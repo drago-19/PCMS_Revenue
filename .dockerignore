@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+data
+samples
+imports
+.shots
+.tmp-*
+*.log
+.env
+.env.local
+.env.*.local
+Dockerfile
+docker-compose.yml
+README.md
