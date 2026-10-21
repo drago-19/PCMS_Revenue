@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="PCMS Revenue">
+  <rect width="48" height="48" rx="13" fill="#121212" />
+  <g transform="translate(13.6 10.4) scale(1.55)">
+    <path d="M6 3h12a1 1 0 0 1 1 1v17l-3-2-2 2-2-2-2 2-2-2-3 2V4a1 1 0 0 1 1-1Z" fill="#00f2ea" transform="translate(-1.2 -1)" />
+    <path d="M6 3h12a1 1 0 0 1 1 1v17l-3-2-2 2-2-2-2 2-2-2-3 2V4a1 1 0 0 1 1-1Z" fill="#fe2c55" transform="translate(1.2 1)" />
+    <path d="M6 3h12a1 1 0 0 1 1 1v17l-3-2-2 2-2-2-2 2-2-2-3 2V4a1 1 0 0 1 1-1Z" fill="#ffffff" />
+    <g stroke="#121212" stroke-width="2" stroke-linecap="round" fill="none">
+      <path d="M9 8h6" />
+      <path d="M9 12h6" />
+      <path d="M9 16h3.5" stroke="#fe2c55" />
+    </g>
+  </g>
+</svg>
