@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { BillPreviewTrigger } from "@/components/BillPreviewDialog";
 import { CopyButton } from "@/components/CopyButton";
 import { PageHeader, StatCard } from "@/components/PageHeader";
+import { PaginationBar } from "@/components/PaginationBar";
 import {
   IconAlert,
-  IconCalendar,
+  IconArrowLeft,
   IconCheckCircle,
   IconReceipt,
   IconSearch,
@@ -13,13 +15,7 @@ import {
 } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Card } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -37,50 +33,69 @@ export const metadata = { title: "รอบรายวัน" };
 
 export default async function DailyPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ date: string }>;
+  searchParams: Promise<{ page?: string; tab?: string }>;
 }) {
   const { date } = await params;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) notFound();
   const batch = await getDailyBatch(date);
   if (!batch) notFound();
 
+  const resolvedSearchParams = await searchParams;
+  const activeTab: "orders" | "others" =
+    resolvedSearchParams.tab === "others" && batch.others.length > 0
+      ? "others"
+      : "orders";
+
+  const pageSize = 20;
+  const totalOrders = batch.orders.length;
+  const orderPageCount = Math.max(1, Math.ceil(totalOrders / pageSize));
+  const rawPage = Math.max(1, Number(resolvedSearchParams.page ?? "1") || 1);
+  const page = Math.min(rawPage, orderPageCount);
+  const pagedOrders = batch.orders.slice((page - 1) * pageSize, page * pageSize);
+
   return (
-    <>
+    <div className="workspace-page">
       <PageHeader
         eyebrow="TikTok Shop · รอบชำระรายวัน"
         title={`รอบชำระ ${formatDateLong(date)}`}
         description={`บิลคำสั่งซื้อ ${batch.summary.orderCount.toLocaleString("th-TH")} ใบ · รายการทั้งหมด ${batch.summary.transactionCount.toLocaleString("th-TH")} รายการ · ยอดสุทธิรวม ${formatTHB(batch.summary.totalPayout)}`}
         actions={
           <>
+            <Button asChild variant="ghost">
+              <Link href="/days">
+                <IconArrowLeft size={16} /> กลับหมวดรอบรายวัน
+              </Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href={`/bills?date=${date}`}>
+                <IconSearch size={16} /> ค้นหาบิลในรอบนี้
+              </Link>
+            </Button>
             <Button asChild variant="default">
               <Link href={`/days/${date}/invoices`}>
                 <IconReceipt size={16} /> พิมพ์ใบกำกับภาษีทั้งรอบ
               </Link>
             </Button>
-            <Button asChild variant="secondary">
-              <Link href={`/bills?date=${date}`}>
-                <IconSearch size={16} /> ค้นหาบิลในรอบ
-              </Link>
-            </Button>
-            <Button asChild variant="ghost">
-              <Link href="/">กลับภาพรวม</Link>
-            </Button>
           </>
         }
       />
 
-      <div className="stats mb-4">
+      <div className="stats">
         <StatCard
-          label="บิลในรอบ"
-          value={`${batch.summary.orderCount.toLocaleString("th-TH")} ใบ`}
-          hint={`จากทั้งหมด ${batch.summary.transactionCount.toLocaleString("th-TH")} รายการ`}
-          icon={<IconReceipt size={19} />}
+          label="ยอดชำระจากบิล"
+          value={formatTHB(batch.summary.orderPayout)}
+          hint={`ยอดสุทธิทั้งรอบ ${formatTHB(batch.summary.totalPayout)}`}
+          tone="positive"
+          icon={<IconWallet size={19} />}
         />
         <StatCard
-          label="รายได้รวม"
+          label="รายได้รวมก่อนหัก"
           value={formatTHB(batch.summary.orderIncome)}
           hint="ยอดก่อนหักค่าธรรมเนียม"
+          tone="brand"
           icon={<IconTrend size={19} />}
         />
         <StatCard
@@ -91,60 +106,62 @@ export default async function DailyPage({
           icon={<IconAlert size={19} />}
         />
         <StatCard
-          label="ยอดชำระจากบิล"
-          value={formatTHB(batch.summary.orderPayout)}
-          hint={`ยอดสุทธิทั้งรอบ ${formatTHB(batch.summary.totalPayout)}`}
-          tone="positive"
-          icon={<IconWallet size={19} />}
+          label="จำนวนบิลในรอบ"
+          value={`${batch.summary.orderCount.toLocaleString("th-TH")} ใบ`}
+          hint={
+            batch.summary.otherCount > 0
+              ? `รายการอื่น ${batch.summary.otherCount.toLocaleString("th-TH")} รายการ (${formatTHB(batch.summary.otherPayout)})`
+              : "แสดงหน้าละ 20 รายการ"
+          }
+          tone="default"
+          icon={<IconReceipt size={19} />}
         />
       </div>
 
-      {batch.summary.otherCount > 0 ? (
-        <Card variant="warning" padding="compact" className="notice mb-4">
-          <IconAlert size={19} />
-          <div>
-            <strong>รอบนี้มีรายการที่ไม่ใช่คำสั่งซื้อ ({batch.summary.otherCount.toLocaleString("th-TH")} รายการ)</strong>
-            <p>
-              ยอดรวม {formatTHB(batch.summary.otherPayout)} (เช่น การชำระด้วย GMV หรือการปรับยอด)
-              ทำให้ยอดสุทธิของรอบเท่ากับ <strong>{formatTHB(batch.summary.totalPayout)}</strong> (ยอดบิล + รายการอื่น)
-            </p>
+      <Card className="workspace-table-card">
+        <div className="shrink-0 border-b border-border bg-[#f8fafc] px-4 py-2.5 min-[640px]:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex flex-wrap items-center gap-1.5">
+              <Button
+                asChild
+                variant={activeTab === "orders" ? "default" : "outline"}
+                size="sm"
+                className="h-10 min-h-[40px]"
+              >
+                <Link href={`/days/${date}`}>
+                  บิลคำสั่งซื้อ ({batch.orders.length.toLocaleString("th-TH")})
+                </Link>
+              </Button>
+              {batch.others.length > 0 ? (
+                <Button
+                  asChild
+                  variant={activeTab === "others" ? "default" : "outline"}
+                  size="sm"
+                  className="h-10 min-h-[40px]"
+                >
+                  <Link href={`/days/${date}?tab=others`}>
+                    รายการอื่นที่ไม่ใช่บิล ({batch.others.length.toLocaleString("th-TH")})
+                  </Link>
+                </Button>
+              ) : null}
+            </div>
+
+            <Button asChild variant="outline" size="sm" className="h-10 min-h-[40px]">
+              <Link href={`/bills?date=${date}`}>
+                <IconSearch size={14} /> ค้นหาละเอียดในหน้าบิลทั้งหมด
+              </Link>
+            </Button>
           </div>
-        </Card>
-      ) : null}
-
-      <Tabs defaultValue="orders" className="w-full">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <TabsList className="h-auto flex-wrap gap-1 p-1">
-            <TabsTrigger value="orders" className="min-h-[38px] px-3.5">
-              บิลคำสั่งซื้อ ({batch.orders.length.toLocaleString("th-TH")})
-            </TabsTrigger>
-            {batch.others.length > 0 ? (
-              <TabsTrigger value="others" className="min-h-[38px] px-3.5">
-                รายการอื่นที่ไม่ใช่บิล ({batch.others.length.toLocaleString("th-TH")})
-              </TabsTrigger>
-            ) : null}
-          </TabsList>
-
-          <Button asChild variant="ghost" size="sm" className="card-link">
-            <Link href={`/bills?date=${date}`}>
-              <IconSearch size={15} /> ค้นหาละเอียดในหน้าบิลทั้งหมด
-            </Link>
-          </Button>
         </div>
 
-        <TabsContent value="orders">
-          <Card>
-            <CardHeader>
-              <CardTitle>รายการบิลคำสั่งซื้อในรอบนี้</CardTitle>
-              <span className="muted small">
-                {batch.orders.length.toLocaleString("th-TH")} ใบ · ยอดชำระรวม{" "}
-                {formatTHB(batch.summary.orderPayout)}
-              </span>
-            </CardHeader>
+        {activeTab === "orders" ? (
+          <>
             <Table variant="stack">
               <TableHeader>
                 <TableRow>
-                  <TableHead>หมายเลขคำสั่งซื้อ</TableHead>
+                  <TableHead>หมายเลขคำสั่งซื้อ / ช่องทาง</TableHead>
+                  <TableHead>รายการสินค้า (SKU)</TableHead>
+                  <TableHead>เลขที่ใบกำกับภาษี</TableHead>
                   <TableHead>วันที่สร้าง</TableHead>
                   <TableHead className="num">รายได้</TableHead>
                   <TableHead className="num">ค่าธรรมเนียม</TableHead>
@@ -154,30 +171,110 @@ export default async function DailyPage({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {batch.orders.map((order) => {
+                {pagedOrders.map((order) => {
                   const ok =
                     Math.abs(order.checks.incomeDiff) < 0.01 &&
                     Math.abs(order.checks.feeDiff) < 0.01 &&
                     Math.abs(order.checks.payoutDiff) < 0.01;
                   return (
                     <TableRow key={order.id}>
-                      <TableCell data-label="หมายเลขคำสั่งซื้อ">
-                        <div className="flex flex-col items-end min-[641px]:items-start">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Link
-                              className="mono link inline-flex min-h-[40px] items-center"
-                              href={`/bills/${order.externalId}`}
-                            >
-                              {order.externalId}
-                            </Link>
+                      <TableCell data-label="หมายเลขคำสั่งซื้อ / ช่องทาง">
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-flex max-w-full items-center gap-1">
+                            <BillPreviewTrigger
+                              row={order}
+                              defaultTab="bill"
+                              triggerVariant="link"
+                            />
                             <CopyButton value={order.externalId} />
                           </span>
-                          {order.invoiceNo ? (
-                            <span className="muted small mono">
-                              ใบกำกับฯ: {order.invoiceNo}
-                            </span>
-                          ) : null}
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge
+                              variant={
+                                order.channel === "Shopee"
+                                  ? "warning"
+                                  : order.channel === "Facebook"
+                                    ? "info"
+                                    : "default"
+                              }
+                              size="sm"
+                            >
+                              {order.channel || "TikTok"}
+                            </Badge>
+                            {order.orderCode ? (
+                              <Badge variant="neutral" size="sm" className="mono">
+                                ผูก #{order.orderCode}
+                              </Badge>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">
+                                (ยังไม่ผูก #ออเดอร์ OMS)
+                              </span>
+                            )}
+                            {order.customerName ? (
+                              <span className="text-[11px] font-medium text-muted-foreground">
+                                {order.customerName}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
+                      </TableCell>
+                      <TableCell data-label="รายการสินค้า (SKU)">
+                        {order.omsItems && order.omsItems.length > 0 ? (
+                          <div className="flex flex-col gap-0.5 text-xs">
+                            {order.omsItems.slice(0, 2).map((item, idx) => (
+                              <span
+                                key={`${item.skuCode}-${idx}`}
+                                className="inline-flex flex-wrap items-center gap-1"
+                              >
+                                <Badge variant="neutral" size="sm" className="mono">
+                                  {item.skuCode}
+                                </Badge>
+                                <span className="font-medium text-foreground">
+                                  {item.productName}
+                                </span>
+                                <span className="font-bold text-primary">
+                                  ×{item.quantity}
+                                </span>
+                              </span>
+                            ))}
+                            {order.omsItems.length > 2 ? (
+                              <span className="text-[11px] text-muted-foreground">
+                                +{order.omsItems.length - 2} รายการอื่น
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : !order.productDetail || order.productDetail.trim() === "/" ? (
+                          <span className="text-xs text-muted-foreground">
+                            (ยังไม่มีข้อมูลสินค้า — รอไฟล์ OMS วันสั่งซื้อ {formatDate(order.createdDate)})
+                          </span>
+                        ) : /^\d{10,}\s*\*\s*\d+/.test(order.productDetail.trim()) ? (
+                          <div className="flex flex-col gap-0.5 text-xs">
+                            <span className="mono text-foreground">
+                              {order.productDetail.replace(/;\s*$/, "")}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">
+                              (รหัสสินค้าแพลตฟอร์ม — รอไฟล์สินค้า OMS วันสั่งซื้อ {formatDate(order.createdDate)})
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-0.5 text-xs">
+                            <span className="text-foreground">{order.productDetail}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              (รอผูกไฟล์รายการสินค้า OMS วันสั่งซื้อ {formatDate(order.createdDate)})
+                            </span>
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell data-label="เลขที่ใบกำกับภาษี">
+                        {order.invoiceNo ? (
+                          <span className="mono text-xs text-muted-foreground">
+                            {order.invoiceNo}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            (รอไฟล์ OMS)
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell data-label="วันที่สร้าง">
                         {formatDate(order.createdDate)}
@@ -186,9 +283,20 @@ export default async function DailyPage({
                         {formatTHB(order.income)}
                       </TableCell>
                       <TableCell data-label="ค่าธรรมเนียม" className="num danger">
-                        {formatTHB(order.feeTotal)}
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span>{formatTHB(order.feeTotal)}</span>
+                          {order.feeTotal === 0 &&
+                          order.normalized.transactionType === "คำสั่งซื้อ (OMS)" ? (
+                            <span className="text-[10.5px] font-normal text-muted-foreground">
+                              (รอไฟล์รายได้ Settlement)
+                            </span>
+                          ) : null}
+                        </div>
                       </TableCell>
-                      <TableCell data-label="ยอดชำระสุทธิ" className="num positive strong">
+                      <TableCell
+                        data-label="ยอดชำระสุทธิ"
+                        className="num positive strong"
+                      >
                         {formatTHB(order.payout)}
                       </TableCell>
                       <TableCell data-label="สถานะ">
@@ -203,13 +311,25 @@ export default async function DailyPage({
                         )}
                       </TableCell>
                       <TableCell data-label="เอกสาร" className="num">
-                        <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                          <Button asChild variant="secondary" size="xs">
-                            <Link href={`/bills/${order.externalId}`}>ดูบิล</Link>
-                          </Button>
-                          <Button asChild variant="ghost" size="xs">
-                            <Link href={`/invoices/${order.externalId}`}>ใบกำกับฯ</Link>
-                          </Button>
+                        <span className="inline-flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
+                          <BillPreviewTrigger
+                            row={order}
+                            defaultTab="bill"
+                            triggerVariant="button"
+                            label="ดูบิล"
+                          />
+                          <BillPreviewTrigger
+                            row={order}
+                            defaultTab="invoice"
+                            triggerVariant="ghost"
+                            label="ใบกำกับฯ"
+                          />
+                          <BillPreviewTrigger
+                            row={order}
+                            defaultTab="invoice_full"
+                            triggerVariant="ghost"
+                            label="ใบเต็ม"
+                          />
                         </span>
                       </TableCell>
                     </TableRow>
@@ -217,55 +337,47 @@ export default async function DailyPage({
                 })}
               </TableBody>
             </Table>
-          </Card>
-        </TabsContent>
 
-        {batch.others.length > 0 ? (
-          <TabsContent value="others">
-            <Card>
-              <CardHeader>
-                <CardTitle>รายการอื่นในรอบ (ไม่สร้างบิล)</CardTitle>
-                <span className="muted small">
-                  {batch.others.length.toLocaleString("th-TH")} รายการ · ยอดรวม{" "}
-                  {formatTHB(batch.summary.otherPayout)}
-                </span>
-              </CardHeader>
-              <Table variant="stack">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>เลขอ้างอิง</TableHead>
-                    <TableHead>ประเภทธุรกรรม</TableHead>
-                    <TableHead className="num">ยอดชำระ</TableHead>
-                    <TableHead className="num">การปรับยอด</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {batch.others.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell data-label="เลขอ้างอิง" className="mono">
-                        {item.externalId}
-                      </TableCell>
-                      <TableCell data-label="ประเภทธุรกรรม">
-                        <Badge variant="neutral">{item.transactionType}</Badge>
-                      </TableCell>
-                      <TableCell data-label="ยอดชำระ" className="num strong">
-                        {formatTHB(item.payout)}
-                      </TableCell>
-                      <TableCell data-label="การปรับยอด" className="num">
-                        {formatTHB(item.adjustment)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          </TabsContent>
-        ) : null}
-      </Tabs>
-
-      <p className="page-foot-note">
-        <IconCalendar size={15} /> ยอดทั้งหมดแยกตามวันที่ชำระเงิน (settlement date) จากไฟล์ export ของ TikTok Shop
-      </p>
-    </>
+            <PaginationBar
+              page={page}
+              pageCount={orderPageCount}
+              pageSize={pageSize}
+              total={totalOrders}
+              unitLabel="บิล"
+              basePath={`/days/${date}`}
+            />
+          </>
+        ) : (
+          <Table variant="stack">
+            <TableHeader>
+              <TableRow>
+                <TableHead>เลขอ้างอิง</TableHead>
+                <TableHead>ประเภทธุรกรรม</TableHead>
+                <TableHead className="num">ยอดชำระ</TableHead>
+                <TableHead className="num">การปรับยอด</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {batch.others.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell data-label="เลขอ้างอิง" className="mono">
+                    {item.externalId}
+                  </TableCell>
+                  <TableCell data-label="ประเภทธุรกรรม">
+                    <Badge variant="neutral">{item.transactionType}</Badge>
+                  </TableCell>
+                  <TableCell data-label="ยอดชำระ" className="num strong">
+                    {formatTHB(item.payout)}
+                  </TableCell>
+                  <TableCell data-label="การปรับยอด" className="num">
+                    {formatTHB(item.adjustment)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+    </div>
   );
 }

@@ -1,67 +1,61 @@
 import Link from "next/link";
-import { PageHeader, StatusBadge } from "@/components/PageHeader";
+import { PageHeader } from "@/components/PageHeader";
 import { UploadForm } from "@/components/UploadForm";
-import { IconCheckCircle, IconFile, IconReceipt } from "@/components/icons";
+import { IconCheckCircle, IconHistory, IconReceipt } from "@/components/icons";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatDate, formatDateTime, formatFileSize } from "@/lib/format";
-import { listImports } from "@/lib/queries";
+import { Card } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "อัปโหลดรายได้" };
 
 export default async function ImportPage() {
-  const imports = await listImports(50);
-
   return (
     <>
       <PageHeader
-        eyebrow="TikTok Shop · นำเข้าข้อมูล"
-        title="อัปโหลดไฟล์รายได้"
-        description="นำเข้าไฟล์ Excel จาก TikTok Shop Seller Center แล้วระบบจะสร้างบิลรายคำสั่งซื้อให้ทันที พร้อมรายงานการจับคู่คอลัมน์และการตรวจยอด"
+        eyebrow="Multi-Channel · นำเข้าและแมปข้อมูล 3 ไฟล์"
+        title="หมวดอัปโหลดไฟล์รายได้ & รายการสินค้า"
+        description="รองรับทั้งไฟล์ .xlsx และ .csv จากทั้ง 3 ส่วน: (1) ไฟล์ออเดอร์ OMS  (2) ไฟล์รายได้ TikTok Shop  (3) ไฟล์รายการสินค้า OMS เพื่อแมปรหัสสินค้า (SKU) และแยกป้ายช่องทางอัตโนมัติ"
         actions={
-          <Button asChild variant="secondary">
-            <Link href="/bills">
-              <IconReceipt size={17} /> ดูบิลทั้งหมด
-            </Link>
-          </Button>
+          <>
+            <Button asChild variant="outline">
+              <Link href="/history">
+                <IconHistory size={17} /> ประวัติไฟล์ที่นำเข้า
+              </Link>
+            </Button>
+            <Button asChild variant="secondary">
+              <Link href="/bills">
+                <IconReceipt size={17} /> ดูบิลทั้งหมด
+              </Link>
+            </Button>
+          </>
         }
       />
 
       <div className="import-grid">
         <Card padding="padded" className="card-pad">
-          <h2 className="card-title">นำเข้าไฟล์ .xlsx</h2>
+          <h2 className="card-title">นำเข้าไฟล์ .xlsx หรือ .csv (เลือกพร้อมกันได้)</h2>
           <p className="card-sub">
-            ไฟล์จาก Seller Center → รายได้ → รายละเอียดคำสั่งซื้อ (หรือไฟล์ที่มีชีต
-            “รายละเอียดคำสั่งซื้อ”)
+            อัปโหลดไฟล์รายได้ TikTok Shop, ไฟล์ออเดอร์รวมช่องทาง (OMS) และไฟล์รายการสินค้า (SKU) ระบบจะตรวจสอบชนิดไฟล์และเชื่อมข้อมูลเข้าด้วยกันให้อัตโนมัติ
           </p>
           <UploadForm />
         </Card>
 
         <Card padding="padded" className="card-pad side-notes">
           <div>
-            <h3>ระบบตรวจให้ทุกครั้ง</h3>
+            <h3>การเชื่อมข้อมูลทั้ง 3 ไฟล์อัตโนมัติ</h3>
             <ul className="check-list">
               <li>
-                <IconCheckCircle size={17} /> จับคู่หัวคอลัมน์ไทย/อังกฤษ และรายงานคอลัมน์ใหม่
+                <IconCheckCircle size={17} /> <strong>ไฟล์ที่ 1 (ออเดอร์ OMS):</strong> เชื่อมรหัสออเดอร์ (เช่น OF39) เข้ากับเลข Marketplace และแยกช่องทาง TikTok / Shopee / Facebook
               </li>
               <li>
-                <IconCheckCircle size={17} /> เทียบยอดรายได้ ค่าธรรมเนียม และยอดชำระกับชีตสรุป
+                <IconCheckCircle size={17} /> <strong>ไฟล์ที่ 2 (รายได้ TikTok Shop):</strong> แจกแจงรายได้ ค่าธรรมเนียม และยอดโอนสุทธิรายคำสั่งซื้อ
               </li>
               <li>
-                <IconCheckCircle size={17} /> รวมหลายแถวของคำสั่งซื้อเดียวกันเป็นบิลเดียว
+                <IconCheckCircle size={17} /> <strong>ไฟล์ที่ 3 (รายการสินค้า OMS):</strong> ดึงรหัสสินค้า (SKU), ชื่อสินค้า, ราคาต่อชิ้น และที่อยู่ลูกค้าไปแสดงในใบกำกับภาษีทั้งแบบย่อและแบบเต็ม
               </li>
               <li>
-                <IconCheckCircle size={17} /> กันไฟล์ซ้ำด้วย hash ของไฟล์
+                <IconCheckCircle size={17} /> รองรับการอัปโหลดสลับลำดับไฟล์ ระบบจะจับคู่ย้อนหลังให้ทันที
               </li>
             </ul>
           </div>
@@ -76,84 +70,16 @@ export default async function ImportPage() {
           </div>
 
           <div className="side-tip">
-            <strong>ทำบิลทุกวัน</strong>
+            <strong>จัดการไฟล์ที่นำเข้าแล้ว</strong>
             <p>
-              อัปโหลดไฟล์ของวันนั้นผ่านหน้านี้ หรือใช้คำสั่ง{" "}
-              <code>pnpm import:dir -- &lt;folder&gt;</code> เพื่อนำเข้าทุกไฟล์ในโฟลเดอร์
+              ดูประวัติไฟล์ทั้งหมด ตรวจสอบรายงานการจับคู่คอลัมน์ หรือลบไฟล์ที่นำเข้าได้ที่หมวด{" "}
+              <Link href="/history" className="font-bold underline">
+                ประวัติการนำเข้าไฟล์
+              </Link>
             </p>
           </div>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>ประวัติการนำเข้า</CardTitle>
-          <span className="muted small">{imports.length} ไฟล์ล่าสุด</span>
-        </CardHeader>
-        {imports.length === 0 ? (
-          <div className="inline-empty">
-            <IconFile size={22} />
-            <span>ยังไม่มีการนำเข้า — ไฟล์แรกจะแสดงที่นี่พร้อมรายงานการตรวจยอด</span>
-          </div>
-        ) : (
-          <Table variant="stack">
-            <TableHeader>
-              <TableRow>
-                <TableHead>ไฟล์</TableHead>
-                <TableHead>นำเข้าเมื่อ</TableHead>
-                <TableHead>รอบชำระ</TableHead>
-                <TableHead className="num">บิล</TableHead>
-                <TableHead>สถานะ</TableHead>
-                <TableHead className="num">จัดการ</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {imports.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell data-label="ไฟล์">
-                    <Link
-                      href={`/import/${item.id}`}
-                      className="file-link inline-flex min-h-[40px] items-center"
-                    >
-                      <IconFile size={16} />
-                      <span className="break-all whitespace-normal">{item.filename}</span>
-                    </Link>
-                    <span className="file-meta">
-                      {formatFileSize(item.fileSize)} · {item.source === "cli" ? "CLI" : "อัปโหลด"}
-                    </span>
-                  </TableCell>
-                  <TableCell data-label="นำเข้าเมื่อ">{formatDateTime(item.importedAt)}</TableCell>
-                  <TableCell data-label="รอบชำระ">
-                    {item.periodStart
-                      ? item.periodStart === item.periodEnd
-                        ? formatDate(item.periodStart)
-                        : `${formatDate(item.periodStart)} – ${formatDate(item.periodEnd ?? item.periodStart)}`
-                      : "-"}
-                  </TableCell>
-                  <TableCell data-label="บิล" className="num">
-                    {item.orderCount.toLocaleString("th-TH")}
-                  </TableCell>
-                  <TableCell data-label="สถานะ">
-                    <StatusBadge status={item.status} />
-                  </TableCell>
-                  <TableCell data-label="จัดการ" className="num">
-                    <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                      {item.periodStart ? (
-                        <Button asChild variant="ghost" size="xs">
-                          <Link href={`/days/${item.periodStart}`}>ดูรอบชำระ</Link>
-                        </Button>
-                      ) : null}
-                      <Button asChild variant="secondary" size="xs">
-                        <Link href={`/import/${item.id}`}>รายงาน</Link>
-                      </Button>
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
     </>
   );
 }

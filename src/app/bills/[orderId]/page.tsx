@@ -51,6 +51,18 @@ export default async function BillDetailPage({
       <BillDocument
         bill={bill}
         invoiceNo={row.invoiceNo}
+        channel={row.channel}
+        orderCode={row.orderCode}
+        customerName={row.customerName}
+        trackingNo={row.trackingNo}
+        courier={row.courier}
+        discountCode={row.discountCode}
+        discountTotal={row.discountTotal}
+        shippingFeeCustomer={row.shippingFeeCustomer}
+        shippingFeeSeller={row.shippingFeeSeller}
+        marketplaceOrderRaw={row.marketplaceOrderRaw}
+        productDetail={row.productDetail}
+        omsItems={row.omsItems}
         source={{
           filename: importRow?.filename ?? "ไม่ทราบไฟล์",
           importedAt: importRow?.importedAt ?? row.createdAt,

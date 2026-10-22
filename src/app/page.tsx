@@ -1,15 +1,10 @@
 import Link from "next/link";
-import {
-  PageHeader,
-  StatCard,
-  StatusBadge,
-} from "@/components/PageHeader";
-import { CopyButton } from "@/components/CopyButton";
+import { PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
 import {
   IconAlert,
-  IconCheckCircle,
+  IconCalendar,
   IconChevronRight,
-  IconFile,
+  IconHistory,
   IconReceipt,
   IconTrend,
   IconUpload,
@@ -17,42 +12,41 @@ import {
 } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
 import { formatDate, formatDateLong, formatTHB } from "@/lib/format";
-import { getDailyBatch, getOverallStats, listDailyBatches, listImports } from "@/lib/queries";
+import { getOverallStats, listDailyBatches, listImports } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const stats = await getOverallStats();
-  const batches = await listDailyBatches(8);
-  const imports = await listImports(6);
+  const [stats, batches, imports] = await Promise.all([
+    getOverallStats(),
+    listDailyBatches(1),
+    listImports(1),
+  ]);
+
   const latest = batches[0] ?? null;
   const latestImport = imports[0] ?? null;
-  const latestOrders = latest
-    ? ((await getDailyBatch(latest.date))?.orders.slice(0, 8) ?? [])
-    : [];
 
   return (
-    <>
+    <div className="flex flex-col gap-[14px]">
       <PageHeader
-        eyebrow="ภาพรวม"
-        title="รายได้และบิลรายวัน"
-        description="สรุปยอดชำระจากไฟล์ TikTok Shop แยกเป็นบิลรายคำสั่งซื้อ พร้อมตรวจยอดกับชีตสรุปของทุกไฟล์"
+        eyebrow="TikTok Shop · Finance Overview"
+        title="หมวดภาพรวมสรุปยอดรายได้"
+        description="สรุปยอดชำระสะสม รอบโอนเงินล่าสุด และทางลัดเข้าสู่แต่ละหมวดหมู่โดยไม่ต้องเลื่อนหาข้อมูลยาว"
         actions={
-          <Button asChild variant="default">
-            <Link href="/import">
-              <IconUpload size={17} /> อัปโหลดไฟล์รายได้
-            </Link>
-          </Button>
+          <>
+            <Button asChild variant="secondary">
+              <Link href="/days">
+                <IconCalendar size={16} /> ดูรอบชำระรายวัน
+              </Link>
+            </Button>
+            <Button asChild variant="default">
+              <Link href="/import">
+                <IconUpload size={17} /> อัปโหลดไฟล์รายได้
+              </Link>
+            </Button>
+          </>
         }
       />
 
@@ -85,27 +79,68 @@ export default async function DashboardPage() {
             <div>
               <span>3</span>
               <strong>เปิดบิลและพิมพ์ได้ทันที</strong>
-              <small>แยกตามหมายเลขคำสั่งซื้อ</small>
+              <small>แยกตามหมวดหมู่ชัดเจน</small>
             </div>
           </div>
         </Card>
       ) : (
         <>
+          <div className="stats m-0">
+            <StatCard
+              label="ยอดชำระสุทธิสะสม"
+              value={formatTHB(stats.totalPayout)}
+              hint="ยอดเงินโอนจากบิลคำสั่งซื้อทั้งหมด"
+              tone="positive"
+              icon={<IconWallet size={19} />}
+            />
+            <StatCard
+              label="รายได้รวมก่อนหัก"
+              value={formatTHB(stats.totalIncome)}
+              hint="ยอดขายรวมส่วนลดและค่าจัดส่ง"
+              tone="brand"
+              icon={<IconTrend size={19} />}
+            />
+            <StatCard
+              label="ค่าธรรมเนียม TikTok Shop"
+              value={formatTHB(stats.totalFees)}
+              hint="ค่าคอมมิชชั่น + ค่าธุรกรรม + ค่าส่ง"
+              tone="negative"
+              icon={<IconAlert size={19} />}
+            />
+            <StatCard
+              label="จำนวนบิลคำสั่งซื้อสะสม"
+              value={`${stats.orderCount.toLocaleString("th-TH")} ใบ`}
+              hint={`นำเข้าแล้ว ${stats.importCount.toLocaleString("th-TH")} ไฟล์`}
+              tone="default"
+              icon={<IconReceipt size={19} />}
+            />
+          </div>
+
           <section className="hero">
             <div className="hero-main">
-              <p className="hero-label">รอบชำระล่าสุด</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="hero-label">
+                  <span className="size-2 rounded-full bg-[#00f2ea] shadow-[0_0_8px_#00f2ea]" />
+                  รอบชำระเงินล่าสุด · Latest Settlement
+                </p>
+                <Badge variant="glass" className="pill">
+                  อัปเดตจาก {stats.importCount} ไฟล์
+                </Badge>
+              </div>
               <h2 className="hero-date">{formatDateLong(latest.date)}</h2>
-              <p className="hero-sub">ยอดชำระจากบิลในรอบนี้</p>
+              <p className="hero-sub">
+                ยอดเงินโอนสุทธิจากคำสั่งซื้อในรอบนี้ (Order Payout)
+              </p>
               <p className="hero-amount">{formatTHB(latest.orderPayout)}</p>
               <div className="hero-pills">
                 <Badge variant="glass" className="pill">
-                  {latest.orderCount.toLocaleString("th-TH")} บิล
+                  {latest.orderCount.toLocaleString("th-TH")} บิลคำสั่งซื้อ
                 </Badge>
                 <Badge variant="glass" className="pill">
-                  รายได้ {formatTHB(latest.orderIncome)}
+                  รายได้รวม {formatTHB(latest.orderIncome)}
                 </Badge>
                 <Badge variant="glass" className="pill">
-                  ค่าธรรมเนียม {formatTHB(latest.orderFees)}
+                  หักค่าธรรมเนียม {formatTHB(latest.orderFees)}
                 </Badge>
                 {latest.otherCount > 0 ? (
                   <Badge variant="glass" className="pill">
@@ -116,7 +151,8 @@ export default async function DashboardPage() {
               <div className="hero-actions">
                 <Button asChild variant="light">
                   <Link href={`/days/${latest.date}`}>
-                    ดูรอบนี้ <IconChevronRight size={16} />
+                    เปิดดูรอบชำระนี้ ({latest.orderCount.toLocaleString("th-TH")} บิล){" "}
+                    <IconChevronRight size={16} />
                   </Link>
                 </Button>
                 <Button asChild variant="outline-light">
@@ -124,223 +160,118 @@ export default async function DashboardPage() {
                     <IconReceipt size={16} /> พิมพ์ใบกำกับภาษีทั้งรอบ
                   </Link>
                 </Button>
-                <Button asChild variant="outline-light">
-                  <Link href="/bills">ดูบิลทั้งหมด</Link>
-                </Button>
               </div>
             </div>
             <div className="hero-side">
               <div className="hero-side-item">
-                <span>ยอดสุทธิของรอบ (รวมรายการอื่น)</span>
+                <span>ยอดสุทธิทั้งรอบ (รวม GMV / ปรับยอด)</span>
                 <strong>{formatTHB(latest.totalPayout)}</strong>
               </div>
               <div className="hero-side-item">
-                <span>รายการที่ไม่ใช่คำสั่งซื้อ</span>
+                <span>รายการที่ไม่ใช่คำสั่งซื้อในรอบนี้</span>
                 <strong>{latest.otherCount.toLocaleString("th-TH")} รายการ</strong>
               </div>
               <div className="hero-side-item">
-                <span>ไฟล์ล่าสุด</span>
-                <strong className="break-all">{latestImport?.filename ?? "-"}</strong>
+                <span>ไฟล์ Excel ล่าสุดที่นำเข้า</span>
+                <strong className="break-all text-sm">
+                  {latestImport?.filename ?? "-"}
+                </strong>
               </div>
             </div>
           </section>
 
-          <div className="stats">
-            <StatCard
-              label="บิลทั้งหมด"
-              value={stats.orderCount.toLocaleString("th-TH")}
-              hint={`จาก ${stats.importCount} ไฟล์ที่นำเข้า`}
-              icon={<IconReceipt size={19} />}
-            />
-            <StatCard
-              label="รายได้รวม"
-              value={formatTHB(stats.totalIncome)}
-              hint="ยอดก่อนหักค่าธรรมเนียม"
-              icon={<IconTrend size={19} />}
-            />
-            <StatCard
-              label="ค่าธรรมเนียมรวม"
-              value={formatTHB(stats.totalFees)}
-              hint="รวมค่าธรรมเนียมทุกประเภท"
-              tone="negative"
-              icon={<IconAlert size={19} />}
-            />
-            <StatCard
-              label="ยอดชำระจากบิล"
-              value={formatTHB(stats.totalPayout)}
-              hint="เฉพาะคำสั่งซื้อที่สร้างบิล"
-              tone="positive"
-              icon={<IconWallet size={19} />}
-            />
-          </div>
-
-          <div className="grid-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>บิลล่าสุดในรอบ</CardTitle>
-                <Button asChild variant="ghost" size="sm" className="card-link">
-                  <Link href={`/days/${latest.date}`}>
-                    ดูทั้งหมด <IconChevronRight size={15} />
+          <div className="grid grid-cols-1 gap-[14px] min-[768px]:grid-cols-2 min-[1180px]:grid-cols-4">
+            <Card className="flex flex-col justify-between p-5">
+              <div>
+                <div className="mb-3 inline-flex size-10 items-center justify-center rounded-xl bg-[#fff0f3] text-[#fe2c55]">
+                  <IconCalendar size={20} />
+                </div>
+                <h3 className="text-base font-bold text-foreground">
+                  หมวดรอบชำระเงินรายวัน
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ดูตารางสรุปยอดโอนแยกตามวัน แสดงหน้าละ 20 รอบ พร้อมเปิดดูบิลและพิมพ์ใบกำกับฯ รายวัน
+                </p>
+              </div>
+              <div className="mt-4 pt-3 border-t border-border">
+                <Button asChild variant="secondary" size="sm" className="w-full justify-between">
+                  <Link href="/days">
+                    เปิดหมวดรอบรายวัน <IconChevronRight size={15} />
                   </Link>
                 </Button>
-              </CardHeader>
-              <Table variant="stack">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>หมายเลขคำสั่งซื้อ</TableHead>
-                    <TableHead>วันที่ชำระ</TableHead>
-                    <TableHead className="num">ยอดชำระ</TableHead>
-                    <TableHead>สถานะ</TableHead>
-                    <TableHead className="num">เอกสาร</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {latestOrders.map((order) => {
-                    const ok =
-                      Math.abs(order.checks.incomeDiff) < 0.01 &&
-                      Math.abs(order.checks.feeDiff) < 0.01 &&
-                      Math.abs(order.checks.payoutDiff) < 0.01;
-                    return (
-                      <TableRow key={order.id}>
-                        <TableCell data-label="หมายเลขคำสั่งซื้อ">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Link
-                              className="mono link inline-flex min-h-[40px] items-center"
-                              href={`/bills/${order.externalId}`}
-                            >
-                              {order.externalId}
-                            </Link>
-                            <CopyButton value={order.externalId} />
-                          </span>
-                        </TableCell>
-                        <TableCell data-label="วันที่ชำระ">{formatDate(order.paidDate)}</TableCell>
-                        <TableCell data-label="ยอดชำระ" className="num positive strong">
-                          {formatTHB(order.payout)}
-                        </TableCell>
-                        <TableCell data-label="สถานะ">
-                          {ok ? (
-                            <Badge variant="success" size="sm">
-                              <IconCheckCircle size={13} /> ยอดตรง
-                            </Badge>
-                          ) : (
-                            <Badge variant="warning" size="sm">
-                              <IconAlert size={13} /> ตรวจสอบ
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell data-label="เอกสาร" className="num">
-                          <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                            <Button asChild variant="secondary" size="xs">
-                              <Link href={`/bills/${order.externalId}`}>ดูบิล</Link>
-                            </Button>
-                            <Button asChild variant="ghost" size="xs">
-                              <Link href={`/invoices/${order.externalId}`}>ใบกำกับฯ</Link>
-                            </Button>
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+              </div>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>ประวัติการนำเข้า</CardTitle>
-                <Button asChild variant="ghost" size="sm" className="card-link">
+            <Card className="flex flex-col justify-between p-5">
+              <div>
+                <div className="mb-3 inline-flex size-10 items-center justify-center rounded-xl bg-[#ecfdf5] text-[#059669]">
+                  <IconReceipt size={20} />
+                </div>
+                <h3 className="text-base font-bold text-foreground">
+                  หมวดบิลคำสั่งซื้อทั้งหมด
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ค้นหาเลขคำสั่งซื้อ กรองสถานะยอดตรง/ต้องตรวจสอบ และเปิดดูบิลหรือใบกำกับฯ แบบป๊อปอัป
+                </p>
+              </div>
+              <div className="mt-4 pt-3 border-t border-border">
+                <Button asChild variant="secondary" size="sm" className="w-full justify-between">
+                  <Link href="/bills">
+                    ค้นหาบิลทั้งหมด ({stats.orderCount.toLocaleString("th-TH")}){" "}
+                    <IconChevronRight size={15} />
+                  </Link>
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="flex flex-col justify-between p-5">
+              <div>
+                <div className="mb-3 inline-flex size-10 items-center justify-center rounded-xl bg-[#f0fdfa] text-[#0d9488]">
+                  <IconUpload size={20} />
+                </div>
+                <h3 className="text-base font-bold text-foreground">
+                  หมวดอัปโหลดไฟล์รายได้
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  อัปโหลดไฟล์ .xlsx จาก TikTok Shop พร้อมป๊อปอัปแสดงเปอร์เซ็นต์ความคืบหน้าแบบเรียลไทม์
+                </p>
+              </div>
+              <div className="mt-4 pt-3 border-t border-border">
+                <Button asChild variant="default" size="sm" className="w-full justify-between">
                   <Link href="/import">
-                    จัดการ <IconChevronRight size={15} />
+                    ไปหน้าอัปโหลดไฟล์ <IconChevronRight size={15} />
                   </Link>
                 </Button>
-              </CardHeader>
-              <ul className="history-list">
-                {imports.map((item) => (
-                  <li key={item.id}>
-                    <div className="history-main">
-                      <Link
-                        href={`/import/${item.id}`}
-                        className="history-file inline-flex min-h-[40px] items-center"
-                      >
-                        <IconFile size={16} />
-                        <span className="break-all whitespace-normal">{item.filename}</span>
-                      </Link>
-                      <span className="muted small">
-                        {item.orderCount} บิล ·{" "}
-                        {item.periodStart ? formatDate(item.periodStart) : "-"}
-                      </span>
-                    </div>
-                    <StatusBadge status={item.status} />
-                  </li>
-                ))}
-              </ul>
+              </div>
+            </Card>
+
+            <Card className="flex flex-col justify-between p-5">
+              <div>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="inline-flex size-10 items-center justify-center rounded-xl bg-[#f1f5f9] text-[#0f172a]">
+                    <IconHistory size={20} />
+                  </span>
+                  {latestImport ? <StatusBadge status={latestImport.status} /> : null}
+                </div>
+                <h3 className="text-base font-bold text-foreground">
+                  หมวดประวัติการนำเข้าไฟล์
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ตรวจสอบไฟล์ที่นำเข้าแล้ว ({stats.importCount.toLocaleString("th-TH")} ไฟล์) ดูรายงานการจับคู่คอลัมน์ หรือลบไฟล์
+                </p>
+              </div>
+              <div className="mt-4 pt-3 border-t border-border">
+                <Button asChild variant="secondary" size="sm" className="w-full justify-between">
+                  <Link href="/history">
+                    ดูประวัติการนำเข้า ({stats.importCount.toLocaleString("th-TH")}){" "}
+                    <IconChevronRight size={15} />
+                  </Link>
+                </Button>
+              </div>
             </Card>
           </div>
-
-          {batches.length > 0 ? (
-            <Card className="mt-4">
-              <CardHeader>
-                <CardTitle>สรุปรอบชำระรายวัน</CardTitle>
-                <span className="muted small">แยกตามวันที่ชำระเงินจาก TikTok Shop</span>
-              </CardHeader>
-              <Table variant="stack">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>วันที่ชำระ</TableHead>
-                    <TableHead className="num">จำนวนบิล</TableHead>
-                    <TableHead className="num">รายได้รวม</TableHead>
-                    <TableHead className="num">หักค่าธรรมเนียม</TableHead>
-                    <TableHead className="num">ยอดชำระสุทธิ (บิล)</TableHead>
-                    <TableHead className="num">จัดการ</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {batches.map((batch) => (
-                    <TableRow key={batch.date}>
-                      <TableCell data-label="วันที่ชำระ">
-                        <Link
-                          className="link inline-flex min-h-[40px] items-center"
-                          href={`/days/${batch.date}`}
-                        >
-                          {formatDateLong(batch.date)}
-                        </Link>
-                      </TableCell>
-                      <TableCell data-label="จำนวนบิล" className="num">
-                        <Badge variant="neutral">
-                          {batch.orderCount.toLocaleString("th-TH")} บิล
-                        </Badge>
-                      </TableCell>
-                      <TableCell data-label="รายได้รวม" className="num">
-                        {formatTHB(batch.orderIncome)}
-                      </TableCell>
-                      <TableCell data-label="หักค่าธรรมเนียม" className="num danger">
-                        {formatTHB(batch.orderFees)}
-                      </TableCell>
-                      <TableCell data-label="ยอดชำระสุทธิ (บิล)" className="num positive strong">
-                        {formatTHB(batch.orderPayout)}
-                      </TableCell>
-                      <TableCell data-label="จัดการ" className="num">
-                        <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                          <Button asChild variant="secondary" size="xs">
-                            <Link href={`/days/${batch.date}`}>
-                              ดูรอบ <IconChevronRight size={14} />
-                            </Link>
-                          </Button>
-                          <Button asChild variant="ghost" size="xs">
-                            <Link href={`/days/${batch.date}/invoices`}>
-                              <IconReceipt size={14} /> พิมพ์ทั้งรอบ
-                            </Link>
-                          </Button>
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          ) : null}
         </>
       )}
-    </>
+    </div>
   );
 }
