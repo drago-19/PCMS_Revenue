@@ -6,18 +6,18 @@ import { Progress as ProgressPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const progressVariants = cva(
-  "relative w-full overflow-hidden rounded-full bg-primary/15",
+  "relative w-full overflow-hidden rounded-full bg-[#e2e8f0]",
   {
     variants: {
       size: {
         default: "h-2.5",
         sm: "h-1.5",
-        lg: "h-3.5",
+        lg: "h-3",
       },
       tone: {
-        default: "bg-primary/15",
-        success: "bg-[#ecfdf3]",
-        danger: "bg-[#fef3f2]",
+        default: "bg-[#ffe4e8]",
+        success: "bg-[#d1fae5]",
+        danger: "bg-[#fee2e2]",
       },
     },
     defaultVariants: {
@@ -32,9 +32,9 @@ const indicatorVariants = cva(
   {
     variants: {
       tone: {
-        default: "bg-gradient-to-r from-[#0f766e] to-[#14b8a6]",
-        success: "bg-[#15803d]",
-        danger: "bg-destructive",
+        default: "bg-gradient-to-r from-[#fe2c55] to-[#ff6482]",
+        success: "bg-[#059669]",
+        danger: "bg-[#dc2626]",
       },
     },
     defaultVariants: {

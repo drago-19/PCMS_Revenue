@@ -29,7 +29,10 @@ function Table({
   return (
     <div
       data-slot="table-container"
-      className={cn("table-wrap relative w-full overflow-x-auto", containerClassName)}
+      className={cn(
+        "table-wrap relative w-full overflow-x-auto min-[641px]:max-h-[calc(100dvh-260px)] min-[641px]:overflow-y-auto",
+        containerClassName
+      )}
     >
       <table
         data-slot="table"
@@ -44,7 +47,7 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b", className)}
+      className={cn("[&_tr]:border-b min-[641px]:sticky min-[641px]:top-0 min-[641px]:z-20", className)}
       {...props}
     />
   )
@@ -78,7 +81,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b border-muted transition-colors hover:bg-[#f9fafb] data-[state=selected]:bg-muted",
+        "border-b border-muted transition-colors even:bg-[#f8fafc]/80 hover:bg-[#eff6ff]/70 data-[state=selected]:bg-muted",
         className
       )}
       {...props}
@@ -91,7 +94,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "px-3 py-3 min-[640px]:px-[18px] text-left align-middle text-[12px] font-bold tracking-[0.02em] whitespace-nowrap text-muted-foreground bg-[#f8f9fb] border-b border-border",
+        "px-4 py-2.5 min-[640px]:px-5 text-left [&.num]:text-right [&.num]:tabular-nums align-middle text-[12px] font-bold tracking-[0.02em] whitespace-nowrap text-muted-foreground bg-[#f8f9fb] border-b border-border shadow-[0_1px_0_var(--border)]",
         className
       )}
       {...props}
@@ -104,7 +107,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "px-3 py-3 min-[640px]:px-[18px] align-middle border-b border-muted",
+        "px-4 py-2.5 min-[640px]:px-5 text-left [&.num]:text-right [&.num]:tabular-nums [&.num]:whitespace-nowrap align-middle border-b border-muted",
         className
       )}
       {...props}
