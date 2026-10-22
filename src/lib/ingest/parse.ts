@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
 import ExcelJS, { type CellValue } from "exceljs";
 import {
   FEE_GROUPS,
@@ -168,6 +169,146 @@ function readSheetRows(sheet: ExcelJS.Worksheet): Primitive[][] {
     else break;
   }
   return rows;
+}
+
+export function parseCsvToRows(buffer: Buffer): Primitive[][] {
+  let text = buffer.toString("utf8");
+  if (text.charCodeAt(0) === 0xfeff) {
+    text = text.slice(1);
+  }
+  const rows: Primitive[][] = [];
+  let currentRow: Primitive[] = [];
+  let currentField = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          currentField += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        currentField += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        currentRow.push(currentField.trim());
+        currentField = "";
+      } else if (ch === "\r" || ch === "\n") {
+        if (ch === "\r" && text[i + 1] === "\n") i++;
+        currentRow.push(currentField.trim());
+        rows.push(currentRow);
+        currentRow = [];
+        currentField = "";
+      } else {
+        currentField += ch;
+      }
+    }
+  }
+  if (currentField.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentField.trim());
+    rows.push(currentRow);
+  }
+  while (rows.length > 0) {
+    const last = rows[rows.length - 1];
+    if (!last || last.every((value) => isEmptyValue(value))) rows.pop();
+    else break;
+  }
+  return rows;
+}
+
+export function isZipBuffer(buffer: Buffer): boolean {
+  return (
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    buffer[2] === 0x03 &&
+    buffer[3] === 0x04
+  );
+}
+
+export async function readInputSheets(
+  input: Buffer | ArrayBuffer,
+): Promise<{ name: string; rows: Primitive[][] }[]> {
+  const buffer = input instanceof ArrayBuffer ? Buffer.from(input) : input;
+  if (isZipBuffer(buffer)) {
+    const sheets: { name: string; rows: Primitive[][] }[] = [];
+    try {
+      const stream = Readable.from(buffer);
+      const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(
+        stream as never,
+        {
+          entries: "emit",
+          sharedStrings: "cache",
+          hyperlinks: "ignore",
+          styles: "ignore",
+          worksheets: "emit",
+        },
+      );
+      for await (const worksheetReader of workbookReader) {
+        const rows: Primitive[][] = [];
+        for await (const row of worksheetReader) {
+          const values = row.values;
+          const mapped = Array.isArray(values)
+            ? values.slice(1).map(cellToPrimitive)
+            : [];
+          rows.push(mapped);
+        }
+        while (rows.length > 0) {
+          const last = rows[rows.length - 1];
+          if (!last || last.every((value) => isEmptyValue(value))) rows.pop();
+          else break;
+        }
+        sheets.push({
+          name: String((worksheetReader as { name?: string }).name ?? `Sheet${sheets.length + 1}`),
+          rows,
+        });
+      }
+      if (sheets.length > 0) {
+        return sheets;
+      }
+    } catch {
+      // Fallback to standard Workbook loader if stream reader encounters non-standard zip structure
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    try {
+      await workbook.xlsx.load(buffer as never);
+    } catch (error) {
+      throw new IngestError(
+        "INVALID_FILE",
+        "อ่านไฟล์ Excel ไม่ได้ กรุณาตรวจสอบว่าเป็นไฟล์ .xlsx หรือ .csv ที่ไม่เสียหาย",
+        [String(error)],
+      );
+    }
+    return workbook.worksheets.map((sheet) => ({
+      name: sheet.name,
+      rows: readSheetRows(sheet),
+    }));
+  }
+
+  const probe = buffer.subarray(0, Math.min(512, buffer.length));
+  let nullBytes = 0;
+  for (let i = 0; i < probe.length; i++) {
+    if (probe[i] === 0) nullBytes++;
+  }
+  if (nullBytes > 0) {
+    throw new IngestError(
+      "INVALID_FILE",
+      "อ่านไฟล์ไม่ได้ กรุณาตรวจสอบว่าเป็นไฟล์ .xlsx หรือ .csv ที่ไม่เสียหาย",
+    );
+  }
+  const csvRows = parseCsvToRows(buffer);
+  if (csvRows.length === 0) {
+    throw new IngestError("INVALID_FILE", "ไฟล์ว่างหรือไม่มีข้อมูลตาราง");
+  }
+  return [{ name: "CSV", rows: csvRows }];
 }
 
 export function toNumber(value: Primitive | undefined): number {
@@ -414,12 +555,14 @@ function sheetNameHint(name: string): number {
   return 0;
 }
 
-function findDetailSheet(workbook: ExcelJS.Workbook): SheetCandidate {
+function findDetailSheet(
+  sheets: { name: string; rows: Primitive[][] }[],
+): SheetCandidate {
   const candidates: SheetCandidate[] = [];
   const rejected: string[] = [];
 
-  for (const sheet of workbook.worksheets) {
-    const rows = readSheetRows(sheet);
+  for (const sheet of sheets) {
+    const rows = sheet.rows;
     if (rows.length < 2) continue;
     const limit = Math.min(30, rows.length);
     let best: SheetCandidate | null = null;
@@ -556,7 +699,7 @@ function parsePeriod(
 }
 
 function parseReportSheet(
-  sheet: ExcelJS.Worksheet,
+  sheetName: string,
   rows: Primitive[][],
 ): { summary: ReportSummary; score: number } {
   const totals: Record<string, number> = {};
@@ -568,6 +711,14 @@ function parseReportSheet(
   let score = 0;
 
   for (const row of rows) {
+    const firstCol = normalizeHeader(String(row[0] ?? ""));
+    if (
+      firstCol === normalizeHeader("ประเภทธุรกรรม") ||
+      firstCol === normalizeHeader("คำอธิบายค่าธรรมเนียม") ||
+      firstCol === normalizeHeader("ชื่อ")
+    ) {
+      break;
+    }
     const entry = reportValueForRow(row);
     if (!entry) continue;
     const valueText =
@@ -611,7 +762,7 @@ function parseReportSheet(
     score,
     summary: {
       found: score >= 2,
-      sheetName: sheet.name,
+      sheetName,
       periodStart,
       periodEnd,
       timezone,
@@ -623,15 +774,21 @@ function parseReportSheet(
 }
 
 function findReport(
-  workbook: ExcelJS.Workbook,
+  sheets: { name: string; rows: Primitive[][] }[],
   detailSheetName: string,
+  embeddedRows?: Primitive[][],
 ): ReportSummary {
   let best: { summary: ReportSummary; score: number } | null = null;
-  for (const sheet of workbook.worksheets) {
+  for (const sheet of sheets) {
     if (sheet.name === detailSheetName) continue;
-    const rows = readSheetRows(sheet);
-    const parsed = parseReportSheet(sheet, rows);
+    const parsed = parseReportSheet(sheet.name, sheet.rows);
     if (!best || parsed.score > best.score) best = parsed;
+  }
+  if (embeddedRows && embeddedRows.length > 0) {
+    const parsedEmbedded = parseReportSheet(`${detailSheetName} (สรุปท้ายตาราง)`, embeddedRows);
+    if (!best || parsedEmbedded.score > best.score) {
+      best = parsedEmbedded;
+    }
   }
   if (best && best.summary.found) return best.summary;
   return {
@@ -732,21 +889,27 @@ function combineTransactions(
 }
 
 export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<ParsedWorkbook> {
-  const buffer = input instanceof ArrayBuffer ? Buffer.from(input) : input;
-  const workbook = new ExcelJS.Workbook();
-  try {
-    await workbook.xlsx.load(buffer as never);
-  } catch (error) {
-    throw new IngestError(
-      "INVALID_FILE",
-      "อ่านไฟล์ Excel ไม่ได้ กรุณาตรวจสอบว่าเป็นไฟล์ .xlsx ที่ไม่เสียหาย",
-      [String(error)],
-    );
-  }
-
-  const detail = findDetailSheet(workbook);
+  const sheets = await readInputSheets(input);
+  const detail = findDetailSheet(sheets);
   const headers = detail.mapping.map((entry) => entry.header);
   const columnCount = headers.length;
+
+  let detailEndRow = detail.rows.length;
+  for (let index = detail.headerRow + 1; index < detail.rows.length; index++) {
+    const row = detail.rows[index] ?? [];
+    const col0 = normalizeHeader(String(row[0] ?? ""));
+    const col1 = normalizeHeader(String(row[1] ?? ""));
+    if (
+      (!col0 && REPORT_LABEL_HINTS.has(col1)) ||
+      col0 === normalizeHeader("ประเภทธุรกรรม") ||
+      col0 === normalizeHeader("คำอธิบายค่าธรรมเนียม")
+    ) {
+      detailEndRow = index;
+      break;
+    }
+  }
+  const embeddedReportRows =
+    detailEndRow < detail.rows.length ? detail.rows.slice(detailEndRow) : undefined;
 
   const mappingByField = new Map<string, MappingEntry>();
   const duplicateHeaders: string[] = [];
@@ -766,7 +929,7 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
   for (const entry of detail.mapping) {
     if (!entry.fieldKey) continue;
     let count = 0;
-    for (let index = detail.headerRow + 1; index < detail.rows.length; index++) {
+    for (let index = detail.headerRow + 1; index < detailEndRow; index++) {
       if (!isEmptyValue(detail.rows[index][entry.col])) count++;
     }
     entry.nonEmpty = count;
@@ -778,7 +941,7 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
     let nonEmpty = 0;
     let nonZeroNumeric = 0;
     const samples: string[] = [];
-    for (let index = detail.headerRow + 1; index < detail.rows.length; index++) {
+    for (let index = detail.headerRow + 1; index < detailEndRow; index++) {
       const value = detail.rows[index][entry.col];
       if (isEmptyValue(value)) continue;
       nonEmpty++;
@@ -811,7 +974,7 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
   const rowWarnings: IngestWarning[] = [];
   let ambiguousDates = 0;
 
-  for (let index = detail.headerRow + 1; index < detail.rows.length; index++) {
+  for (let index = detail.headerRow + 1; index < detailEndRow; index++) {
     const row = detail.rows[index] ?? [];
     const excelRow = index + 1;
     if (row.every((value) => isEmptyValue(value))) continue;
@@ -967,7 +1130,7 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
   }
 
   const combined = combineTransactions(transactions);
-  const report = findReport(workbook, detail.sheetName);
+  const report = findReport(sheets, detail.sheetName, embeddedReportRows);
 
   const warnings: IngestWarning[] = [];
   if (duplicateHeaders.length > 0) {

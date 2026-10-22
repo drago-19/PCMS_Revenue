@@ -47,7 +47,9 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   params: unknown[] = [],
   db?: Queryable,
 ): Promise<T[]> {
-  await ensureSchema();
+  if (!db) {
+    await ensureSchema();
+  }
   const target = db ?? getPool();
   const result = await target.query<T>(text, params as never[]);
   return result.rows;
@@ -143,4 +145,134 @@ CREATE TABLE IF NOT EXISTS invoice_registry (
   invoice_no TEXT NOT NULL UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_type TEXT NOT NULL DEFAULT 'settlement';
+ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_blob BYTEA;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'TikTok';
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS order_code TEXT;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_channel ON transactions(channel);
+CREATE INDEX IF NOT EXISTS ix_transactions_order_code ON transactions(order_code);
+
+CREATE TABLE IF NOT EXISTS oms_orders (
+  order_code TEXT PRIMARY KEY,
+  import_id BIGINT REFERENCES imports(id) ON DELETE SET NULL,
+  channel TEXT NOT NULL DEFAULT 'TikTok',
+  customer_name TEXT,
+  customer_phone TEXT,
+  contact_name TEXT,
+  courier TEXT,
+  shipping_fee_customer DOUBLE PRECISION NOT NULL DEFAULT 0,
+  shipping_fee_seller DOUBLE PRECISION NOT NULL DEFAULT 0,
+  province TEXT,
+  bank TEXT,
+  tracking_no TEXT,
+  note TEXT,
+  created_by TEXT,
+  created_date TEXT NOT NULL DEFAULT '',
+  paid_date TEXT NOT NULL DEFAULT '',
+  printed_date TEXT NOT NULL DEFAULT '',
+  marketplace_order_raw TEXT,
+  marketplace_order_norm TEXT,
+  marketplace_order_prefix TEXT,
+  marketplace_order_float DOUBLE PRECISION,
+  discount_code TEXT,
+  discount_total DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total_qty INTEGER NOT NULL DEFAULT 0,
+  sales_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  profit_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  matched_external_id TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_oms_orders_mp_norm ON oms_orders(marketplace_order_norm);
+CREATE INDEX IF NOT EXISTS ix_oms_orders_mp_prefix ON oms_orders(marketplace_order_prefix);
+CREATE INDEX IF NOT EXISTS ix_oms_orders_matched_ext ON oms_orders(matched_external_id);
+CREATE INDEX IF NOT EXISTS ix_oms_orders_paid_date ON oms_orders(paid_date);
+CREATE INDEX IF NOT EXISTS ix_oms_orders_channel ON oms_orders(channel);
+
+CREATE TABLE IF NOT EXISTS oms_order_items (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  import_id BIGINT REFERENCES imports(id) ON DELETE CASCADE,
+  order_code TEXT NOT NULL,
+  line_no INTEGER NOT NULL DEFAULT 1,
+  sku_code TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  order_sales_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  shipping_fee_customer DOUBLE PRECISION NOT NULL DEFAULT 0,
+  sender_name TEXT,
+  customer_name TEXT,
+  customer_address TEXT,
+  postal_code TEXT,
+  customer_phone TEXT,
+  paid_date TEXT NOT NULL DEFAULT '',
+  created_date TEXT NOT NULL DEFAULT '',
+  courier TEXT,
+  channel TEXT NOT NULL DEFAULT 'TikTok',
+  bank TEXT,
+  note TEXT,
+  tracking_no TEXT,
+  UNIQUE(order_code, line_no)
+);
+
+CREATE INDEX IF NOT EXISTS ix_oms_items_order_code ON oms_order_items(order_code);
+CREATE INDEX IF NOT EXISTS ix_oms_items_sku_code ON oms_order_items(sku_code);
+
+CREATE TABLE IF NOT EXISTS products (
+  sku_code TEXT PRIMARY KEY,
+  product_name TEXT NOT NULL,
+  default_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS daily_summaries (
+  paid_date TEXT PRIMARY KEY,
+  transaction_count INTEGER NOT NULL DEFAULT 0,
+  order_count INTEGER NOT NULL DEFAULT 0,
+  order_payout DOUBLE PRECISION NOT NULL DEFAULT 0,
+  order_income DOUBLE PRECISION NOT NULL DEFAULT 0,
+  order_fees DOUBLE PRECISION NOT NULL DEFAULT 0,
+  other_count INTEGER NOT NULL DEFAULT 0,
+  other_payout DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total_payout DOUBLE PRECISION NOT NULL DEFAULT 0,
+  adjustment DOUBLE PRECISION NOT NULL DEFAULT 0,
+  tiktok_count INTEGER NOT NULL DEFAULT 0,
+  shopee_count INTEGER NOT NULL DEFAULT 0,
+  facebook_count INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sku_summaries (
+  sku_code TEXT PRIMARY KEY,
+  product_name TEXT NOT NULL,
+  total_qty INTEGER NOT NULL DEFAULT 0,
+  order_count INTEGER NOT NULL DEFAULT 0,
+  gross_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  net_sales_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  tiktok_qty INTEGER NOT NULL DEFAULT 0,
+  shopee_qty INTEGER NOT NULL DEFAULT 0,
+  facebook_qty INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_order_paid_ext
+  ON transactions(paid_date DESC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_channel_paid_ext
+  ON transactions(channel, paid_date DESC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_search_trgm
+  ON transactions USING gin (
+    (external_id || ' ' || COALESCE(order_code, '') || ' ' || COALESCE(product_detail, '')) gin_trgm_ops
+  )
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_sku_summaries_sort
+  ON sku_summaries(total_qty DESC, net_sales_amount DESC, sku_code ASC);
 `;

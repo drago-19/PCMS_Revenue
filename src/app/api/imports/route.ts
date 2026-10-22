@@ -1,8 +1,14 @@
 import { importWorkbook, type ImportProgressEvent, type ImportResult } from "@/lib/ingest/import-service";
 import { IngestError } from "@/lib/ingest/parse";
+import { deleteAllImports } from "@/lib/queries";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export async function DELETE() {
+  const deletedCount = await deleteAllImports();
+  return Response.json({ ok: true, deletedCount });
+}
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -21,9 +27,9 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) {
       return Response.json({ error: "ไม่พบไฟล์ที่ส่งมา" }, { status: 400 });
     }
-    if (!/\.xlsx$/i.test(file.name)) {
+    if (!/\.(xlsx|csv)$/i.test(file.name)) {
       return Response.json(
-        { error: "รองรับเฉพาะไฟล์ .xlsx ที่ export จาก TikTok Shop" },
+        { error: "รองรับเฉพาะไฟล์ .xlsx หรือ .csv เท่านั้น" },
         { status: 400 },
       );
     }
@@ -38,12 +44,22 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const rawCustomMapping = form.get("customMapping");
+    let customMapping: Record<string, string> | undefined;
+    if (typeof rawCustomMapping === "string" && rawCustomMapping.trim()) {
+      try {
+        customMapping = JSON.parse(rawCustomMapping) as Record<string, string>;
+      } catch {
+        // ignore invalid json
+      }
+    }
 
     if (!streamMode) {
       const result = await importWorkbook({
         filename: file.name,
         buffer,
         source: "upload",
+        customMapping,
       });
       return Response.json(result, { status: result.duplicate ? 200 : 201 });
     }
@@ -60,6 +76,7 @@ export async function POST(request: Request) {
             filename: file.name,
             buffer,
             source: "upload",
+            customMapping,
             onProgress: (event) => {
               send({ type: "progress", ...event });
             },

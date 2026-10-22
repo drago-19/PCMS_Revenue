@@ -218,7 +218,7 @@ test("POST /api/imports validates missing/non-xlsx/empty files before touching D
   assert.match(bodyNoFile.error, /ไม่พบไฟล์/);
 
   const badExtForm = new FormData();
-  badExtForm.append("file", new File(["hello"], "report.csv", { type: "text/csv" }));
+  badExtForm.append("file", new File(["hello"], "report.txt", { type: "text/plain" }));
   const resBadExt = await POST(
     new Request("http://localhost:3001/api/imports?stream=1", {
       method: "POST",
@@ -240,4 +240,337 @@ test("POST /api/imports validates missing/non-xlsx/empty files before touching D
   assert.equal(resZero.status, 400);
   const bodyZero = (await resZero.json()) as { error: string };
   assert.match(bodyZero.error, /ไฟล์ว่าง/);
+});
+
+test("detects and parses OMS orders, OMS items, and CSV settlement with 15-digit scientific notation matching", async () => {
+  const { detectAndParseOmsInput, normalizeMarketplaceId } = await import(
+    "../src/lib/ingest/oms-parse"
+  );
+  const { buildInvoice } = await import("../src/lib/invoice");
+
+  const normSci = normalizeMarketplaceId("5.8635928059415936e+17");
+  assert.equal(normSci.prefix, "586359280594159");
+  assert.equal(normSci.norm, "586359280594159360");
+
+  const omsOrdersCsv = [
+    "เลขที่ออเดอร์,ชื่อ,เบอร์โทร,ช่องทางติดต่อ,ชื่อตามช่องทางติดต่อ,ขนส่ง,ค่าส่งที่เก็บลูกค้า,จังหวัด,ธนาคาร,เลขพัสดุ,ค่าส่งที่ร้านจ่าย,หมายเหตุ,สร้างโดย,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,เลขที่บน Marketplace,รหัสส่วนลด,ส่วนลดรวม,จำนวนรวม,ยอดขาย,กำไร",
+    "OF37,ดาริกา บุตรพรม,0631954616,TikTok,TikTok,J&T (Pick Up),0.0,ชัยภูมิ,PromptPay,755093165214,0,,P&C,01/10/2026 11:25,01/10/2026 00:00,01/10/2026 11:25,5.86356565637268e+17,,100.0,1,150.0,150.0",
+    "OF33,สายฝน,0827564556,Shopee,Shopee,Shopee Xpress (Pick Up),37.0,ชลบุรี,เงินโอน,TH263097252167Z,0,,P&C,01/10/2026 09:05,01/10/2026 00:00,01/10/2026 09:05,261001GH52V0JW,,171.0,2,266.0,266.0",
+  ].join("\n");
+
+  const parsedOrders = await detectAndParseOmsInput(Buffer.from(omsOrdersCsv, "utf8"));
+  assert.ok(parsedOrders);
+  assert.equal(parsedOrders.fileType, "oms_orders");
+  assert.equal(parsedOrders.orders.length, 2);
+  assert.equal(parsedOrders.orders[0].orderCode, "OF37");
+  assert.equal(parsedOrders.orders[0].channel, "TikTok");
+  assert.equal(parsedOrders.orders[0].marketplaceOrderPrefix, "586356565637268");
+  assert.equal(parsedOrders.orders[1].orderCode, "OF33");
+  assert.equal(parsedOrders.orders[1].channel, "Shopee");
+  assert.equal(parsedOrders.orders[1].marketplaceOrderNorm, "261001GH52V0JW");
+
+  const omsItemsCsv = [
+    "รหัสสินค้า,สินค้า,ราคา,จำนวน,เลขที่ออเดอร์,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,ที่อยู่,รหัสไปรษณีย์,เบอร์โทร,วันที่โอนเงิน,สร้างโดย,ขนส่ง,ช่องทางติดต่อ,ธนาคารที่โอนเงิน,หมายเหตุ,เลขพัสดุ,วันที่สร้าง",
+    "SET21,ไฟเบอร์1กล่องแถมตรีผลา1ห่อ,250.0,1,OF37,150.0,0.0,แบรนด์ P&C,ดาริกา บุตรพรม,27 ม.9 ต.บ้านหัน อ.เกษตรสมบูรณ์ จ.ชัยภูมิ 36120,36120,0631954616,01/10/2026 00:00,P&C,J&T (Pick Up),TikTok,PromptPay,,755093165214,01/10/2026 11:25",
+  ].join("\n");
+
+  const parsedItems = await detectAndParseOmsInput(Buffer.from(omsItemsCsv, "utf8"));
+  assert.ok(parsedItems);
+  assert.equal(parsedItems.fileType, "oms_items");
+  assert.equal(parsedItems.items.length, 1);
+  assert.equal(parsedItems.items[0].skuCode, "SET21");
+  assert.equal(parsedItems.items[0].productName, "ไฟเบอร์1กล่องแถมตรีผลา1ห่อ");
+  assert.equal(parsedItems.items[0].orderCode, "OF37");
+
+  const invoice = buildInvoice({
+    id: 1,
+    importId: 1,
+    externalId: "586356565637268989",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-10-01",
+    paidDate: "2026-10-01",
+    currency: "THB",
+    income: 150,
+    feeTotal: -17.39,
+    adjustment: 0,
+    payout: 132.61,
+    productDetail: "SET21 · ไฟเบอร์1กล่องแถมตรีผลา1ห่อ × 1",
+    weightEstimated: 200,
+    weightCharged: 200,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      externalId: "586356565637268989",
+      transactionType: "คำสั่งซื้อ",
+      isOrder: true,
+      createdAt: "2026-10-01",
+      paidAt: "2026-10-01",
+      currency: "THB",
+      fields: { productAfterDiscount: 150, shippingCustomerFee: 0 },
+      mappedFields: [],
+      feeGroups: {},
+      unknownValues: [],
+      checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+      warnings: [],
+      raw: {},
+      sourceRows: 1,
+      firstRow: 2,
+      rowIndexes: [2],
+    },
+    createdAt: "2026-10-01",
+    invoiceNo: "TT26100100001",
+    channel: "TikTok",
+    orderCode: "OF37",
+    customerName: "ดาริกา บุตรพรม",
+    customerPhone: "0631954616",
+    customerAddress: "27 ม.9 ต.บ้านหัน อ.เกษตรสมบูรณ์ จ.ชัยภูมิ 36120",
+    postalCode: "36120",
+    province: "ชัยภูมิ",
+    trackingNo: "755093165214",
+    courier: "J&T (Pick Up)",
+    discountTotal: 100,
+    shippingFeeCustomer: 0,
+    omsItems: [
+      {
+        skuCode: "SET21",
+        productName: "ไฟเบอร์1กล่องแถมตรีผลา1ห่อ",
+        unitPrice: 250,
+        quantity: 1,
+      },
+    ],
+  });
+
+  assert.equal(invoice.orderCode, "OF37");
+  assert.equal(invoice.channel, "TikTok");
+  assert.equal(invoice.items.length, 1);
+  assert.equal(invoice.items[0].sku, "SET21");
+  assert.equal(invoice.items[0].name, "ไฟเบอร์1กล่องแถมตรีผลา1ห่อ");
+  assert.equal(invoice.grossItemsTotal, 250);
+  assert.equal(invoice.discountTotal, 100);
+  assert.equal(invoice.total, 150);
+  assert.equal(invoice.preVatAmount, 140.19);
+  assert.equal(invoice.vatAmount, 9.81);
+});
+
+test("deleteImport removes orphaned invoice_registry rows and resets invoice_seq when empty", async () => {
+  const { deleteImport } = await import("../src/lib/queries");
+  const executedSql: string[] = [];
+
+  const mockDb = {
+    query: async (sql: string) => {
+      executedSql.push(sql.replace(/\s+/g, " ").trim());
+      if (sql.includes("DELETE FROM imports")) {
+        return { rows: [{ id: 99 }] };
+      }
+      if (sql.includes("SELECT COUNT(*) AS c FROM invoice_registry")) {
+        return { rows: [{ c: 0 }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const ok = await deleteImport(99, mockDb as never);
+  assert.equal(ok, true);
+  assert.ok(
+    executedSql.some((s) => s.includes("DELETE FROM imports WHERE id = $1")),
+    "should delete from imports",
+  );
+  assert.ok(
+    executedSql.some((s) => s.includes("DELETE FROM products p WHERE NOT EXISTS")),
+    "should delete orphaned products rows",
+  );
+  assert.ok(
+    executedSql.some((s) => s.includes("DELETE FROM invoice_registry r WHERE NOT EXISTS")),
+    "should delete orphaned invoice_registry rows",
+  );
+  assert.ok(
+    executedSql.some((s) => s.includes("ALTER SEQUENCE invoice_seq RESTART WITH 1")),
+    "should reset invoice_seq when invoice_registry is empty",
+  );
+});
+
+test("supports custom column mapping for arbitrary Synnity/Shopee headers", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const customCsv = [
+    "Bill_Ref,Item_SKU_ID,Item_Title,Price_Each,Qty_Sold,Pay_Date,Platform_Source",
+    "SYN-9001,SKU-HERB-01,สมุนไพรตรีผลาสกัด,290,2,2026-10-05,Shopee",
+  ].join("\n");
+
+  const parsed = await detectAndParseOmsInput(Buffer.from(customCsv, "utf8"), {
+    Bill_Ref: "orderCode",
+    Item_SKU_ID: "skuCode",
+    Item_Title: "productName",
+    Price_Each: "unitPrice",
+    Qty_Sold: "quantity",
+    Pay_Date: "paidDate",
+    Platform_Source: "channel",
+  });
+
+  assert.ok(parsed);
+  assert.equal(parsed.fileType, "oms_items");
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.items[0].orderCode, "SYN-9001");
+  assert.equal(parsed.items[0].skuCode, "SKU-HERB-01");
+  assert.equal(parsed.items[0].productName, "สมุนไพรตรีผลาสกัด");
+  assert.equal(parsed.items[0].unitPrice, 290);
+  assert.equal(parsed.items[0].quantity, 2);
+  assert.equal(parsed.items[0].channel, "Shopee");
+});
+
+test("listBills uses pre-aggregated daily_summaries fast path without scanning transactions COUNT/SUM", async () => {
+  const { listBills } = await import("../src/lib/queries");
+  const executedSql: string[] = [];
+
+  const mockDb = {
+    query: async (sql: string) => {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      executedSql.push(clean);
+      if (clean.includes("FROM daily_summaries")) {
+        return {
+          rows: [
+            {
+              order_count: 1000000000,
+              order_income: 250000000000,
+              order_fees: -15000000000,
+              order_payout: 235000000000,
+              tiktok_count: 700000000,
+              shopee_count: 250000000,
+              facebook_count: 50000000,
+              min_paid_date: "2020-01-01",
+              max_paid_date: "2026-10-22",
+              distinct_dates: 2480,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const result = await listBills({ page: 1, pageSize: 20 }, mockDb as never);
+  assert.equal(result.total, 1000000000);
+  assert.equal(result.summary.income, 250000000000);
+  assert.equal(result.channelCounts.TikTok, 700000000);
+  assert.equal(result.channelCounts.Shopee, 250000000);
+  assert.equal(result.channelCounts.Facebook, 50000000);
+  assert.ok(
+    !executedSql.some((s) => s.includes("SELECT COUNT(*) AS count") && s.includes("FROM transactions")),
+    "should not run full COUNT/SUM scan on transactions table when fast path applies",
+  );
+});
+
+test("getImportSpreadsheetData reads original Excel file_blob and falls back to database reconstruction", async () => {
+  const { getImportSpreadsheetData } = await import("../src/lib/queries");
+
+  const xlsxBuf = await buildXlsx([
+    {
+      name: "Order details",
+      rows: [
+        ["Order ID", "Product Name", "Amount"],
+        ["ORD-001", "สมุนไพรตรีผลา", 250],
+        ["ORD-002", "ไฟเบอร์ดีท็อกซ์", 450],
+      ],
+    },
+    {
+      name: "Reports",
+      rows: [
+        ["Total settlement amount", 700],
+      ],
+    },
+  ]);
+
+  const mockBlobDb = {
+    query: async () => ({
+      rows: [
+        {
+          id: 10,
+          filename: "sample_with_blob.xlsx",
+          file_size: xlsxBuf.length,
+          imported_at: "2026-10-22T03:00:00Z",
+          source: "upload",
+          file_type: "settlement",
+          sheet_name: "Order details",
+          header_row: 1,
+          status: "ok",
+          row_count: 2,
+          transaction_count: 2,
+          order_count: 2,
+          warnings_json: "[]",
+          mapping_json: "[]",
+          unknown_columns_json: "[]",
+          report_json: "{}",
+          reconciliation_json: "{}",
+          file_blob: xlsxBuf,
+        },
+      ],
+    }),
+  };
+
+  const blobData = await getImportSpreadsheetData(10, mockBlobDb as never);
+  assert.ok(blobData);
+  assert.equal(blobData.sourceMode, "original_file");
+  assert.equal(blobData.hasOriginalFile, true);
+  assert.equal(blobData.sheets.length, 2);
+  assert.equal(blobData.sheets[0].name, "Order details");
+  assert.deepEqual(blobData.sheets[0].headers, ["Order ID", "Product Name", "Amount"]);
+  assert.equal(blobData.sheets[0].rows.length, 3);
+  assert.equal(blobData.sheets[0].rows[1][1], "สมุนไพรตรีผลา");
+  assert.equal(blobData.sheets[0].rows[2][2], 450);
+
+  // Fallback reconstruction when file_blob is null (legacy import)
+  const mockFallbackDb = {
+    query: async (sql: string) => {
+      if (sql.includes("FROM imports")) {
+        return {
+          rows: [
+            {
+              id: 11,
+              filename: "Data_21-10-2026.xlsx",
+              file_size: 136000,
+              imported_at: "2026-10-22T03:01:00Z",
+              source: "upload",
+              file_type: "oms_orders",
+              sheet_name: "Orders",
+              header_row: 1,
+              status: "ok",
+              row_count: 1,
+              transaction_count: 1,
+              order_count: 1,
+              warnings_json: "[]",
+              mapping_json: JSON.stringify([
+                { col: 0, header: "เลขที่ออเดอร์", fieldKey: "orderCode", label: "เลขที่ออเดอร์", kind: "text", confidence: "exact", nonEmpty: 1 },
+                { col: 1, header: "ชื่อ", fieldKey: "customerName", label: "ชื่อ", kind: "text", confidence: "exact", nonEmpty: 1 },
+                { col: 2, header: "ยอดขาย", fieldKey: "salesAmount", label: "ยอดขาย", kind: "text", confidence: "exact", nonEmpty: 1 },
+              ]),
+              unknown_columns_json: "[]",
+              report_json: "{}",
+              reconciliation_json: "{}",
+              file_blob: null,
+            },
+          ],
+        };
+      }
+      if (sql.includes("FROM oms_orders")) {
+        return {
+          rows: [
+            {
+              order_code: "OF39",
+              customer_name: "สมชาย ใจดี",
+              sales_amount: 450,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const fallbackData = await getImportSpreadsheetData(11, mockFallbackDb as never);
+  assert.ok(fallbackData);
+  assert.equal(fallbackData.sourceMode, "database_reconstructed");
+  assert.equal(fallbackData.hasOriginalFile, false);
+  assert.equal(fallbackData.sheets.length, 1);
+  assert.deepEqual(fallbackData.sheets[0].headers, ["เลขที่ออเดอร์", "ชื่อ", "ยอดขาย"]);
+  assert.deepEqual(fallbackData.sheets[0].rows[1], ["OF39", "สมชาย ใจดี", 450]);
 });

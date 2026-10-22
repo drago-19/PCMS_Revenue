@@ -41,7 +41,9 @@ export interface BillModel {
   notes: string[];
   productDetail: string | null;
   weightEstimated: number | null;
+  weightCharged: number | null;
   sourceRows: number;
+  discountBreakdown: BillLine[];
 }
 
 function n(value: string | number | undefined): number {
@@ -94,6 +96,56 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
         key: "storeDiscount",
         label: labelFor("storeDiscount"),
         amount: storeDiscount,
+        depth: 1,
+        kind: "line",
+      });
+    }
+    const sellerCofund = n(fields.sellerCofundCoupon);
+    if (sellerCofund !== 0) {
+      incomeLines.push({
+        key: "sellerCofundCoupon",
+        label: labelFor("sellerCofundCoupon"),
+        amount: sellerCofund,
+        depth: 1,
+        kind: "line",
+      });
+    }
+    const shippingDiscountStore = n(fields.shippingDiscountStore);
+    if (shippingDiscountStore !== 0) {
+      incomeLines.push({
+        key: "shippingDiscountStore",
+        label: labelFor("shippingDiscountStore"),
+        amount: shippingDiscountStore,
+        depth: 1,
+        kind: "line",
+      });
+    }
+    const platformDiscount = n(fields.platformDiscount);
+    if (platformDiscount !== 0) {
+      incomeLines.push({
+        key: "platformDiscount",
+        label: `${labelFor("platformDiscount")} (TikTok ชดเชยในรายได้)`,
+        amount: platformDiscount,
+        depth: 1,
+        kind: "line",
+      });
+    }
+    const platformCofund = n(fields.platformCofundCoupon);
+    if (platformCofund !== 0) {
+      incomeLines.push({
+        key: "platformCofundCoupon",
+        label: `${labelFor("platformCofundCoupon")} (TikTok ชดเชยในรายได้)`,
+        amount: platformCofund,
+        depth: 1,
+        kind: "line",
+      });
+    }
+    const customerPayment = n(fields.customerPayment);
+    if (customerPayment !== 0) {
+      incomeLines.push({
+        key: "customerPayment",
+        label: `${labelFor("customerPayment")} (ยอดที่ลูกค้าจ่ายจริง)`,
+        amount: customerPayment,
         depth: 1,
         kind: "line",
       });
@@ -220,6 +272,31 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     Math.abs(normalized.checks.payoutDiff) < 0.01 &&
     Math.abs(round2(incomeTotal + feeTotal + adjustment) - payout) < 0.01;
 
+  const discountBreakdown: BillLine[] = [];
+  for (const key of [
+    "storeDiscount",
+    "sellerCofundCoupon",
+    "shippingDiscountStore",
+    "platformDiscount",
+    "platformCofundCoupon",
+    "customerPayment",
+    "customerRefund",
+    "sellerCofundCouponRefund",
+    "platformDiscountRefund",
+    "platformCofundCouponRefund",
+  ]) {
+    const val = n(fields[key]);
+    if (val !== 0) {
+      discountBreakdown.push({
+        key,
+        label: labelFor(key),
+        amount: val,
+        depth: 1,
+        kind: "line",
+      });
+    }
+  }
+
   return {
     externalId: normalized.externalId,
     transactionType: normalized.transactionType,
@@ -250,6 +327,11 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
       typeof normalized.fields.weightEstimated === "number"
         ? normalized.fields.weightEstimated
         : null,
+    weightCharged:
+      typeof normalized.fields.weightCharged === "number"
+        ? normalized.fields.weightCharged
+        : null,
     sourceRows: normalized.sourceRows,
+    discountBreakdown,
   };
 }
