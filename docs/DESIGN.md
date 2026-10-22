@@ -6,21 +6,22 @@
 
 | Token | Hex | การใช้งาน |
 |---|---|---|
-| `--background` (`--bg`) | `#F8F9FB` | พื้นหลังหลักของหน้าเว็บ (สว่าง สะอาด สบายตาสำหรับงานบัญชี) |
+| `--background` (`--bg`) | `#F1F4F9` | พื้นหลังแคนวาสหลัก (Slate อ่อน) เพื่อตัดกับตัวการ์ดสีขาว (`#FFFFFF`) อย่างชัดเจน |
 | `--card` (`--surface`) | `#FFFFFF` | พื้นหลังการ์ด ตาราง และฟอร์ม |
-| `--foreground` (`--ink`) | `#121212` | สีตัวอักษรหลัก (TikTok Onyx — คมชัด contrast > 15:1) |
+| `--sidebar-bg` | `#0F1117` | พื้นหลังเมนูนำทางด้านซ้ายและแถบบนมือถือ (TikTok Onyx — ตัดกับแคนวาสชัดเจน) |
+| `--foreground` (`--ink`) | `#0F172A` | สีตัวอักษรหลัก (คมชัด contrast > 15:1) |
 | `--primary` (`--brand`) | `#FE2C55` | สีหลักแบรนด์ TikTok Razzmatazz (ปุ่ม CTA หลัก, จุดเน้นสำคัญ, Active indicator) |
-| `--primary-dark` (`--brand-dark`) | `#E01E45` | สีปุ่ม Primary เมื่อ hover/active |
-| `--primary-soft` (`--brand-soft`) | `#FFF0F3` | พื้นหลังอ่อนของสีหลัก (Active nav, Badge, Highlight) |
+| `--primary-dark` (`--brand-dark`) | `#C81038` | สีปุ่ม Primary เมื่อ hover/active |
+| `--primary-soft` (`--brand-soft`) | `#FFF0F3` | พื้นหลังอ่อนของสีหลัก (Badge, Highlight) |
 | `--tiktok-cyan` | `#00F2EA` | สี TikTok Cyan Neon สำหรับตกแต่ง Hero / Brand Mark / Dual-tone shadow |
-| `--tiktok-teal` | `#00807B` | สี TikTok Teal เข้มสำหรับลิงก์และข้อความคู่ขนานบนพื้นขาว (contrast ≥ 4.5:1) |
-| `--tiktok-teal-soft` | `#E6FBF9` | พื้นหลังอ่อนโทนฟ้าอมเขียว |
-| `--green` (`success`) | `#0D8A47` | ยอดชำระสุทธิ / สถานะตรวจยอดผ่าน (พื้นหลัง `#ECFDF3`) |
-| `--amber` (`warning`) | `#B45309` | คำเตือน / ยอดต้องตรวจสอบ (พื้นหลัง `#FFFBEB`) |
-| `--red` (`destructive`) | `#D92D20` | ค่าธรรมเนียมหักลบ / ยอดไม่ตรง / ปุ่มลบ (พื้นหลัง `#FEF3F2`) |
-| `--muted` | `#F1F3F6` | พื้นหลังส่วนหัวตาราง / แถบแบ่งกลุ่ม |
-| `--muted-foreground` | `#525866` | ข้อความรอง / คำอธิบาย (contrast ≥ 6.5:1 บนพื้นขาว) |
-| `--border` (`--line`) | `#E4E7EC` | เส้นขอบการ์ดและตาราง |
+| `--tiktok-teal` | `#0D9488` | สี TikTok Teal เข้มสำหรับลิงก์และข้อความคู่ขนานบนพื้นขาว (contrast ≥ 4.5:1) |
+| `--tiktok-teal-soft` | `#F0FDFA` | พื้นหลังอ่อนโทนฟ้าอมเขียว |
+| `--green` (`success`) | `#059669` | ยอดชำระสุทธิ / สถานะตรวจยอดผ่าน (พื้นหลัง `#ECFDF5`) |
+| `--amber` (`warning`) | `#D97706` | คำเตือน / ยอดต้องตรวจสอบ (พื้นหลัง `#FFFBEB`) |
+| `--red` (`destructive`) | `#DC2626` | ค่าธรรมเนียมหักลบ / ยอดไม่ตรง / ปุ่มลบ (พื้นหลัง `#FEF2F2`) |
+| `--muted` | `#F1F5F9` | พื้นหลังส่วนหัวตาราง / แถบแบ่งกลุ่ม |
+| `--muted-foreground` | `#475569` | ข้อความรอง / คำอธิบาย (contrast ≥ 7:1 บนพื้นขาว) |
+| `--border` (`--line`) | `#CBD5E1` | เส้นขอบการ์ดและตาราง (เข้มชัด ไม่กลืนกับพื้นขาว) |
 | `--ring` | `#FE2C55` | เส้น Focus ring สำหรับการเข้าถึงด้วยคีย์บอร์ด |
 
 ## 2. Typography
