@@ -9,10 +9,9 @@ RUN pnpm install --frozen-lockfile
 FROM node:24-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN pnpm build
+RUN node ./node_modules/next/dist/bin/next build
 
 # ---- run ----
 FROM node:24-alpine AS runner

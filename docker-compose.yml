@@ -28,18 +28,3 @@ services:
     depends_on:
       - app
 
-  # เปิดดูฐานข้อมูลผ่านเบราว์เซอร์ — docker compose --profile admin up -d
-  # เปิด http://localhost:5050 → Add New Server: host=host.docker.internal, port=5432,
-  #   db=pcms_revenue, user=postgres, password=postgrespassword
-  admin:
-    image: dpage/pgadmin4:latest
-    container_name: pcms-revenue-pgadmin
-    profiles: ["admin"]
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@pcms-revenue.com
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
-    ports:
-      - "5050:80"
