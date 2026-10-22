@@ -73,7 +73,7 @@ export function CopyButton({
           variant="ghost"
           size="icon-xs"
           className={cn(
-            "copy-btn no-print ml-2 align-middle",
+            "copy-btn no-print shrink-0 align-middle",
             status !== "idle" && status,
           )}
           title={hint}

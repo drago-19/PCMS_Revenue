@@ -39,6 +39,7 @@ const statCardVariants = cva("stat", {
   variants: {
     tone: {
       default: "tone-default",
+      brand: "tone-brand",
       positive: "tone-positive",
       negative: "tone-negative",
     },

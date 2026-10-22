@@ -15,10 +15,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { formatDate, formatFileSize } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { ExcelFilePreviewDialog } from "./ExcelPreviewDialog";
 import { IconAlert, IconCheckCircle, IconFile, IconUpload } from "./icons";
 
 interface UploadWarning {
@@ -31,6 +38,7 @@ interface UploadResult {
   importId: number;
   duplicate: boolean;
   filename: string;
+  fileType?: "settlement" | "oms_orders" | "oms_items";
   status: "ok" | "warning";
   rowCount: number;
   orderCount: number;
@@ -58,6 +66,7 @@ interface UploadProgressState {
   open: boolean;
   percent: number;
   stage: ProgressStage;
+  lastActiveStage: ProgressStage;
   message: string;
   filename: string;
   fileSize: number;
@@ -86,39 +95,80 @@ const STEP_ITEMS: { key: "upload" | "parse" | "save"; label: string }[] = [
 
 function getStepState(
   stage: ProgressStage,
+  lastActiveStage: ProgressStage,
   stepKey: "upload" | "parse" | "save",
-): "pending" | "active" | "done" {
+): "pending" | "active" | "done" | "error" {
   if (stage === "done") return "done";
+  const targetStage = stage === "error" ? lastActiveStage : stage;
+  const isError = stage === "error";
+
   if (stepKey === "upload") {
-    if (stage === "uploading") return "active";
-    if (stage === "hashing" || stage === "parsing" || stage === "reconciling" || stage === "saving") {
+    if (targetStage === "uploading") return isError ? "error" : "active";
+    if (
+      targetStage === "hashing" ||
+      targetStage === "parsing" ||
+      targetStage === "reconciling" ||
+      targetStage === "saving"
+    ) {
       return "done";
     }
-    return "pending";
+    return isError ? "error" : "pending";
   }
   if (stepKey === "parse") {
-    if (stage === "hashing" || stage === "parsing" || stage === "reconciling") return "active";
-    if (stage === "saving") return "done";
+    if (
+      targetStage === "hashing" ||
+      targetStage === "parsing" ||
+      targetStage === "reconciling"
+    ) {
+      return isError ? "error" : "active";
+    }
+    if (targetStage === "saving") return "done";
     return "pending";
   }
   if (stepKey === "save") {
-    if (stage === "saving") return "active";
+    if (targetStage === "saving") return isError ? "error" : "active";
     return "pending";
   }
   return "pending";
 }
 
+const CUSTOM_MAPPING_FIELDS: { key: string; label: string }[] = [
+  { key: "orderCode", label: "เลขที่ออเดอร์ / รหัสคำสั่งซื้อ (จำเป็น)" },
+  { key: "skuCode", label: "รหัสสินค้า (SKU)" },
+  { key: "productName", label: "ชื่อสินค้า" },
+  { key: "unitPrice", label: "ราคาต่อชิ้น" },
+  { key: "quantity", label: "จำนวนชิ้น" },
+  { key: "salesAmount", label: "ยอดขายรวมออเดอร์" },
+  { key: "discountTotal", label: "ส่วนลดรวม" },
+  { key: "shippingFeeCustomer", label: "ค่าส่งที่เก็บลูกค้า" },
+  { key: "channel", label: "ช่องทางจำหน่าย (TikTok/Shopee/FB)" },
+  { key: "marketplaceOrderId", label: "เลขคำสั่งซื้อบน Marketplace" },
+  { key: "customerName", label: "ชื่อลูกค้า" },
+  { key: "customerPhone", label: "เบอร์โทรลูกค้า" },
+  { key: "customerAddress", label: "ที่อยู่จัดส่ง" },
+  { key: "postalCode", label: "รหัสไปรษณีย์" },
+  { key: "trackingNo", label: "เลขพัสดุ" },
+  { key: "courier", label: "ขนส่ง" },
+  { key: "createdDate", label: "วันที่สั่งซื้อ / วันที่สร้าง" },
+  { key: "paidDate", label: "วันที่โอนเงิน / ชำระเงิน" },
+];
+
 export function UploadForm() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
   const [result, setResult] = useState<UploadResult | null>(null);
+  const [batchResults, setBatchResults] = useState<UploadResult[]>([]);
+  const [mappingFile, setMappingFile] = useState<File | null>(null);
+  const [unrecognizedHeaders, setUnrecognizedHeaders] = useState<string[]>([]);
+  const [fieldToHeader, setFieldToHeader] = useState<Record<string, string>>({});
   const [progress, setProgress] = useState<UploadProgressState>({
     open: false,
     percent: 0,
     stage: "idle",
+    lastActiveStage: "idle",
     message: "",
     filename: "",
     fileSize: 0,
@@ -126,216 +176,290 @@ export function UploadForm() {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  function choose(nextFile: File | null) {
+  function chooseFiles(fileList: FileList | File[] | null) {
     setError(null);
     setErrorDetails([]);
     setResult(null);
-    if (!nextFile) {
-      setFile(null);
+    setBatchResults([]);
+    if (!fileList || fileList.length === 0) {
+      setFiles([]);
       return;
     }
-    if (!/\.xlsx$/i.test(nextFile.name)) {
-      const msg = "รองรับเฉพาะไฟล์ .xlsx ที่ export จาก TikTok Shop";
+    const nextFiles = Array.from(fileList);
+    const invalid = nextFiles.find((f) => !/\.(xlsx|csv)$/i.test(f.name));
+    if (invalid) {
+      const msg = "รองรับเฉพาะไฟล์ .xlsx หรือ .csv เท่านั้น";
       setError(msg);
       toast.error(msg);
-      setFile(null);
+      setFiles([]);
       return;
     }
-    setFile(nextFile);
+    setFiles(nextFiles);
   }
 
-  async function upload() {
-    if (!file || busy) return;
-    setBusy(true);
-    setError(null);
-    setErrorDetails([]);
-    setResult(null);
-
-    const targetFile = file;
+  async function uploadSingleFile(
+    targetFile: File,
+    fileIndex: number,
+    totalFiles: number,
+    customMap?: Record<string, string>,
+  ): Promise<
+    | { ok: true; data: UploadResult }
+    | { ok: false; error: string; code?: string; details?: string[] }
+  > {
+    const prefix = totalFiles > 1 ? `[ไฟล์ ${fileIndex + 1}/${totalFiles}] ` : "";
     setProgress({
       open: true,
       percent: 1,
       stage: "uploading",
-      message: "กำลังส่งไฟล์ขึ้นเซิร์ฟเวอร์...",
+      lastActiveStage: "uploading",
+      message: `${prefix}กำลังส่งไฟล์ขึ้นเซิร์ฟเวอร์...`,
       filename: targetFile.name,
       fileSize: targetFile.size,
     });
 
-    try {
-      const payload = await new Promise<
-        | { ok: true; data: UploadResult }
-        | { ok: false; error: string; details?: string[] }
-      >((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/imports?stream=1", true);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/imports?stream=1", true);
 
-        let processedIndex = 0;
-        let resolved = false;
+      let processedIndex = 0;
+      let resolved = false;
 
-        const consumeLines = (finalChunk = false) => {
-          const text = xhr.responseText ?? "";
-          let newlineIndex = text.indexOf("\n", processedIndex);
+      const consumeLines = (finalChunk = false) => {
+        const text = xhr.responseText ?? "";
+        let newlineIndex = text.indexOf("\n", processedIndex);
 
-          while (newlineIndex !== -1) {
-            const line = text.slice(processedIndex, newlineIndex).trim();
-            processedIndex = newlineIndex + 1;
-            if (line) {
-              handleLine(line);
-            }
-            newlineIndex = text.indexOf("\n", processedIndex);
+        while (newlineIndex !== -1) {
+          const line = text.slice(processedIndex, newlineIndex).trim();
+          processedIndex = newlineIndex + 1;
+          if (line) {
+            handleLine(line);
           }
+          newlineIndex = text.indexOf("\n", processedIndex);
+        }
 
-          if (finalChunk && processedIndex < text.length) {
-            const tail = text.slice(processedIndex).trim();
-            processedIndex = text.length;
-            if (tail) {
-              handleLine(tail);
-            }
+        if (finalChunk && processedIndex < text.length) {
+          const tail = text.slice(processedIndex).trim();
+          processedIndex = text.length;
+          if (tail) {
+            handleLine(tail);
           }
-        };
+        }
+      };
 
-        const handleLine = (line: string) => {
-          try {
-            const msg = JSON.parse(line) as StreamMessage;
-            if (msg.type === "progress") {
-              const mappedPercent = Math.min(
-                99,
-                Math.max(30, Math.round(30 + (msg.percent / 100) * 70)),
-              );
-              setProgress((prev) => ({
-                ...prev,
-                percent: Math.max(prev.percent, mappedPercent),
-                stage: msg.stage,
-                message: msg.message,
-                current: msg.current,
-                total: msg.total,
-              }));
-            } else if (msg.type === "result") {
-              resolved = true;
+      const handleLine = (line: string) => {
+        try {
+          const msg = JSON.parse(line) as StreamMessage;
+          if (msg.type === "progress") {
+            const mappedPercent = Math.min(
+              99,
+              Math.max(30, Math.round(30 + (msg.percent / 100) * 70)),
+            );
+            setProgress((prev) => ({
+              ...prev,
+              percent: Math.max(prev.percent, mappedPercent),
+              stage: msg.stage,
+              lastActiveStage: msg.stage,
+              message: `${prefix}${msg.message}`,
+              current: msg.current,
+              total: msg.total,
+            }));
+          } else if (msg.type === "result") {
+            resolved = true;
+            setProgress((prev) => ({
+              ...prev,
+              percent: 100,
+              stage: "done",
+              lastActiveStage: "done",
+              message: msg.data.duplicate
+                ? `${prefix}ไฟล์นี้เคยนำเข้าแล้ว ไม่ต้องบันทึกซ้ำ`
+                : `${prefix}นำเข้าสำเร็จ (${msg.data.orderCount.toLocaleString("th-TH")} ออเดอร์)`,
+            }));
+            resolve({ ok: true, data: msg.data });
+          } else if (msg.type === "error") {
+            resolved = true;
+            setProgress((prev) => ({
+              ...prev,
+              stage: "error",
+              message: msg.error ?? "นำเข้าไม่สำเร็จ",
+            }));
+            resolve({
+              ok: false,
+              error: msg.error ?? "นำเข้าไม่สำเร็จ",
+              code: msg.code,
+              details: msg.details ?? [],
+            });
+          } else if (typeof msg.error === "string") {
+            resolved = true;
+            setProgress((prev) => ({
+              ...prev,
+              stage: "error",
+              message: msg.error,
+            }));
+            resolve({
+              ok: false,
+              error: msg.error,
+              details: msg.details ?? [],
+            });
+          }
+        } catch {
+          // ignore non-json partial line
+        }
+      };
+
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable || event.total <= 0) return;
+        const uploadRatio = Math.min(1, event.loaded / event.total);
+        const mappedPercent = Math.max(1, Math.round(uploadRatio * 30));
+        const nextStage: ProgressStage = uploadRatio >= 1 ? "hashing" : "uploading";
+        setProgress((prev) => ({
+          ...prev,
+          percent: Math.max(prev.percent, mappedPercent),
+          stage: nextStage,
+          lastActiveStage: nextStage,
+          message:
+            uploadRatio >= 1
+              ? `${prefix}อัปโหลดครบแล้ว กำลังตรวจสอบไฟล์...`
+              : `${prefix}กำลังส่งไฟล์ขึ้นเซิร์ฟเวอร์ (${formatFileSize(event.loaded)} / ${formatFileSize(event.total)})`,
+        }));
+      };
+
+      xhr.onprogress = () => {
+        consumeLines(false);
+      };
+
+      xhr.onload = () => {
+        consumeLines(true);
+        if (!resolved) {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const parsed = JSON.parse(xhr.responseText) as UploadResult;
               setProgress((prev) => ({
                 ...prev,
                 percent: 100,
                 stage: "done",
-                message: msg.data.duplicate
-                  ? "ไฟล์นี้เคยนำเข้าแล้ว ไม่ต้องบันทึกซ้ำ"
-                  : `นำเข้าสำเร็จ สร้างบิล ${msg.data.orderCount.toLocaleString("th-TH")} ใบ`,
+                message: `นำเข้าสำเร็จ (${parsed.orderCount.toLocaleString("th-TH")} ออเดอร์)`,
               }));
-              resolve({ ok: true, data: msg.data });
-            } else if (msg.type === "error") {
-              resolved = true;
-              setProgress((prev) => ({
-                ...prev,
-                stage: "error",
-                message: msg.error ?? "นำเข้าไม่สำเร็จ",
-              }));
-              resolve({
-                ok: false,
-                error: msg.error ?? "นำเข้าไม่สำเร็จ",
-                details: msg.details ?? [],
-              });
-            } else if (typeof msg.error === "string") {
-              resolved = true;
-              setProgress((prev) => ({
-                ...prev,
-                stage: "error",
-                message: msg.error,
-              }));
-              resolve({
-                ok: false,
-                error: msg.error,
-                details: msg.details ?? [],
-              });
-            }
-          } catch {
-            // ignore non-json partial line
-          }
-        };
-
-        xhr.upload.onprogress = (event) => {
-          if (!event.lengthComputable || event.total <= 0) return;
-          const uploadRatio = Math.min(1, event.loaded / event.total);
-          const mappedPercent = Math.max(1, Math.round(uploadRatio * 30));
-          setProgress((prev) => ({
-            ...prev,
-            percent: Math.max(prev.percent, mappedPercent),
-            stage: uploadRatio >= 1 ? "hashing" : "uploading",
-            message:
-              uploadRatio >= 1
-                ? "อัปโหลดครบแล้ว กำลังตรวจสอบไฟล์..."
-                : `กำลังส่งไฟล์ขึ้นเซิร์ฟเวอร์ (${formatFileSize(event.loaded)} / ${formatFileSize(event.total)})`,
-          }));
-        };
-
-        xhr.onprogress = () => {
-          consumeLines(false);
-        };
-
-        xhr.onload = () => {
-          consumeLines(true);
-          if (!resolved) {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                const parsed = JSON.parse(xhr.responseText) as UploadResult;
-                setProgress((prev) => ({
-                  ...prev,
-                  percent: 100,
-                  stage: "done",
-                  message: `นำเข้าสำเร็จ สร้างบิล ${parsed.orderCount.toLocaleString("th-TH")} ใบ`,
-                }));
-                resolve({ ok: true, data: parsed });
-                return;
-              } catch {
-                // fallthrough
-              }
-            }
-            try {
-              const errPayload = JSON.parse(xhr.responseText) as {
-                error?: string;
-                details?: string[];
-              };
-              const errMsg = errPayload.error ?? "นำเข้าไม่สำเร็จ";
-              setProgress((prev) => ({
-                ...prev,
-                stage: "error",
-                message: errMsg,
-              }));
-              resolve({
-                ok: false,
-                error: errMsg,
-                details: errPayload.details ?? [],
-              });
+              resolve({ ok: true, data: parsed });
+              return;
             } catch {
-              resolve({
-                ok: false,
-                error: "นำเข้าไม่สำเร็จ กรุณาตรวจสอบไฟล์แล้วลองอีกครั้ง",
-              });
+              // fallthrough
             }
           }
-        };
+          try {
+            const errPayload = JSON.parse(xhr.responseText) as {
+              error?: string;
+              details?: string[];
+            };
+            const errMsg = errPayload.error ?? "นำเข้าไม่สำเร็จ";
+            setProgress((prev) => ({
+              ...prev,
+              stage: "error",
+              message: errMsg,
+            }));
+            resolve({
+              ok: false,
+              error: errMsg,
+              details: errPayload.details ?? [],
+            });
+          } catch {
+            resolve({
+              ok: false,
+              error: "นำเข้าไม่สำเร็จ กรุณาตรวจสอบไฟล์แล้วลองอีกครั้ง",
+            });
+          }
+        }
+      };
 
-        xhr.onerror = () => {
-          reject(new Error("NETWORK_ERROR"));
-        };
+      xhr.onerror = () => {
+        reject(new Error("NETWORK_ERROR"));
+      };
 
-        const body = new FormData();
-        body.append("file", targetFile);
-        xhr.send(body);
-      });
+      const body = new FormData();
+      body.append("file", targetFile);
+      if (customMap && Object.keys(customMap).length > 0) {
+        body.append("customMapping", JSON.stringify(customMap));
+      }
+      xhr.send(body);
+    });
+  }
 
+  async function uploadWithCustomMapping() {
+    if (!mappingFile || busy) return;
+    const headerToField: Record<string, string> = {};
+    for (const [fieldKey, headerName] of Object.entries(fieldToHeader)) {
+      if (headerName) headerToField[headerName] = fieldKey;
+    }
+    if (!headerToField || Object.keys(headerToField).length < 2) {
+      toast.error("กรุณาเลือกจับคู่คอลัมน์อย่างน้อย 2 คอลัมน์");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setErrorDetails([]);
+    try {
+      const payload = await uploadSingleFile(mappingFile, 0, 1, headerToField);
       if (!payload.ok) {
         setError(payload.error);
         setErrorDetails(payload.details ?? []);
         toast.error(payload.error);
         return;
       }
-
+      setMappingFile(null);
+      setUnrecognizedHeaders([]);
+      setFieldToHeader({});
       setResult(payload.data);
-      setFile(null);
+      setFiles([]);
+      toast.success(`นำเข้าด้วย Custom Mapping สำเร็จ (${payload.data.orderCount} ออเดอร์)`);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function upload() {
+    if (files.length === 0 || busy) return;
+    setBusy(true);
+    setError(null);
+    setErrorDetails([]);
+    setResult(null);
+    setBatchResults([]);
+
+    try {
+      const completed: UploadResult[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const payload = await uploadSingleFile(files[i], i, files.length);
+        if (!payload.ok) {
+          if (
+            payload.code === "UNRECOGNIZED_HEADERS" &&
+            payload.details &&
+            payload.details.length > 0
+          ) {
+            setProgress((prev) => ({ ...prev, open: false }));
+            setMappingFile(files[i]);
+            setUnrecognizedHeaders(payload.details);
+            setFieldToHeader({});
+            toast.info("พบหัวตารางรูปแบบใหม่ กรุณาเลือกจับคู่คอลัมน์");
+            return;
+          }
+          setError(`${files[i].name}: ${payload.error}`);
+          setErrorDetails(payload.details ?? []);
+          toast.error(`${files[i].name}: ${payload.error}`);
+          return;
+        }
+        completed.push(payload.data);
+      }
+
+      const last = completed[completed.length - 1] ?? null;
+      setResult(last);
+      setBatchResults(completed);
+      setFiles([]);
       if (inputRef.current) inputRef.current.value = "";
-      if (payload.data.duplicate) {
+      if (completed.length > 1) {
+        toast.success(`นำเข้าและแมปข้อมูลทั้ง ${completed.length} ไฟล์สำเร็จ`);
+      } else if (last?.duplicate) {
         toast.info("ไฟล์นี้เคยนำเข้าแล้ว ระบบจึงไม่บันทึกซ้ำ");
-      } else {
-        toast.success(`นำเข้าสำเร็จ สร้างบิล ${payload.data.orderCount} ใบ`);
+      } else if (last) {
+        toast.success(`นำเข้าสำเร็จ (${last.orderCount} ออเดอร์)`);
       }
       router.refresh();
     } catch {
@@ -373,50 +497,59 @@ export function UploadForm() {
         onDrop={(event) => {
           event.preventDefault();
           setDragging(false);
-          choose(event.dataTransfer.files?.[0] ?? null);
+          chooseFiles(event.dataTransfer.files);
         }}
       >
         <Input
           ref={inputRef}
           id="income-file"
           type="file"
-          accept=".xlsx"
+          accept=".xlsx,.csv"
+          multiple
           className="sr-only"
-          aria-label="เลือกไฟล์รายได้ .xlsx"
+          aria-label="เลือกไฟล์ .xlsx หรือ .csv"
           disabled={busy}
-          onChange={(event) => choose(event.target.files?.[0] ?? null)}
+          onChange={(event) => chooseFiles(event.target.files)}
         />
         <span className="dropzone-icon">
           <IconUpload size={26} />
         </span>
         <strong className="break-all">
-          {file ? file.name : "ลากไฟล์ .xlsx มาวาง หรือคลิกเพื่อเลือกไฟล์"}
+          {files.length === 1
+            ? files[0].name
+            : files.length > 1
+              ? `เลือกไว้ ${files.length} ไฟล์ (${files.map((f) => f.name).join(", ")})`
+              : "ลากไฟล์ .xlsx หรือ .csv มาวาง (เลือกพร้อมกันทั้ง 3 ไฟล์ได้)"}
         </strong>
         <span className="dropzone-hint">
-          {file
-            ? `${formatFileSize(file.size)} · พร้อมนำเข้า`
-            : "ไฟล์รายได้จาก TikTok Shop (รายละเอียดคำสั่งซื้อ) — รองรับสูงสุด 25 MB"}
+          {files.length > 0
+            ? `${formatFileSize(files.reduce((acc, f) => acc + f.size, 0))} · พร้อมนำเข้าและแมปข้อมูลอัตโนมัติ`
+            : "รองรับ 1) ไฟล์ออเดอร์ OMS  2) ไฟล์รายได้ TikTok Shop  3) ไฟล์รายการสินค้า OMS (.xlsx / .csv)"}
         </span>
       </label>
 
-      <div className="upload-actions">
+      <div className="upload-actions flex flex-wrap items-center gap-2.5">
         <Button
           type="button"
           variant="default"
           onClick={upload}
-          disabled={!file || busy}
+          disabled={files.length === 0 || busy}
           loading={busy}
         >
-          {busy ? `กำลังนำเข้า (${progress.percent}%)...` : "นำเข้าไฟล์"}
+          {busy
+            ? `กำลังนำเข้า (${progress.percent}%)...`
+            : files.length > 1
+              ? `นำเข้าและแมปทั้ง ${files.length} ไฟล์`
+              : "นำเข้าไฟล์"}
         </Button>
-        {file ? (
+        {files.length > 0 && !busy ? (
           <Button
             type="button"
-            variant="ghost"
-            onClick={() => choose(null)}
+            variant="outline"
+            onClick={() => chooseFiles(null)}
             disabled={busy}
           >
-            ยกเลิก
+            ล้างไฟล์ที่เลือก
           </Button>
         ) : null}
       </div>
@@ -438,7 +571,12 @@ export function UploadForm() {
             if (isProcessing) event.preventDefault();
           }}
         >
-          <DialogHeader className="text-left">
+          <DialogHeader
+            className={cn(
+              "text-left",
+              isProcessing ? "pr-0" : "pr-11",
+            )}
+          >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
                 <span
@@ -483,7 +621,7 @@ export function UploadForm() {
                       ? "success"
                       : "secondary"
                 }
-                className="font-mono text-xs tabular-nums"
+                className="shrink-0 font-mono text-xs tabular-nums"
               >
                 {progress.percent}%
               </Badge>
@@ -491,9 +629,9 @@ export function UploadForm() {
           </DialogHeader>
 
           <div className="mt-1 space-y-4">
-            <div className="rounded-xl border border-border bg-muted/40 p-4">
+            <div className="rounded-xl border border-[#cbd5e1] bg-[#f8fafc] p-4 shadow-xs">
               <div className="mb-2 flex items-baseline justify-between gap-2">
-                <span className="text-xs font-semibold text-muted-foreground">
+                <span className="text-xs font-bold text-[#475569]">
                   ความคืบหน้าทั้งหมด
                 </span>
                 <span className="font-mono text-2xl font-extrabold tracking-tight text-primary tabular-nums">
@@ -512,24 +650,30 @@ export function UploadForm() {
                 }
                 aria-label="ความคืบหน้าการอัปโหลดและนำเข้าไฟล์"
               />
-              <p className="mt-2.5 text-xs font-medium text-foreground">
+              <p className="mt-2.5 text-xs font-semibold text-[#0f172a]">
                 {progress.message}
               </p>
             </div>
 
             <ul className="m-0 list-none space-y-2 p-0 text-xs" aria-label="ขั้นตอนการนำเข้า">
               {STEP_ITEMS.map((step, idx) => {
-                const state = getStepState(progress.stage, step.key);
+                const state = getStepState(
+                  progress.stage,
+                  progress.lastActiveStage,
+                  step.key,
+                );
                 return (
                   <li
                     key={step.key}
                     className={cn(
                       "flex items-center justify-between gap-2 rounded-lg border px-3 py-2 transition-colors",
                       state === "done"
-                        ? "border-[#bfe8d2] bg-[#f3fdf7] text-[#15803d]"
-                        : state === "active"
-                          ? "border-[#cde9e2] bg-secondary/60 text-foreground font-semibold"
-                          : "border-border bg-card text-muted-foreground",
+                        ? "border-[#a7f3d0] bg-[#ecfdf5] text-[#047857] font-semibold"
+                        : state === "error"
+                          ? "border-[#fecaca] bg-[#fef2f2] text-[#b91c1c] font-semibold"
+                          : state === "active"
+                            ? "border-[#fecdd3] bg-[#fff0f3] text-[#be123c] font-semibold"
+                            : "border-border bg-card text-muted-foreground",
                     )}
                   >
                     <span className="flex items-center gap-2 min-w-0">
@@ -537,27 +681,31 @@ export function UploadForm() {
                         className={cn(
                           "grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold",
                           state === "done"
-                            ? "bg-[#15803d] text-white"
-                            : state === "active"
-                              ? "bg-primary text-white"
-                              : "bg-muted text-muted-foreground",
+                            ? "bg-[#059669] text-white"
+                            : state === "error"
+                              ? "bg-destructive text-white"
+                              : state === "active"
+                                ? "bg-primary text-white"
+                                : "bg-[#e2e8f0] text-[#475569]",
                         )}
                       >
-                        {state === "done" ? "✓" : idx + 1}
+                        {state === "done" ? "✓" : state === "error" ? "!" : idx + 1}
                       </span>
                       <span className="truncate">{step.label}</span>
                     </span>
                     <span className="shrink-0 font-mono text-[11px] tabular-nums">
                       {step.key === "save" &&
-                      state === "active" &&
+                      (state === "active" || state === "error") &&
                       progress.current !== undefined &&
                       progress.total !== undefined
                         ? `${progress.current.toLocaleString("th-TH")}/${progress.total.toLocaleString("th-TH")}`
                         : state === "done"
                           ? "เสร็จสิ้น"
-                          : state === "active"
-                            ? "กำลังทำ..."
-                            : "รอ"}
+                          : state === "error"
+                            ? "เกิดข้อผิดพลาด"
+                            : state === "active"
+                              ? "กำลังทำ..."
+                              : "รอ"}
                     </span>
                   </li>
                 );
@@ -634,6 +782,110 @@ export function UploadForm() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={Boolean(mappingFile)}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setMappingFile(null);
+            setUnrecognizedHeaders([]);
+            setFieldToHeader({});
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-xl" showCloseButton={!busy}>
+          <DialogHeader className="pr-14">
+            <div className="flex flex-wrap items-center gap-2">
+              <DialogTitle>จับคู่คอลัมน์เอง (Custom Column Mapping)</DialogTitle>
+              <Badge variant="warning" size="sm">
+                รูปแบบใหม่
+              </Badge>
+            </div>
+            <DialogDescription className="truncate">
+              ไฟล์: <strong className="font-mono">{mappingFile?.name ?? "-"}</strong> · เลือกคอลัมน์ในไฟล์ให้ตรงกับช่องข้อมูลของระบบ (รองรับ Synnity / Shopee / ไฟล์กำหนดเอง)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[55dvh] space-y-2.5 overflow-y-auto pr-1">
+            {CUSTOM_MAPPING_FIELDS.map((field) => {
+              const selectedHeader = fieldToHeader[field.key] ?? "";
+              return (
+                <div
+                  key={field.key}
+                  className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/20 p-2.5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span className="text-xs font-medium text-foreground">
+                    {field.label}
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant={selectedHeader ? "secondary" : "outline"}
+                        size="sm"
+                        className="w-full justify-between font-mono text-xs sm:w-64"
+                      >
+                        <span className="truncate">
+                          {selectedHeader || "— ไม่ระบุคอลัมน์ —"}
+                        </span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-64 w-64">
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFieldToHeader((prev) => {
+                            const next = { ...prev };
+                            delete next[field.key];
+                            return next;
+                          })
+                        }
+                      >
+                        — ไม่ระบุคอลัมน์ —
+                      </DropdownMenuItem>
+                      {unrecognizedHeaders.map((header) => (
+                        <DropdownMenuItem
+                          key={`${field.key}-${header}`}
+                          onSelect={() =>
+                            setFieldToHeader((prev) => ({
+                              ...prev,
+                              [field.key]: header,
+                            }))
+                          }
+                        >
+                          {header}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              );
+            })}
+          </div>
+
+          <DialogFooter className="mt-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setMappingFile(null);
+                setUnrecognizedHeaders([]);
+                setFieldToHeader({});
+              }}
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={busy}
+              onClick={uploadWithCustomMapping}
+            >
+              {busy ? "กำลังนำเข้า..." : "นำเข้าด้วยคอลัมน์ที่จับคู่"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {error ? (
         <Card variant="danger" padding="compact" className="alert alert-error">
           <IconAlert size={18} />
@@ -662,12 +914,18 @@ export function UploadForm() {
             </span>
             <div>
               <strong>
-                {result.duplicate ? "ไฟล์นี้เคยนำเข้าแล้ว" : "นำเข้าสำเร็จ"}
+                {batchResults.length > 1
+                  ? `นำเข้าและเชื่อมข้อมูล ${batchResults.length} ไฟล์สำเร็จ`
+                  : result.duplicate
+                    ? "ไฟล์นี้เคยนำเข้าแล้ว"
+                    : "นำเข้าสำเร็จ"}
               </strong>
               <p>
-                {result.duplicate
-                  ? "ระบบตรวจพบไฟล์เดิมจาก hash จึงไม่บันทึกซ้ำ"
-                  : `สร้างบิลได้ ${result.orderCount} ใบ จาก ${result.rowCount} แถวข้อมูล`}
+                {batchResults.length > 1
+                  ? `ไฟล์ที่นำเข้า: ${batchResults.map((r) => r.filename).join(" · ")}`
+                  : result.duplicate
+                    ? "ระบบตรวจพบไฟล์เดิมจาก hash จึงไม่บันทึกซ้ำ"
+                    : `ประมวลผล ${result.orderCount} ออเดอร์ จาก ${result.rowCount} แถวข้อมูล`}
               </p>
             </div>
           </div>
@@ -711,6 +969,13 @@ export function UploadForm() {
           ) : null}
 
           <div className="result-actions">
+            <ExcelFilePreviewDialog
+              importId={result.importId}
+              filename={result.filename}
+              fileType={result.fileType}
+              rowCount={result.rowCount}
+              triggerLabel="เปิดอ่านตาราง Excel"
+            />
             <Button asChild variant="default">
               <Link href={`/import/${result.importId}`}>ดูรายงานการนำเข้า</Link>
             </Button>
