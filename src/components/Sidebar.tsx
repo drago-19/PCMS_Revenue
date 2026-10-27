@@ -1,10 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { MenuIcon } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { KeyRoundIcon, LogOutIcon, MenuIcon, ShieldCheckIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -124,9 +136,183 @@ function NavLinks({
   );
 }
 
+function AccountControls({ onAction }: { onAction?: () => void }) {
+  const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [savingPwd, setSavingPwd] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      toast.success("ออกจากระบบเรียบร้อยแล้ว");
+      onAction?.();
+      router.replace("/login");
+      router.refresh();
+    } catch {
+      toast.error("ออกจากระบบไม่สำเร็จ");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
+  async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (savingPwd) return;
+    if (!currentPassword || !newPassword) {
+      setPwdError("กรุณากรอกรหัสผ่านให้ครบทุกช่อง");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setPwdError("รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร");
+      return;
+    }
+
+    setSavingPwd(true);
+    setPwdError(null);
+    try {
+      const response = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) {
+        setPwdError(payload.error ?? "เปลี่ยนรหัสผ่านไม่สำเร็จ");
+        return;
+      }
+      toast.success("เปลี่ยนรหัสผ่านสำเร็จ");
+      setCurrentPassword("");
+      setNewPassword("");
+      setPwdOpen(false);
+    } catch {
+      setPwdError("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
+    } finally {
+      setSavingPwd(false);
+    }
+  }
+
+  return (
+    <div className="sidebar-foot mt-auto rounded-xl border border-white/10 bg-white/[0.04] p-3">
+      <div className="flex items-center gap-2 text-xs font-semibold text-white">
+        <ShieldCheckIcon className="size-3.5 text-[#00f2ea]" />
+        <span>TikTok Shop · Protected</span>
+      </div>
+      <span className="mt-0.5 text-[11px] text-[#94a3b8]">
+        ล็อกสิทธิ์เข้าถึงและบันทึก Audit Log
+      </span>
+
+      <div className="mt-2.5 flex flex-col gap-2">
+        <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
+          <DialogTrigger asChild>
+            <Button
+              type="button"
+              variant="outline-light"
+              size="sm"
+              className="w-full justify-start text-xs"
+            >
+              <KeyRoundIcon className="size-3.5" />
+              เปลี่ยนรหัสผ่าน
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="no-print">
+            <DialogHeader className="pr-11">
+              <DialogTitle>เปลี่ยนรหัสผ่านผู้ดูแลระบบ</DialogTitle>
+              <DialogDescription>
+                รหัสผ่านใหม่จะถูกเข้ารหัสด้วย bcrypt (cost 12) และบันทึกในฐานข้อมูลทันที
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleChangePassword} className="flex flex-col gap-3.5">
+              {pwdError ? (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-xs font-semibold text-[#b91c1c]"
+                >
+                  {pwdError}
+                </div>
+              ) : null}
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="current-password-input"
+                  className="text-xs font-bold text-[#0f172a]"
+                >
+                  รหัสผ่านปัจจุบัน
+                </label>
+                <Input
+                  id="current-password-input"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  disabled={savingPwd}
+                  placeholder="กรอกรหัสผ่านปัจจุบัน"
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="new-password-input"
+                  className="text-xs font-bold text-[#0f172a]"
+                >
+                  รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)
+                </label>
+                <Input
+                  id="new-password-input"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  disabled={savingPwd}
+                  placeholder="กรอกรหัสผ่านใหม่"
+                  required
+                />
+              </div>
+              <DialogFooter className="gap-2 pt-2">
+                <DialogClose asChild>
+                  <Button type="button" variant="outline" disabled={savingPwd}>
+                    ยกเลิก
+                  </Button>
+                </DialogClose>
+                <Button
+                  type="submit"
+                  variant="default"
+                  loading={savingPwd}
+                  disabled={savingPwd}
+                >
+                  บันทึกรหัสผ่านใหม่
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <Button
+          type="button"
+          variant="outline-light"
+          size="sm"
+          onClick={handleLogout}
+          loading={loggingOut}
+          disabled={loggingOut}
+          className="w-full justify-start border-[#fe2c55]/40 text-xs text-[#fecdd3] hover:bg-[#fe2c55] hover:text-white"
+        >
+          <LogOutIcon className="size-3.5" />
+          {loggingOut ? "กำลังออกจากระบบ..." : "ออกจากระบบ"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+
+  if (pathname === "/login") {
+    return null;
+  }
 
   return (
     <>
@@ -160,12 +346,12 @@ export function Sidebar() {
             side="left"
             className="no-print flex w-[276px] max-w-[85vw] flex-col gap-6 border-r border-[#1e293b] bg-[#0f1117] p-5 text-white"
           >
-            <SheetHeader className="p-0 text-left">
+            <SheetHeader className="p-0 pr-12 text-left">
               <SheetTitle asChild>
                 <Link
                   href="/"
                   onClick={() => setOpen(false)}
-                  className="brand inline-flex min-h-[40px] items-center gap-3 pr-10"
+                  className="brand inline-flex min-h-[40px] items-center gap-3"
                 >
                   <span className="brand-mark">
                     <AppMark size={38} />
@@ -183,15 +369,7 @@ export function Sidebar() {
 
             <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
 
-            <div className="sidebar-foot mt-auto rounded-xl border border-white/10 bg-white/[0.04] p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-white">
-                <span className="size-2 rounded-full bg-[#00f2ea] shadow-[0_0_8px_#00f2ea]" />
-                TikTok Shop Reconciliation
-              </div>
-              <span className="mt-1 text-[11px] text-[#94a3b8]">
-                สรุปบิลและตรวจยอดอัตโนมัติรายคำสั่งซื้อ
-              </span>
-            </div>
+            <AccountControls onAction={() => setOpen(false)} />
           </SheetContent>
         </Sheet>
       </div>
@@ -209,15 +387,7 @@ export function Sidebar() {
 
         <NavLinks pathname={pathname} />
 
-        <div className="sidebar-foot rounded-xl border border-white/10 bg-white/[0.04] p-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-white">
-            <span className="size-2 rounded-full bg-[#00f2ea] shadow-[0_0_8px_#00f2ea]" />
-            TikTok Shop Reconciliation
-          </div>
-          <span className="mt-1 text-[11px] text-[#94a3b8]">
-            สรุปบิลและตรวจยอดอัตโนมัติรายคำสั่งซื้อ
-          </span>
-        </div>
+        <AccountControls />
       </aside>
     </>
   );

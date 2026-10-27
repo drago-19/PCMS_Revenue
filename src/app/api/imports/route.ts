@@ -1,13 +1,43 @@
+import { recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { importWorkbook, type ImportProgressEvent, type ImportResult } from "@/lib/ingest/import-service";
 import { IngestError } from "@/lib/ingest/parse";
 import { deleteAllImports } from "@/lib/queries";
+import { checkApiRateLimit } from "@/lib/session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  const auth = requireApiAuth(request);
+  if (!auth.ok) return auth.response;
+
+  const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 30, 60_000);
+  if (!rate.allowed) {
+    return Response.json(
+      { error: "ส่งคำขอถี่เกินกำหนด กรุณารอสักครู่", requestId: auth.requestId },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rate.retryAfterSeconds),
+          "x-request-id": auth.requestId,
+        },
+      },
+    );
+  }
+
   const deletedCount = await deleteAllImports();
-  return Response.json({ ok: true, deletedCount });
+  await recordAuditLog({
+    actor: auth.session.sub,
+    action: "imports.delete_all",
+    ipAddress: auth.ip,
+    outcome: "success",
+    details: { deletedCount },
+    requestId: auth.requestId,
+  });
+  return Response.json(
+    { ok: true, deletedCount, requestId: auth.requestId },
+    { headers: { "x-request-id": auth.requestId } },
+  );
 }
 
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -18,6 +48,23 @@ export type ImportStreamMessage =
   | { type: "error"; error: string; code?: string; details?: string[]; status?: number };
 
 export async function POST(request: Request) {
+  const auth = requireApiAuth(request);
+  if (!auth.ok) return auth.response;
+
+  const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 30, 60_000);
+  if (!rate.allowed) {
+    return Response.json(
+      { error: "ส่งคำขอถี่เกินกำหนด กรุณารอสักครู่", requestId: auth.requestId },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rate.retryAfterSeconds),
+          "x-request-id": auth.requestId,
+        },
+      },
+    );
+  }
+
   const url = new URL(request.url);
   const streamMode = url.searchParams.get("stream") === "1";
 
@@ -27,7 +74,8 @@ export async function POST(request: Request) {
     if (!(file instanceof File)) {
       return Response.json({ error: "ไม่พบไฟล์ที่ส่งมา" }, { status: 400 });
     }
-    if (!/\.(xlsx|csv)$/i.test(file.name)) {
+    const safeFilename = file.name.replace(/[\r\n\0]/g, "").slice(0, 255);
+    if (!/\.(xlsx|csv)$/i.test(safeFilename)) {
       return Response.json(
         { error: "รองรับเฉพาะไฟล์ .xlsx หรือ .csv เท่านั้น" },
         { status: 400 },
@@ -48,7 +96,16 @@ export async function POST(request: Request) {
     let customMapping: Record<string, string> | undefined;
     if (typeof rawCustomMapping === "string" && rawCustomMapping.trim()) {
       try {
-        customMapping = JSON.parse(rawCustomMapping) as Record<string, string>;
+        const parsed = JSON.parse(rawCustomMapping.slice(0, 16_384)) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const cleanMap: Record<string, string> = {};
+          for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof k === "string" && typeof v === "string") {
+              cleanMap[k.slice(0, 120)] = v.slice(0, 120);
+            }
+          }
+          customMapping = cleanMap;
+        }
       } catch {
         // ignore invalid json
       }
@@ -56,12 +113,29 @@ export async function POST(request: Request) {
 
     if (!streamMode) {
       const result = await importWorkbook({
-        filename: file.name,
+        filename: safeFilename,
         buffer,
         source: "upload",
         customMapping,
       });
-      return Response.json(result, { status: result.duplicate ? 200 : 201 });
+      await recordAuditLog({
+        actor: auth.session.sub,
+        action: "imports.upload",
+        ipAddress: auth.ip,
+        outcome: "success",
+        details: {
+          importId: result.importId,
+          filename: safeFilename,
+          fileSize: file.size,
+          orderCount: result.orderCount,
+          duplicate: result.duplicate,
+        },
+        requestId: auth.requestId,
+      });
+      return Response.json(result, {
+        status: result.duplicate ? 200 : 201,
+        headers: { "x-request-id": auth.requestId },
+      });
     }
 
     const encoder = new TextEncoder();
@@ -73,7 +147,7 @@ export async function POST(request: Request) {
 
         try {
           const result = await importWorkbook({
-            filename: file.name,
+            filename: safeFilename,
             buffer,
             source: "upload",
             customMapping,
@@ -81,8 +155,34 @@ export async function POST(request: Request) {
               send({ type: "progress", ...event });
             },
           });
+          await recordAuditLog({
+            actor: auth.session.sub,
+            action: "imports.upload",
+            ipAddress: auth.ip,
+            outcome: "success",
+            details: {
+              importId: result.importId,
+              filename: safeFilename,
+              fileSize: file.size,
+              orderCount: result.orderCount,
+              duplicate: result.duplicate,
+            },
+            requestId: auth.requestId,
+          });
           send({ type: "result", data: result });
         } catch (error) {
+          await recordAuditLog({
+            actor: auth.session.sub,
+            action: "imports.upload",
+            ipAddress: auth.ip,
+            outcome: "failure",
+            details: {
+              filename: safeFilename,
+              fileSize: file.size,
+              code: error instanceof IngestError ? error.code : "internal_error",
+            },
+            requestId: auth.requestId,
+          });
           if (error instanceof IngestError) {
             send({
               type: "error",
@@ -92,7 +192,10 @@ export async function POST(request: Request) {
               status: 422,
             });
           } else {
-            console.error("import failed", error);
+            console.error("import failed", {
+              requestId: auth.requestId,
+              error: error instanceof Error ? error.message : "unknown",
+            });
             send({
               type: "error",
               error: "นำเข้าไม่สำเร็จ กรุณาตรวจสอบไฟล์แล้วลองอีกครั้ง",
@@ -111,19 +214,23 @@ export async function POST(request: Request) {
         "Content-Type": "application/x-ndjson; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
+        "x-request-id": auth.requestId,
       },
     });
   } catch (error) {
     if (error instanceof IngestError) {
       return Response.json(
         { error: error.message, code: error.code, details: error.details ?? [] },
-        { status: 422 },
+        { status: 422, headers: { "x-request-id": auth.requestId } },
       );
     }
-    console.error("import failed", error);
+    console.error("import failed", {
+      requestId: auth.requestId,
+      error: error instanceof Error ? error.message : "unknown",
+    });
     return Response.json(
       { error: "นำเข้าไม่สำเร็จ กรุณาตรวจสอบไฟล์แล้วลองอีกครั้ง" },
-      { status: 500 },
+      { status: 500, headers: { "x-request-id": auth.requestId } },
     );
   }
 }

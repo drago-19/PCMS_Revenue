@@ -205,11 +205,33 @@ test("converts amounts to Thai baht text", () => {
 
 test("POST /api/imports validates missing/non-xlsx/empty files before touching DB", async () => {
   const { POST } = await import("../src/app/api/imports/route");
+  const { createSessionToken, SESSION_COOKIE_NAME } = await import(
+    "../src/lib/session-token"
+  );
+
+  // Unauthenticated / missing Origin request must be blocked first
+  const unauthForm = new FormData();
+  const resUnauth = await POST(
+    new Request("http://localhost:3001/api/imports?stream=1", {
+      method: "POST",
+      body: unauthForm,
+    }),
+  );
+  assert.equal(resUnauth.status, 403);
+
+  const authHeaders = {
+    host: "localhost:3001",
+    origin: "http://localhost:3001",
+    cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(
+      createSessionToken({ username: "admin", role: "admin" }),
+    )}`,
+  };
 
   const emptyForm = new FormData();
   const resNoFile = await POST(
     new Request("http://localhost:3001/api/imports?stream=1", {
       method: "POST",
+      headers: authHeaders,
       body: emptyForm,
     }),
   );
@@ -222,6 +244,7 @@ test("POST /api/imports validates missing/non-xlsx/empty files before touching D
   const resBadExt = await POST(
     new Request("http://localhost:3001/api/imports?stream=1", {
       method: "POST",
+      headers: authHeaders,
       body: badExtForm,
     }),
   );
@@ -234,6 +257,7 @@ test("POST /api/imports validates missing/non-xlsx/empty files before touching D
   const resZero = await POST(
     new Request("http://localhost:3001/api/imports?stream=1", {
       method: "POST",
+      headers: authHeaders,
       body: zeroForm,
     }),
   );

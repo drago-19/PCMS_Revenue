@@ -982,6 +982,13 @@ export async function listDailyBatches(
   }));
 }
 
+export function escapeLikePattern(raw: string): string {
+  return raw
+    .trim()
+    .slice(0, 120)
+    .replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 export async function listDailyBatchesPaged(
   options: { page?: number; pageSize?: number; q?: string } = {},
   db?: Queryable,
@@ -994,7 +1001,7 @@ export async function listDailyBatchesPaged(
 }> {
   const pageSize = Math.min(200, Math.max(10, options.pageSize ?? 20));
   const rawPage = Math.max(1, options.page ?? 1);
-  const q = (options.q ?? "").trim();
+  const q = escapeLikePattern(options.q ?? "");
 
   const summaryCountRow = await queryOne<{ c: string | number }>(
     "SELECT COUNT(*) AS c FROM daily_summaries",
@@ -1003,7 +1010,7 @@ export async function listDailyBatchesPaged(
   );
   if (Number(summaryCountRow?.c ?? 0) > 0) {
     const sParams: unknown[] = [];
-    const sWhere = q ? "WHERE paid_date LIKE $1" : "";
+    const sWhere = q ? "WHERE paid_date LIKE $1 ESCAPE '\\'" : "";
     if (q) sParams.push(`%${q}%`);
     const countRow = await queryOne<{ c: string | number }>(
       `SELECT COUNT(*) AS c FROM daily_summaries ${sWhere}`,
@@ -1055,7 +1062,7 @@ export async function listDailyBatchesPaged(
   const params: unknown[] = [];
   let dateFilter = "paid_date <> '' AND paid_date <> 'unknown'";
   if (q) {
-    dateFilter += ` AND paid_date LIKE $${params.length + 1}`;
+    dateFilter += ` AND paid_date LIKE $${params.length + 1} ESCAPE '\\'`;
     params.push(`%${q}%`);
   }
 
@@ -1190,9 +1197,9 @@ export async function listBills(
   } = {},
   db?: Queryable,
 ): Promise<BillListResult> {
-  const date = (options.date ?? "").trim();
-  const q = (options.q ?? "").trim();
-  const channel = (options.channel ?? "all").trim();
+  const date = (options.date ?? "").trim().slice(0, 32);
+  const q = escapeLikePattern(options.q ?? "");
+  const channel = (options.channel ?? "all").trim().slice(0, 32);
   const status = options.status ?? "all";
   const pageSize = Math.min(500, Math.max(10, options.pageSize ?? 20));
   const page = Math.max(1, options.page ?? 1);
@@ -1204,7 +1211,7 @@ export async function listBills(
   }
   if (q) {
     baseClauses.push(
-      `(t.external_id || ' ' || COALESCE(t.order_code, '') || ' ' || COALESCE(t.product_detail, '')) ILIKE $${baseParams.length + 1}`,
+      `(t.external_id || ' ' || COALESCE(t.order_code, '') || ' ' || COALESCE(t.product_detail, '')) ILIKE $${baseParams.length + 1} ESCAPE '\\'`,
     );
     baseParams.push(`%${q}%`);
   }
@@ -1424,14 +1431,14 @@ export async function listSkuSummariesPaged(
 }> {
   const pageSize = Math.min(200, Math.max(10, options.pageSize ?? 20));
   const rawPage = Math.max(1, options.page ?? 1);
-  const q = (options.q ?? "").trim();
-  const channel = (options.channel ?? "all").trim();
+  const q = escapeLikePattern(options.q ?? "");
+  const channel = (options.channel ?? "all").trim().slice(0, 32);
 
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (q) {
     clauses.push(
-      `(s.sku_code ILIKE $${params.length + 1} OR s.product_name ILIKE $${params.length + 2})`,
+      `(s.sku_code ILIKE $${params.length + 1} ESCAPE '\\' OR s.product_name ILIKE $${params.length + 2} ESCAPE '\\')`,
     );
     params.push(`%${q}%`, `%${q}%`);
   }

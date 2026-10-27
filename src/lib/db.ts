@@ -15,9 +15,10 @@ function connectionConfig() {
   }
   return {
     host: process.env.PGHOST ?? "127.0.0.1",
-    port: Number(process.env.PGPORT ?? 5433),
-    user: process.env.PGUSER ?? "pcms_revenue",
-    password: process.env.PGPASSWORD ?? "pcms_revenue",
+    port: Number(process.env.PGPORT ?? 5432),
+    user: process.env.PGUSER ?? "postgres",
+    password:
+      process.env.PGPASSWORD ?? process.env.SUPABASE_POSTGRES_PASSWORD ?? "",
     database: process.env.PGDATABASE ?? "pcms_revenue",
   };
 }
@@ -275,4 +276,51 @@ CREATE INDEX IF NOT EXISTS ix_transactions_search_trgm
 
 CREATE INDEX IF NOT EXISTS ix_sku_summaries_sort
   ON sku_summaries(total_qty DESC, net_sales_amount DESC, sku_code ASC);
+
+CREATE TABLE IF NOT EXISTS app_users (
+  username TEXT PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'admin',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS auth_rate_limits (
+  ip_key TEXT PRIMARY KEY,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  first_failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  blocked_until TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  ip_address TEXT NOT NULL DEFAULT 'unknown',
+  outcome TEXT NOT NULL,
+  details_json JSONB NOT NULL DEFAULT '{}',
+  request_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_audit_logs_action ON audit_logs(action);
+
+CREATE OR REPLACE FUNCTION prevent_audit_log_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'audit_logs table is append-only (UPDATE and DELETE are prohibited)';
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_audit_logs_immutable'
+  ) THEN
+    CREATE TRIGGER trg_audit_logs_immutable
+    BEFORE UPDATE OR DELETE ON audit_logs
+    FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation();
+  END IF;
+END $$;
 `;
