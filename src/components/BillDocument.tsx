@@ -107,12 +107,12 @@ export function BillDocument({
           </dd>
         </div>
         <div>
-          <dt>ผูกออเดอร์ OMS (ค้นหารายการสินค้า)</dt>
+          <dt>รหัสออเดอร์ OMS</dt>
           {orderCode ? (
             <dd className="mono">#{orderCode}</dd>
           ) : (
-            <dd className="text-xs font-normal text-muted-foreground">
-              (ยังไม่มีข้อมูล — รออัปโหลดไฟล์ออเดอร์ OMS ของวันสั่งซื้อ {formatDate(bill.createdAt)})
+            <dd className="bill-empty-hint">
+              รอไฟล์ OMS ({formatDate(bill.createdAt)})
             </dd>
           )}
         </div>
@@ -134,9 +134,7 @@ export function BillDocument({
           {invoiceNo ? (
             <dd className="mono">{invoiceNo}</dd>
           ) : (
-            <dd className="text-xs font-normal text-muted-foreground">
-              (ยังไม่มีข้อมูล — รออัปโหลดไฟล์ออเดอร์ OMS ของวันสั่งซื้อ {formatDate(bill.createdAt)})
-            </dd>
+            <dd className="bill-empty-hint">รอไฟล์ OMS</dd>
           )}
         </div>
         <div>
@@ -144,9 +142,7 @@ export function BillDocument({
           {customerName ? (
             <dd>{customerName}</dd>
           ) : (
-            <dd className="text-xs font-normal text-muted-foreground">
-              (ยังไม่มีข้อมูล — ในไฟล์ Settlement ไม่มีชื่อลูกค้า รอผูกไฟล์ออเดอร์ OMS)
-            </dd>
+            <dd className="bill-empty-hint">รอไฟล์ OMS</dd>
           )}
         </div>
         <div>
@@ -157,9 +153,7 @@ export function BillDocument({
               {courier ? ` (${courier})` : ""}
             </dd>
           ) : (
-            <dd className="text-xs font-normal text-muted-foreground">
-              (ยังไม่มีข้อมูล — รอผูกไฟล์ออเดอร์ OMS ของวันสั่งซื้อ {formatDate(bill.createdAt)})
-            </dd>
+            <dd className="bill-empty-hint">รอไฟล์ OMS</dd>
           )}
         </div>
         <div>
@@ -195,17 +189,24 @@ export function BillDocument({
       <section className="bill-section">
         <div className="bill-section-head">
           <span>
-            รายการสินค้าที่แมปได้ (
-            {omsItems && omsItems.length > 0
-              ? `${omsItems.length} รายการ`
-              : "ยังไม่มีข้อมูลจากไฟล์ OMS"}
-            )
+            รายการสินค้า{" "}
+            {omsItems && omsItems.length > 0 ? (
+              <span>({omsItems.length} รายการ)</span>
+            ) : (
+              <span className="text-[11px] font-normal text-[#64748b]">
+                (รอไฟล์ OMS)
+              </span>
+            )}
           </span>
-          <span>
-            {omsItems && omsItems.length > 0
-              ? `${omsItems.reduce((acc, it) => acc + it.quantity, 0)} ชิ้น`
-              : `(รอไฟล์ OMS วันสั่งซื้อ ${formatDate(bill.createdAt)})`}
-          </span>
+          {omsItems && omsItems.length > 0 ? (
+            <span>
+              {omsItems.reduce((acc, it) => acc + it.quantity, 0)} ชิ้น
+            </span>
+          ) : (
+            <span className="text-[11px] font-normal text-[#94a3b8]">
+              วันสั่งซื้อ {formatDate(bill.createdAt)}
+            </span>
+          )}
         </div>
         <div className="bill-rows">
           {omsItems && omsItems.length > 0 ? (
@@ -292,27 +293,25 @@ export function BillDocument({
               {productDetail && productDetail !== "/" ? (
                 <div className="bill-row">
                   <span>
-                    รหัสสินค้าจาก {channelLabel}:{" "}
+                    รหัสสินค้า ({channelLabel}):{" "}
                     <strong className="mono">
                       {productDetail.replace(/;\s*$/, "")}
                     </strong>{" "}
-                    <span className="text-xs text-muted-foreground">
-                      (รหัสแพลตฟอร์มจากไฟล์ Settlement — ยังไม่มีชื่อสินค้า)
+                    <span className="text-[11px] font-normal text-[#94a3b8]">
+                      (รอชื่อสินค้าจาก OMS)
                     </span>
                   </span>
                   <span className="amount">{formatTHB(bill.incomeTotal)}</span>
                 </div>
               ) : null}
               <div className="bill-row muted">
-                <span>
+                <span className="text-[11.5px] font-normal text-[#94a3b8]">
                   {orderCode
-                    ? `(ผูกกับออเดอร์ #${orderCode} แล้ว แต่ยังไม่มีรายละเอียดสินค้า — กรุณาอัปโหลดไฟล์รายการสินค้า OMS ที่ครอบคลุมออเดอร์ #${orderCode} เพื่อดึงชื่อสินค้า รหัส SKU และราคาตั้งต้นต่อชิ้นมาแสดง)`
-                    : `(ยังไม่มีข้อมูลรายการสินค้าและส่วนลดตั้งต้น — เนื่องจากคำสั่งซื้อนี้สั่งซื้อเมื่อวันที่ ${formatDate(
-                        bill.createdAt,
-                      )} กรุณาอัปโหลดไฟล์ออเดอร์และไฟล์รายการสินค้า OMS ของวันที่สั่งซื้อดังกล่าว เพื่อให้ระบบผูก #OF และดึงชื่อสินค้ามาแสดงครบถ้วน)`}
+                    ? `ผูก #${orderCode} แล้ว — รอไฟล์รายการสินค้า OMS`
+                    : `ยังไม่มีข้อมูลสินค้า — รอไฟล์ OMS (${formatDate(bill.createdAt)})`}
                 </span>
-                <span className="amount text-xs text-muted-foreground">
-                  (รอไฟล์ OMS)
+                <span className="amount text-[11px] font-normal text-[#94a3b8]">
+                  รอไฟล์ OMS
                 </span>
               </div>
               {bill.discountBreakdown && bill.discountBreakdown.length > 0 ? (
@@ -360,10 +359,10 @@ export function BillDocument({
         <div className="bill-rows">
           {!hasFees ? (
             <div className="bill-row muted">
-              <span>
+              <span className="text-[11.5px] font-normal text-[#94a3b8]">
                 {isOmsPlaceholder
-                  ? `(ยังไม่มีข้อมูลค่าธรรมเนียมที่ ${channelLabel} หัก — บิลนี้เพิ่งนำเข้าจากไฟล์ออเดอร์ OMS เท่านั้น กรุณาอัปโหลดไฟล์ Settlement รายได้ของรอบโอนเงินคำสั่งซื้อนี้ ระบบจึงจะดึงค่าขนส่ง ค่าคอมมิชชั่น และค่าบริการที่ถูกหักมาแจกแจงให้ครบทุกบรรทัด)`
-                  : "(ไม่มีค่าธรรมเนียมที่ถูกหักในคำสั่งซื้อนี้)"}
+                  ? "ยังไม่มีข้อมูลค่าธรรมเนียม — รอไฟล์รายได้ (Settlement)"
+                  : "ไม่มีค่าธรรมเนียมที่ถูกหักในคำสั่งซื้อนี้"}
               </span>
               <span className="amount">{formatTHB(0)}</span>
             </div>

@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="th">
       <body>
         <TooltipProvider delayDuration={150}>
-          <div className="app-shell">
+          <div className="app-shell has-[[data-login-page]]:!grid-cols-1">
             <Sidebar />
             <div className="app-main">
               <main className="app-content">{children}</main>

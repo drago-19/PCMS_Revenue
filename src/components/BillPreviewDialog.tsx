@@ -73,7 +73,7 @@ export function BillPreviewTrigger({
           type="button"
           onClick={handleOpen}
           className={cn(
-            "mono link inline-flex min-h-[40px] cursor-pointer items-center text-left max-[640px]:break-all min-[641px]:whitespace-nowrap text-[12.5px] min-[641px]:text-[13px] bg-transparent border-0 p-0",
+            "mono link inline-flex min-h-[40px] cursor-pointer items-center text-left max-[860px]:break-all min-[861px]:whitespace-nowrap text-[12.5px] min-[861px]:text-[13px] bg-transparent border-0 p-0",
             className,
           )}
         >
@@ -203,7 +203,7 @@ export function BillPreviewTrigger({
             <div className="no-print border-b border-border bg-[#f8fafc] px-4 py-2.5 sm:px-6">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <div>
-                  <label className="mb-1 block text-[11px] font-bold text-[#475569]">
+                  <label className="mb-1 block text-xs font-bold text-[#475569]">
                     ชื่อผู้ซื้อ / บริษัท
                   </label>
                   <Input
@@ -214,7 +214,7 @@ export function BillPreviewTrigger({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-bold text-[#475569]">
+                  <label className="mb-1 block text-xs font-bold text-[#475569]">
                     เลขผู้เสียภาษีผู้ซื้อ (ถ้ามี)
                   </label>
                   <Input
@@ -225,7 +225,7 @@ export function BillPreviewTrigger({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-bold text-[#475569]">
+                  <label className="mb-1 block text-xs font-bold text-[#475569]">
                     ที่อยู่ผู้ซื้อ
                   </label>
                   <Input

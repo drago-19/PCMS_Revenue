@@ -365,7 +365,7 @@
 
   .workspace-page > .stats .stat-hint {
     margin-top: 2px;
-    font-size: 11.5px;
+    font-size: 12px;
   }
 
   .workspace-table-card {
@@ -393,7 +393,7 @@
 }
 
 .eyebrow {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -831,7 +831,7 @@ table.data {
 
 .data th {
   text-align: left;
-  padding: 11px 18px;
+  padding: 10px 10px;
   background: #f8f9fb;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
@@ -843,9 +843,19 @@ table.data {
 }
 
 .data td {
-  padding: 12px 18px;
+  padding: 10px 10px;
   border-bottom: 1px solid var(--line-soft);
   vertical-align: middle;
+}
+
+@media (min-width: 1280px) {
+  .data th {
+    padding: 11px 14px;
+  }
+
+  .data td {
+    padding: 12px 14px;
+  }
 }
 
 .data tbody tr:last-child td {
@@ -1794,6 +1804,7 @@ table.data {
 
 .bill-meta > div {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 6px 0;
@@ -1810,6 +1821,14 @@ table.data {
   font-weight: 650;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.bill-meta dd.bill-empty-hint {
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 400;
+  color: #94a3b8;
+  white-space: nowrap;
 }
 
 .bill-section {
@@ -2563,7 +2582,9 @@ table.data {
     height: 40px;
     margin-left: 6px;
   }
+}
 
+@media (max-width: 860px) {
   .data.stack {
     min-width: 0;
     font-size: 13.5px;
@@ -2589,9 +2610,10 @@ table.data {
 
   .data.stack tbody td {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 8px 10px;
     padding: 9px 0;
     border-bottom: 1px dashed var(--line-soft);
     text-align: right;

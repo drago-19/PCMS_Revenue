@@ -179,7 +179,7 @@ export default async function DailyPage({
                   return (
                     <TableRow key={order.id}>
                       <TableCell data-label="หมายเลขคำสั่งซื้อ / ช่องทาง">
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1 max-[860px]:items-end">
                           <span className="inline-flex max-w-full items-center gap-1">
                             <BillPreviewTrigger
                               row={order}
@@ -188,7 +188,7 @@ export default async function DailyPage({
                             />
                             <CopyButton value={order.externalId} />
                           </span>
-                          <div className="flex flex-wrap items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1 max-[860px]:justify-end">
                             <Badge
                               variant={
                                 order.channel === "Shopee"
@@ -206,12 +206,12 @@ export default async function DailyPage({
                                 ผูก #{order.orderCode}
                               </Badge>
                             ) : (
-                              <span className="text-[11px] text-muted-foreground">
-                                (ยังไม่ผูก #ออเดอร์ OMS)
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                (รอผูก OMS)
                               </span>
                             )}
                             {order.customerName ? (
-                              <span className="text-[11px] font-medium text-muted-foreground">
+                              <span className="text-xs font-medium text-muted-foreground">
                                 {order.customerName}
                               </span>
                             ) : null}
@@ -220,11 +220,11 @@ export default async function DailyPage({
                       </TableCell>
                       <TableCell data-label="รายการสินค้า (SKU)">
                         {order.omsItems && order.omsItems.length > 0 ? (
-                          <div className="flex flex-col gap-0.5 text-xs">
+                          <div className="flex flex-col gap-0.5 text-xs max-[860px]:items-end">
                             {order.omsItems.slice(0, 2).map((item, idx) => (
                               <span
                                 key={`${item.skuCode}-${idx}`}
-                                className="inline-flex flex-wrap items-center gap-1"
+                                className="inline-flex flex-wrap items-center gap-1 max-[860px]:justify-end"
                               >
                                 <Badge variant="neutral" size="sm" className="mono">
                                   {item.skuCode}
@@ -238,45 +238,45 @@ export default async function DailyPage({
                               </span>
                             ))}
                             {order.omsItems.length > 2 ? (
-                              <span className="text-[11px] text-muted-foreground">
+                              <span className="text-xs text-muted-foreground">
                                 +{order.omsItems.length - 2} รายการอื่น
                               </span>
                             ) : null}
                           </div>
                         ) : !order.productDetail || order.productDetail.trim() === "/" ? (
-                          <span className="text-xs text-muted-foreground">
-                            (ยังไม่มีข้อมูลสินค้า — รอไฟล์ OMS วันสั่งซื้อ {formatDate(order.createdDate)})
+                          <span className="text-xs font-normal text-[#64748b] whitespace-nowrap">
+                            รอไฟล์ OMS ({formatDate(order.createdDate)})
                           </span>
                         ) : /^\d{10,}\s*\*\s*\d+/.test(order.productDetail.trim()) ? (
-                          <div className="flex flex-col gap-0.5 text-xs">
+                          <div className="flex flex-col gap-0.5 text-xs max-[860px]:items-end">
                             <span className="mono text-foreground">
                               {order.productDetail.replace(/;\s*$/, "")}
                             </span>
-                            <span className="text-[11px] text-muted-foreground">
-                              (รหัสสินค้าแพลตฟอร์ม — รอไฟล์สินค้า OMS วันสั่งซื้อ {formatDate(order.createdDate)})
+                            <span className="text-xs font-normal text-[#64748b] whitespace-nowrap">
+                              รอชื่อสินค้า OMS
                             </span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-0.5 text-xs">
+                          <div className="flex flex-col gap-0.5 text-xs max-[860px]:items-end">
                             <span className="text-foreground">{order.productDetail}</span>
-                            <span className="text-[11px] text-muted-foreground">
-                              (รอผูกไฟล์รายการสินค้า OMS วันสั่งซื้อ {formatDate(order.createdDate)})
+                            <span className="text-xs font-normal text-[#64748b] whitespace-nowrap">
+                              รอไฟล์สินค้า OMS
                             </span>
                           </div>
                         )}
                       </TableCell>
-                      <TableCell data-label="เลขที่ใบกำกับภาษี">
+                      <TableCell data-label="เลขที่ใบกำกับภาษี" className="whitespace-nowrap">
                         {order.invoiceNo ? (
                           <span className="mono text-xs text-muted-foreground">
                             {order.invoiceNo}
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">
-                            (รอไฟล์ OMS)
+                          <span className="text-xs font-normal text-[#64748b]">
+                            รอไฟล์ OMS
                           </span>
                         )}
                       </TableCell>
-                      <TableCell data-label="วันที่สร้าง">
+                      <TableCell data-label="วันที่สร้าง" className="whitespace-nowrap">
                         {formatDate(order.createdDate)}
                       </TableCell>
                       <TableCell data-label="รายได้" className="num">
@@ -287,8 +287,8 @@ export default async function DailyPage({
                           <span>{formatTHB(order.feeTotal)}</span>
                           {order.feeTotal === 0 &&
                           order.normalized.transactionType === "คำสั่งซื้อ (OMS)" ? (
-                            <span className="text-[10.5px] font-normal text-muted-foreground">
-                              (รอไฟล์รายได้ Settlement)
+                            <span className="text-xs font-normal text-muted-foreground whitespace-nowrap">
+                              (รอไฟล์รายได้)
                             </span>
                           ) : null}
                         </div>
@@ -299,7 +299,7 @@ export default async function DailyPage({
                       >
                         {formatTHB(order.payout)}
                       </TableCell>
-                      <TableCell data-label="สถานะ">
+                      <TableCell data-label="สถานะ" className="whitespace-nowrap">
                         {ok ? (
                           <Badge variant="success" size="sm">
                             <IconCheckCircle size={13} /> ยอดตรง
@@ -311,7 +311,7 @@ export default async function DailyPage({
                         )}
                       </TableCell>
                       <TableCell data-label="เอกสาร" className="num">
-                        <span className="inline-flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
+                        <span className="inline-flex flex-wrap items-center justify-end gap-1 min-[980px]:flex-nowrap whitespace-nowrap">
                           <BillPreviewTrigger
                             row={order}
                             defaultTab="bill"

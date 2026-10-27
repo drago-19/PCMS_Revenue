@@ -191,7 +191,7 @@ export default async function BillsPage({
 
             {availableDates.length > 0 ? (
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[11.5px] font-semibold text-muted-foreground">
+                <span className="text-xs font-semibold text-muted-foreground">
                   เลือกดูตามวัน:
                 </span>
                 <Link
@@ -218,7 +218,7 @@ export default async function BillsPage({
                     >
                       <span>{formatDateLong(item.date)}</span>
                       <span
-                        className={`text-[10.5px] ${
+                        className={`text-xs ${
                           active ? "text-white/90" : "text-muted-foreground"
                         }`}
                       >
@@ -233,7 +233,7 @@ export default async function BillsPage({
 
           {/* แถบแยกป้ายช่องทาง (TikTok / Shopee / Facebook) */}
           <div className="mb-2.5 flex flex-wrap items-center gap-1.5 border-b border-border/70 pb-2">
-            <span className="text-[11.5px] font-bold text-foreground">
+            <span className="text-xs font-bold text-foreground">
               ช่องทางจำหน่าย:
             </span>
             {[
@@ -258,7 +258,7 @@ export default async function BillsPage({
                 >
                   <span>{ch.label}</span>
                   <span
-                    className={`text-[10.5px] ${
+                    className={`text-xs ${
                       active ? "text-white/90" : "text-muted-foreground"
                     }`}
                   >
@@ -427,7 +427,7 @@ export default async function BillsPage({
                   return (
                     <TableRow key={row.id}>
                       <TableCell data-label="หมายเลขคำสั่งซื้อ / ช่องทาง">
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1 max-[860px]:items-end">
                           <span className="inline-flex max-w-full items-center gap-1">
                             <BillPreviewTrigger
                               row={row}
@@ -436,7 +436,7 @@ export default async function BillsPage({
                             />
                             <CopyButton value={row.externalId} />
                           </span>
-                          <div className="flex flex-wrap items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1 max-[860px]:justify-end">
                             <Badge
                               variant={
                                 row.channel === "Shopee"
@@ -454,12 +454,12 @@ export default async function BillsPage({
                                 ผูก #{row.orderCode}
                               </Badge>
                             ) : (
-                              <span className="text-[11px] text-muted-foreground">
-                                (ยังไม่ผูก #ออเดอร์ OMS)
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                (รอผูก OMS)
                               </span>
                             )}
                             {row.customerName ? (
-                              <span className="text-[11px] font-medium text-muted-foreground">
+                              <span className="text-xs font-medium text-muted-foreground">
                                 {row.customerName}
                               </span>
                             ) : null}
@@ -468,11 +468,11 @@ export default async function BillsPage({
                       </TableCell>
                       <TableCell data-label="รายการสินค้า (SKU)">
                         {row.omsItems && row.omsItems.length > 0 ? (
-                          <div className="flex flex-col gap-0.5 text-xs">
+                          <div className="flex flex-col gap-0.5 text-xs max-[860px]:items-end">
                             {row.omsItems.slice(0, 2).map((item, idx) => (
                               <span
                                 key={`${item.skuCode}-${idx}`}
-                                className="inline-flex flex-wrap items-center gap-1"
+                                className="inline-flex flex-wrap items-center gap-1 max-[860px]:justify-end"
                               >
                                 <Badge variant="neutral" size="sm" className="mono">
                                   {item.skuCode}
@@ -486,58 +486,55 @@ export default async function BillsPage({
                               </span>
                             ))}
                             {row.omsItems.length > 2 ? (
-                              <span className="text-[11px] text-muted-foreground">
+                              <span className="text-xs text-muted-foreground">
                                 +{row.omsItems.length - 2} รายการอื่น
                               </span>
                             ) : null}
                           </div>
                         ) : !row.productDetail || row.productDetail.trim() === "/" ? (
-                          <span className="text-xs text-muted-foreground">
-                            (ยังไม่มีข้อมูลสินค้า — รอไฟล์ OMS วันสั่งซื้อ {formatDate(row.createdDate)})
+                          <span className="text-xs font-normal text-[#64748b] whitespace-nowrap">
+                            รอไฟล์ OMS ({formatDate(row.createdDate)})
                           </span>
                         ) : /^\d{10,}\s*\*\s*\d+/.test(row.productDetail.trim()) ? (
-                          <div className="flex flex-col gap-0.5 text-xs">
+                          <div className="flex flex-col gap-0.5 text-xs max-[860px]:items-end">
                             <span className="mono text-foreground">
                               {row.productDetail.replace(/;\s*$/, "")}
                             </span>
-                            <span className="text-[11px] text-muted-foreground">
-                              (รหัสสินค้าแพลตฟอร์ม — รอไฟล์สินค้า OMS วันสั่งซื้อ {formatDate(row.createdDate)})
+                            <span className="text-xs font-normal text-[#64748b] whitespace-nowrap">
+                              รอชื่อสินค้า OMS
                             </span>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-0.5 text-xs">
+                          <div className="flex flex-col gap-0.5 text-xs max-[860px]:items-end">
                             <span className="text-foreground">{row.productDetail}</span>
-                            <span className="text-[11px] text-muted-foreground">
-                              (รอผูกไฟล์รายการสินค้า OMS วันสั่งซื้อ {formatDate(row.createdDate)})
+                            <span className="text-xs font-normal text-[#64748b] whitespace-nowrap">
+                              รอไฟล์สินค้า OMS
                             </span>
                           </div>
                         )}
                       </TableCell>
-                      <TableCell data-label="เลขที่ใบกำกับภาษี">
+                      <TableCell data-label="เลขที่ใบกำกับภาษี" className="whitespace-nowrap">
                         {row.invoiceNo ? (
                           <span className="mono text-xs text-muted-foreground">
                             {row.invoiceNo}
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">
-                            (รอไฟล์ OMS)
+                          <span className="text-xs font-normal text-[#64748b]">
+                            รอไฟล์ OMS
                           </span>
                         )}
                       </TableCell>
                       <TableCell data-label="วันที่ชำระเงิน / วันสั่งซื้อ">
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <div className="flex flex-col items-start gap-1 text-xs max-[860px]:items-end">
                           <Link
                             href={buildHref({ nextDate: row.paidDate, nextPage: 1 })}
-                            title={`คลิกเพื่อกรองเฉพาะวันที่ชำระ ${formatDateLong(row.paidDate)}`}
-                            className="inline-flex items-center gap-1 rounded-md border border-[#fecdd3] bg-[#fff0f3] px-2 py-0.5 font-bold text-[#be123c] hover:bg-[#ffe4ea]"
+                            title={`คลิกเพื่อกรองเฉพาะวันที่ชำระ ${formatDateLong(row.paidDate)} (${formatDate(row.paidDate)})`}
+                            className="inline-flex items-center gap-1 rounded-md border border-[#fecdd3] bg-[#fff0f3] px-2 py-0.5 font-bold whitespace-nowrap text-[#be123c] hover:bg-[#ffe4ea]"
                           >
-                            <IconCalendar size={12} />
+                            <IconCalendar size={12} className="shrink-0" />
                             <span>ชำระ {formatDateLong(row.paidDate)}</span>
-                            <span className="text-[11px] font-medium opacity-80">
-                              ({formatDate(row.paidDate)})
-                            </span>
                           </Link>
-                          <span className="text-muted-foreground whitespace-nowrap">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
                             สั่งซื้อ {formatDate(row.createdDate)}
                           </span>
                         </div>
@@ -553,8 +550,8 @@ export default async function BillsPage({
                           <span>{formatTHB(row.feeTotal)}</span>
                           {row.feeTotal === 0 &&
                           row.normalized.transactionType === "คำสั่งซื้อ (OMS)" ? (
-                            <span className="text-[10.5px] font-normal text-muted-foreground">
-                              (รอไฟล์รายได้ Settlement)
+                            <span className="text-xs font-normal text-muted-foreground whitespace-nowrap">
+                              (รอไฟล์รายได้)
                             </span>
                           ) : null}
                         </div>
@@ -565,7 +562,7 @@ export default async function BillsPage({
                       >
                         {formatTHB(row.payout)}
                       </TableCell>
-                      <TableCell data-label="สถานะตรวจยอด">
+                      <TableCell data-label="สถานะตรวจยอด" className="whitespace-nowrap">
                         {ok ? (
                           <Badge variant="success" size="sm">
                             <IconCheckCircle size={13} /> ยอดตรง
@@ -577,7 +574,7 @@ export default async function BillsPage({
                         )}
                       </TableCell>
                       <TableCell data-label="เอกสาร" className="num">
-                        <span className="inline-flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
+                        <span className="inline-flex flex-wrap items-center justify-end gap-1 min-[980px]:flex-nowrap whitespace-nowrap">
                           <BillPreviewTrigger
                             row={row}
                             defaultTab="bill"
