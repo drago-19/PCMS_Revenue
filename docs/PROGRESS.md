@@ -6,6 +6,10 @@
 ## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-10-27)
 
 - ✅ เสร็จแล้ว:
+  - **แยกพอร์ตการทำงานระหว่างโหมดแก้โค้ด (`3001`), เซิร์ฟเวอร์จริงที่ Build แล้วออกท่อ Cloudflare (`3002`) และหน้าจัดการฐานข้อมูล (`54324`) (`docker-compose.yml`, `package.json`, `README.md`, `PROJECT_GUIDELINES.md`, `docs/lessons.md`)**:
+    - ตั้งค่า `pnpm dev` ให้รันที่พอร์ต **`3001`** (`http://localhost:3001`) สำหรับแก้โค้ดแยกต่างหาก
+    - ย้าย Docker container `pcms-revenue-app` (ตัวที่ Build แล้ว โหลดเร็ว) ไปที่พอร์ต **`3002`** (`http://localhost:3002`) พร้อมเพิ่มสคริปต์ `pnpm run deploy:app` (`docker compose up -d --build app`) สำหรับสั่ง Build อัปเดตพอร์ต `3002` ทันทีเมื่อแก้โค้ดเสร็จ
+    - คงพอร์ตหน้าเว็บจัดการฐานข้อมูล (Supabase Studio) ไว้ที่ **`54324`** (`http://localhost:54324`) ตามเดิม
   - **จัดแบ่ง Git Commits งานส่วนระบบความปลอดภัย, โครงสร้างพื้นฐาน Cloudflare Tunnel และ UI Responsive ออกเป็น 4 หมวดหมู่ (`feat(security)`, `chore(infra)`, `fix(ui)`, `docs`)**:
     - ตรวจสอบ `npx tsc --noEmit` (0 error) และ `pnpm test` (19/19 passed) ก่อน Commit เก็บเข้า Git จน Working Tree สะอาด 100%
   - **แก้ไขให้ระบบทำงานผ่าน Cloudflare Tunnel (`https://revenue.goldpulse-ai.com`) เหมือนกับ `http://localhost:3001` ทุกประการ + แก้ไข Responsive ตารางและ Hydration Mismatch**:
@@ -96,6 +100,7 @@
 
 ## ประวัติงาน
 
+- [x] 2026-10-27 — แยกพอร์ต `pnpm dev` (`3001`), เซิร์ฟเวอร์ Build ใน Docker `pcms-revenue-app` (`3002`) และ Database Studio (`54324`) พร้อมเพิ่มคำสั่ง `pnpm run deploy:app` และเปิดรัน `pcms-revenue-app` บนพอร์ต `3002` (`docker-compose.yml`, `package.json`, `README.md`, `PROJECT_GUIDELINES.md`, `docs/lessons.md`, `docs/PROGRESS.md`)
 - [x] 2026-10-27 — จัดแบ่ง Git Commits งานรอบระบบ Login/Security, Cloudflare Tunnel และ UI Responsive ออกเป็น 4 หมวดหมู่ (`feat(security)`, `chore(infra)`, `fix(ui)`, `docs`) พร้อมตรวจสอบ `tsc` และชุดทดสอบ 19 ข้อผ่านทั้งหมด
 - [x] 2026-10-22 — เพิ่มระบบ Login รหัสผ่าน (`bcryptjs` cost 12 + HMAC-SHA256 `HttpOnly` Session ≤ 24h) + Brute-Force Protection (5 ครั้งบล็อก 15 นาที) + Append-Only `audit_logs` พร้อม DB Trigger ห้ามลบ/แก้ไข + ป้องกัน CSRF / Rate Limit / Formula Injection / Wildcard Injection + HTTP Security Headers + `GET /api/health` + ทดสอบจำลองแฮกเกอร์และตรวจ UI 360px/390px/768px/1280px (`src/proxy.ts`, `src/lib/auth.ts`, `src/lib/session-token.ts`, `src/lib/db.ts`, `src/lib/queries.ts`, `src/app/login/page.tsx`, `src/app/api/auth/*`, `src/app/api/health/route.ts`, `src/app/api/imports/*`, `src/components/Sidebar.tsx`, `next.config.ts`, `docker-compose.yml`, `tests/security.test.ts`)
 - [x] 2026-10-22 — จัดแบ่ง Git Commits งานรอบล่าสุดออกเป็น 6 หมวดหมู่ตามโครงสร้างระบบ (`chore(docker)`, `feat(ingest)`, `feat(ui)`, `feat(components)`, `feat(pages)`, `docs`)

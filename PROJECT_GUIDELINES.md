@@ -20,12 +20,13 @@
 | Database หลัก | PostgreSQL (`pg` ชี้ไปยัง database `pcms_revenue` ที่แชร์ container `pcms-supabase-db`) |
 | Excel Processing | `exceljs` |
 | Network | Cloudflare Tunnel (`docker-compose.yml` profile `tunnel`) |
-| Hosting | Docker Compose (`pcms-revenue-app` พอร์ต 3001, dev พอร์ต 4321) |
+| Hosting | Docker Compose (`pcms-revenue-app` พอร์ต 3002 สำหรับตัว Build/ออกท่อ, `pnpm dev` พอร์ต 3001, Supabase Studio พอร์ต 54324) |
 
 ## คำสั่งที่ใช้บ่อย
 
 ```bash
-PORT=4321 pnpm dev          # รัน dev server ที่พอร์ต 4321
+pnpm dev                    # รัน dev server ที่พอร์ต 3001 (แก้โค้ดแยก)
+pnpm run deploy:app         # build และอัปเดตเซิร์ฟเวอร์จริง (Docker พอร์ต 3002)
 npx tsc --noEmit            # ตรวจ TypeScript types
 pnpm build                  # build production
 pnpm test                   # รัน unit/integration tests (tsx --test tests/*.test.ts)

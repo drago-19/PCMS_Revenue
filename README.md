@@ -21,9 +21,9 @@ docker compose up -d --build
 
 | ชื่อ | หน้าที่ | พอร์ต (บนเครื่อง) |
 |---|---|---|
-| `pcms-supabase-db` (Supabase เดิม) | ฐานข้อมูล PostgreSQL (แชร์) database แยก `pcms_revenue` | 5432 |
-| `pcms-revenue-app` | เว็บแอป | **3001** → เปิด http://localhost:3001 |
-| `pcms-revenue-pgadmin` | เปิดดูฐานข้อมูล (GUI) | 5050 |
+| `pcms-supabase-db` (Supabase เดิม) | ฐานข้อมูล PostgreSQL (แชร์) database แยก `pcms_revenue` | 5432 (Studio: **54324**) |
+| `pcms-revenue-app` | เว็บแอปตัวที่ Build แล้ว (สำหรับใช้งานจริง / ออกท่อ Cloudflare) | **3002** → เปิด http://localhost:3002 |
+| `pnpm dev` | โหมดแก้โค้ด (Hot Reload บนเครื่อง) | **3001** → เปิด http://localhost:3001 |
 
 **เปิดใช้งาน pgAdmin (GUI ดูข้อมูล):**
 ```bash
@@ -40,16 +40,20 @@ docker compose --profile tunnel up -d
 
 ---
 
-## 3. รันแบบ dev บนเครื่อง (ถ้าไม่ใช้ Docker)
+## 3. รันแบบ dev บนเครื่อง (แยกพอร์ตกับเซิร์ฟเวอร์จริง)
 
 ```bash
 cp .env.example .env        # แก้ DATABASE_URL ให้ชี้ไปที่ 5432/pcms_revenue
 pnpm install
-# ฐานข้อมูล = Supabase (โปรเจกต์อื่น) ที่รันอยู่แล้วบน 5432 — ไม่ต้องรัน db แยก
-PORT=4321 pnpm dev          # เปิด http://localhost:4321
+# ฐานข้อมูล = Supabase ที่รันอยู่แล้วบน 5432 (ดูผ่านเว็บ Studio ที่ http://localhost:54324)
+pnpm dev                    # เปิดโหมดแก้โค้ดที่ http://localhost:3001
 ```
 
-> พอร์ต 3000 บนเครื่องถูกโปรเจกต์อื่นใช้อยู่ จึงรัน dev ที่ 4321 แทน
+> **การทำงานแยกพอร์ต:**
+> - **`http://localhost:3001`** = รัน `pnpm dev` สำหรับแก้โค้ด
+> - **`http://localhost:3002`** = รัน `pcms-revenue-app` (Docker ตัวที่ Build แล้ว โหลดเร็ว สำหรับต่อออกท่อ Cloudflare `https://revenue.goldpulse-ai.com`)
+> - **`http://localhost:54324`** = หน้าเว็บจัดการฐานข้อมูล (Supabase Studio ของ `pcms_revenue`)
+> - เมื่อแก้โค้ดที่พอร์ต `3001` เสร็จแล้ว สั่งอัปเดตไปที่พอร์ต `3002` ด้วยคำสั่ง: `pnpm run deploy:app` (หรือ `docker compose up -d --build app`)
 
 ---
 

@@ -18,7 +18,7 @@ services:
       AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
       SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
     ports:
-      - "3001:3000"
+      - "3002:3000"
 
   # Cloudflare Tunnel — เปิดใช้งานด้วย: docker compose --profile tunnel up -d
   # ต้องใส่ CLOUDFLARE_TUNNEL_TOKEN ใน .env (ได้จาก Cloudflare Zero Trust → Tunnels)
