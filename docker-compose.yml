@@ -7,11 +7,16 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       # แชร์ Postgres ตัวเดียวกับ Supabase (อีกโปรเจกต์) แต่ใช้ database แยก "pcms_revenue"
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgrespassword@host.docker.internal:5432/pcms_revenue}
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:${SUPABASE_POSTGRES_PASSWORD}@host.docker.internal:5432/pcms_revenue}
       SELLER_NAME: ${SELLER_NAME:-บริษัท ชีเฮง จำกัด (สำนักงานใหญ่)}
       SELLER_ADDRESS: ${SELLER_ADDRESS:-3675 ถนนพระรามที่ 4 แขวงพระโขนง เขตคลองเตย กรุงเทพมหานคร 10110}
       SELLER_TAX_ID: ${SELLER_TAX_ID:-0655568002694}
       SELLER_VAT_RATE: ${SELLER_VAT_RATE:-7}
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
+      AUTH_INITIAL_PASSWORD: ${AUTH_INITIAL_PASSWORD:-}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
     ports:
       - "3001:3000"
 
