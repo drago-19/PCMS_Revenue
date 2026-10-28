@@ -393,8 +393,9 @@ function matchAliasMap(
 export async function detectAndParseOmsInput(
   input: Buffer | ArrayBuffer,
   customMapping?: Record<string, string>,
+  preloadedSheets?: { name: string; rows: Primitive[][] }[],
 ): Promise<ParsedOmsWorkbook | null> {
-  const sheets = await readInputSheets(input);
+  const sheets = preloadedSheets ?? (await readInputSheets(input));
 
   const parsedOrders: ParsedOmsOrder[] = [];
   const parsedItems: ParsedOmsItem[] = [];
@@ -516,7 +517,7 @@ export async function detectAndParseOmsInput(
         if (!orderCode) continue;
 
         const channel = normalizeChannel(get("channel"));
-        if (channel !== "TikTok") continue;
+        if (channel !== "TikTok" && channel !== "Shopee") continue;
 
         totalDataRows++;
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";
@@ -565,7 +566,7 @@ export async function detectAndParseOmsInput(
         if (!skuCode || !orderCode) continue;
 
         const channel = normalizeChannel(get("channel"));
-        if (channel !== "TikTok") continue;
+        if (channel !== "TikTok" && channel !== "Shopee") continue;
 
         totalDataRows++;
         const nextLine = (lineCounter.get(orderCode) ?? 0) + 1;

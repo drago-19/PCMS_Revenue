@@ -1,6 +1,50 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
+import {
+  SESSION_COOKIE_NAME,
+  verifySessionToken,
+  type CompanyId,
+} from "./session-token";
 
-const SCHEMA_VERSION = "2026-10-27-v4";
+const SCHEMA_VERSION = "2026-10-28-v10";
+
+export type { CompanyId };
+
+export const companyContextStorage = new AsyncLocalStorage<CompanyId>();
+
+export function runWithCompany<T>(companyId: CompanyId, fn: () => T): T {
+  return companyContextStorage.run(companyId, fn);
+}
+
+export async function getActiveCompanyId(): Promise<CompanyId> {
+  const fromStorage = companyContextStorage.getStore();
+  if (fromStorage === "seeheng" || fromStorage === "dragon19") {
+    return fromStorage;
+  }
+  try {
+    const { cookies, headers } = await import("next/headers");
+    const hdrs = await headers();
+    const fromHeader = hdrs.get("x-auth-company");
+    if (fromHeader === "seeheng" || fromHeader === "dragon19") {
+      return fromHeader;
+    }
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+    const session = verifySessionToken(token);
+    if (session?.companyId === "seeheng") {
+      return "seeheng";
+    }
+  } catch {
+    // Outside Next.js request context (e.g., CLI or unit tests)
+  }
+  return "dragon19";
+}
+
+function getSchemaSearchPathSql(companyId: CompanyId): string {
+  return companyId === "seeheng"
+    ? "SET LOCAL search_path TO seeheng, public"
+    : "SET LOCAL search_path TO public";
+}
 
 const globalForDb = globalThis as unknown as {
   __pcmsRevenuePool?: Pool;
@@ -43,14 +87,24 @@ export function ensureSchema(): Promise<void> {
     globalForDb.__pcmsRevenueSchemaVersion !== SCHEMA_VERSION
   ) {
     globalForDb.__pcmsRevenueSchemaVersion = SCHEMA_VERSION;
-    globalForDb.__pcmsRevenueSchema = getPool()
-      .query(SCHEMA_SQL)
-      .then(() => undefined)
-      .catch((err) => {
-        globalForDb.__pcmsRevenueSchema = undefined;
-        globalForDb.__pcmsRevenueSchemaVersion = undefined;
-        throw err;
-      });
+    globalForDb.__pcmsRevenueSchema = (async () => {
+      const pool = getPool();
+      const client = await pool.connect();
+      try {
+        await client.query("SET search_path TO public");
+        await client.query(SCHEMA_SQL);
+        await client.query("CREATE SCHEMA IF NOT EXISTS seeheng");
+        await client.query("SET search_path TO seeheng, public");
+        await client.query(SCHEMA_SQL);
+        await client.query("SET search_path TO public");
+      } finally {
+        client.release();
+      }
+    })().catch((err) => {
+      globalForDb.__pcmsRevenueSchema = undefined;
+      globalForDb.__pcmsRevenueSchemaVersion = undefined;
+      throw err;
+    });
   }
   return globalForDb.__pcmsRevenueSchema;
 }
@@ -64,6 +118,24 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
     await ensureSchema();
   }
   const target = db ?? getPool();
+  if (target === getPool()) {
+    const companyId = await getActiveCompanyId();
+    if (companyId === "seeheng") {
+      const client = await getPool().connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(getSchemaSearchPathSql("seeheng"));
+        const result = await client.query<T>(text, params as never[]);
+        await client.query("COMMIT");
+        return result.rows;
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+  }
   const result = await target.query<T>(text, params as never[]);
   return result.rows;
 }
@@ -79,11 +151,14 @@ export async function queryOne<T extends QueryResultRow = QueryResultRow>(
 
 export async function withTransaction<T>(
   fn: (client: PoolClient) => Promise<T>,
+  companyOverride?: CompanyId,
 ): Promise<T> {
   await ensureSchema();
+  const companyId = companyOverride ?? (await getActiveCompanyId());
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await client.query(getSchemaSearchPathSql(companyId));
     const value = await fn(client);
     await client.query("COMMIT");
     return value;
@@ -206,6 +281,9 @@ CREATE INDEX IF NOT EXISTS ix_oms_orders_mp_prefix ON oms_orders(marketplace_ord
 CREATE INDEX IF NOT EXISTS ix_oms_orders_matched_ext ON oms_orders(matched_external_id);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_paid_date ON oms_orders(paid_date);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_channel ON oms_orders(channel);
+CREATE INDEX IF NOT EXISTS ix_oms_orders_import ON oms_orders(import_id);
+CREATE INDEX IF NOT EXISTS ix_oms_orders_unmatched ON oms_orders(order_code)
+  WHERE matched_external_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS oms_order_items (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -235,6 +313,7 @@ CREATE TABLE IF NOT EXISTS oms_order_items (
 
 CREATE INDEX IF NOT EXISTS ix_oms_items_order_code ON oms_order_items(order_code);
 CREATE INDEX IF NOT EXISTS ix_oms_items_sku_code ON oms_order_items(sku_code);
+CREATE INDEX IF NOT EXISTS ix_oms_items_import ON oms_order_items(import_id);
 
 CREATE TABLE IF NOT EXISTS products (
   sku_code TEXT PRIMARY KEY,
@@ -257,8 +336,17 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
   tiktok_count INTEGER NOT NULL DEFAULT 0,
   shopee_count INTEGER NOT NULL DEFAULT 0,
   facebook_count INTEGER NOT NULL DEFAULT 0,
+  linked_count INTEGER NOT NULL DEFAULT 0,
+  oms_only_count INTEGER NOT NULL DEFAULT 0,
+  unlinked_count INTEGER NOT NULL DEFAULT 0,
+  mismatch_count INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS linked_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS oms_only_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS unlinked_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS mismatch_count INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS sku_summaries (
   sku_code TEXT PRIMARY KEY,
@@ -279,9 +367,55 @@ CREATE INDEX IF NOT EXISTS ix_transactions_order_paid_ext
   ON transactions(paid_date DESC, external_id DESC)
   WHERE is_order = 1;
 
+CREATE INDEX IF NOT EXISTS ix_transactions_order_paid_priority_ext
+  ON transactions(
+    paid_date DESC,
+    (
+      CASE
+        WHEN (order_code IS NOT NULL AND order_code <> '' AND transaction_type <> 'คำสั่งซื้อ (OMS)') THEN 0
+        WHEN (order_code IS NOT NULL AND order_code <> '') THEN 1
+        ELSE 2
+      END
+    ) ASC,
+    external_id DESC
+  )
+  WHERE is_order = 1;
+
 CREATE INDEX IF NOT EXISTS ix_transactions_channel_paid_ext
   ON transactions(channel, paid_date DESC, external_id DESC)
   WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_unlinked_created_date
+  ON transactions(paid_date, created_date DESC)
+  WHERE is_order = 1
+    AND (order_code IS NULL OR order_code = '')
+    AND created_date <> ''
+    AND created_date <> 'unknown';
+
+CREATE INDEX IF NOT EXISTS ix_transactions_order_payout
+  ON transactions(payout DESC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_order_income
+  ON transactions(income DESC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_non_positive_income
+  ON transactions(paid_date, channel, income, fee_total, payout)
+  WHERE is_order = 1 AND income <= 0;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_order_fee
+  ON transactions(ABS(fee_total) DESC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_order_mismatch
+  ON transactions(paid_date DESC, external_id DESC)
+  WHERE is_order = 1
+    AND (
+      ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
+      OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
+      OR ABS(COALESCE((checks_json->>'payoutDiff')::numeric, 0)) >= 0.01
+    );
 
 CREATE INDEX IF NOT EXISTS ix_transactions_search_trgm
   ON transactions USING gin (
@@ -289,8 +423,28 @@ CREATE INDEX IF NOT EXISTS ix_transactions_search_trgm
   )
   WHERE is_order = 1;
 
+CREATE INDEX IF NOT EXISTS ix_transactions_ext_prefix15
+  ON transactions(LEFT(external_id, 15))
+  WHERE is_order = 1 AND transaction_type <> 'คำสั่งซื้อ (OMS)';
+
+CREATE INDEX IF NOT EXISTS ix_transactions_oms_temp
+  ON transactions(order_code)
+  WHERE transaction_type = 'คำสั่งซื้อ (OMS)';
+
+CREATE INDEX IF NOT EXISTS ix_transactions_missing_product_detail
+  ON transactions(order_code)
+  WHERE is_order = 1
+    AND order_code IS NOT NULL
+    AND order_code <> ''
+    AND product_detail IS NULL;
+
 CREATE INDEX IF NOT EXISTS ix_sku_summaries_sort
   ON sku_summaries(total_qty DESC, net_sales_amount DESC, sku_code ASC);
+
+CREATE INDEX IF NOT EXISTS ix_sku_summaries_trgm
+  ON sku_summaries USING gin (
+    (sku_code || ' ' || product_name) gin_trgm_ops
+  );
 
 CREATE TABLE IF NOT EXISTS app_users (
   username TEXT PRIMARY KEY,
@@ -338,28 +492,24 @@ $$ LANGUAGE plpgsql;
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_audit_logs_immutable'
+    SELECT 1 FROM pg_trigger WHERE tgname = 'trg_audit_logs_immutable' AND tgrelid = 'audit_logs'::regclass
   ) THEN
     CREATE TRIGGER trg_audit_logs_immutable
     BEFORE UPDATE OR DELETE ON audit_logs
     FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation();
   END IF;
 
-  -- Enforce TikTok-only policy across existing database records
+  -- Fast check on pre-aggregated summary tables only (never full-scan billion-row tables on startup)
   IF EXISTS (
-    SELECT 1 FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'
+    SELECT 1 FROM daily_summaries WHERE facebook_count > 0
   ) OR EXISTS (
-    SELECT 1 FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'
+    SELECT 1 FROM daily_summaries WHERE order_count > 0 AND linked_count = 0 AND oms_only_count = 0 AND unlinked_count = 0
   ) OR EXISTS (
-    SELECT 1 FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'
-  ) OR EXISTS (
-    SELECT 1 FROM daily_summaries WHERE shopee_count > 0 OR facebook_count > 0
-  ) OR EXISTS (
-    SELECT 1 FROM sku_summaries WHERE shopee_qty > 0 OR facebook_qty > 0
+    SELECT 1 FROM sku_summaries WHERE facebook_qty > 0
   ) THEN
-    DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok';
-    DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok';
-    DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok';
+    DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee');
+    DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee');
+    DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee');
 
     DELETE FROM products p
     WHERE NOT EXISTS (
@@ -375,7 +525,8 @@ BEGIN
     INSERT INTO daily_summaries (
       paid_date, transaction_count, order_count, order_payout, order_income,
       order_fees, other_count, other_payout, total_payout, adjustment,
-      tiktok_count, shopee_count, facebook_count, updated_at
+      tiktok_count, shopee_count, facebook_count,
+      linked_count, oms_only_count, unlinked_count, mismatch_count, updated_at
     )
     SELECT
       paid_date,
@@ -388,13 +539,21 @@ BEGIN
       ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
       ROUND(SUM(payout)::numeric, 2),
       ROUND(SUM(adjustment)::numeric, 2),
-      SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
       0,
-      0,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type = 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND (
+        ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
+        OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
+        OR ABS(COALESCE((checks_json->>'payoutDiff')::numeric, 0)) >= 0.01
+      ) THEN 1 ELSE 0 END)::int,
       now()
     FROM transactions
     WHERE paid_date <> '' AND paid_date <> 'unknown'
-      AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok'
+      AND COALESCE(NULLIF(channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
     GROUP BY paid_date;
 
     DELETE FROM sku_summaries;
@@ -409,12 +568,12 @@ BEGIN
       COUNT(DISTINCT i.order_code)::int,
       ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
       ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
-      COALESCE(SUM(i.quantity), 0)::int,
-      0,
+      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
       0,
       now()
     FROM oms_order_items i
-    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok'
+    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
     GROUP BY i.sku_code;
   END IF;
 END $$;

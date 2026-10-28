@@ -136,10 +136,12 @@ export const FIELD_DEFS: FieldDef[] = [
     "Total actual shipping fee paid by seller",
     "Total shipping fee paid by seller",
   ]),
-  F("shippingActual", "ค่าธรรมเนียมการจัดส่งจริง", "feeChild", [
+  F("shippingActual", "การจัดส่ง", "feeChild", [
+    "ค่าธรรมเนียมการจัดส่งจริง",
     "Actual shipping fee",
   ]),
-  F("shippingPlatformDiscount", "ส่วนลดค่าธรรมเนียมการจัดส่งจากแพลตฟอร์ม", "feeChild", [
+  F("shippingPlatformDiscount", "ส่วนลดค่าจัดส่งจาก TikTok Shop", "feeChild", [
+    "ส่วนลดค่าธรรมเนียมการจัดส่งจากแพลตฟอร์ม",
     "Platform shipping fee discount",
   ]),
   F("shippingCustomerFee", "ค่าธรรมเนียมการจัดส่งของลูกค้า", "feeChild", [

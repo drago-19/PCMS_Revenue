@@ -1,5 +1,6 @@
 import { recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { saveColumnMappingRules } from "@/lib/column-mapping-settings";
+import { runWithCompany } from "@/lib/db";
 import { importWorkbook, type ImportProgressEvent, type ImportResult } from "@/lib/ingest/import-service";
 import { IngestError } from "@/lib/ingest/parse";
 import { deleteAllImports } from "@/lib/queries";
@@ -41,7 +42,7 @@ export async function DELETE(request: Request) {
   );
 }
 
-const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_BYTES = 100 * 1024 * 1024;
 
 export type ImportStreamMessage =
   | ({ type: "progress" } & ImportProgressEvent)
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
   const auth = requireApiAuth(request);
   if (!auth.ok) return auth.response;
 
-  const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 30, 60_000);
+  const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 300, 60_000);
   if (!rate.allowed) {
     return Response.json(
       { error: "ส่งคำขอถี่เกินกำหนด กรุณารอสักครู่", requestId: auth.requestId },
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
     }
     if (file.size > MAX_BYTES) {
       return Response.json(
-        { error: "ไฟล์มีขนาดเกิน 25 MB กรุณาแยกไฟล์ก่อนนำเข้า" },
+        { error: "ไฟล์มีขนาดเกิน 100 MB กรุณาแยกไฟล์ก่อนนำเข้า" },
         { status: 400 },
       );
     }
@@ -117,14 +118,18 @@ export async function POST(request: Request) {
       }
     }
 
+    const activeCompanyId = auth.session.companyId ?? "dragon19";
+
     if (
       customMapping &&
       Object.keys(customMapping).length > 0 &&
       shouldSaveMapping
     ) {
-      await saveColumnMappingRules(
-        { headerToFieldKey: customMapping },
-        auth.session.sub,
+      await runWithCompany(activeCompanyId, () =>
+        saveColumnMappingRules(
+          { headerToFieldKey: customMapping },
+          auth.session.sub,
+        ),
       );
       await recordAuditLog({
         actor: auth.session.sub,
@@ -137,12 +142,14 @@ export async function POST(request: Request) {
     }
 
     if (!streamMode) {
-      const result = await importWorkbook({
-        filename: safeFilename,
-        buffer,
-        source: "upload",
-        customMapping,
-      });
+      const result = await runWithCompany(activeCompanyId, () =>
+        importWorkbook({
+          filename: safeFilename,
+          buffer,
+          source: "upload",
+          customMapping,
+        }),
+      );
       await recordAuditLog({
         actor: auth.session.sub,
         action: "imports.upload",
@@ -171,15 +178,19 @@ export async function POST(request: Request) {
         };
 
         try {
-          const result = await importWorkbook({
-            filename: safeFilename,
-            buffer,
-            source: "upload",
-            customMapping,
-            onProgress: (event) => {
-              send({ type: "progress", ...event });
-            },
-          });
+          const result = await runWithCompany(
+            auth.session.companyId ?? "dragon19",
+            () =>
+              importWorkbook({
+                filename: safeFilename,
+                buffer,
+                source: "upload",
+                customMapping,
+                onProgress: (event) => {
+                  send({ type: "progress", ...event });
+                },
+              }),
+          );
           await recordAuditLog({
             actor: auth.session.sub,
             action: "imports.upload",

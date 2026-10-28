@@ -23,6 +23,7 @@ export type Primitive = string | number | boolean | Date | null;
 export interface ParseWorkbookOptions {
   customMapping?: Record<string, string>;
   unknownColumnCategories?: Record<string, UnknownColumnCategory>;
+  preloadedSheets?: { name: string; rows: Primitive[][] }[];
 }
 
 export interface IngestWarning {
@@ -992,7 +993,7 @@ export async function parseWorkbook(
   input: Buffer | ArrayBuffer,
   options?: ParseWorkbookOptions,
 ): Promise<ParsedWorkbook> {
-  const sheets = await readInputSheets(input);
+  const sheets = options?.preloadedSheets ?? (await readInputSheets(input));
   const detail = findDetailSheet(sheets, options?.customMapping);
   const headers = detail.mapping.map((entry) => entry.header);
   const columnCount = headers.length;
