@@ -25,6 +25,7 @@ export default async function BillDetailPage({
 
   return (
     <>
+      <style media="print">{"@page { size: A4 portrait; margin: 8mm; }"}</style>
       <div className="bill-toolbar no-print">
         <Button asChild variant="ghost" className="back-link px-2">
           <Link href="/bills">
@@ -53,7 +54,7 @@ export default async function BillDetailPage({
         invoiceNo={row.invoiceNo}
         channel={row.channel}
         orderCode={row.orderCode}
-        customerName={row.customerName}
+        customerName={row.buyerName || row.customerName}
         trackingNo={row.trackingNo}
         courier={row.courier}
         discountCode={row.discountCode}

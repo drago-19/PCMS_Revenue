@@ -120,10 +120,10 @@ export default async function DashboardPage() {
             <div className="hero-main">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="hero-label">
-                  <span className="size-2 rounded-full bg-[#00f2ea] shadow-[0_0_8px_#00f2ea]" />
+                  <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
                   รอบชำระเงินล่าสุด · Latest Settlement
                 </p>
-                <Badge variant="glass" className="pill">
+                <Badge variant="neutral" className="border-border bg-white/80 text-foreground">
                   อัปเดตจาก {stats.importCount} ไฟล์
                 </Badge>
               </div>
@@ -133,29 +133,29 @@ export default async function DashboardPage() {
               </p>
               <p className="hero-amount">{formatTHB(latest.orderPayout)}</p>
               <div className="hero-pills">
-                <Badge variant="glass" className="pill">
+                <Badge variant="neutral" className="border-border bg-white px-3 py-1 text-xs font-semibold text-foreground shadow-2xs">
                   {latest.orderCount.toLocaleString("th-TH")} บิลคำสั่งซื้อ
                 </Badge>
-                <Badge variant="glass" className="pill">
+                <Badge variant="neutral" className="border-border bg-white px-3 py-1 text-xs font-semibold text-foreground shadow-2xs">
                   รายได้รวม {formatTHB(latest.orderIncome)}
                 </Badge>
-                <Badge variant="glass" className="pill">
+                <Badge variant="neutral" className="border-border bg-white px-3 py-1 text-xs font-semibold text-foreground shadow-2xs">
                   หักค่าธรรมเนียม {formatTHB(latest.orderFees)}
                 </Badge>
                 {latest.otherCount > 0 ? (
-                  <Badge variant="glass" className="pill">
+                  <Badge variant="neutral" className="border-border bg-white px-3 py-1 text-xs font-semibold text-foreground shadow-2xs">
                     รายการอื่น {formatTHB(latest.otherPayout)}
                   </Badge>
                 ) : null}
               </div>
               <div className="hero-actions">
-                <Button asChild variant="light">
+                <Button asChild variant="default">
                   <Link href={`/days/${latest.date}`}>
                     เปิดดูรอบชำระนี้ ({latest.orderCount.toLocaleString("th-TH")} บิล){" "}
                     <IconChevronRight size={16} />
                   </Link>
                 </Button>
-                <Button asChild variant="outline-light">
+                <Button asChild variant="outline">
                   <Link href={`/days/${latest.date}/invoices`}>
                     <IconReceipt size={16} /> พิมพ์ใบกำกับภาษีทั้งรอบ
                   </Link>

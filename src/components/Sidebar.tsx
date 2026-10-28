@@ -3,7 +3,13 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { KeyRoundIcon, LogOutIcon, MenuIcon, ShieldCheckIcon } from "lucide-react";
+import {
+  KeyRoundIcon,
+  LogOutIcon,
+  MenuIcon,
+  SettingsIcon,
+  ShieldCheckIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,6 +90,14 @@ const items = [
     icon: IconHistory,
     match: (pathname: string) =>
       pathname === "/history" || pathname.startsWith("/import/"),
+  },
+  {
+    href: "/settings",
+    label: "ตั้งค่าเอกสาร / บริษัท",
+    sub: "Document Settings",
+    icon: SettingsIcon,
+    match: (pathname: string) =>
+      pathname === "/settings" || pathname.startsWith("/settings/"),
   },
 ];
 
@@ -316,7 +330,7 @@ export function Sidebar() {
 
   return (
     <>
-      <div className="mobile-topbar no-print flex min-[980px]:hidden items-center justify-between gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
+      <div className="mobile-topbar no-print flex min-[1100px]:hidden items-center justify-between gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
         <Link
           href="/"
           className="brand inline-flex min-h-[40px] items-center gap-2.5 px-1"
@@ -374,7 +388,7 @@ export function Sidebar() {
         </Sheet>
       </div>
 
-      <aside className="sidebar no-print hidden min-[980px]:flex">
+      <aside className="sidebar no-print hidden min-[1100px]:flex">
         <Link href="/" className="brand min-h-[44px]">
           <span className="brand-mark">
             <AppMark size={38} />

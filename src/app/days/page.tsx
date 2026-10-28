@@ -19,6 +19,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -34,6 +35,29 @@ export const dynamic = "force-dynamic";
 
 export const metadata = { title: "รอบชำระเงินรายวัน" };
 
+const THAI_MONTHS_SHORT = [
+  "",
+  "ม.ค.",
+  "ก.พ.",
+  "มี.ค.",
+  "เม.ย.",
+  "พ.ค.",
+  "มิ.ย.",
+  "ก.ค.",
+  "ส.ค.",
+  "ก.ย.",
+  "ต.ค.",
+  "พ.ย.",
+  "ธ.ค.",
+];
+
+function formatYearMonthLabel(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  if (!m) return ym;
+  const monthIdx = Number(m[2]);
+  return `${THAI_MONTHS_SHORT[monthIdx] ?? m[2]} ${m[1]}`;
+}
+
 export default async function DailyBatchesPage({
   searchParams,
 }: {
@@ -46,13 +70,38 @@ export default async function DailyBatchesPage({
   const [stats, result, allBatches] = await Promise.all([
     getOverallStats(),
     listDailyBatchesPaged({ page, pageSize: 20, q }),
-    listDailyBatches(60),
+    listDailyBatches(1000),
   ]);
 
   const availableDates = allBatches.map((b) => ({
     date: b.date,
     count: b.orderCount,
   }));
+
+  const monthSummaryMap = new Map<
+    string,
+    { ym: string; days: number; orders: number; payout: number }
+  >();
+  for (const b of allBatches) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.date)) continue;
+    const ym = b.date.slice(0, 7);
+    const cur = monthSummaryMap.get(ym) ?? {
+      ym,
+      days: 0,
+      orders: 0,
+      payout: 0,
+    };
+    cur.days += 1;
+    cur.orders += b.orderCount;
+    cur.payout += b.totalPayout;
+    monthSummaryMap.set(ym, cur);
+  }
+  const availableMonths = [...monthSummaryMap.values()].sort((a, b) =>
+    b.ym.localeCompare(a.ym),
+  );
+  const activeMonthForPrint = /^\d{4}-\d{2}$/.test(q)
+    ? q
+    : availableMonths[0]?.ym ?? "";
 
   return (
     <div className="workspace-page">
@@ -108,44 +157,49 @@ export default async function DailyBatchesPage({
       </div>
 
       <Card className="workspace-table-card">
-        <div className="shrink-0 border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
+        <div className="sticky top-14 z-20 shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc]/95 px-4 py-3 backdrop-blur-md min-[640px]:px-5 min-[1100px]:top-0">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-bold text-foreground sm:text-base">
                 ตารางรอบการชำระเงินรายวัน (Daily Settlement Statements)
               </h2>
               <p className="text-xs text-muted-foreground">
-                คลิกที่วันที่เพื่อดูรายการบิลเฉพาะของรอบนั้น (แสดงหน้าละ 20 รอบ)
+                เลือกกรองรายเดือนหรือรายวันจากปุ่มปฏิทินด้านขวา (แสดงหน้าละ 20 รอบ)
               </p>
             </div>
 
-            <form className="flex flex-wrap items-center gap-2" method="get">
+            <div className="flex flex-wrap items-center gap-2">
               <DatePickerField
                 name="q"
                 defaultValue={q}
-                placeholder="ทุกรอบชำระ (เลือกวันที่)"
+                placeholder="ทุกรอบชำระ (เลือกเดือน/วัน)"
                 availableDates={availableDates}
                 basePath="/days"
               />
-              <Button
-                type="submit"
-                variant="default"
-                size="sm"
-                className="h-10 min-h-[40px]"
-              >
-                <IconSearch size={15} /> กรองวันที่
-              </Button>
-              {q ? (
+              {activeMonthForPrint ? (
                 <Button
                   asChild
                   variant="outline"
                   size="sm"
                   className="h-10 min-h-[40px]"
                 >
+                  <Link href={`/days/${activeMonthForPrint}/invoices`}>
+                    <IconReceipt size={15} /> พิมพ์ใบกำกับฯ เดือน{" "}
+                    {formatYearMonthLabel(activeMonthForPrint)}
+                  </Link>
+                </Button>
+              ) : null}
+              {q ? (
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="sm"
+                  className="h-10 min-h-[40px] text-muted-foreground hover:text-foreground"
+                >
                   <Link href="/days">ล้างตัวกรอง</Link>
                 </Button>
               ) : null}
-            </form>
+            </div>
           </div>
         </div>
 
@@ -179,73 +233,158 @@ export default async function DailyBatchesPage({
             <Table variant="stack">
               <TableHeader>
                 <TableRow>
-                  <TableHead>วันที่ชำระเงิน (Settlement Date)</TableHead>
+                  <TableHead>วันที่ชำระเงิน</TableHead>
                   <TableHead className="num">จำนวนบิล</TableHead>
-                  <TableHead className="num">รายได้รวม</TableHead>
-                  <TableHead className="num">หักค่าธรรมเนียม</TableHead>
+                  <TableHead className="num min-[768px]:max-[959px]:hidden">
+                    รายได้รวม
+                  </TableHead>
+                  <TableHead className="num min-[768px]:max-[959px]:hidden">
+                    หักค่าธรรมเนียม
+                  </TableHead>
                   <TableHead className="num">ยอดชำระสุทธิ (บิล)</TableHead>
-                  <TableHead className="num">ยอดสุทธิทั้งรอบ</TableHead>
+                  <TableHead className="num min-[768px]:max-[1359px]:hidden">
+                    ยอดสุทธิทั้งรอบ
+                  </TableHead>
                   <TableHead className="num">การจัดการ</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {result.rows.map((batch) => (
-                  <TableRow key={batch.date}>
-                    <TableCell data-label="วันที่ชำระเงิน">
-                      <Link
-                        className="link inline-flex min-h-[38px] items-center gap-2"
-                        href={`/days/${batch.date}`}
+                {result.rows.map((batch) => {
+                  const feeRatio =
+                    batch.orderIncome > 0
+                      ? Math.min(
+                          100,
+                          Math.round(
+                            (Math.abs(batch.orderFees) / batch.orderIncome) *
+                              1000,
+                          ) / 10,
+                        )
+                      : 0;
+                  return (
+                    <TableRow key={batch.date}>
+                      <TableCell
+                        data-label="วันที่ชำระเงิน"
+                        className="whitespace-nowrap"
                       >
-                        <span className="size-2 rounded-full bg-primary" />
-                        <span>{formatDateLong(batch.date)}</span>
-                        <span className="text-xs font-normal text-muted-foreground">
-                          ({formatDate(batch.date)})
+                        <Link
+                          className="link inline-flex min-h-[40px] items-center gap-2 font-bold whitespace-nowrap text-[#0f172a] hover:text-primary"
+                          href={`/days/${batch.date}`}
+                        >
+                          <span className="size-2.5 shrink-0 rounded-full bg-primary shadow-[0_0_0_3px_rgba(254,44,85,0.14)]" />
+                          <span className="whitespace-nowrap">
+                            {formatDateLong(batch.date)}
+                          </span>
+                          <span className="mono shrink-0 rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-1.5 py-0.5 text-xs font-semibold text-[#475569]">
+                            {formatDate(batch.date)}
+                          </span>
+                        </Link>
+                      </TableCell>
+                      <TableCell data-label="จำนวนบิล" className="num">
+                        <Badge
+                          variant="neutral"
+                          className="border-[#cbd5e1] bg-[#f8fafc] font-bold text-[#0f172a]"
+                        >
+                          {batch.orderCount.toLocaleString("th-TH")} บิล
+                        </Badge>
+                      </TableCell>
+                      <TableCell
+                        data-label="รายได้รวม"
+                        className="num font-semibold text-[#0f172a] min-[768px]:max-[959px]:hidden"
+                      >
+                        {formatTHB(batch.orderIncome)}
+                      </TableCell>
+                      <TableCell
+                        data-label="หักค่าธรรมเนียม"
+                        className="num danger font-semibold min-[768px]:max-[959px]:hidden"
+                      >
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span>{formatTHB(batch.orderFees)}</span>
+                          {feeRatio > 0 ? (
+                            <span className="text-xs font-normal text-[#64748b]">
+                              ({feeRatio}% ของรายได้)
+                            </span>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        data-label="ยอดชำระสุทธิ (บิล)"
+                        className="num payout-col positive font-extrabold text-[13.5px] min-[1280px]:text-[14px]"
+                      >
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span>{formatTHB(batch.orderPayout)}</span>
+                          <span className="hidden text-xs font-normal text-muted-foreground min-[768px]:max-[959px]:inline">
+                            รับ {formatTHB(batch.orderIncome)} · หัก{" "}
+                            {formatTHB(batch.orderFees)}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        data-label="ยอดสุทธิทั้งรอบ"
+                        className="num font-bold text-[#0f172a] min-[768px]:max-[1359px]:hidden"
+                      >
+                        {formatTHB(batch.totalPayout)}
+                      </TableCell>
+                      <TableCell data-label="การจัดการ" className="num">
+                        <span className="inline-flex flex-wrap items-center justify-end gap-1.5 min-[1100px]:flex-nowrap whitespace-nowrap">
+                          <Button asChild variant="default" size="xs">
+                            <Link href={`/days/${batch.date}`}>
+                              ดูบิลในรอบ <IconChevronRight size={14} />
+                            </Link>
+                          </Button>
+                          <Button asChild variant="outline" size="xs">
+                            <Link href={`/days/${batch.date}/invoices`}>
+                              <IconReceipt size={14} /> พิมพ์ใบกำกับฯ
+                            </Link>
+                          </Button>
                         </span>
-                      </Link>
-                    </TableCell>
-                    <TableCell data-label="จำนวนบิล" className="num">
-                      <Badge variant="neutral">
-                        {batch.orderCount.toLocaleString("th-TH")} บิล
-                      </Badge>
-                    </TableCell>
-                    <TableCell data-label="รายได้รวม" className="num font-semibold">
-                      {formatTHB(batch.orderIncome)}
-                    </TableCell>
-                    <TableCell
-                      data-label="หักค่าธรรมเนียม"
-                      className="num danger font-semibold"
-                    >
-                      {formatTHB(batch.orderFees)}
-                    </TableCell>
-                    <TableCell
-                      data-label="ยอดชำระสุทธิ (บิล)"
-                      className="num positive strong"
-                    >
-                      {formatTHB(batch.orderPayout)}
-                    </TableCell>
-                    <TableCell
-                      data-label="ยอดสุทธิทั้งรอบ"
-                      className="num font-semibold"
-                    >
-                      {formatTHB(batch.totalPayout)}
-                    </TableCell>
-                    <TableCell data-label="การจัดการ" className="num">
-                      <span className="inline-flex flex-nowrap items-center justify-end gap-2 whitespace-nowrap">
-                        <Button asChild variant="default" size="xs">
-                          <Link href={`/days/${batch.date}`}>
-                            เปิดดูบิลในรอบ <IconChevronRight size={14} />
-                          </Link>
-                        </Button>
-                        <Button asChild variant="outline" size="xs">
-                          <Link href={`/days/${batch.date}/invoices`}>
-                            <IconReceipt size={14} /> พิมพ์ใบกำกับฯ ทั้งรอบ
-                          </Link>
-                        </Button>
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
+              <TableFooter>
+                <TableRow>
+                  <TableCell
+                    data-label="สรุปยอดรวมสะสม"
+                    className="font-bold text-[#0f172a]"
+                  >
+                    รวมทุกรอบชำระ ({result.total.toLocaleString("th-TH")} รอบ)
+                  </TableCell>
+                  <TableCell data-label="รวมจำนวนบิล" className="num">
+                    <Badge
+                      variant="neutral"
+                      className="border-[#cbd5e1] bg-white font-bold text-[#0f172a]"
+                    >
+                      {stats.orderCount.toLocaleString("th-TH")} บิล
+                    </Badge>
+                  </TableCell>
+                  <TableCell
+                    data-label="รวมรายได้"
+                    className="num font-bold text-[#0f172a] min-[768px]:max-[959px]:hidden"
+                  >
+                    {formatTHB(stats.totalIncome)}
+                  </TableCell>
+                  <TableCell
+                    data-label="รวมค่าธรรมเนียม"
+                    className="num danger font-bold min-[768px]:max-[959px]:hidden"
+                  >
+                    {formatTHB(stats.totalFees)}
+                  </TableCell>
+                  <TableCell
+                    data-label="รวมยอดชำระสุทธิ"
+                    className="num payout-col positive font-extrabold text-[14px]"
+                  >
+                    {formatTHB(stats.totalPayout)}
+                  </TableCell>
+                  <TableCell
+                    data-label="รวมยอดสุทธิทั้งรอบ"
+                    className="num font-extrabold text-[#0f172a] min-[768px]:max-[1359px]:hidden"
+                  >
+                    {formatTHB(stats.totalPayout)}
+                  </TableCell>
+                  <TableCell data-label="" className="max-[767px]:hidden" />
+                </TableRow>
+              </TableFooter>
             </Table>
 
             <PaginationBar

@@ -131,9 +131,13 @@ export default async function ImportHistoryPage({
               <TableHeader>
                 <TableRow>
                   <TableHead>ไฟล์ที่นำเข้า</TableHead>
-                  <TableHead>นำเข้าเมื่อ</TableHead>
+                  <TableHead className="min-[768px]:max-[1439px]:hidden">
+                    นำเข้าเมื่อ
+                  </TableHead>
                   <TableHead>รอบชำระ</TableHead>
-                  <TableHead className="num">จำนวนแถว</TableHead>
+                  <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                    จำนวนแถว
+                  </TableHead>
                   <TableHead className="num">จำนวนบิล</TableHead>
                   <TableHead>สถานะ</TableHead>
                   <TableHead className="num">การจัดการ</TableHead>
@@ -143,59 +147,80 @@ export default async function ImportHistoryPage({
                 {result.rows.map((item) => (
                   <TableRow key={item.id}>
                     <TableCell data-label="ไฟล์ที่นำเข้า">
-                      <ExcelFilePreviewDialog
-                        importId={item.id}
-                        filename={item.filename}
-                        fileType={item.fileType}
-                        rowCount={item.rowCount}
-                        triggerVariant="filename"
-                      />
-                      <span className="file-meta flex flex-wrap items-center gap-1.5">
-                        <Badge
-                          variant={
-                            item.fileType === "oms_orders"
-                              ? "info"
+                      <div className="flex flex-col gap-1">
+                        <ExcelFilePreviewDialog
+                          importId={item.id}
+                          filename={item.filename}
+                          fileType={item.fileType}
+                          rowCount={item.rowCount}
+                          triggerVariant="filename"
+                        />
+                        <span className="file-meta flex flex-wrap items-center gap-1.5 text-xs text-[#475569]">
+                          <Badge
+                            variant={
+                              item.fileType === "oms_orders"
+                                ? "info"
+                                : item.fileType === "oms_items"
+                                  ? "warning"
+                                  : "default"
+                            }
+                            size="sm"
+                          >
+                            {item.fileType === "oms_orders"
+                              ? "1. ออเดอร์ใน shipnity"
                               : item.fileType === "oms_items"
-                                ? "warning"
-                                : "default"
-                          }
-                          size="sm"
-                        >
-                          {item.fileType === "oms_orders"
-                            ? "1. ออเดอร์ OMS"
-                            : item.fileType === "oms_items"
-                              ? "3. รายการสินค้า OMS"
-                              : "2. รายได้ TikTok"}
-                        </Badge>
-                        <span>
-                          {formatFileSize(item.fileSize)} ·{" "}
-                          {item.source === "cli" ? "CLI" : "อัปโหลดผ่านเว็บ"}
+                                ? "3. สินค้าในออเดอร์ shipnity"
+                                : "2. รายได้ TikTok"}
+                          </Badge>
+                          <span className="font-medium text-[#64748b]">
+                            {formatFileSize(item.fileSize)} ·{" "}
+                            {item.source === "cli" ? "CLI" : "อัปโหลดผ่านเว็บ"}
+                          </span>
+                          <span className="hidden text-[#64748b] min-[768px]:max-[1439px]:inline">
+                            · {formatDateTime(item.importedAt)}
+                          </span>
                         </span>
-                      </span>
+                      </div>
                     </TableCell>
-                    <TableCell data-label="นำเข้าเมื่อ">
+                    <TableCell
+                      data-label="นำเข้าเมื่อ"
+                      className="whitespace-nowrap font-medium text-[#334155] min-[768px]:max-[1439px]:hidden"
+                    >
                       {formatDateTime(item.importedAt)}
                     </TableCell>
-                    <TableCell data-label="รอบชำระ">
-                      {item.periodStart
-                        ? item.periodStart === item.periodEnd
-                          ? formatDate(item.periodStart)
-                          : `${formatDate(item.periodStart)} – ${formatDate(
-                              item.periodEnd ?? item.periodStart,
-                            )}`
-                        : "-"}
+                    <TableCell
+                      data-label="รอบชำระ"
+                      className="whitespace-nowrap"
+                    >
+                      {item.periodStart ? (
+                        <span className="mono inline-flex items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-2 py-0.5 text-xs font-semibold text-[#1e293b]">
+                          {item.periodStart === item.periodEnd
+                            ? formatDate(item.periodStart)
+                            : `${formatDate(item.periodStart)} – ${formatDate(
+                                item.periodEnd ?? item.periodStart,
+                              )}`}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </TableCell>
-                    <TableCell data-label="จำนวนแถว" className="num">
+                    <TableCell
+                      data-label="จำนวนแถว"
+                      className="num font-medium text-[#334155] min-[768px]:max-[1099px]:hidden"
+                    >
                       {item.rowCount.toLocaleString("th-TH")}
                     </TableCell>
-                    <TableCell data-label="จำนวนบิล" className="num font-semibold">
-                      {item.orderCount.toLocaleString("th-TH")}
+                    <TableCell
+                      data-label="จำนวนบิล"
+                      className="num payout-col font-extrabold text-[#0f172a]"
+                    >
+                      {item.orderCount.toLocaleString("th-TH")} ใบ
                     </TableCell>
                     <TableCell data-label="สถานะ">
                       <StatusBadge status={item.status} />
                     </TableCell>
                     <TableCell data-label="การจัดการ" className="num">
-                      <span className="inline-flex flex-wrap items-center justify-end gap-2 min-[640px]:flex-nowrap min-[640px]:whitespace-nowrap">
+                      <span className="inline-flex flex-wrap items-center justify-end gap-1.5 min-[1100px]:flex-nowrap whitespace-nowrap">
                         <ExcelFilePreviewDialog
                           importId={item.id}
                           filename={item.filename}
@@ -203,7 +228,7 @@ export default async function ImportHistoryPage({
                           rowCount={item.rowCount}
                         />
                         {item.periodStart ? (
-                          <Button asChild variant="ghost" size="xs">
+                          <Button asChild variant="outline" size="xs">
                             <Link href={`/days/${item.periodStart}`}>
                               ดูรอบชำระ
                             </Link>

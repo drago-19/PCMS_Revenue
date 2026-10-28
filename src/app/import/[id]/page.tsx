@@ -1,16 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { BillPreviewTrigger } from "@/components/BillPreviewDialog";
 import { DeleteImportButton } from "@/components/DeleteImportButton";
 import {
   ExcelFilePreviewDialog,
   ExcelSpreadsheetViewer,
 } from "@/components/ExcelPreviewDialog";
+import { UnknownColumnsManager } from "@/components/UnknownColumnsManager";
 import {
   MoneyDiffBadge,
   PageHeader,
   StatCard,
   StatusBadge,
 } from "@/components/PageHeader";
+import { getColumnMappingRules } from "@/lib/column-mapping-settings";
 import {
   IconAlert,
   IconArrowLeft,
@@ -31,7 +34,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate, formatDateTime, formatTHB } from "@/lib/format";
-import { getImport, getImportSpreadsheetData } from "@/lib/queries";
+import { toNumber } from "@/lib/ingest/parse";
+import {
+  getImport,
+  getImportSpreadsheetData,
+  listDuplicateOrderTransactionsForImport,
+} from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +86,14 @@ export default async function ImportReportPage({
     activeTab === "spreadsheet"
       ? await getImportSpreadsheetData(importId)
       : null;
+
+  const duplicateOrderRows =
+    activeTab === "details"
+      ? await listDuplicateOrderTransactionsForImport(importId)
+      : [];
+
+  const columnMappingRules =
+    activeTab === "details" ? await getColumnMappingRules() : null;
 
   const mappedCount = importRow.mapping.filter((entry) => entry.fieldKey).length;
   const totalHeaders = importRow.mapping.filter((entry) => entry.header).length;
@@ -165,7 +181,7 @@ export default async function ImportReportPage({
       <Card className="workspace-table-card">
         <div className="shrink-0 border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-[#cbd5e1] bg-[#e2e8f0] p-1">
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs">
               <Button
                 asChild
                 variant={activeTab === "spreadsheet" ? "default" : "ghost"}
@@ -173,7 +189,7 @@ export default async function ImportReportPage({
                 className={
                   activeTab === "spreadsheet"
                     ? "shadow-xs"
-                    : "text-[#334155] hover:bg-white/70 hover:text-[#0f172a]"
+                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=spreadsheet`}>
@@ -187,7 +203,7 @@ export default async function ImportReportPage({
                 className={
                   activeTab === "reconcile"
                     ? "shadow-xs"
-                    : "text-[#334155] hover:bg-white/70 hover:text-[#0f172a]"
+                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=reconcile`}>
@@ -201,7 +217,7 @@ export default async function ImportReportPage({
                 className={
                   activeTab === "mapping"
                     ? "shadow-xs"
-                    : "text-[#334155] hover:bg-white/70 hover:text-[#0f172a]"
+                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=mapping`}>
@@ -215,7 +231,7 @@ export default async function ImportReportPage({
                 className={
                   activeTab === "details"
                     ? "shadow-xs"
-                    : "text-[#334155] hover:bg-white/70 hover:text-[#0f172a]"
+                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=details`}>
@@ -243,32 +259,54 @@ export default async function ImportReportPage({
                     <TableHead className="num">จากชีตรายละเอียด</TableHead>
                     <TableHead className="num">จากชีตสรุป</TableHead>
                     <TableHead className="num">ส่วนต่าง</TableHead>
-                    <TableHead className="icon-cell" aria-label="ผลตรวจ" />
+                    <TableHead className="num">ผลตรวจ</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {importRow.reconciliation.metrics.map((metric) => (
-                    <TableRow key={metric.key}>
-                      <TableCell data-label="รายการ">{metric.label}</TableCell>
-                      <TableCell data-label="จากชีตรายละเอียด" className="num">
+                    <TableRow
+                      key={metric.key}
+                      className={
+                        metric.matched === false
+                          ? "bg-[#fffbeb]/70 hover:bg-[#fef3c7]/60"
+                          : undefined
+                      }
+                    >
+                      <TableCell
+                        data-label="รายการ"
+                        className="font-semibold text-[#0f172a]"
+                      >
+                        {metric.label}
+                      </TableCell>
+                      <TableCell
+                        data-label="จากชีตรายละเอียด"
+                        className="num font-semibold text-[#0f172a]"
+                      >
                         {formatTHB(metric.detail)}
                       </TableCell>
-                      <TableCell data-label="จากชีตสรุป" className="num">
+                      <TableCell
+                        data-label="จากชีตสรุป"
+                        className="num font-medium text-[#334155]"
+                      >
                         {metric.report === null ? "—" : formatTHB(metric.report)}
                       </TableCell>
                       <TableCell
                         data-label="ส่วนต่าง"
-                        className={`num${metric.matched === false ? " danger" : ""}`}
+                        className={`num font-bold${metric.matched === false ? " danger" : " text-[#059669]"}`}
                       >
                         {metric.diff === null ? "—" : formatTHB(metric.diff)}
                       </TableCell>
-                      <TableCell data-label="ผลตรวจ" className="icon-cell">
+                      <TableCell data-label="ผลตรวจ" className="num">
                         {metric.matched === null ? (
                           <span className="muted">—</span>
                         ) : metric.matched ? (
-                          <IconCheckCircle size={17} className="ok-icon" />
+                          <Badge variant="success" size="sm">
+                            <IconCheckCircle size={13} /> ยอดตรง
+                          </Badge>
                         ) : (
-                          <IconAlert size={17} className="warn-icon" />
+                          <Badge variant="warning" size="sm">
+                            <IconAlert size={13} /> มีส่วนต่าง
+                          </Badge>
                         )}
                       </TableCell>
                     </TableRow>
@@ -355,74 +393,173 @@ export default async function ImportReportPage({
                 </div>
               ) : (
                 <ul className="warning-list">
-                  {warnings.map((warning, index) => (
-                    <li
-                      key={`${warning.code}-${index}`}
-                      className={`severity-${warning.severity}`}
-                    >
-                      <IconAlert size={17} />
-                      <div>
-                        <strong>{warning.code}</strong>
-                        <span>{warning.message}</span>
-                      </div>
-                    </li>
-                  ))}
+                  {warnings.map((warning, index) => {
+                    const isDuplicateOrderWarning =
+                      warning.code === "DUPLICATE_ORDER_ROWS" &&
+                      duplicateOrderRows.length > 0;
+                    const enrichedMessage = isDuplicateOrderWarning
+                      ? `พบคำสั่งซื้อที่ปรากฏหลายแถวในไฟล์ Excel จำนวน ${duplicateOrderRows.length} รายการ (${duplicateOrderRows
+                          .slice(0, 6)
+                          .map((tx) => {
+                            const rowNums =
+                              tx.normalized.rowIndexes?.length > 0
+                                ? `แถว ${tx.normalized.rowIndexes.join(", ")}`
+                                : `${tx.normalized.sourceRows} แถว`;
+                            return `#${tx.externalId} [${rowNums}]`;
+                          })
+                          .join(" · ")}${
+                          duplicateOrderRows.length > 6
+                            ? ` และอีก ${duplicateOrderRows.length - 6} รายการ`
+                            : ""
+                        }) — ระบบรวมยอดสุทธิเป็นบิลเดียวให้แล้ว (ดูรายละเอียดด้านล่าง)`
+                      : warning.message;
+
+                    return (
+                      <li
+                        key={`${warning.code}-${index}`}
+                        className={`severity-${warning.severity}`}
+                      >
+                        <IconAlert size={17} />
+                        <div>
+                          <strong>{warning.code}</strong>
+                          <span>{enrichedMessage}</span>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </Card>
 
-            <div className="grid grid-cols-1 gap-4 min-[980px]:grid-cols-2">
+            {duplicateOrderRows.length > 0 ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>คอลัมน์ใหม่ที่ยังไม่รู้จัก</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CardTitle>
+                      รายการคำสั่งซื้อที่ปรากฏหลายแถวในไฟล์ Excel (รวมเป็นบิลเดียวแล้ว)
+                    </CardTitle>
+                    <Badge variant="warning" size="sm">
+                      {duplicateOrderRows.length.toLocaleString("th-TH")} คำสั่งซื้อ
+                    </Badge>
+                  </div>
                   <span className="muted small">
-                    {importRow.unknownColumns.length} คอลัมน์
+                    เกิดจากออเดอร์ที่มีทั้งแถวขายปกติและแถวคืนเงิน/ปรับปรุงยอดแยกบรรทัดกันในไฟล์ TikTok
                   </span>
                 </CardHeader>
-                {importRow.unknownColumns.length === 0 ? (
-                  <div className="inline-empty success">
-                    <IconCheckCircle size={20} />
-                    <span>ไม่มีคอลัมน์ใหม่</span>
-                  </div>
-                ) : (
-                  <Table variant="stack">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>คอลัมน์</TableHead>
-                        <TableHead className="num">มีค่า</TableHead>
-                        <TableHead className="num">ไม่ใช่ศูนย์</TableHead>
-                        <TableHead>ตัวอย่าง</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {importRow.unknownColumns.map((column) => (
-                        <TableRow key={column.col}>
-                          <TableCell data-label="คอลัมน์">
-                            <strong>{column.header}</strong>
-                            {column.moneyLike ? (
-                              <Badge variant="warning" size="sm" className="ml-1.5">
-                                อาจเป็นเงิน
+                <Table variant="stack">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>หมายเลขคำสั่งซื้อ</TableHead>
+                      <TableHead>บรรทัดใน Excel</TableHead>
+                      <TableHead>สาเหตุที่มีหลายแถว</TableHead>
+                      <TableHead className="num">รายได้สุทธิ</TableHead>
+                      <TableHead className="num">ค่าธรรมเนียม</TableHead>
+                      <TableHead className="num">ยอดรับสุทธิ (หลังรวม)</TableHead>
+                      <TableHead className="num">ตรวจสอบบิล</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {duplicateOrderRows.map((tx) => {
+                      const rowIndexes = tx.normalized.rowIndexes ?? [];
+                      const sourceRows =
+                        tx.normalized.sourceRows ?? Math.max(2, rowIndexes.length);
+                      const productAfterDiscount = toNumber(
+                        tx.normalized.fields.productAfterDiscount,
+                      );
+                      const refundAfterDiscount = toNumber(
+                        tx.normalized.fields.refundAfterDiscount,
+                      );
+                      const reasonText =
+                        productAfterDiscount > 0 && refundAfterDiscount < 0
+                          ? Math.abs(productAfterDiscount + refundAfterDiscount) < 0.01
+                            ? `ขาย ${formatTHB(productAfterDiscount)} + คืนเงินเต็มจำนวน ${formatTHB(refundAfterDiscount)}`
+                            : `ขาย ${formatTHB(productAfterDiscount)} + คืนเงินบางส่วน ${formatTHB(refundAfterDiscount)}`
+                          : `แยกบันทึก ${sourceRows} แถวในรอบชำระเดียวกัน`;
+
+                      return (
+                        <TableRow key={tx.id}>
+                          <TableCell data-label="หมายเลขคำสั่งซื้อ">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="mono font-bold text-[#0f172a]">
+                                #{tx.externalId}
+                              </span>
+                              {tx.orderCode ? (
+                                <Badge variant="secondary" size="sm">
+                                  ผูก #{tx.orderCode}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <div className="mt-0.5 text-xs text-[#64748b]">
+                              สร้าง {formatDate(tx.createdDate)} · ชำระ{" "}
+                              {formatDate(tx.paidDate)}
+                            </div>
+                          </TableCell>
+                          <TableCell data-label="บรรทัดใน Excel">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Badge variant="warning" size="sm">
+                                {sourceRows} แถว
                               </Badge>
-                            ) : null}
+                              {rowIndexes.length > 0 ? (
+                                <span className="mono text-xs font-semibold text-[#334155]">
+                                  แถวที่ {rowIndexes.join(", ")}
+                                </span>
+                              ) : null}
+                            </div>
                           </TableCell>
-                          <TableCell data-label="มีค่า" className="num">
-                            {column.nonEmpty}
+                          <TableCell
+                            data-label="สาเหตุที่มีหลายแถว"
+                            className="text-xs font-medium text-[#334155]"
+                          >
+                            {reasonText}
                           </TableCell>
-                          <TableCell data-label="ไม่ใช่ศูนย์" className="num">
-                            {column.nonZeroNumeric}
+                          <TableCell
+                            data-label="รายได้สุทธิ"
+                            className="num font-semibold text-[#0f172a]"
+                          >
+                            {formatTHB(tx.income)}
                           </TableCell>
-                          <TableCell data-label="ตัวอย่าง" className="muted small">
-                            {column.samples.length > 0
-                              ? column.samples.join(", ")
-                              : "—"}
+                          <TableCell
+                            data-label="ค่าธรรมเนียม"
+                            className={`num font-semibold${tx.feeTotal < 0 ? " danger" : ""}`}
+                          >
+                            {formatTHB(tx.feeTotal)}
+                          </TableCell>
+                          <TableCell
+                            data-label="ยอดรับสุทธิ (หลังรวม)"
+                            className={`num font-bold${tx.payout < 0 ? " danger" : " positive"}`}
+                          >
+                            {formatTHB(tx.payout)}
+                          </TableCell>
+                          <TableCell data-label="ตรวจสอบบิล" className="num">
+                            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                              <BillPreviewTrigger
+                                row={tx}
+                                defaultTab="bill"
+                                triggerVariant="outline"
+                                label="เปิดดูบิล"
+                              />
+                            </div>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </Card>
+            ) : null}
 
+            <UnknownColumnsManager
+              importId={importRow.id}
+              unknownColumns={importRow.unknownColumns}
+              initialRules={
+                columnMappingRules ?? {
+                  headerToFieldKey: {},
+                  unknownColumnCategories: {},
+                }
+              }
+            />
+
+            <div className="grid grid-cols-1 gap-4">
               <Card padding="padded" className="card-pad">
                 <h2 className="card-title">ข้อมูลไฟล์ต้นฉบับ</h2>
                 <dl className="info-list">

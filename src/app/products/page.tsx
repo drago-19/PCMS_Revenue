@@ -17,6 +17,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -33,44 +34,27 @@ export default async function ProductsPage({
 }: {
   searchParams: Promise<{
     q?: string;
-    channel?: string;
     page?: string;
   }>;
 }) {
   const params = await searchParams;
   const q = (params.q ?? "").trim();
-  const channel = (params.channel ?? "all").trim();
   const page = Math.max(1, Number(params.page ?? "1") || 1);
 
   const result = await listSkuSummariesPaged({
     q,
-    channel,
     page,
     pageSize: 20,
   });
 
-  function buildHref(overrides: { nextPage?: number; nextChannel?: string }) {
-    const search = new URLSearchParams();
-    if (q) search.set("q", q);
-    const targetChannel =
-      overrides.nextChannel !== undefined ? overrides.nextChannel : channel;
-    if (targetChannel && targetChannel !== "all") {
-      search.set("channel", targetChannel);
-    }
-    const targetPage = overrides.nextPage ?? 1;
-    if (targetPage > 1) search.set("page", String(targetPage));
-    const query = search.toString();
-    return query ? `/products?${query}` : "/products";
-  }
-
-  const hasFilters = Boolean(q || (channel && channel !== "all"));
+  const hasFilters = Boolean(q);
 
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="Multi-Channel · SKU Summary Table"
+        eyebrow="TikTok Shop · SKU Summary Table"
         title="หมวดสรุปยอดขายตามรหัสสินค้า (SKU)"
-        description="ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table) แยกตามช่องทาง TikTok / Shopee / Facebook"
+        description="ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
         actions={
           <Button asChild variant="default">
             <Link href="/import">
@@ -84,14 +68,14 @@ export default async function ProductsPage({
         <StatCard
           label="รหัสสินค้าที่ขายได้ (SKU)"
           value={`${result.totals.skuCount.toLocaleString("th-TH")} รหัส`}
-          hint="รวมรหัสสินค้าจากไฟล์รายการสินค้า OMS"
+          hint="รวมรหัสสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity"
           tone="brand"
           icon={<IconFile size={19} />}
         />
         <StatCard
           label="จำนวนที่ขายได้รวม"
           value={`${result.totals.totalQty.toLocaleString("th-TH")} ชิ้น`}
-          hint="รวมทุกช่องทางจำหน่าย"
+          hint="รวมคำสั่งซื้อ TikTok Shop"
           tone="positive"
           icon={<IconReceipt size={19} />}
         />
@@ -115,47 +99,24 @@ export default async function ProductsPage({
         <div className="shrink-0 border-b border-border bg-[#f8fafc] px-4 py-2.5 min-[640px]:px-5">
           <div className="flex flex-col gap-2 min-[980px]:flex-row min-[980px]:items-center min-[980px]:justify-between">
             <div className="inline-flex flex-wrap items-center gap-1.5">
-              {[
-                { key: "all", label: "ทุกช่องทาง" },
-                { key: "TikTok", label: "TikTok" },
-                { key: "Shopee", label: "Shopee" },
-                { key: "Facebook", label: "Facebook" },
-              ].map((ch) => {
-                const active =
-                  (ch.key === "all" && (!channel || channel === "all")) ||
-                  channel === ch.key;
-                return (
-                  <Button
-                    key={ch.key}
-                    asChild
-                    variant={active ? "default" : "outline"}
-                    size="sm"
-                    className="h-10 min-h-[40px]"
-                  >
-                    <Link href={buildHref({ nextChannel: ch.key, nextPage: 1 })}>
-                      {ch.label}
-                    </Link>
-                  </Button>
-                );
-              })}
+              <Badge variant="default" size="default" className="font-bold">
+                TikTok Shop
+              </Badge>
             </div>
 
             <form
               className="flex flex-1 flex-wrap items-center gap-2 min-[640px]:flex-nowrap min-[980px]:justify-end"
               method="get"
             >
-              {channel && channel !== "all" ? (
-                <input type="hidden" name="channel" value={channel} />
-              ) : null}
               <div className="field h-10 min-w-[200px] flex-1 max-w-[340px] bg-white">
-                <IconSearch size={16} />
+                <IconSearch size={16} className="shrink-0" />
                 <Input
                   type="search"
                   name="q"
                   defaultValue={q}
                   placeholder="ค้นหารหัสสินค้า (SKU) หรือชื่อสินค้า..."
                   aria-label="ค้นหารหัสสินค้า"
-                  className="h-full border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                  className="h-full min-h-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
                 />
               </div>
               <Button
@@ -185,7 +146,7 @@ export default async function ProductsPage({
             <EmptyState
               icon={<IconFile size={28} />}
               title="ยังไม่มีข้อมูลรหัสสินค้า (SKU)"
-              description="อัปโหลดไฟล์รายการสินค้า OMS (ไฟล์ที่ 3) เพื่อให้ระบบสร้างตารางสรุปยอดขายตามรหัสสินค้าอัตโนมัติ"
+              description="อัปโหลดไฟล์ สินค้าในออเดอร์ shipnity (ไฟล์ที่ 3) เพื่อให้ระบบสร้างตารางสรุปยอดขายตามรหัสสินค้าอัตโนมัติ"
               action={
                 <Button asChild variant="default">
                   <Link href="/import">
@@ -200,84 +161,117 @@ export default async function ProductsPage({
             <Table variant="stack">
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12 text-center">#</TableHead>
                   <TableHead>รหัสสินค้า (SKU)</TableHead>
                   <TableHead>ชื่อสินค้า</TableHead>
-                  <TableHead className="num">ราคาตั้งต้น/ชิ้น</TableHead>
-                  <TableHead className="num">TikTok</TableHead>
-                  <TableHead className="num">Shopee</TableHead>
-                  <TableHead className="num">Facebook</TableHead>
+                  <TableHead className="num min-[768px]:max-[959px]:hidden">
+                    ราคาตั้งต้น/ชิ้น
+                  </TableHead>
                   <TableHead className="num">รวมจำนวนชิ้น</TableHead>
-                  <TableHead className="num">จำนวนออเดอร์</TableHead>
+                  <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                    จำนวนออเดอร์
+                  </TableHead>
                   <TableHead className="num">มูลค่ารวมตั้งต้น</TableHead>
                   <TableHead className="num">ดูบิล</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {result.rows.map((row) => (
-                  <TableRow key={row.skuCode}>
-                    <TableCell data-label="รหัสสินค้า (SKU)">
-                      <Badge variant="neutral" className="mono font-bold">
-                        {row.skuCode}
-                      </Badge>
-                    </TableCell>
-                    <TableCell data-label="ชื่อสินค้า" className="font-semibold">
-                      {row.productName}
-                    </TableCell>
-                    <TableCell data-label="ราคาตั้งต้น/ชิ้น" className="num">
-                      {formatTHB(row.defaultPrice)}
-                    </TableCell>
-                    <TableCell data-label="TikTok" className="num">
-                      {row.tiktokQty > 0 ? (
-                        <Badge variant="default" size="sm">
-                          {row.tiktokQty.toLocaleString("th-TH")}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell data-label="Shopee" className="num">
-                      {row.shopeeQty > 0 ? (
-                        <Badge variant="warning" size="sm">
-                          {row.shopeeQty.toLocaleString("th-TH")}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell data-label="Facebook" className="num">
-                      {row.facebookQty > 0 ? (
-                        <Badge variant="info" size="sm">
-                          {row.facebookQty.toLocaleString("th-TH")}
-                        </Badge>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell
-                      data-label="รวมจำนวนชิ้น"
-                      className="num font-extrabold text-primary"
-                    >
-                      {row.totalQty.toLocaleString("th-TH")} ชิ้น
-                    </TableCell>
-                    <TableCell data-label="จำนวนออเดอร์" className="num">
-                      {row.orderCount.toLocaleString("th-TH")} บิล
-                    </TableCell>
-                    <TableCell
-                      data-label="มูลค่ารวมตั้งต้น"
-                      className="num positive strong"
-                    >
-                      {formatTHB(row.grossAmount)}
-                    </TableCell>
-                    <TableCell data-label="ดูบิล" className="num">
-                      <Button asChild variant="secondary" size="xs">
-                        <Link href={`/bills?q=${encodeURIComponent(row.skuCode)}`}>
-                          ดูบิลสินค้านี้
-                        </Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {result.rows.map((row, idx) => {
+                  const rank = (result.page - 1) * result.pageSize + idx + 1;
+                  return (
+                    <TableRow key={row.skuCode}>
+                      <TableCell
+                        data-label="ลำดับ"
+                        className="text-center font-bold text-[#64748b]"
+                      >
+                        <span
+                          className={
+                            rank <= 3
+                              ? "inline-flex size-6 items-center justify-center rounded-full bg-[#fff0f3] text-xs font-extrabold text-primary"
+                              : "mono text-xs text-[#64748b]"
+                          }
+                        >
+                          {rank}
+                        </span>
+                      </TableCell>
+                      <TableCell data-label="รหัสสินค้า (SKU)">
+                        <span className="mono inline-flex items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-2.5 py-0.5 text-xs font-bold text-[#0f172a]">
+                          {row.skuCode}
+                        </span>
+                      </TableCell>
+                      <TableCell
+                        data-label="ชื่อสินค้า"
+                        className="font-semibold text-[#0f172a]"
+                      >
+                        {row.productName}
+                      </TableCell>
+                      <TableCell
+                        data-label="ราคาตั้งต้น/ชิ้น"
+                        className="num font-medium text-[#334155] min-[768px]:max-[959px]:hidden"
+                      >
+                        {formatTHB(row.defaultPrice)}
+                      </TableCell>
+                      <TableCell data-label="รวมจำนวนชิ้น" className="num">
+                        <span className="inline-flex items-center rounded-md border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-xs font-extrabold text-[#1d4ed8]">
+                          {row.totalQty.toLocaleString("th-TH")} ชิ้น
+                        </span>
+                      </TableCell>
+                      <TableCell
+                        data-label="จำนวนออเดอร์"
+                        className="num font-medium text-[#334155] min-[768px]:max-[1099px]:hidden"
+                      >
+                        {row.orderCount.toLocaleString("th-TH")} บิล
+                      </TableCell>
+                      <TableCell
+                        data-label="มูลค่ารวมตั้งต้น"
+                        className="num payout-col positive font-extrabold text-[13.5px] min-[1280px]:text-[14px]"
+                      >
+                        {formatTHB(row.grossAmount)}
+                      </TableCell>
+                      <TableCell data-label="ดูบิล" className="num">
+                        <Button asChild variant="outline" size="xs">
+                          <Link href={`/bills?q=${encodeURIComponent(row.skuCode)}`}>
+                            ดูบิลสินค้านี้
+                          </Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
+              <TableFooter>
+                <TableRow>
+                  <TableCell
+                    colSpan={3}
+                    data-label="สรุปยอดรวมทั้งหมด"
+                    className="font-bold text-[#0f172a]"
+                  >
+                    รวมทั้งหมด ({result.totals.skuCount.toLocaleString("th-TH")}{" "}
+                    รหัสสินค้า)
+                  </TableCell>
+                  <TableCell
+                    data-label=""
+                    className="min-[768px]:max-[959px]:hidden max-[767px]:hidden"
+                  />
+                  <TableCell
+                    data-label="รวมจำนวนชิ้น"
+                    className="num font-extrabold text-[#1d4ed8]"
+                  >
+                    {result.totals.totalQty.toLocaleString("th-TH")} ชิ้น
+                  </TableCell>
+                  <TableCell
+                    data-label=""
+                    className="min-[768px]:max-[1099px]:hidden max-[767px]:hidden"
+                  />
+                  <TableCell
+                    data-label="รวมมูลค่าตั้งต้น"
+                    className="num payout-col positive font-extrabold text-[14px]"
+                  >
+                    {formatTHB(result.totals.grossAmount)}
+                  </TableCell>
+                  <TableCell data-label="" className="max-[767px]:hidden" />
+                </TableRow>
+              </TableFooter>
             </Table>
 
             <PaginationBar
@@ -289,7 +283,6 @@ export default async function ProductsPage({
               basePath="/products"
               extraParams={{
                 q: q || undefined,
-                channel: channel && channel !== "all" ? channel : undefined,
               }}
             />
           </>
