@@ -1819,3 +1819,62 @@ test("listBills and getDailyBatchPaged partition orders into normal (income > 0)
   assert.equal(dayNormal.categorySummary.income, 566372);
 });
 
+test("getDailyUploadCompleteness reports complete days, missing files per day, and fills calendar gap days", async () => {
+  const { getDailyUploadCompleteness } = await import("../src/lib/queries");
+
+  const mockDb = {
+    async query(sql: string) {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      if (clean.includes("SELECT DISTINCT SUBSTRING")) {
+        return { rows: [{ ym: "2026-10" }] };
+      }
+      if (clean.includes("WITH items_by_order AS")) {
+        return {
+          rows: [
+            {
+              d: "2026-10-01",
+              normal_orders: 42,
+              complete_count: 0,
+              missing_file1_count: 0,
+              missing_file2_count: 5,
+              missing_file3_count: 42,
+            },
+            {
+              d: "2026-10-03",
+              normal_orders: 72,
+              complete_count: 72,
+              missing_file1_count: 0,
+              missing_file2_count: 0,
+              missing_file3_count: 0,
+            },
+          ],
+        };
+      }
+      if (clean.includes("FROM imports")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const report = await getDailyUploadCompleteness(
+    { month: "2026-10", mode: "created" },
+    mockDb as never,
+  );
+  assert.equal(report.month, "2026-10");
+  assert.equal(report.rows.length, 3); // 01, 02 (gap), 03
+  assert.equal(report.rows[0]?.date, "2026-10-01");
+  assert.equal(report.rows[0]?.isComplete, false);
+  assert.equal(report.rows[0]?.missingFile2Count, 5);
+  assert.equal(report.rows[0]?.missingFile3Count, 42);
+  assert.equal(report.rows[1]?.date, "2026-10-02"); // gap day
+  assert.equal(report.rows[1]?.normalOrders, 0);
+  assert.equal(report.rows[1]?.isComplete, false);
+  assert.equal(report.rows[2]?.date, "2026-10-03");
+  assert.equal(report.rows[2]?.isComplete, true);
+  assert.equal(report.summary.totalDays, 3);
+  assert.equal(report.summary.completeDays, 1);
+  assert.equal(report.summary.incompleteDays, 2);
+});
+
+

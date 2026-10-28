@@ -2447,3 +2447,242 @@ export async function getOverallStats(db?: Queryable): Promise<OverallStats> {
     latestPaidDate: totals?.latest_paid_date ? String(totals.latest_paid_date) : null,
   };
 }
+
+export type UploadDateMode = "created" | "paid";
+
+export interface DailyUploadCompletenessRow {
+  date: string;
+  normalOrders: number;
+  completeCount: number;
+  missingFile1Count: number;
+  missingFile2Count: number;
+  missingFile3Count: number;
+  hasFile1: boolean;
+  hasFile2: boolean;
+  hasFile3: boolean;
+  isComplete: boolean;
+}
+
+export interface DailyUploadCompletenessReport {
+  month: string;
+  availableMonths: string[];
+  mode: UploadDateMode;
+  rows: DailyUploadCompletenessRow[];
+  summary: {
+    totalDays: number;
+    completeDays: number;
+    incompleteDays: number;
+    totalNormalOrders: number;
+    totalCompleteOrders: number;
+    totalMissingFile1: number;
+    totalMissingFile2: number;
+    totalMissingFile3: number;
+  };
+  recentImports: {
+    id: number;
+    filename: string;
+    fileType: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+    orderCount: number;
+    importedAt: string;
+  }[];
+}
+
+export async function getDailyUploadCompleteness(
+  options?: { month?: string; mode?: UploadDateMode },
+  db?: Queryable,
+): Promise<DailyUploadCompletenessReport> {
+  const mode: UploadDateMode = options?.mode === "paid" ? "paid" : "created";
+  const dateCol =
+    mode === "paid"
+      ? "COALESCE(NULLIF(t.paid_date, ''), t.created_date)"
+      : "COALESCE(NULLIF(t.created_date, ''), t.paid_date)";
+
+  const monthRows = await query<{ ym: string }>(
+    `SELECT DISTINCT SUBSTRING(${dateCol} FROM 1 FOR 7) AS ym
+     FROM transactions t
+     WHERE t.is_order = 1
+       AND t.income > 0
+       AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       AND ${dateCol} <> '1970-01-01'
+     ORDER BY ym DESC`,
+    [],
+    db,
+  );
+
+  const availableMonths = monthRows
+    .map((r) => String(r.ym ?? ""))
+    .filter((ym) => /^\d{4}-\d{2}$/.test(ym));
+
+  const fallbackMonth = new Date().toISOString().slice(0, 7);
+  const selectedMonth =
+    options?.month && /^\d{4}-\d{2}$/.test(options.month)
+      ? options.month
+      : availableMonths[0] ?? fallbackMonth;
+
+  const rawRows = await query<Record<string, unknown>>(
+    `WITH items_by_order AS (
+       SELECT DISTINCT order_code
+       FROM oms_order_items
+     )
+     SELECT
+       ${dateCol} AS d,
+       COUNT(*)::int AS normal_orders,
+       SUM(
+         CASE
+           WHEN t.order_code IS NOT NULL
+            AND t.order_code <> ''
+            AND ibo.order_code IS NOT NULL
+            AND (t.channel <> 'TikTok' OR t.transaction_type <> 'คำสั่งซื้อ (OMS)')
+           THEN 1
+           ELSE 0
+         END
+       )::int AS complete_count,
+       SUM(
+         CASE
+           WHEN t.order_code IS NULL OR t.order_code = ''
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_file1_count,
+       SUM(
+         CASE
+           WHEN t.order_code IS NOT NULL
+            AND t.order_code <> ''
+            AND ibo.order_code IS NULL
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_file2_count,
+       SUM(
+         CASE
+           WHEN t.channel = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_file3_count
+     FROM transactions t
+     LEFT JOIN items_by_order ibo ON ibo.order_code = t.order_code
+     WHERE t.is_order = 1
+       AND t.income > 0
+       AND ${dateCol} LIKE $1 || '-%'
+       AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+     GROUP BY ${dateCol}
+     ORDER BY ${dateCol} ASC`,
+    [selectedMonth],
+    db,
+  );
+
+  const byDate = new Map<string, DailyUploadCompletenessRow>();
+  for (const r of rawRows) {
+    const date = String(r.d ?? "");
+    const normalOrders = Number(r.normal_orders ?? 0);
+    const completeCount = Number(r.complete_count ?? 0);
+    const missingFile1Count = Number(r.missing_file1_count ?? 0);
+    const missingFile2Count = Number(r.missing_file2_count ?? 0);
+    const missingFile3Count = Number(r.missing_file3_count ?? 0);
+    const hasFile1 = normalOrders > 0 && missingFile1Count === 0;
+    const hasFile2 = normalOrders > 0 && missingFile1Count === 0 && missingFile2Count === 0;
+    const hasFile3 = normalOrders > 0 && missingFile3Count === 0;
+    const isComplete =
+      normalOrders > 0 &&
+      missingFile1Count === 0 &&
+      missingFile2Count === 0 &&
+      missingFile3Count === 0;
+
+    byDate.set(date, {
+      date,
+      normalOrders,
+      completeCount,
+      missingFile1Count,
+      missingFile2Count,
+      missingFile3Count,
+      hasFile1,
+      hasFile2,
+      hasFile3,
+      isComplete,
+    });
+  }
+
+  // Fill calendar days from day 01 up to the max date in selectedMonth so gap days are visible
+  const existingDates = Array.from(byDate.keys()).sort();
+  const rows: DailyUploadCompletenessRow[] = [];
+  if (existingDates.length > 0) {
+    const maxDay = Number(existingDates[existingDates.length - 1]!.slice(8, 10));
+    for (let day = 1; day <= maxDay; day++) {
+      const dd = String(day).padStart(2, "0");
+      const iso = `${selectedMonth}-${dd}`;
+      const existing = byDate.get(iso);
+      if (existing) {
+        rows.push(existing);
+      } else {
+        rows.push({
+          date: iso,
+          normalOrders: 0,
+          completeCount: 0,
+          missingFile1Count: 0,
+          missingFile2Count: 0,
+          missingFile3Count: 0,
+          hasFile1: false,
+          hasFile2: false,
+          hasFile3: false,
+          isComplete: false,
+        });
+      }
+    }
+  }
+
+  const recentImportRows = await query<Record<string, unknown>>(
+    `SELECT id, filename, file_type, period_start, period_end, order_count, imported_at
+     FROM imports
+     ORDER BY id DESC
+     LIMIT 6`,
+    [],
+    db,
+  );
+
+  const summary = rows.reduce(
+    (acc, r) => {
+      acc.totalDays += 1;
+      if (r.isComplete) acc.completeDays += 1;
+      else acc.incompleteDays += 1;
+      acc.totalNormalOrders += r.normalOrders;
+      acc.totalCompleteOrders += r.completeCount;
+      acc.totalMissingFile1 += r.missingFile1Count;
+      acc.totalMissingFile2 += r.missingFile2Count;
+      acc.totalMissingFile3 += r.missingFile3Count;
+      return acc;
+    },
+    {
+      totalDays: 0,
+      completeDays: 0,
+      incompleteDays: 0,
+      totalNormalOrders: 0,
+      totalCompleteOrders: 0,
+      totalMissingFile1: 0,
+      totalMissingFile2: 0,
+      totalMissingFile3: 0,
+    },
+  );
+
+  return {
+    month: selectedMonth,
+    availableMonths:
+      availableMonths.length > 0 ? availableMonths : [selectedMonth],
+    mode,
+    rows,
+    summary,
+    recentImports: recentImportRows.map((r) => ({
+      id: Number(r.id ?? 0),
+      filename: String(r.filename ?? ""),
+      fileType: String(r.file_type ?? "settlement"),
+      periodStart: r.period_start ? String(r.period_start) : null,
+      periodEnd: r.period_end ? String(r.period_end) : null,
+      orderCount: Number(r.order_count ?? 0),
+      importedAt: String(r.imported_at ?? ""),
+    })),
+  };
+}
+
