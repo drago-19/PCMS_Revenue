@@ -179,17 +179,17 @@ export default async function ImportReportPage({
       </div>
 
       <Card className="workspace-table-card">
-        <div className="shrink-0 border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
+        <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs">
+            <div className="grid w-full grid-cols-1 gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs min-[480px]:grid-cols-2 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center">
               <Button
                 asChild
                 variant={activeTab === "spreadsheet" ? "default" : "ghost"}
                 size="xs"
                 className={
                   activeTab === "spreadsheet"
-                    ? "shadow-xs"
-                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                    ? "w-full justify-center shadow-xs sm:w-auto"
+                    : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=spreadsheet`}>
@@ -202,8 +202,8 @@ export default async function ImportReportPage({
                 size="xs"
                 className={
                   activeTab === "reconcile"
-                    ? "shadow-xs"
-                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                    ? "w-full justify-center shadow-xs sm:w-auto"
+                    : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=reconcile`}>
@@ -216,8 +216,8 @@ export default async function ImportReportPage({
                 size="xs"
                 className={
                   activeTab === "mapping"
-                    ? "shadow-xs"
-                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                    ? "w-full justify-center shadow-xs sm:w-auto"
+                    : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=mapping`}>
@@ -230,8 +230,8 @@ export default async function ImportReportPage({
                 size="xs"
                 className={
                   activeTab === "details"
-                    ? "shadow-xs"
-                    : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                    ? "w-full justify-center shadow-xs sm:w-auto"
+                    : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=details`}>
@@ -248,7 +248,10 @@ export default async function ImportReportPage({
         </div>
 
         {activeTab === "spreadsheet" && spreadsheetData ? (
-          <ExcelSpreadsheetViewer data={spreadsheetData} />
+          <ExcelSpreadsheetViewer
+            data={spreadsheetData}
+            className="max-h-[calc(100dvh-210px)] rounded-b-2xl"
+          />
         ) : activeTab === "reconcile" ? (
           <>
             {importRow.reconciliation.reportAvailable ? (
@@ -338,7 +341,7 @@ export default async function ImportReportPage({
             </CardFooter>
           </>
         ) : activeTab === "mapping" ? (
-          <Table variant="mapping">
+          <Table variant="stack" className="mapping-table">
             <TableHeader>
               <TableRow>
                 <TableHead>หัวคอลัมน์ในไฟล์</TableHead>
@@ -355,17 +358,17 @@ export default async function ImportReportPage({
                     key={entry.col}
                     className={unknown ? "row-warning" : undefined}
                   >
-                    <TableCell className="header-cell">
+                    <TableCell data-label="หัวคอลัมน์ในไฟล์" className="header-cell">
                       {entry.header || <span className="muted">(คอลัมน์ว่าง)</span>}
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="ฟิลด์ที่ระบบใช้">
                       {entry.label ?? (
                         <span className="muted">
                           {entry.header ? "— ไม่รู้จัก —" : "—"}
                         </span>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="ความมั่นใจ">
                       <Badge
                         variant={CONFIDENCE_VARIANT[entry.confidence] ?? "neutral"}
                         className={`badge-conf-${entry.confidence}`}
@@ -373,14 +376,16 @@ export default async function ImportReportPage({
                         {CONFIDENCE_LABEL[entry.confidence] ?? entry.confidence}
                       </Badge>
                     </TableCell>
-                    <TableCell className="num">{entry.nonEmpty}</TableCell>
+                    <TableCell data-label="มีค่า" className="num">
+                      {entry.nonEmpty}
+                    </TableCell>
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 min-[640px]:p-5 space-y-4">
+          <div className="min-h-0 flex-1 p-4 min-[640px]:p-5 space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle>คำเตือนและข้อสังเกต</CardTitle>
@@ -452,8 +457,12 @@ export default async function ImportReportPage({
                       <TableHead>หมายเลขคำสั่งซื้อ</TableHead>
                       <TableHead>บรรทัดใน Excel</TableHead>
                       <TableHead>สาเหตุที่มีหลายแถว</TableHead>
-                      <TableHead className="num">รายได้สุทธิ</TableHead>
-                      <TableHead className="num">ค่าธรรมเนียม</TableHead>
+                      <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                        รายได้สุทธิ
+                      </TableHead>
+                      <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                        ค่าธรรมเนียม
+                      </TableHead>
                       <TableHead className="num">ยอดรับสุทธิ (หลังรวม)</TableHead>
                       <TableHead className="num">ตรวจสอบบิล</TableHead>
                     </TableRow>
@@ -514,13 +523,13 @@ export default async function ImportReportPage({
                           </TableCell>
                           <TableCell
                             data-label="รายได้สุทธิ"
-                            className="num font-semibold text-[#0f172a]"
+                            className="num font-semibold text-[#0f172a] min-[768px]:max-[1099px]:hidden"
                           >
                             {formatTHB(tx.income)}
                           </TableCell>
                           <TableCell
                             data-label="ค่าธรรมเนียม"
-                            className={`num font-semibold${tx.feeTotal < 0 ? " danger" : ""}`}
+                            className={`num font-semibold min-[768px]:max-[1099px]:hidden${tx.feeTotal < 0 ? " danger" : ""}`}
                           >
                             {formatTHB(tx.feeTotal)}
                           </TableCell>

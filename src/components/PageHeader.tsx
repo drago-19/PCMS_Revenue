@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { CompactValueToggle } from "@/components/CompactValueToggle";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -67,7 +68,9 @@ export function StatCard({
         <span className="stat-label">{label}</span>
         {icon ? <span className="stat-icon">{icon}</span> : null}
       </div>
-      <div className="stat-value">{value}</div>
+      <div className="stat-value">
+        <CompactValueToggle value={value} />
+      </div>
       {hint ? <div className="stat-hint">{hint}</div> : null}
     </Card>
   );

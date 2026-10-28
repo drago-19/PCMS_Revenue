@@ -142,7 +142,7 @@ export function DatePickerField({
             size="sm"
             aria-label="เลือกวันที่ชำระเงิน"
             className={cn(
-              "h-10 min-h-[40px] justify-between gap-2 rounded-[10px] border-border bg-white px-3 font-semibold shadow-xs",
+              "h-10 min-h-[40px] w-full flex-1 justify-between gap-2 rounded-[10px] border-border bg-white px-3 font-semibold shadow-xs",
               value
                 ? "border-primary/50 bg-[#fff0f3]/60 text-foreground"
                 : "text-muted-foreground"
@@ -161,7 +161,7 @@ export function DatePickerField({
           </Button>
         </PopoverTrigger>
 
-        <PopoverContent align="end" className="w-[320px] p-3">
+        <PopoverContent align="end" className="w-[320px] max-w-[calc(100vw-24px)] p-3">
           <div className="mb-2 flex items-center justify-between border-b border-border pb-2">
             <span className="text-xs font-bold text-foreground">
               เลือกเดือน หรือ วันที่ชำระเงิน

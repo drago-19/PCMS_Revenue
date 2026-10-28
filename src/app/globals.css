@@ -423,10 +423,6 @@
     display: flex;
     flex-direction: column;
   }
-
-  .workspace-table-card [data-slot="table-container"] {
-    overflow-x: auto;
-  }
 }
 
 .page-head h1 {
@@ -865,7 +861,13 @@
 
 .table-wrap {
   width: 100%;
-  overflow-x: auto;
+  overflow-x: visible;
+}
+
+@media screen and (max-width: 767px) {
+  .table-wrap:not(:has(.data.stack)) {
+    overflow-x: auto;
+  }
 }
 
 table.data {
@@ -886,13 +888,29 @@ table.data {
   white-space: nowrap;
 }
 
+@media screen and (min-width: 768px) {
+  .data thead,
+  .data th {
+    position: sticky;
+    top: 61px;
+    z-index: 20;
+  }
+}
+
+@media screen and (min-width: 1100px) {
+  .data thead,
+  .data th {
+    top: 0;
+  }
+}
+
 .data td {
   padding: 11px 12px;
   border-bottom: 1px solid #e2e8f0;
   vertical-align: middle;
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 1440px) {
   .data th {
     padding: 11px 14px;
   }
@@ -1051,6 +1069,8 @@ table.data {
 .badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 4px;
   padding: 3px 9px;
   border-radius: 999px;
@@ -1261,6 +1281,8 @@ table.data {
 .inline-empty {
   display: flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 9px;
   padding: 22px 20px;
   color: var(--muted-foreground);
@@ -1363,6 +1385,8 @@ table.data {
   gap: 10px 12px;
   padding: 12px 16px;
   border-top: 1px solid var(--line-soft);
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
   font-size: 12px;
   color: var(--muted-foreground);
 }
@@ -1450,6 +1474,9 @@ table.data {
 
 .alert {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 10px;
   margin-top: 14px;
   padding: 13px 15px;
@@ -1464,9 +1491,11 @@ table.data {
 }
 
 .alert-list {
-  margin: 6px 0 0;
+  margin: 6px auto 0;
   padding-left: 18px;
   font-size: 12.5px;
+  text-align: left;
+  display: inline-block;
 }
 
 .result-card {
@@ -1656,7 +1685,9 @@ table.data {
 .warning-list li {
   display: flex;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   padding: 11px 13px;
   border-radius: 11px;
   font-size: 12.5px;
@@ -1666,12 +1697,12 @@ table.data {
 
 .warning-list li > svg {
   flex: 0 0 auto;
-  margin-top: 1px;
 }
 
 .warning-list li > div {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 1px;
 }
 
@@ -1738,7 +1769,9 @@ table.data {
 .notice {
   display: flex;
   gap: 11px;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   margin-top: 16px;
   padding: 14px 16px;
   border-radius: 14px;
@@ -1750,7 +1783,6 @@ table.data {
 
 .notice > svg {
   flex: 0 0 auto;
-  margin-top: 1px;
   color: var(--amber);
 }
 
@@ -2024,6 +2056,9 @@ table.data {
 
 .bill-alert {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 10px;
   margin: 14px 24px 0;
   padding: 12px 14px;
@@ -2036,7 +2071,6 @@ table.data {
 
 .bill-alert > svg {
   flex: 0 0 auto;
-  margin-top: 1px;
   color: var(--amber);
 }
 
@@ -2047,7 +2081,8 @@ table.data {
 
 .bill-alert ul {
   margin: 3px 0 0;
-  padding-left: 18px;
+  padding-left: 0;
+  list-style-position: inside;
 }
 
 .bill-notes {
@@ -2373,6 +2408,11 @@ table.data {
   .page-actions {
     width: 100%;
   }
+
+  .page-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }
 
 /* ---------- print ---------- */
@@ -2611,7 +2651,7 @@ table.data {
 
 .invoice-refs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin: 16px 0;
   font-size: 13px;

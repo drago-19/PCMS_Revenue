@@ -23,38 +23,69 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatTHB } from "@/lib/format";
-import { listSkuSummariesPaged } from "@/lib/queries";
+import { type SkuSortKey, listSkuSummariesPaged } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "สรุปยอดตามรหัสสินค้า (SKU)" };
+
+const VALID_SKU_SORTS: SkuSortKey[] = [
+  "qty_desc",
+  "qty_asc",
+  "gross_desc",
+  "gross_asc",
+  "orders_desc",
+  "orders_asc",
+  "price_desc",
+  "price_asc",
+];
 
 export default async function ProductsPage({
   searchParams,
 }: {
   searchParams: Promise<{
     q?: string;
+    sort?: string;
     page?: string;
   }>;
 }) {
   const params = await searchParams;
   const q = (params.q ?? "").trim();
+  const rawSort = (params.sort ?? "qty_desc").trim() as SkuSortKey;
+  const sort: SkuSortKey = VALID_SKU_SORTS.includes(rawSort)
+    ? rawSort
+    : "qty_desc";
   const page = Math.max(1, Number(params.page ?? "1") || 1);
+
+  function buildProductsHref(overrides: {
+    nextSort?: SkuSortKey;
+    nextPage?: number;
+  }) {
+    const search = new URLSearchParams();
+    if (q) search.set("q", q);
+    const targetSort = overrides.nextSort ?? sort;
+    if (targetSort !== "qty_desc") search.set("sort", targetSort);
+    const targetPage = overrides.nextPage ?? 1;
+    if (targetPage > 1) search.set("page", String(targetPage));
+    const qs = search.toString();
+    return qs ? `/products?${qs}` : "/products";
+  }
 
   const result = await listSkuSummariesPaged({
     q,
+    sort,
     page,
     pageSize: 20,
   });
 
-  const hasFilters = Boolean(q);
+  const hasFilters = Boolean(q || sort !== "qty_desc");
 
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop · SKU Summary Table"
+        eyebrow="TikTok Shop & Shopee · SKU Summary Table"
         title="หมวดสรุปยอดขายตามรหัสสินค้า (SKU)"
-        description="ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
+        description="ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop และ Shopee ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
         actions={
           <Button asChild variant="default">
             <Link href="/import">
@@ -96,19 +127,28 @@ export default async function ProductsPage({
       </div>
 
       <Card className="workspace-table-card">
-        <div className="shrink-0 border-b border-border bg-[#f8fafc] px-4 py-2.5 min-[640px]:px-5">
+        <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-2.5 min-[640px]:px-5">
           <div className="flex flex-col gap-2 min-[980px]:flex-row min-[980px]:items-center min-[980px]:justify-between">
-            <div className="inline-flex flex-wrap items-center gap-1.5">
-              <Badge variant="default" size="default" className="font-bold">
-                TikTok Shop
-              </Badge>
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[980px]:w-auto">
+              <div className="inline-flex flex-wrap items-center gap-1.5">
+                <Badge variant="default" size="default" className="font-bold">
+                  TikTok Shop
+                </Badge>
+                <Badge variant="shopee" size="default" className="font-bold">
+                  Shopee
+                </Badge>
+              </div>
+             
             </div>
 
             <form
               className="flex flex-1 flex-wrap items-center gap-2 min-[640px]:flex-nowrap min-[980px]:justify-end"
               method="get"
             >
-              <div className="field h-10 min-w-[200px] flex-1 max-w-[340px] bg-white">
+              {sort !== "qty_desc" ? (
+                <input type="hidden" name="sort" value={sort} />
+              ) : null}
+              <div className="field h-10 w-full bg-white min-[640px]:min-w-[200px] min-[640px]:max-w-[340px] min-[640px]:flex-1">
                 <IconSearch size={16} className="shrink-0" />
                 <Input
                   type="search"
@@ -123,7 +163,7 @@ export default async function ProductsPage({
                 type="submit"
                 variant="default"
                 size="sm"
-                className="h-10 min-h-[40px] shrink-0"
+                className="h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial"
               >
                 <IconSearch size={15} /> ค้นหา
               </Button>
@@ -132,7 +172,7 @@ export default async function ProductsPage({
                   asChild
                   variant="outline"
                   size="sm"
-                  className="h-10 min-h-[40px] shrink-0"
+                  className="h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial"
                 >
                   <Link href="/products">ล้างตัวกรอง</Link>
                 </Button>
@@ -165,13 +205,80 @@ export default async function ProductsPage({
                   <TableHead>รหัสสินค้า (SKU)</TableHead>
                   <TableHead>ชื่อสินค้า</TableHead>
                   <TableHead className="num min-[768px]:max-[959px]:hidden">
-                    ราคาตั้งต้น/ชิ้น
+                    <Link
+                      href={buildProductsHref({
+                        nextSort:
+                          sort === "price_asc" ? "price_desc" : "price_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>ราคาตั้งต้น/ชิ้น</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "price_asc"
+                          ? "↑"
+                          : sort === "price_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
                   </TableHead>
-                  <TableHead className="num">รวมจำนวนชิ้น</TableHead>
+                  <TableHead className="num">
+                    <Link
+                      href={buildProductsHref({
+                        nextSort: sort === "qty_asc" ? "qty_desc" : "qty_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>รวมจำนวนชิ้น</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "qty_asc"
+                          ? "↑"
+                          : sort === "qty_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
+                  </TableHead>
                   <TableHead className="num min-[768px]:max-[1099px]:hidden">
-                    จำนวนออเดอร์
+                    <Link
+                      href={buildProductsHref({
+                        nextSort:
+                          sort === "orders_asc" ? "orders_desc" : "orders_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>จำนวนออเดอร์</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "orders_asc"
+                          ? "↑"
+                          : sort === "orders_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
                   </TableHead>
-                  <TableHead className="num">มูลค่ารวมตั้งต้น</TableHead>
+                  <TableHead className="num">
+                    <Link
+                      href={buildProductsHref({
+                        nextSort:
+                          sort === "gross_asc" ? "gross_desc" : "gross_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>มูลค่ารวมตั้งต้น</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "gross_asc"
+                          ? "↑"
+                          : sort === "gross_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
+                  </TableHead>
                   <TableHead className="num">ดูบิล</TableHead>
                 </TableRow>
               </TableHeader>
@@ -283,6 +390,7 @@ export default async function ProductsPage({
               basePath="/products"
               extraParams={{
                 q: q || undefined,
+                sort: sort !== "qty_desc" ? sort : undefined,
               }}
             />
           </>

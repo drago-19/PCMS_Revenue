@@ -94,7 +94,7 @@ export default async function ImportHistoryPage({
       </div>
 
       <Card className="workspace-table-card">
-        <div className="shrink-0 border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
+        <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-bold text-foreground sm:text-base">

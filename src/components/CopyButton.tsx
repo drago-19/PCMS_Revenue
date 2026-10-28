@@ -73,14 +73,14 @@ export function CopyButton({
           variant="ghost"
           size="icon-xs"
           className={cn(
-            "copy-btn no-print shrink-0 align-middle",
+            "copy-btn no-print shrink-0 align-middle min-[768px]:size-7 min-[768px]:min-h-[28px] min-[768px]:min-w-[28px]",
             status !== "idle" && status,
           )}
           title={hint}
           aria-label={`${hint} ${value}`}
           onClick={handleClick}
         >
-          <Icon size={15} />
+          <Icon size={14} />
         </Button>
       </TooltipTrigger>
       <TooltipContent className="no-print">{hint}</TooltipContent>

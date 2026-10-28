@@ -49,8 +49,8 @@ export function PaginationBar({
   const endItem = Math.min(total, page * pageSize);
 
   return (
-    <div className="pagination shrink-0 bg-[#f8fafc] flex-wrap">
-      <span className="text-xs text-muted-foreground">
+    <div className="pagination shrink-0 flex-wrap bg-[#f8fafc]">
+      <span className="w-full text-center text-xs text-muted-foreground sm:w-auto sm:text-left">
         แสดง{" "}
         <strong className="text-foreground">
           {startItem.toLocaleString("th-TH")}–{endItem.toLocaleString("th-TH")}
@@ -62,34 +62,60 @@ export function PaginationBar({
         {unitLabel} (หน้าละ {pageSize} {unitLabel})
       </span>
 
-      <div className="pagination-actions flex-wrap items-center">
-        {page > 1 ? (
-          <>
-            <Button asChild variant="outline" size="xs">
-              <Link href={buildHref(1)} aria-label="หน้าแรก">
+      <div className="pagination-actions flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-1.5">
+        <div className="grid w-full grid-cols-4 gap-1.5 sm:contents">
+          {page > 1 ? (
+            <>
+              <Button asChild variant="outline" size="xs" className="w-full sm:w-auto">
+                <Link href={buildHref(1)} aria-label="หน้าแรก">
+                  « หน้าแรก
+                </Link>
+              </Button>
+              <Button asChild variant="secondary" size="xs" className="w-full sm:w-auto">
+                <Link href={buildHref(page - 1)} aria-label="หน้าก่อนหน้า">
+                  ‹ ก่อนหน้า
+                </Link>
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button type="button" variant="outline" size="xs" disabled className="w-full sm:w-auto">
                 « หน้าแรก
-              </Link>
-            </Button>
-            <Button asChild variant="secondary" size="xs">
-              <Link href={buildHref(page - 1)} aria-label="หน้าก่อนหน้า">
+              </Button>
+              <Button type="button" variant="secondary" size="xs" disabled className="w-full sm:w-auto">
                 ‹ ก่อนหน้า
-              </Link>
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button type="button" variant="outline" size="xs" disabled>
-              « หน้าแรก
-            </Button>
-            <Button type="button" variant="secondary" size="xs" disabled>
-              ‹ ก่อนหน้า
-            </Button>
-          </>
-        )}
+              </Button>
+            </>
+          )}
+
+          {page < pageCount ? (
+            <>
+              <Button asChild variant="secondary" size="xs" className="w-full sm:order-4 sm:w-auto">
+                <Link href={buildHref(page + 1)} aria-label="หน้าถัดไป">
+                  ถัดไป ›
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="xs" className="w-full sm:order-5 sm:w-auto">
+                <Link href={buildHref(pageCount)} aria-label="หน้าสุดท้าย">
+                  สุดท้าย »
+                </Link>
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button type="button" variant="secondary" size="xs" disabled className="w-full sm:order-4 sm:w-auto">
+                ถัดไป ›
+              </Button>
+              <Button type="button" variant="outline" size="xs" disabled className="w-full sm:order-5 sm:w-auto">
+                สุดท้าย »
+              </Button>
+            </>
+          )}
+        </div>
 
         <form
           onSubmit={handleJumpSubmit}
-          className="inline-flex items-center gap-1.5 px-1"
+          className="inline-flex w-full items-center justify-center gap-1.5 px-1 sm:order-3 sm:w-auto"
         >
           <span className="text-xs text-muted-foreground">หน้า</span>
           <Input
@@ -109,30 +135,6 @@ export function PaginationBar({
             ไป
           </Button>
         </form>
-
-        {page < pageCount ? (
-          <>
-            <Button asChild variant="secondary" size="xs">
-              <Link href={buildHref(page + 1)} aria-label="หน้าถัดไป">
-                ถัดไป ›
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="xs">
-              <Link href={buildHref(pageCount)} aria-label="หน้าสุดท้าย">
-                สุดท้าย »
-              </Link>
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button type="button" variant="secondary" size="xs" disabled>
-              ถัดไป ›
-            </Button>
-            <Button type="button" variant="outline" size="xs" disabled>
-              สุดท้าย »
-            </Button>
-          </>
-        )}
       </div>
     </div>
   );

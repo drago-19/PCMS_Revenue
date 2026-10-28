@@ -221,87 +221,104 @@ export function UnknownColumnsManager({
         </div>
 
         {unknownColumns.length === 0 ? (
-          <div className="empty-inline">
+          <div className="empty-inline text-center text-balance">
             ไม่มีคอลัมน์แปลกใหม่ในไฟล์นี้ – ทุกคอลัมน์ถูกจับคู่เรียบร้อย
           </div>
         ) : (
-          <div className="table-wrap">
-            <Table className="data-table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>ชื่อคอลัมน์ในไฟล์</TableHead>
-                  <TableHead className="num">แถวที่มีข้อมูล</TableHead>
-                  <TableHead className="num">แถวที่เป็นตัวเลข ≠ 0</TableHead>
-                  <TableHead>ตัวอย่างค่า</TableHead>
-                  <TableHead>หมวดหมู่การคำนวณเงิน</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {unknownColumns.map((column) => {
-                  const currentVal = categories[column.header] ?? "";
-                  const meta = getCategoryMeta(currentVal);
-                  return (
-                    <TableRow key={column.col}>
-                      <TableCell className="mono">{column.col + 1}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <strong>{column.header}</strong>
-                          <Badge variant={meta.badgeVariant} size="sm">
-                            {meta.badgeLabel}
-                          </Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell className="num">{column.nonEmpty}</TableCell>
-                      <TableCell className="num">
-                        {column.nonZeroNumeric}
-                      </TableCell>
-                      <TableCell className="mono muted">
-                        {column.samples.join(", ") || "-"}
-                      </TableCell>
-                      <TableCell>
-                        {readOnly ? (
-                          <span className="text-xs text-muted-foreground">
-                            {meta.label}
-                          </span>
-                        ) : (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant={currentVal ? "secondary" : "outline"}
-                                size="sm"
-                                disabled={busy}
-                                className="w-full min-w-[190px] justify-between text-xs sm:w-60"
+          <Table variant="stack" className="data-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>#</TableHead>
+                <TableHead>ชื่อคอลัมน์ในไฟล์</TableHead>
+                <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                  แถวที่มีข้อมูล
+                </TableHead>
+                <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                  แถวที่เป็นตัวเลข ≠ 0
+                </TableHead>
+                <TableHead className="min-[768px]:max-[959px]:hidden">
+                  ตัวอย่างค่า
+                </TableHead>
+                <TableHead>หมวดหมู่การคำนวณเงิน</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {unknownColumns.map((column) => {
+                const currentVal = categories[column.header] ?? "";
+                const meta = getCategoryMeta(currentVal);
+                return (
+                  <TableRow key={column.col}>
+                    <TableCell data-label="ลำดับคอลัมน์" className="mono">
+                      {column.col + 1}
+                    </TableCell>
+                    <TableCell data-label="ชื่อคอลัมน์ในไฟล์">
+                      <div className="flex flex-wrap items-center gap-1.5 max-[767px]:justify-end">
+                        <strong>{column.header}</strong>
+                        <Badge variant={meta.badgeVariant} size="sm">
+                          {meta.badgeLabel}
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell
+                      data-label="แถวที่มีข้อมูล"
+                      className="num min-[768px]:max-[1099px]:hidden"
+                    >
+                      {column.nonEmpty}
+                    </TableCell>
+                    <TableCell
+                      data-label="แถวที่เป็นตัวเลข ≠ 0"
+                      className="num min-[768px]:max-[1099px]:hidden"
+                    >
+                      {column.nonZeroNumeric}
+                    </TableCell>
+                    <TableCell
+                      data-label="ตัวอย่างค่า"
+                      className="mono muted min-[768px]:max-[959px]:hidden"
+                    >
+                      {column.samples.join(", ") || "-"}
+                    </TableCell>
+                    <TableCell data-label="หมวดหมู่การคำนวณเงิน">
+                      {readOnly ? (
+                        <span className="text-xs text-muted-foreground">
+                          {meta.label}
+                        </span>
+                      ) : (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant={currentVal ? "secondary" : "outline"}
+                              size="sm"
+                              disabled={busy}
+                              className="w-full min-w-[190px] justify-between text-xs sm:w-60"
+                            >
+                              <span className="truncate">{meta.label}</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-72">
+                            {CATEGORY_OPTIONS.map((opt) => (
+                              <DropdownMenuItem
+                                key={`${column.col}-${opt.value || "none"}`}
+                                onSelect={() => {
+                                  const next = {
+                                    ...categories,
+                                    [column.header]: opt.value,
+                                  };
+                                  setCategories(next);
+                                }}
                               >
-                                <span className="truncate">{meta.label}</span>
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-72">
-                              {CATEGORY_OPTIONS.map((opt) => (
-                                <DropdownMenuItem
-                                  key={`${column.col}-${opt.value || "none"}`}
-                                  onSelect={() => {
-                                    const next = {
-                                      ...categories,
-                                      [column.header]: opt.value,
-                                    };
-                                    setCategories(next);
-                                  }}
-                                >
-                                  {opt.label}
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                                {opt.label}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </Card>
 
@@ -371,75 +388,77 @@ export function UnknownColumnsManager({
             ยังไม่มีกฎจำชื่อคอลัมน์พิเศษที่บันทึกไว้ (ใช้ชื่อคอลัมน์มาตรฐานของระบบ)
           </div>
         ) : (
-          <div className="table-wrap">
-            <Table className="data-table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ประเภทกฎ</TableHead>
-                  <TableHead>ชื่อคอลัมน์ในไฟล์ Excel</TableHead>
-                  <TableHead>การจับคู่ / หมวดหมู่ที่ตั้งไว้</TableHead>
-                  {!readOnly ? <TableHead className="num">จัดการ</TableHead> : null}
+          <Table variant="stack" className="data-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>ประเภทกฎ</TableHead>
+                <TableHead>ชื่อคอลัมน์ในไฟล์ Excel</TableHead>
+                <TableHead>การจับคู่ / หมวดหมู่ที่ตั้งไว้</TableHead>
+                {!readOnly ? <TableHead className="num">จัดการ</TableHead> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {savedHeaderEntries.map(([header, fieldKey]) => (
+                <TableRow key={`hdr-${header}`}>
+                  <TableCell data-label="ประเภทกฎ">
+                    <Badge variant="info" size="sm">
+                      จับคู่ช่องข้อมูล
+                    </Badge>
+                  </TableCell>
+                  <TableCell data-label="ชื่อคอลัมน์ในไฟล์ Excel">
+                    <strong>{header}</strong>
+                  </TableCell>
+                  <TableCell data-label="การจับคู่ที่ตั้งไว้" className="mono">
+                    {fieldKey}
+                  </TableCell>
+                  {!readOnly ? (
+                    <TableCell data-label="จัดการ" className="num">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => handleRemoveHeaderRule(header)}
+                      >
+                        ลบ
+                      </Button>
+                    </TableCell>
+                  ) : null}
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {savedHeaderEntries.map(([header, fieldKey]) => (
-                  <TableRow key={`hdr-${header}`}>
-                    <TableCell>
-                      <Badge variant="info" size="sm">
-                        จับคู่ช่องข้อมูล
+              ))}
+              {extraSavedCategoryHeaders.map((header) => {
+                const meta = getCategoryMeta(categories[header]);
+                return (
+                  <TableRow key={`cat-${header}`}>
+                    <TableCell data-label="ประเภทกฎ">
+                      <Badge variant={meta.badgeVariant} size="sm">
+                        {meta.badgeLabel}
                       </Badge>
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="ชื่อคอลัมน์ในไฟล์ Excel">
                       <strong>{header}</strong>
                     </TableCell>
-                    <TableCell className="mono">{fieldKey}</TableCell>
+                    <TableCell data-label="หมวดหมู่ที่ตั้งไว้">
+                      {meta.label}
+                    </TableCell>
                     {!readOnly ? (
-                      <TableCell className="num">
+                      <TableCell data-label="จัดการ" className="num">
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
                           disabled={busy}
-                          onClick={() => handleRemoveHeaderRule(header)}
+                          onClick={() => handleRemoveCategoryRule(header)}
                         >
                           ลบ
                         </Button>
                       </TableCell>
                     ) : null}
                   </TableRow>
-                ))}
-                {extraSavedCategoryHeaders.map((header) => {
-                  const meta = getCategoryMeta(categories[header]);
-                  return (
-                    <TableRow key={`cat-${header}`}>
-                      <TableCell>
-                        <Badge variant={meta.badgeVariant} size="sm">
-                          {meta.badgeLabel}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <strong>{header}</strong>
-                      </TableCell>
-                      <TableCell>{meta.label}</TableCell>
-                      {!readOnly ? (
-                        <TableCell className="num">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => handleRemoveCategoryRule(header)}
-                          >
-                            ลบ
-                          </Button>
-                        </TableCell>
-                      ) : null}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </Card>
     </div>

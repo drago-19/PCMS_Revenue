@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/table";
 import { formatDate, formatDateLong, formatTHB } from "@/lib/format";
 import {
+  type DailyBatchSortKey,
   getOverallStats,
   listDailyBatches,
   listDailyBatchesPaged,
@@ -34,6 +35,19 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "รอบชำระเงินรายวัน" };
+
+const VALID_BATCH_SORTS: DailyBatchSortKey[] = [
+  "date_desc",
+  "date_asc",
+  "payout_desc",
+  "payout_asc",
+  "income_desc",
+  "income_asc",
+  "fees_desc",
+  "fees_asc",
+  "orders_desc",
+  "orders_asc",
+];
 
 const THAI_MONTHS_SHORT = [
   "",
@@ -61,15 +75,33 @@ function formatYearMonthLabel(ym: string): string {
 export default async function DailyBatchesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; q?: string }>;
+  searchParams: Promise<{ page?: string; q?: string; sort?: string }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? "1") || 1);
   const q = (params.q ?? "").trim();
+  const rawSort = (params.sort ?? "date_desc").trim() as DailyBatchSortKey;
+  const sort: DailyBatchSortKey = VALID_BATCH_SORTS.includes(rawSort)
+    ? rawSort
+    : "date_desc";
+
+  function buildDaysHref(overrides: {
+    nextSort?: DailyBatchSortKey;
+    nextPage?: number;
+  }) {
+    const search = new URLSearchParams();
+    if (q) search.set("q", q);
+    const targetSort = overrides.nextSort ?? sort;
+    if (targetSort !== "date_desc") search.set("sort", targetSort);
+    const targetPage = overrides.nextPage ?? 1;
+    if (targetPage > 1) search.set("page", String(targetPage));
+    const qs = search.toString();
+    return qs ? `/days?${qs}` : "/days";
+  }
 
   const [stats, result, allBatches] = await Promise.all([
     getOverallStats(),
-    listDailyBatchesPaged({ page, pageSize: 20, q }),
+    listDailyBatchesPaged({ page, pageSize: 20, q, sort }),
     listDailyBatches(1000),
   ]);
 
@@ -157,7 +189,7 @@ export default async function DailyBatchesPage({
       </div>
 
       <Card className="workspace-table-card">
-        <div className="sticky top-14 z-20 shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc]/95 px-4 py-3 backdrop-blur-md min-[640px]:px-5 min-[1100px]:top-0">
+        <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-bold text-foreground sm:text-base">
@@ -168,20 +200,26 @@ export default async function DailyBatchesPage({
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
+             
+
               <DatePickerField
                 name="q"
                 defaultValue={q}
                 placeholder="ทุกรอบชำระ (เลือกเดือน/วัน)"
                 availableDates={availableDates}
                 basePath="/days"
+                className="w-full sm:w-auto"
+                extraParams={{
+                  sort: sort !== "date_desc" ? sort : undefined,
+                }}
               />
               {activeMonthForPrint ? (
                 <Button
                   asChild
                   variant="outline"
                   size="sm"
-                  className="h-10 min-h-[40px]"
+                  className="h-10 min-h-[40px] w-full sm:w-auto"
                 >
                   <Link href={`/days/${activeMonthForPrint}/invoices`}>
                     <IconReceipt size={15} /> พิมพ์ใบกำกับฯ เดือน{" "}
@@ -189,12 +227,12 @@ export default async function DailyBatchesPage({
                   </Link>
                 </Button>
               ) : null}
-              {q ? (
+              {q || sort !== "date_desc" ? (
                 <Button
                   asChild
                   variant="ghost"
                   size="sm"
-                  className="h-10 min-h-[40px] text-muted-foreground hover:text-foreground"
+                  className="h-10 min-h-[40px] w-full text-muted-foreground hover:text-foreground sm:w-auto"
                 >
                   <Link href="/days">ล้างตัวกรอง</Link>
                 </Button>
@@ -233,15 +271,99 @@ export default async function DailyBatchesPage({
             <Table variant="stack">
               <TableHeader>
                 <TableRow>
-                  <TableHead>วันที่ชำระเงิน</TableHead>
-                  <TableHead className="num">จำนวนบิล</TableHead>
-                  <TableHead className="num min-[768px]:max-[959px]:hidden">
-                    รายได้รวม
+                  <TableHead>
+                    <Link
+                      href={buildDaysHref({
+                        nextSort: sort === "date_desc" ? "date_asc" : "date_desc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>วันที่ชำระเงิน</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "date_desc"
+                          ? "↓"
+                          : sort === "date_asc"
+                            ? "↑"
+                            : "↕"}
+                      </span>
+                    </Link>
+                  </TableHead>
+                  <TableHead className="num">
+                    <Link
+                      href={buildDaysHref({
+                        nextSort:
+                          sort === "orders_asc" ? "orders_desc" : "orders_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>จำนวนบิล</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "orders_asc"
+                          ? "↑"
+                          : sort === "orders_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
                   </TableHead>
                   <TableHead className="num min-[768px]:max-[959px]:hidden">
-                    หักค่าธรรมเนียม
+                    <Link
+                      href={buildDaysHref({
+                        nextSort:
+                          sort === "income_asc" ? "income_desc" : "income_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>รายได้รวม</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "income_asc"
+                          ? "↑"
+                          : sort === "income_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
                   </TableHead>
-                  <TableHead className="num">ยอดชำระสุทธิ (บิล)</TableHead>
+                  <TableHead className="num min-[768px]:max-[959px]:hidden">
+                    <Link
+                      href={buildDaysHref({
+                        nextSort: sort === "fees_asc" ? "fees_desc" : "fees_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>หักค่าธรรมเนียม</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "fees_asc"
+                          ? "↑"
+                          : sort === "fees_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
+                  </TableHead>
+                  <TableHead className="num">
+                    <Link
+                      href={buildDaysHref({
+                        nextSort:
+                          sort === "payout_asc" ? "payout_desc" : "payout_asc",
+                        nextPage: 1,
+                      })}
+                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                    >
+                      <span>ยอดชำระสุทธิ (บิล)</span>
+                      <span className="text-[11px] text-[#64748b]">
+                        {sort === "payout_asc"
+                          ? "↑"
+                          : sort === "payout_desc"
+                            ? "↓"
+                            : "↕"}
+                      </span>
+                    </Link>
+                  </TableHead>
                   <TableHead className="num min-[768px]:max-[1359px]:hidden">
                     ยอดสุทธิทั้งรอบ
                   </TableHead>
@@ -394,7 +516,10 @@ export default async function DailyBatchesPage({
               total={result.total}
               unitLabel="รอบชำระ"
               basePath="/days"
-              extraParams={{ q: q || undefined }}
+              extraParams={{
+                q: q || undefined,
+                sort: sort !== "date_desc" ? sort : undefined,
+              }}
             />
           </>
         )}

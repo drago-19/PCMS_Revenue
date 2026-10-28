@@ -665,7 +665,7 @@ export function UploadForm() {
                 }
                 aria-label="ความคืบหน้าการอัปโหลดและนำเข้าไฟล์"
               />
-              <p className="mt-2.5 text-xs font-semibold text-[#0f172a]">
+              <p className="mt-2.5 text-center text-xs font-semibold text-[#0f172a] text-balance">
                 {progress.message}
               </p>
             </div>
@@ -755,8 +755,8 @@ export function UploadForm() {
             ) : null}
 
             {progress.stage === "error" && errorDetails.length > 0 ? (
-              <div className="rounded-xl border border-[#f6cfcb] bg-[#fef3f2] p-3 text-xs text-[#7a271a]">
-                <ul className="m-0 list-disc space-y-1 pl-4">
+              <div className="rounded-xl border border-[#f6cfcb] bg-[#fef3f2] p-3 text-center text-xs text-[#7a271a] text-balance">
+                <ul className="m-0 inline-block list-disc space-y-1 pl-4 text-left">
                   {errorDetails.slice(0, 4).map((detail) => (
                     <li key={detail}>{detail}</li>
                   ))}

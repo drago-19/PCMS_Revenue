@@ -79,7 +79,9 @@ export function DeleteImportButton({
             </DialogDescription>
           </DialogHeader>
           {error ? (
-            <p className="text-sm font-medium text-destructive">{error}</p>
+            <p className="rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-center text-sm font-medium text-destructive text-balance">
+              {error}
+            </p>
           ) : null}
           <DialogFooter className="gap-2">
             <DialogClose asChild>

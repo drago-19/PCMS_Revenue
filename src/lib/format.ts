@@ -29,6 +29,45 @@ export function formatPlainAmount(value: number): string {
   return numberFormatter.format(round2(value));
 }
 
+export function formatCompactNumber(value: number): string {
+  const r = round2(value);
+  const abs = Math.abs(r);
+  const sign = r < 0 ? "-" : "";
+  if (abs < 100_000) {
+    return numberFormatter.format(r);
+  }
+  if (abs >= 1_000_000) {
+    const m = Math.round((abs / 1_000_000) * 10) / 10;
+    const formattedM = Number.isInteger(m) ? String(m) : m.toFixed(1);
+    return `${sign}${formattedM}M`;
+  }
+  const k = Math.round((abs / 1_000) * 10) / 10;
+  const formattedK = Number.isInteger(k) ? String(k) : k.toFixed(1);
+  return `${sign}${formattedK}k`;
+}
+
+export function compactDisplayString(fullText: string): {
+  isCompactable: boolean;
+  compactText: string;
+  fullText: string;
+} {
+  const match = /^([^\d]*?)(\d[\d,]*(?:\.\d+)?)(.*)$/.exec(fullText ?? "");
+  if (!match) {
+    return { isCompactable: false, compactText: fullText, fullText };
+  }
+  const [, prefix, rawNumStr, suffix] = match;
+  const numericValue = Number(rawNumStr.replace(/,/g, ""));
+  if (!Number.isFinite(numericValue) || Math.abs(numericValue) < 100_000) {
+    return { isCompactable: false, compactText: fullText, fullText };
+  }
+  const compactCore = formatCompactNumber(Math.abs(numericValue));
+  return {
+    isCompactable: true,
+    compactText: `${prefix}${compactCore}${suffix}`,
+    fullText,
+  };
+}
+
 const THAI_MONTHS_SHORT = [
   "ม.ค.",
   "ก.พ.",

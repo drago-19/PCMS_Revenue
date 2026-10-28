@@ -4,14 +4,17 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2.5 py-0.5 text-xs leading-[1.5] font-bold whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 [&>svg]:pointer-events-none",
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2.5 py-0.5 text-center text-xs leading-[1.5] font-bold whitespace-nowrap text-balance transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 [&>svg]:pointer-events-none",
   {
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
+        shopee: "bg-[#ee4d2d] text-white border-transparent [a&]:hover:bg-[#d73211]",
         secondary:
           "bg-[#e6fbf9] text-[#007a76] border-[#b2f2ec] [a&]:hover:bg-[#d5f8f5]",
         destructive:
+          "bg-[#fef3f2] text-[#d92d20] border-[#f7c9c4] [a&]:hover:bg-[#fee4e2]",
+        danger:
           "bg-[#fef3f2] text-[#d92d20] border-[#f7c9c4] [a&]:hover:bg-[#fee4e2]",
         success:
           "bg-[#ecfdf3] text-[#0d8a47] border-[#abefc6]",
