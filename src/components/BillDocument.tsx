@@ -51,14 +51,7 @@ export function BillDocument({
     bill.feeExtraLines.length > 0 ||
     bill.feeTotal !== 0;
 
-  const channelLabel =
-    channel === "TikTok"
-      ? "TikTok Shop"
-      : channel === "Shopee"
-        ? "Shopee"
-        : channel === "Facebook"
-          ? "Facebook"
-          : channel;
+  const channelLabel = "TikTok Shop";
 
   return (
     <article className="bill-card">
@@ -92,7 +85,7 @@ export function BillDocument({
               </Button>
             </TooltipTrigger>
             <TooltipContent className="no-print">
-              ยอดทั้งหมดอ้างอิงจากไฟล์ export และจับคู่รหัสสินค้าจาก OMS
+              ยอดทั้งหมดอ้างอิงจากไฟล์ export และจับคู่รหัสสินค้าจาก shipnity
             </TooltipContent>
           </Tooltip>
         </div>
@@ -107,12 +100,12 @@ export function BillDocument({
           </dd>
         </div>
         <div>
-          <dt>รหัสออเดอร์ OMS</dt>
+          <dt>รหัสออเดอร์ shipnity</dt>
           {orderCode ? (
             <dd className="mono">#{orderCode}</dd>
           ) : (
             <dd className="bill-empty-hint">
-              รอไฟล์ OMS ({formatDate(bill.createdAt)})
+              รอไฟล์ ออเดอร์ใน shipnity ({formatDate(bill.createdAt)})
             </dd>
           )}
         </div>
@@ -134,7 +127,7 @@ export function BillDocument({
           {invoiceNo ? (
             <dd className="mono">{invoiceNo}</dd>
           ) : (
-            <dd className="bill-empty-hint">รอไฟล์ OMS</dd>
+            <dd className="bill-empty-hint">รอไฟล์ ออเดอร์ใน shipnity</dd>
           )}
         </div>
         <div>
@@ -142,7 +135,7 @@ export function BillDocument({
           {customerName ? (
             <dd>{customerName}</dd>
           ) : (
-            <dd className="bill-empty-hint">รอไฟล์ OMS</dd>
+            <dd className="bill-empty-hint">รอไฟล์ ออเดอร์ใน shipnity</dd>
           )}
         </div>
         <div>
@@ -153,7 +146,7 @@ export function BillDocument({
               {courier ? ` (${courier})` : ""}
             </dd>
           ) : (
-            <dd className="bill-empty-hint">รอไฟล์ OMS</dd>
+            <dd className="bill-empty-hint">รอไฟล์ ออเดอร์ใน shipnity</dd>
           )}
         </div>
         <div>
@@ -166,7 +159,11 @@ export function BillDocument({
         </div>
         <div>
           <dt>ประเภทธุรกรรม</dt>
-          <dd>{bill.transactionType}</dd>
+          <dd>
+            {bill.transactionType === "คำสั่งซื้อ (OMS)"
+              ? "คำสั่งซื้อ (ออเดอร์ใน shipnity)"
+              : bill.transactionType}
+          </dd>
         </div>
         <div>
           <dt>สกุลเงิน</dt>
@@ -186,6 +183,114 @@ export function BillDocument({
         ) : null}
       </dl>
 
+      {bill.customerPayment > 0 ||
+      bill.customerPaymentBreakdown?.total > 0 ? (
+        <section className="bill-section">
+          <div className="bill-section-head">
+            <span>ยอดที่ลูกค้าของคุณจ่าย</span>
+            <span>
+              {formatTHB(
+                bill.customerPaymentBreakdown?.total ?? bill.customerPayment,
+              )}
+            </span>
+          </div>
+          <div className="bill-rows">
+            <div className="bill-row font-semibold">
+              <span>ผลรวมย่อยของสินค้าหลังจากหักส่วนลด</span>
+              <span className="amount">
+                {formatTHB(
+                  bill.customerPaymentBreakdown
+                    ?.productSubtotalAfterDiscount ??
+                    Math.max(0, bill.customerPayment - bill.shippingCustomerFee),
+                )}
+              </span>
+            </div>
+            {bill.customerPaymentBreakdown ? (
+              <>
+                <div className="bill-row child">
+                  <span>ผลรวมย่อยของสินค้าก่อนหักส่วนลด</span>
+                  <span className="amount">
+                    {formatTHB(
+                      bill.customerPaymentBreakdown
+                        .productSubtotalBeforeDiscount,
+                    )}
+                  </span>
+                </div>
+                <div className="bill-row child">
+                  <span>ส่วนลดค่าสินค้าจากผู้ขาย</span>
+                  <span className="amount danger">
+                    {bill.customerPaymentBreakdown.sellerProductDiscount === 0
+                      ? "-฿0.00"
+                      : formatTHB(
+                          bill.customerPaymentBreakdown.sellerProductDiscount,
+                        )}
+                  </span>
+                </div>
+                <div className="bill-row child">
+                  <span>ส่วนลดสำหรับสินค้าจาก TikTok Shop</span>
+                  <span className="amount danger">
+                    {bill.customerPaymentBreakdown.tiktokProductDiscount === 0
+                      ? "-฿0.00"
+                      : formatTHB(
+                          bill.customerPaymentBreakdown.tiktokProductDiscount,
+                        )}
+                  </span>
+                </div>
+              </>
+            ) : null}
+            <div className="bill-row font-semibold">
+              <span>ค่าธรรมเนียมการจัดส่งหลังจากหักส่วนลด</span>
+              <span className="amount">
+                {formatTHB(
+                  bill.customerPaymentBreakdown?.shippingAfterDiscount ??
+                    bill.shippingCustomerFee,
+                )}
+              </span>
+            </div>
+            {bill.customerPaymentBreakdown ? (
+              <>
+                <div className="bill-row child">
+                  <span>ค่าธรรมเนียมการจัดส่งก่อนหักส่วนลด</span>
+                  <span className="amount">
+                    {formatTHB(
+                      bill.customerPaymentBreakdown.shippingBeforeDiscount,
+                    )}
+                  </span>
+                </div>
+                <div className="bill-row child">
+                  <span>ส่วนลดค่าจัดส่งจากผู้ขาย</span>
+                  <span className="amount">
+                    {bill.customerPaymentBreakdown.sellerShippingDiscount === 0
+                      ? "-฿0.00"
+                      : formatTHB(
+                          bill.customerPaymentBreakdown.sellerShippingDiscount,
+                        )}
+                  </span>
+                </div>
+                <div className="bill-row child">
+                  <span>ส่วนลดค่าจัดส่งจาก TikTok Shop</span>
+                  <span className="amount danger">
+                    {bill.customerPaymentBreakdown.tiktokShippingDiscount === 0
+                      ? "-฿0.00"
+                      : formatTHB(
+                          bill.customerPaymentBreakdown.tiktokShippingDiscount,
+                        )}
+                  </span>
+                </div>
+              </>
+            ) : null}
+            <div className="bill-row font-bold">
+              <span>ยอดรวม</span>
+              <span className="amount">
+                {formatTHB(
+                  bill.customerPaymentBreakdown?.total ?? bill.customerPayment,
+                )}
+              </span>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <section className="bill-section">
         <div className="bill-section-head">
           <span>
@@ -194,7 +299,7 @@ export function BillDocument({
               <span>({omsItems.length} รายการ)</span>
             ) : (
               <span className="text-[11px] font-normal text-[#64748b]">
-                (รอไฟล์ OMS)
+                (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity)
               </span>
             )}
           </span>
@@ -211,25 +316,15 @@ export function BillDocument({
         <div className="bill-rows">
           {omsItems && omsItems.length > 0 ? (
             <>
-              {omsItems.map((it, idx) => (
-                <div key={`${it.skuCode}-${idx}`} className="bill-row">
-                  <span>
-                    <strong className="mono">{it.skuCode}</strong> · {it.productName} ×{" "}
-                    {it.quantity}{" "}
-                    <span className="text-xs text-muted-foreground">
-                      (ราคาตั้งต้น {formatTHB(it.unitPrice)}/ชิ้น)
-                    </span>
-                  </span>
-                  <span className="amount">
-                    {formatTHB(it.unitPrice * it.quantity)}
-                  </span>
-                </div>
-              ))}
               {(() => {
                 const listTotal = omsItems.reduce(
                   (acc, it) => acc + it.unitPrice * it.quantity,
                   0,
                 );
+                const customerItemsTotal =
+                  bill.customerPayment > 0
+                    ? Math.max(0, bill.customerPayment - bill.shippingCustomerFee)
+                    : bill.incomeTotal;
                 const effectiveDiscount =
                   discountTotal !== undefined && discountTotal > 0
                     ? discountTotal
@@ -237,8 +332,28 @@ export function BillDocument({
                 const breakdown = bill.discountBreakdown ?? [];
                 return (
                   <>
+                    {omsItems.map((it, idx) => {
+                      const netUnit =
+                        listTotal > 0
+                          ? (customerItemsTotal * it.unitPrice) / listTotal
+                          : it.unitPrice;
+                      return (
+                        <div key={`${it.skuCode}-${idx}`} className="bill-row">
+                          <span>
+                            <strong className="mono">{it.skuCode}</strong> ·{" "}
+                            {it.productName} × {it.quantity}{" "}
+                            <span className="text-xs text-muted-foreground">
+                              (ราคาตั้งต้น {formatTHB(it.unitPrice)}/ชิ้น)
+                            </span>
+                          </span>
+                          <span className="amount">
+                            {formatTHB(netUnit)} × {it.quantity}
+                          </span>
+                        </div>
+                      );
+                    })}
                     <div className="bill-row child">
-                      <span>ยอดรวมราคาตั้งต้นสินค้า ({omsItems.length} รายการ)</span>
+                      <span>ผลรวมย่อยของสินค้าก่อนหักส่วนลด ({omsItems.length} รายการ)</span>
                       <span className="amount">{formatTHB(listTotal)}</span>
                     </div>
                     {breakdown.length > 0 ? (
@@ -258,30 +373,36 @@ export function BillDocument({
                     ) : effectiveDiscount > 0 ? (
                       <div className="bill-row child">
                         <span>
-                          หักส่วนลดร้านค้า / โปรโมชั่นแคมเปญ
-                          {discountCode
-                            ? ` (โค้ดส่วนลด: ${discountCode})`
-                            : " (ไฟล์ออเดอร์ OMS เก็บเป็นยอดส่วนลดรวม ไม่ได้แยกรายชิ้น)"}
+                          ส่วนลดค่าสินค้าจากผู้ขาย
+                          {discountCode ? ` (โค้ดส่วนลด: ${discountCode})` : ""}
                         </span>
                         <span className="amount danger">
                           -{formatTHB(effectiveDiscount)}
                         </span>
                       </div>
                     ) : null}
+                    {bill.customerPayment > 0 ? (
+                      <div className="bill-row child">
+                        <span>ผลรวมย่อยของสินค้าหลังจากหักส่วนลด</span>
+                        <span className="amount">
+                          {formatTHB(customerItemsTotal)}
+                        </span>
+                      </div>
+                    ) : null}
                     {shippingFeeCustomer !== undefined && shippingFeeCustomer > 0 ? (
                       <div className="bill-row child">
-                        <span>ค่าจัดส่งที่เก็บจากลูกค้า (จากไฟล์ออเดอร์ OMS)</span>
-                        <span className="amount">+{formatTHB(shippingFeeCustomer)}</span>
+                        <span>ค่าธรรมเนียมการจัดส่งของลูกค้า</span>
+                        <span className="amount">{formatTHB(shippingFeeCustomer)}</span>
                       </div>
                     ) : null}
                     {shippingFeeSeller !== undefined && shippingFeeSeller > 0 ? (
                       <div className="bill-row child">
-                        <span>ค่าจัดส่งที่ร้านค้าจ่ายจริง (จากไฟล์ออเดอร์ OMS)</span>
+                        <span>ยอดรวมค่าจัดส่งที่ร้านค้าจ่ายจริง</span>
                         <span className="amount danger">-{formatTHB(shippingFeeSeller)}</span>
                       </div>
                     ) : null}
                     <div className="bill-row font-bold">
-                      <span>ยอดขายสุทธิหลังหักส่วนลด (ตรงกับรายได้รวม)</span>
+                      <span>ยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย</span>
                       <span className="amount">{formatTHB(bill.incomeTotal)}</span>
                     </div>
                   </>
@@ -298,7 +419,7 @@ export function BillDocument({
                       {productDetail.replace(/;\s*$/, "")}
                     </strong>{" "}
                     <span className="text-[11px] font-normal text-[#94a3b8]">
-                      (รอชื่อสินค้าจาก OMS)
+                      (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity)
                     </span>
                   </span>
                   <span className="amount">{formatTHB(bill.incomeTotal)}</span>
@@ -307,18 +428,18 @@ export function BillDocument({
               <div className="bill-row muted">
                 <span className="text-[11.5px] font-normal text-[#94a3b8]">
                   {orderCode
-                    ? `ผูก #${orderCode} แล้ว — รอไฟล์รายการสินค้า OMS`
-                    : `ยังไม่มีข้อมูลสินค้า — รอไฟล์ OMS (${formatDate(bill.createdAt)})`}
+                    ? `ผูก #${orderCode} แล้ว — รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity`
+                    : `ยังไม่มีข้อมูลสินค้า — รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity (${formatDate(bill.createdAt)})`}
                 </span>
                 <span className="amount text-[11px] font-normal text-[#94a3b8]">
-                  รอไฟล์ OMS
+                  รอไฟล์ สินค้าในออเดอร์ shipnity
                 </span>
               </div>
               {bill.discountBreakdown && bill.discountBreakdown.length > 0 ? (
                 <>
                   {bill.discountBreakdown.map((d) => (
                     <div key={`settle-disc-${d.key}`} className="bill-row child">
-                      <span>{d.label} (จากไฟล์ Settlement)</span>
+                      <span>{d.label}</span>
                       <span className={`amount${d.amount < 0 ? " danger" : ""}`}>
                         {formatTHB(d.amount)}
                       </span>
@@ -333,7 +454,7 @@ export function BillDocument({
 
       <section className="bill-section">
         <div className="bill-section-head">
-          <span>รายได้รวม</span>
+          <span>รายได้ทั้งหมด</span>
           <span>{formatTHB(bill.incomeTotal)}</span>
         </div>
         <div className="bill-rows">
@@ -353,7 +474,7 @@ export function BillDocument({
 
       <section className="bill-section">
         <div className="bill-section-head fee">
-          <span>ค่าธรรมเนียมทั้งหมด (ค่าคอมมิชชั่น / ค่าส่ง / ค่าบริการที่แพลตฟอร์มหัก)</span>
+          <span>ค่าธรรมเนียมทั้งหมด</span>
           <span>{formatTHB(bill.feeTotal)}</span>
         </div>
         <div className="bill-rows">
@@ -361,7 +482,7 @@ export function BillDocument({
             <div className="bill-row muted">
               <span className="text-[11.5px] font-normal text-[#94a3b8]">
                 {isOmsPlaceholder
-                  ? "ยังไม่มีข้อมูลค่าธรรมเนียม — รอไฟล์รายได้ (Settlement)"
+                  ? "ยังไม่มีข้อมูลรายได้จาก TikTok"
                   : "ไม่มีค่าธรรมเนียมที่ถูกหักในคำสั่งซื้อนี้"}
               </span>
               <span className="amount">{formatTHB(0)}</span>
@@ -374,7 +495,12 @@ export function BillDocument({
                 <span className="amount">{formatTHB(group.amount)}</span>
               </div>
               {group.children.map((child) => (
-                <div key={`${group.key}-${child.key}`} className="bill-row child">
+                <div
+                  key={`${group.key}-${child.key}`}
+                  className={`bill-row child${
+                    child.depth === 2 ? " pl-7 text-[12px] text-[#475569]" : ""
+                  }`}
+                >
                   <span>{child.label}</span>
                   <span className="amount">{formatTHB(child.amount)}</span>
                 </div>
@@ -393,7 +519,7 @@ export function BillDocument({
       {bill.adjustment !== 0 ? (
         <section className="bill-section">
           <div className="bill-section-head adjustment">
-            <span>รายการปรับปรุง</span>
+            <span>จำนวนการปรับยอด</span>
             <span>{formatTHB(bill.adjustment)}</span>
           </div>
           <div className="bill-rows">
@@ -406,7 +532,7 @@ export function BillDocument({
       ) : null}
 
       <div className="bill-total">
-        <span>จำนวนเงินที่ชำระทั้งหมด</span>
+        <span>ยอดการชำระเงินทั้งหมด</span>
         <span>{formatTHB(bill.payout)}</span>
       </div>
 
@@ -438,12 +564,29 @@ export function BillDocument({
         </ul>
       ) : null}
 
-      {bill.productDetail ? (
-        <details className="bill-extra">
-          <summary>ข้อมูลอ้างอิงจากไฟล์</summary>
-          <pre>{bill.productDetail}</pre>
-        </details>
-      ) : null}
+      <details className="bill-extra">
+        <summary>ข้อมูลอ้างอิงจากไฟล์ · {source.filename}</summary>
+        <pre>
+          {[
+            `ไฟล์ต้นทาง: ${source.filename} (นำเข้าเมื่อ ${formatDateTime(source.importedAt)})`,
+            bill.rowIndexes && bill.rowIndexes.length > 0
+              ? `บรรทัดในไฟล์ Excel: แถวที่ ${bill.rowIndexes.join(", ")}${
+                  bill.sourceRows > 1 ? ` (รวม ${bill.sourceRows} แถว)` : ""
+                }`
+              : null,
+            `หมายเลขคำสั่งซื้อ (${channelLabel}): ${bill.externalId}`,
+            orderCode
+              ? `รหัสออเดอร์ shipnity: #${orderCode}`
+              : "สถานะการผูก shipnity: ยังไม่ผูกไฟล์ ออเดอร์ใน shipnity",
+            bill.productDetail &&
+            !["/", "-", "--", "N/A"].includes(bill.productDetail.trim())
+              ? `รายละเอียดสินค้าในไฟล์: ${bill.productDetail}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n")}
+        </pre>
+      </details>
 
       <footer className="bill-source">
         <span>
