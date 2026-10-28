@@ -44,14 +44,14 @@ export async function POST(request: Request) {
     );
   }
 
-  if (newPassword.length < 8 || newPassword.length > 128) {
+  if (newPassword.length < 6 || newPassword.length > 128) {
     return Response.json(
-      { error: "รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 8 ตัวอักษร (ไม่เกิน 128 ตัวอักษร)", requestId: auth.requestId },
+      { error: "รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร (ไม่เกิน 128 ตัวอักษร)", requestId: auth.requestId },
       { status: 400, headers: { "x-request-id": auth.requestId } },
     );
   }
 
-  const admin = await ensureAdminUser();
+  const admin = await ensureAdminUser(undefined, auth.session.sub);
   const matches = await verifyPassword(currentPassword, admin.passwordHash);
   if (!matches) {
     await recordAuditLog({
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
 
   await withTransaction(async (client) => {
     await client.query(
-      `UPDATE app_users
+      `UPDATE public.app_users
        SET password_hash = $2, updated_at = now()
        WHERE username = $1`,
       [admin.username, newHash],

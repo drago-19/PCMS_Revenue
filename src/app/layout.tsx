@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { getActiveCompanyId } from "@/lib/db";
+import { getDocumentSettings } from "@/lib/settings";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,13 +21,15 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const companyId = await getActiveCompanyId();
+  const settings = await getDocumentSettings();
   return (
     <html lang="th">
       <body>
         <TooltipProvider delayDuration={150}>
           <div className="app-shell has-[[data-login-page]]:!grid-cols-1">
-            <Sidebar />
+            <Sidebar companyId={companyId} companyName={settings.name} />
             <div className="app-main">
               <main className="app-content">{children}</main>
             </div>

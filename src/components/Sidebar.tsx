@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -150,7 +150,15 @@ function NavLinks({
   );
 }
 
-function AccountControls({ onAction }: { onAction?: () => void }) {
+function AccountControls({
+  companyId = "dragon19",
+  companyName,
+  onAction,
+}: {
+  companyId?: "dragon19" | "seeheng";
+  companyName?: string;
+  onAction?: () => void;
+}) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
@@ -158,6 +166,11 @@ function AccountControls({ onAction }: { onAction?: () => void }) {
   const [newPassword, setNewPassword] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
   const [pwdError, setPwdError] = useState<string | null>(null);
+  const companyLabel =
+    companyName?.trim() ||
+    (companyId === "seeheng"
+      ? "บริษัท ซีเฮง จำกัด"
+      : "บริษัท ดราก้อน 19 จำกัด");
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -182,8 +195,8 @@ function AccountControls({ onAction }: { onAction?: () => void }) {
       setPwdError("กรุณากรอกรหัสผ่านให้ครบทุกช่อง");
       return;
     }
-    if (newPassword.length < 8) {
-      setPwdError("รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร");
+    if (newPassword.length < 6) {
+      setPwdError("รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร");
       return;
     }
 
@@ -215,10 +228,10 @@ function AccountControls({ onAction }: { onAction?: () => void }) {
     <div className="sidebar-foot mt-auto rounded-xl border border-white/10 bg-white/[0.04] p-3">
       <div className="flex items-center gap-2 text-xs font-semibold text-white">
         <ShieldCheckIcon className="size-3.5 text-[#00f2ea]" />
-        <span>TikTok Shop · Protected</span>
+        <span>{companyLabel}</span>
       </div>
       <span className="mt-0.5 text-[11px] text-[#94a3b8]">
-        ล็อกสิทธิ์เข้าถึงและบันทึก Audit Log
+        แยกข้อมูลและเลขใบกำกับภาษีตามบริษัท
       </span>
 
       <div className="mt-2.5 flex flex-col gap-2">
@@ -245,7 +258,7 @@ function AccountControls({ onAction }: { onAction?: () => void }) {
               {pwdError ? (
                 <div
                   role="alert"
-                  className="rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-xs font-semibold text-[#b91c1c]"
+                  className="rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-center text-xs font-semibold text-[#b91c1c] text-balance"
                 >
                   {pwdError}
                 </div>
@@ -320,9 +333,48 @@ function AccountControls({ onAction }: { onAction?: () => void }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({
+  companyId = "dragon19",
+  companyName,
+}: {
+  companyId?: "dragon19" | "seeheng";
+  companyName?: string;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [liveCompanyName, setLiveCompanyName] = useState<string | undefined>(
+    companyName,
+  );
+
+  useEffect(() => {
+    setLiveCompanyName(companyName);
+  }, [companyName, companyId]);
+
+  useEffect(() => {
+    function handleCompanyNameChanged(event: Event) {
+      const custom = event as CustomEvent<string>;
+      if (typeof custom.detail === "string") {
+        setLiveCompanyName(custom.detail);
+      }
+    }
+    window.addEventListener(
+      "pcms:company-name-changed",
+      handleCompanyNameChanged,
+    );
+    return () => {
+      window.removeEventListener(
+        "pcms:company-name-changed",
+        handleCompanyNameChanged,
+      );
+    };
+  }, []);
+
+  const companySubLabel =
+    liveCompanyName?.trim() ||
+    companyName?.trim() ||
+    (companyId === "seeheng"
+      ? "บริษัท ซีเฮง จำกัด"
+      : "บริษัท ดราก้อน 19 จำกัด");
 
   if (pathname === "/login") {
     return null;
@@ -330,17 +382,17 @@ export function Sidebar() {
 
   return (
     <>
-      <div className="mobile-topbar no-print flex min-[1100px]:hidden items-center justify-between gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
+      <div className="mobile-topbar no-print sticky top-0 z-40 flex h-[61px] min-[1100px]:hidden items-center justify-between gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
         <Link
           href="/"
-          className="brand inline-flex min-h-[40px] items-center gap-2.5 px-1"
+          className="brand inline-flex min-h-[40px] min-w-0 items-center gap-2.5 px-1"
         >
           <span className="brand-mark">
             <AppMark size={36} />
           </span>
-          <span className="brand-text">
-            <strong>PCMS Revenue</strong>
-            <small>TikTok Shop · Seller Finance</small>
+          <span className="brand-text min-w-0">
+            <strong className="truncate">PCMS Revenue</strong>
+            <small className="truncate">{companySubLabel}</small>
           </span>
         </Link>
 
@@ -357,8 +409,8 @@ export function Sidebar() {
             </Button>
           </SheetTrigger>
           <SheetContent
-            side="left"
-            className="no-print flex w-[276px] max-w-[85vw] flex-col gap-6 border-r border-[#1e293b] bg-[#0f1117] p-5 text-white"
+            side="right"
+            className="no-print flex w-[276px] max-w-[85vw] flex-col gap-6 border-l border-[#1e293b] bg-[#0f1117] p-5 text-white"
           >
             <SheetHeader className="p-0 pr-12 text-left">
               <SheetTitle asChild>
@@ -372,7 +424,7 @@ export function Sidebar() {
                   </span>
                   <span className="brand-text">
                     <strong>PCMS Revenue</strong>
-                    <small>TikTok Shop · Seller Finance</small>
+                    <small>{companySubLabel}</small>
                   </span>
                 </Link>
               </SheetTitle>
@@ -383,7 +435,11 @@ export function Sidebar() {
 
             <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
 
-            <AccountControls onAction={() => setOpen(false)} />
+            <AccountControls
+              companyId={companyId}
+              companyName={companySubLabel}
+              onAction={() => setOpen(false)}
+            />
           </SheetContent>
         </Sheet>
       </div>
@@ -395,13 +451,13 @@ export function Sidebar() {
           </span>
           <span className="brand-text">
             <strong>PCMS Revenue</strong>
-            <small>TikTok Shop · Seller Finance</small>
+            <small>{companySubLabel}</small>
           </span>
         </Link>
 
         <NavLinks pathname={pathname} />
 
-        <AccountControls />
+        <AccountControls companyId={companyId} companyName={companySubLabel} />
       </aside>
     </>
   );

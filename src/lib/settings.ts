@@ -1,6 +1,14 @@
-import { query, queryOne, withTransaction, type Queryable } from "./db";
+import {
+  getActiveCompanyId,
+  query,
+  queryOne,
+  withTransaction,
+  type CompanyId,
+  type Queryable,
+} from "./db";
 import {
   applySellerSettingsToMemory,
+  DEFAULT_SEEHENG_SELLER,
   DEFAULT_SELLER,
   type DefaultInvoicePaperSize,
   type SellerInfo,
@@ -10,11 +18,19 @@ import {
 const SETTING_KEY = "document_settings";
 
 const globalForSettings = globalThis as unknown as {
-  __pcmsSettingsCache?: Required<SellerInfo> | null;
-  __pcmsSettingsCachedAtMs?: number;
+  __pcmsSettingsCacheByCompany?: Record<
+    string,
+    { settings: Required<SellerInfo>; cachedAtMs: number }
+  >;
 };
 
 const CACHE_TTL_MS = 2_000;
+
+export function getCompanyDefaultSeller(
+  companyId: CompanyId = "dragon19",
+): Required<SellerInfo> {
+  return companyId === "seeheng" ? DEFAULT_SEEHENG_SELLER : DEFAULT_SELLER;
+}
 
 function sanitizeText(raw: unknown, fallback: string, maxLen = 300): string {
   if (typeof raw !== "string") return fallback;
@@ -24,18 +40,20 @@ function sanitizeText(raw: unknown, fallback: string, maxLen = 300): string {
 
 export function normalizeSellerSettings(
   input: Partial<Record<string, unknown>> | null | undefined,
+  companyId: CompanyId = "dragon19",
 ): Required<SellerInfo> {
   const src = input ?? {};
+  const fallbackSeller = getCompanyDefaultSeller(companyId);
   const name =
-    sanitizeText(src.name, DEFAULT_SELLER.name, 200) || DEFAULT_SELLER.name;
-  const branchName = sanitizeText(src.branchName, DEFAULT_SELLER.branchName, 100);
+    sanitizeText(src.name, fallbackSeller.name, 200) || fallbackSeller.name;
+  const branchName = sanitizeText(src.branchName, fallbackSeller.branchName, 100);
   const address =
-    sanitizeText(src.address, DEFAULT_SELLER.address, 500) ||
-    DEFAULT_SELLER.address;
+    sanitizeText(src.address, fallbackSeller.address, 500) ||
+    fallbackSeller.address;
   const taxId =
-    sanitizeText(src.taxId, DEFAULT_SELLER.taxId, 40) || DEFAULT_SELLER.taxId;
-  const phone = sanitizeText(src.phone, DEFAULT_SELLER.phone, 60);
-  const email = sanitizeText(src.email, DEFAULT_SELLER.email, 120);
+    sanitizeText(src.taxId, fallbackSeller.taxId, 40) || fallbackSeller.taxId;
+  const phone = sanitizeText(src.phone, fallbackSeller.phone, 60);
+  const email = sanitizeText(src.email, fallbackSeller.email, 120);
 
   const rawVat =
     src.vatRate !== undefined && src.vatRate !== null && src.vatRate !== ""
@@ -46,17 +64,26 @@ export function normalizeSellerSettings(
       ? Number(rawVat.toFixed(2))
       : DEFAULT_SELLER.vatRate;
 
-  const hasExplicitPrefix = typeof src.invoicePrefix === "string";
   const cleanedPrefix = sanitizeText(
     src.invoicePrefix,
     DEFAULT_SELLER.invoicePrefix,
-    16,
+    32,
   )
     .toUpperCase()
     .replace(/[^\p{L}\p{M}\p{N}_/-]/gu, "");
-  const invoicePrefix = hasExplicitPrefix
-    ? cleanedPrefix
-    : cleanedPrefix || DEFAULT_SELLER.invoicePrefix;
+  const invoicePrefix =
+    !cleanedPrefix || cleanedPrefix === "TT"
+      ? DEFAULT_SELLER.invoicePrefix
+      : cleanedPrefix;
+
+  const cleanedReceiptPrefix = sanitizeText(
+    src.receiptPrefix,
+    DEFAULT_SELLER.receiptPrefix,
+    32,
+  )
+    .toUpperCase()
+    .replace(/[^\p{L}\p{M}\p{N}_/-]/gu, "");
+  const receiptPrefix = cleanedReceiptPrefix || DEFAULT_SELLER.receiptPrefix;
 
   const vatCalculationBase: VatCalculationBase =
     src.vatCalculationBase === "customer_paid" ? "customer_paid" : "payout";
@@ -68,6 +95,16 @@ export function normalizeSellerSettings(
     src.defaultPaperSize === "a6"
       ? src.defaultPaperSize
       : DEFAULT_SELLER.defaultPaperSize;
+
+  const showInvoiceNo =
+    typeof src.showInvoiceNo === "boolean"
+      ? src.showInvoiceNo
+      : DEFAULT_SELLER.showInvoiceNo;
+
+  const showReceiptNo =
+    typeof src.showReceiptNo === "boolean"
+      ? src.showReceiptNo
+      : DEFAULT_SELLER.showReceiptNo;
 
   const showSkuInAbbreviated =
     typeof src.showSkuInAbbreviated === "boolean"
@@ -105,8 +142,11 @@ export function normalizeSellerSettings(
     email,
     vatRate,
     invoicePrefix,
+    receiptPrefix,
     vatCalculationBase,
     defaultPaperSize,
+    showInvoiceNo,
+    showReceiptNo,
     showSkuInAbbreviated,
     showSkuInFull,
     showFeeBreakdown,
@@ -120,13 +160,12 @@ export async function getDocumentSettings(
   db?: Queryable,
   forceRefresh = false,
 ): Promise<Required<SellerInfo>> {
+  const companyId = await getActiveCompanyId();
   const now = Date.now();
-  if (
-    !forceRefresh &&
-    globalForSettings.__pcmsSettingsCache &&
-    now - (globalForSettings.__pcmsSettingsCachedAtMs ?? 0) < CACHE_TTL_MS
-  ) {
-    return globalForSettings.__pcmsSettingsCache;
+  const cacheMap = globalForSettings.__pcmsSettingsCacheByCompany ?? {};
+  const cached = cacheMap[companyId];
+  if (!forceRefresh && cached && now - cached.cachedAtMs < CACHE_TTL_MS) {
+    return cached.settings;
   }
 
   try {
@@ -143,13 +182,36 @@ export async function getDocumentSettings(
         parsed = row.value_json as Partial<Record<string, unknown>>;
       }
     }
-    const normalized = normalizeSellerSettings(parsed);
-    globalForSettings.__pcmsSettingsCache = normalized;
-    globalForSettings.__pcmsSettingsCachedAtMs = now;
+    // สำหรับรหัสบริษัท ดราก้อน 19 (schema public เดิม) หากยังเป็นชื่อเริ่มต้นเดิมของซีเฮงและยังไม่เคยถูกแก้ไขโดยผู้ดูแล ให้แสดงชื่อ "บริษัท ดราก้อน 19 จำกัด"
+    if (
+      companyId === "dragon19" &&
+      typeof parsed.name === "string" &&
+      /^บริษัท\s*[ซช]ีเฮง\s*จำกัด/.test(parsed.name.trim())
+    ) {
+      const updatedByRow = await queryOne<{ updated_by: string }>(
+        "SELECT updated_by FROM app_settings WHERE setting_key = $1",
+        [SETTING_KEY],
+        db,
+      );
+      if (!updatedByRow || updatedByRow.updated_by !== "dragon19_manual") {
+        parsed = {
+          ...parsed,
+          name: DEFAULT_SELLER.name,
+        };
+      }
+    }
+    const normalized = normalizeSellerSettings(parsed, companyId);
+    globalForSettings.__pcmsSettingsCacheByCompany = {
+      ...(globalForSettings.__pcmsSettingsCacheByCompany ?? {}),
+      [companyId]: { settings: normalized, cachedAtMs: now },
+    };
     applySellerSettingsToMemory(normalized);
     return normalized;
   } catch {
-    const fallback = normalizeSellerSettings(DEFAULT_SELLER);
+    const fallback = normalizeSellerSettings(
+      getCompanyDefaultSeller(companyId),
+      companyId,
+    );
     applySellerSettingsToMemory(fallback);
     return fallback;
   }
@@ -159,8 +221,12 @@ export async function saveDocumentSettings(
   input: Partial<Record<string, unknown>>,
   meta: { actor?: string; ipAddress?: string; requestId?: string } = {},
 ): Promise<Required<SellerInfo>> {
-  const normalized = normalizeSellerSettings(input);
-  const actor = meta.actor || "admin";
+  const companyId = await getActiveCompanyId();
+  const normalized = normalizeSellerSettings(input, companyId);
+  const actor =
+    companyId === "dragon19"
+      ? "dragon19_manual"
+      : meta.actor || "admin";
   const ipAddress = meta.ipAddress || "unknown";
   const requestId = meta.requestId ?? null;
 
@@ -187,11 +253,59 @@ export async function saveDocumentSettings(
       client,
     );
 
+    // Only normalize invoice_registry if legacy non-'SEQ/%' rows exist (prevents rewriting billion-row tables on every settings save)
+    const hasLegacyInvoiceNo = await queryOne<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM invoice_registry WHERE invoice_no NOT LIKE 'SEQ/%'
+       ) AS exists`,
+      [],
+      client,
+    );
+
+    if (hasLegacyInvoiceNo?.exists) {
+      await query(
+        `WITH ordered AS (
+           SELECT r.order_id,
+                  ROW_NUMBER() OVER (
+                    ORDER BY COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') ASC,
+                             r.created_at ASC,
+                             r.order_id ASC
+                  ) AS rn
+           FROM invoice_registry r
+           LEFT JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
+         )
+         UPDATE invoice_registry r
+         SET invoice_no = '__TMP_SEQ__/' || o.rn::text
+         FROM ordered o
+         WHERE r.order_id = o.order_id`,
+        [],
+        client,
+      );
+
+      await query(
+        `UPDATE invoice_registry
+         SET invoice_no = 'SEQ/' || LPAD(SUBSTRING(invoice_no FROM 13), 5, '0')
+         WHERE invoice_no LIKE '__TMP_SEQ__/%'`,
+        [],
+        client,
+      );
+
+      await query(
+        `SELECT setval(
+           'invoice_seq',
+           GREATEST(1, (SELECT COUNT(*) FROM invoice_registry)),
+           (SELECT COUNT(*) > 0 FROM invoice_registry)
+         )`,
+        [],
+        client,
+      );
+    }
+
     await query(
       `INSERT INTO audit_logs (actor, action, ip_address, outcome, details_json, request_id)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
       [
-        actor,
+        meta.actor || actor,
         "settings.document.update",
         ipAddress,
         "success",
@@ -200,10 +314,12 @@ export async function saveDocumentSettings(
       ],
       client,
     );
-  });
+  }, companyId);
 
-  globalForSettings.__pcmsSettingsCache = normalized;
-  globalForSettings.__pcmsSettingsCachedAtMs = Date.now();
+  globalForSettings.__pcmsSettingsCacheByCompany = {
+    ...(globalForSettings.__pcmsSettingsCacheByCompany ?? {}),
+    [companyId]: { settings: normalized, cachedAtMs: Date.now() },
+  };
   applySellerSettingsToMemory(normalized);
   return normalized;
 }

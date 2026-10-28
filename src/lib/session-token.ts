@@ -4,9 +4,12 @@ export const SESSION_COOKIE_NAME = "pcms_rev_session";
 export const MAX_SESSION_TTL_SECONDS = 24 * 60 * 60; // 24 hours (Hard Gate: <= 24h)
 export const DEFAULT_SESSION_TTL_SECONDS = 12 * 60 * 60; // 12 hours default
 
+export type CompanyId = "dragon19" | "seeheng";
+
 export interface SessionPayload {
   sub: string;
   role: "admin" | "staff";
+  companyId?: CompanyId;
   iat: number;
   exp: number;
   jti: string;
@@ -49,6 +52,7 @@ export function createSessionToken(
   input: {
     username: string;
     role?: "admin" | "staff";
+    companyId?: CompanyId;
     ttlSeconds?: number;
     nowSeconds?: number;
   },
@@ -60,9 +64,15 @@ export function createSessionToken(
     MAX_SESSION_TTL_SECONDS,
     Math.max(60, input.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS),
   );
+  const companyId: CompanyId =
+    input.companyId === "seeheng" ||
+    input.username.trim().toLowerCase() === "seeheng"
+      ? "seeheng"
+      : "dragon19";
   const payload: SessionPayload = {
     sub: input.username,
     role: input.role ?? "admin",
+    companyId,
     iat: now,
     exp: now + ttl,
     jti: crypto.randomUUID(),
@@ -118,9 +128,16 @@ export function verifySessionToken(
     if (parsed.exp - parsed.iat > MAX_SESSION_TTL_SECONDS) return null;
     if (parsed.iat > now + 60) return null;
 
+    const resolvedCompanyId: CompanyId =
+      parsed.companyId === "seeheng" ||
+      parsed.sub.trim().toLowerCase() === "seeheng"
+        ? "seeheng"
+        : "dragon19";
+
     return {
       sub: parsed.sub,
       role: parsed.role,
+      companyId: resolvedCompanyId,
       iat: parsed.iat,
       exp: parsed.exp,
       jti: parsed.jti,

@@ -4,11 +4,12 @@ import {
   clearLoginFailures,
   ensureAdminUser,
   getInitialPasswordHash,
+  getSeehengInitialPasswordHash,
   recordAuditLog,
   recordLoginFailure,
   verifyPassword,
 } from "@/lib/auth";
-import { query } from "@/lib/db";
+import { getPool } from "@/lib/db";
 import {
   createSessionToken,
   DEFAULT_SESSION_TTL_SECONDS,
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const admin = await ensureAdminUser();
+    const admin = await ensureAdminUser(undefined, username);
     const usernameMatches =
       username.toLowerCase() === admin.username.toLowerCase();
     const targetHash = usernameMatches ? admin.passwordHash : DUMMY_BCRYPT_HASH;
@@ -128,11 +129,14 @@ export async function POST(request: Request) {
 
     // If .env AUTH_INITIAL_PASSWORD / AUTH_PASSWORD_HASH was updated, sync it to DB seamlessly
     if (usernameMatches && !passwordValid) {
-      const envHash = await getInitialPasswordHash();
+      const envHash =
+        admin.companyId === "seeheng"
+          ? await getSeehengInitialPasswordHash()
+          : await getInitialPasswordHash();
       if (envHash !== admin.passwordHash && (await verifyPassword(password, envHash))) {
         passwordValid = true;
-        await query(
-          "UPDATE app_users SET password_hash = $2, updated_at = now() WHERE username = $1",
+        await getPool().query(
+          "UPDATE public.app_users SET password_hash = $2, updated_at = now() WHERE username = $1",
           [admin.username, envHash],
         );
       }
@@ -184,6 +188,7 @@ export async function POST(request: Request) {
     const token = createSessionToken({
       username: admin.username,
       role: admin.role,
+      companyId: admin.companyId,
       ttlSeconds: DEFAULT_SESSION_TTL_SECONDS,
     });
 
@@ -192,14 +197,18 @@ export async function POST(request: Request) {
       action: "auth.login",
       ipAddress: ip,
       outcome: "success",
-      details: { role: admin.role },
+      details: { role: admin.role, companyId: admin.companyId },
       requestId,
     });
 
     return Response.json(
       {
         ok: true,
-        user: { username: admin.username, role: admin.role },
+        user: {
+          username: admin.username,
+          role: admin.role,
+          companyId: admin.companyId,
+        },
         requestId,
       },
       {

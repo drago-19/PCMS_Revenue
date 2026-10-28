@@ -96,6 +96,7 @@ export function proxy(request: NextRequest) {
     requestHeaders.set("x-request-id", requestId);
     requestHeaders.set("x-auth-user", session.sub);
     requestHeaders.set("x-auth-role", session.role);
+    requestHeaders.set("x-auth-company", session.companyId ?? "dragon19");
 
     return applySecurityHeaders(
       NextResponse.next({ request: { headers: requestHeaders } }),
@@ -117,6 +118,7 @@ export function proxy(request: NextRequest) {
   requestHeaders.set("x-request-id", requestId);
   requestHeaders.set("x-auth-user", session.sub);
   requestHeaders.set("x-auth-role", session.role);
+  requestHeaders.set("x-auth-company", session.companyId ?? "dragon19");
 
   return applySecurityHeaders(
     NextResponse.next({ request: { headers: requestHeaders } }),

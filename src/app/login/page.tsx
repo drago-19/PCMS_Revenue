@@ -126,9 +126,9 @@ function LoginFormCard() {
           {lockedMessage ? (
             <div
               role="alert"
-              className="rounded-xl border border-[#fecaca] bg-[#fef2f2] p-3.5 text-[13px] font-semibold text-[#b91c1c]"
+              className="rounded-xl border border-[#fecaca] bg-[#fef2f2] p-3.5 text-center text-[13px] font-semibold text-[#b91c1c] text-balance"
             >
-              <div className="flex items-center gap-2 font-bold">
+              <div className="flex items-center justify-center gap-2 font-bold">
                 <LockIcon className="size-4 shrink-0 text-[#dc2626]" />
                 <span>ระบบล็อกการเข้าสู่ระบบชั่วคราว (Brute-Force Protection)</span>
               </div>
@@ -139,7 +139,7 @@ function LoginFormCard() {
           {error ? (
             <div
               role="alert"
-              className="rounded-xl border border-[#fecaca] bg-[#fef2f2] px-3.5 py-2.5 text-[13px] font-semibold text-[#b91c1c]"
+              className="rounded-xl border border-[#fecaca] bg-[#fef2f2] px-3.5 py-2.5 text-center text-[13px] font-semibold text-[#b91c1c] text-balance"
             >
               {error}
             </div>

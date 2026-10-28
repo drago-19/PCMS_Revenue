@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
-import { query, queryOne, type Queryable } from "./db";
+import {
+  companyContextStorage,
+  ensureSchema,
+  getPool,
+  type CompanyId,
+  type Queryable,
+} from "./db";
 import {
   extractCookieValue,
   getClientIp,
@@ -80,41 +86,67 @@ export async function getInitialPasswordHash(): Promise<string> {
   return FALLBACK_ADMIN_HASH;
 }
 
+let cachedSeehengDefaultHash: string | null = null;
+
+export async function getSeehengInitialPasswordHash(): Promise<string> {
+  const initialPlain =
+    (process.env.AUTH_SEEHENG_PASSWORD ?? "seeheng").trim() || "seeheng";
+  if (!cachedSeehengDefaultHash) {
+    cachedSeehengDefaultHash = await hashPassword(initialPlain, BCRYPT_COST);
+  }
+  return cachedSeehengDefaultHash;
+}
+
 export async function ensureAdminUser(
   db?: Queryable,
-): Promise<{ username: string; passwordHash: string; role: "admin" | "staff" }> {
-  const username = getConfiguredAdminUsername();
-  const existing = await queryOne<{
+  targetUsername?: string,
+): Promise<{
+  username: string;
+  passwordHash: string;
+  role: "admin" | "staff";
+  companyId: CompanyId;
+}> {
+  await ensureSchema();
+  const target = db ?? getPool();
+  const requested = (targetUsername ?? "").trim().toLowerCase();
+  const isSeeheng = requested === "seeheng";
+  const username = isSeeheng ? "seeheng" : getConfiguredAdminUsername();
+  const companyId: CompanyId = isSeeheng ? "seeheng" : "dragon19";
+
+  const existingRes = await target.query<{
     username: string;
     password_hash: string;
     role: string;
   }>(
-    "SELECT username, password_hash, role FROM app_users WHERE username = $1",
+    "SELECT username, password_hash, role FROM public.app_users WHERE LOWER(username) = LOWER($1)",
     [username],
-    db,
   );
+  const existing = existingRes.rows[0];
 
   if (existing) {
     return {
       username: existing.username,
       passwordHash: existing.password_hash,
       role: existing.role === "staff" ? "staff" : "admin",
+      companyId,
     };
   }
 
-  const initialHash = await getInitialPasswordHash();
-  await query(
-    `INSERT INTO app_users (username, password_hash, role, updated_at)
+  const initialHash = isSeeheng
+    ? await getSeehengInitialPasswordHash()
+    : await getInitialPasswordHash();
+  await target.query(
+    `INSERT INTO public.app_users (username, password_hash, role, updated_at)
      VALUES ($1, $2, 'admin', now())
      ON CONFLICT (username) DO NOTHING`,
     [username, initialHash],
-    db,
   );
 
   return {
     username,
     passwordHash: initialHash,
     role: "admin",
+    companyId,
   };
 }
 
@@ -213,15 +245,17 @@ export async function checkLoginBruteForce(
   if (memStatus.blocked) return memStatus;
 
   try {
-    const row = await queryOne<{
+    await ensureSchema();
+    const target = db ?? getPool();
+    const res = await target.query<{
       failed_count: number;
       first_failed_at: string;
       blocked_until: string | null;
     }>(
-      "SELECT failed_count, first_failed_at, blocked_until FROM auth_rate_limits WHERE ip_key = $1",
+      "SELECT failed_count, first_failed_at, blocked_until FROM public.auth_rate_limits WHERE ip_key = $1",
       [ipKey],
-      db,
     );
+    const row = res.rows[0];
     if (!row) return memStatus;
 
     const nowMs = Date.now();
@@ -240,7 +274,7 @@ export async function checkLoginBruteForce(
       (blockedUntilMs && blockedUntilMs <= nowMs) ||
       nowMs - firstFailedAtMs > ATTEMPT_WINDOW_MS
     ) {
-      await query("DELETE FROM auth_rate_limits WHERE ip_key = $1", [ipKey], db);
+      await target.query("DELETE FROM public.auth_rate_limits WHERE ip_key = $1", [ipKey]);
       return {
         blocked: false,
         remainingAttempts: MAX_LOGIN_ATTEMPTS,
@@ -265,20 +299,21 @@ export async function recordLoginFailure(
 ): Promise<{ blocked: boolean; failedCount: number; remainingAttempts: number; retryAfterSeconds: number }> {
   const memResult = recordMemoryLoginFailure(ipKey);
   try {
+    await ensureSchema();
+    const target = db ?? getPool();
     const now = new Date();
     const blockedUntil = memResult.blocked
       ? new Date(now.getTime() + BLOCK_DURATION_MS).toISOString()
       : null;
 
-    await query(
-      `INSERT INTO auth_rate_limits (ip_key, failed_count, first_failed_at, blocked_until, updated_at)
+    await target.query(
+      `INSERT INTO public.auth_rate_limits (ip_key, failed_count, first_failed_at, blocked_until, updated_at)
        VALUES ($1, $2, now(), $3, now())
        ON CONFLICT (ip_key) DO UPDATE SET
          failed_count = EXCLUDED.failed_count,
          blocked_until = EXCLUDED.blocked_until,
          updated_at = now()`,
       [ipKey, memResult.failedCount, blockedUntil],
-      db,
     );
   } catch {
     // Fallback to memory state if DB is temporarily unreachable
@@ -292,7 +327,9 @@ export async function clearLoginFailures(
 ): Promise<void> {
   clearMemoryLoginFailures(ipKey);
   try {
-    await query("DELETE FROM auth_rate_limits WHERE ip_key = $1", [ipKey], db);
+    await ensureSchema();
+    const target = db ?? getPool();
+    await target.query("DELETE FROM public.auth_rate_limits WHERE ip_key = $1", [ipKey]);
   } catch {
     // ignore
   }
@@ -319,8 +356,10 @@ export async function recordAuditLog(
   }
 
   try {
-    await query(
-      `INSERT INTO audit_logs (actor, action, ip_address, outcome, details_json, request_id, created_at)
+    await ensureSchema();
+    const target = db ?? getPool();
+    await target.query(
+      `INSERT INTO public.audit_logs (actor, action, ip_address, outcome, details_json, request_id, created_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())`,
       [
         entry.actor.slice(0, 120),
@@ -330,7 +369,6 @@ export async function recordAuditLog(
         JSON.stringify(safeDetails),
         entry.requestId ?? crypto.randomUUID(),
       ],
-      db,
     );
   } catch (error) {
     console.error("audit log write failed", {
@@ -376,6 +414,8 @@ export function requireApiAuth(
       ),
     };
   }
+
+  companyContextStorage.enterWith(session.companyId ?? "dragon19");
 
   return { ok: true, session, ip, requestId };
 }
