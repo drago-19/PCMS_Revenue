@@ -1,8 +1,11 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
+const SCHEMA_VERSION = "2026-10-27-v4";
+
 const globalForDb = globalThis as unknown as {
   __pcmsRevenuePool?: Pool;
   __pcmsRevenueSchema?: Promise<void>;
+  __pcmsRevenueSchemaVersion?: string;
 };
 
 type Queryable = Pool | PoolClient;
@@ -35,10 +38,19 @@ export function getPool(): Pool {
 }
 
 export function ensureSchema(): Promise<void> {
-  if (!globalForDb.__pcmsRevenueSchema) {
+  if (
+    !globalForDb.__pcmsRevenueSchema ||
+    globalForDb.__pcmsRevenueSchemaVersion !== SCHEMA_VERSION
+  ) {
+    globalForDb.__pcmsRevenueSchemaVersion = SCHEMA_VERSION;
     globalForDb.__pcmsRevenueSchema = getPool()
       .query(SCHEMA_SQL)
-      .then(() => undefined);
+      .then(() => undefined)
+      .catch((err) => {
+        globalForDb.__pcmsRevenueSchema = undefined;
+        globalForDb.__pcmsRevenueSchemaVersion = undefined;
+        throw err;
+      });
   }
   return globalForDb.__pcmsRevenueSchema;
 }
@@ -151,6 +163,9 @@ ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_type TEXT NOT NULL DEFAULT 'se
 ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_blob BYTEA;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'TikTok';
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS order_code TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_name TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_tax_id TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_address TEXT;
 
 CREATE INDEX IF NOT EXISTS ix_transactions_channel ON transactions(channel);
 CREATE INDEX IF NOT EXISTS ix_transactions_order_code ON transactions(order_code);
@@ -284,6 +299,13 @@ CREATE TABLE IF NOT EXISTS app_users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+  setting_key TEXT PRIMARY KEY,
+  value_json JSONB NOT NULL DEFAULT '{}',
+  updated_by TEXT NOT NULL DEFAULT 'system',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS auth_rate_limits (
   ip_key TEXT PRIMARY KEY,
   failed_count INTEGER NOT NULL DEFAULT 0,
@@ -321,6 +343,79 @@ BEGIN
     CREATE TRIGGER trg_audit_logs_immutable
     BEFORE UPDATE OR DELETE ON audit_logs
     FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation();
+  END IF;
+
+  -- Enforce TikTok-only policy across existing database records
+  IF EXISTS (
+    SELECT 1 FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'
+  ) OR EXISTS (
+    SELECT 1 FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'
+  ) OR EXISTS (
+    SELECT 1 FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'
+  ) OR EXISTS (
+    SELECT 1 FROM daily_summaries WHERE shopee_count > 0 OR facebook_count > 0
+  ) OR EXISTS (
+    SELECT 1 FROM sku_summaries WHERE shopee_qty > 0 OR facebook_qty > 0
+  ) THEN
+    DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok';
+    DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok';
+    DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok';
+
+    DELETE FROM products p
+    WHERE NOT EXISTS (
+      SELECT 1 FROM oms_order_items i WHERE i.sku_code = p.sku_code
+    );
+
+    DELETE FROM invoice_registry r
+    WHERE NOT EXISTS (
+      SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND t.is_order = 1
+    );
+
+    DELETE FROM daily_summaries;
+    INSERT INTO daily_summaries (
+      paid_date, transaction_count, order_count, order_payout, order_income,
+      order_fees, other_count, other_payout, total_payout, adjustment,
+      tiktok_count, shopee_count, facebook_count, updated_at
+    )
+    SELECT
+      paid_date,
+      COUNT(*)::int,
+      SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int,
+      ROUND(SUM(CASE WHEN is_order = 1 THEN payout ELSE 0 END)::numeric, 2),
+      ROUND(SUM(CASE WHEN is_order = 1 THEN income ELSE 0 END)::numeric, 2),
+      ROUND(SUM(CASE WHEN is_order = 1 THEN fee_total ELSE 0 END)::numeric, 2),
+      SUM(CASE WHEN is_order = 0 THEN 1 ELSE 0 END)::int,
+      ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
+      ROUND(SUM(payout)::numeric, 2),
+      ROUND(SUM(adjustment)::numeric, 2),
+      SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int,
+      0,
+      0,
+      now()
+    FROM transactions
+    WHERE paid_date <> '' AND paid_date <> 'unknown'
+      AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok'
+    GROUP BY paid_date;
+
+    DELETE FROM sku_summaries;
+    INSERT INTO sku_summaries (
+      sku_code, product_name, total_qty, order_count, gross_amount,
+      net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, updated_at
+    )
+    SELECT
+      i.sku_code,
+      MAX(i.product_name),
+      COALESCE(SUM(i.quantity), 0)::int,
+      COUNT(DISTINCT i.order_code)::int,
+      ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
+      ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
+      COALESCE(SUM(i.quantity), 0)::int,
+      0,
+      0,
+      now()
+    FROM oms_order_items i
+    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok'
+    GROUP BY i.sku_code;
   END IF;
 END $$;
 `;
