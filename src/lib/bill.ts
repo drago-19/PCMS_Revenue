@@ -263,13 +263,6 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     });
   }
 
-  const hasShippingActivity =
-    shippingActual !== 0 ||
-    shippingPlatformDiscount !== 0 ||
-    shippingCustomerFee !== 0 ||
-    shippingDiscountStore !== 0 ||
-    shippingSubsidy !== 0;
-
   const feeGroups: BillFeeGroup[] = [];
   for (const group of FEE_GROUPS) {
     const value = normalized.feeGroups[group.key];
@@ -277,55 +270,6 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     const children: BillLine[] = [];
     for (const childKey of group.children) {
       const amount = round2(value.children[childKey] ?? 0);
-      if (group.key === "shipping" && childKey === "shippingCustomerFee") {
-        if (!hasShippingActivity && amount === 0) continue;
-        const custShipLabel =
-          weightEstimated !== null
-            ? `${labelFor("shippingCustomerFee")} (น้ำหนักพัสดุโดยประมาณ: ${weightEstimated} ก.)`
-            : labelFor("shippingCustomerFee");
-        children.push({
-          key: "shippingCustomerFee",
-          label: custShipLabel,
-          amount,
-          depth: 1,
-          kind: "line",
-        });
-        children.push(
-          {
-            key: "shippingCustomerBeforeDiscount",
-            label: "ค่าจัดส่งของลูกค้าก่อนหักส่วนลด",
-            amount: shippingBeforeDiscount,
-            depth: 2,
-            kind: "line",
-          },
-          {
-            key: "shippingCustomerDiscountStore",
-            label: "ส่วนลดค่าจัดส่งจากร้านค้า",
-            amount: -round2(Math.abs(shippingDiscountStore)),
-            depth: 2,
-            kind: "line",
-          },
-          {
-            key: "shippingCustomerDiscountPlatform",
-            label: "ส่วนลดค่าจัดส่งจาก TikTok Shop",
-            amount: -round2(Math.abs(shippingPlatformDiscount)),
-            depth: 2,
-            kind: "line",
-          },
-          {
-            key: "shippingCustomerSubsidy",
-            label: "เงินสนับสนุนการจัดส่ง",
-            amount: round2(shippingSubsidy),
-            depth: 2,
-            kind: "line",
-          },
-        );
-        continue;
-      }
-      if (group.key === "shipping" && childKey === "shippingSubsidy") {
-        // แสดงอยู่ในรายการย่อยภายใต้ ค่าธรรมเนียมการจัดส่งของลูกค้า แล้ว
-        continue;
-      }
       if (amount === 0) continue;
       let label = labelFor(childKey);
       if (label === group.label) continue;

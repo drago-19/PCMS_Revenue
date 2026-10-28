@@ -130,9 +130,13 @@ export function BillPreviewTrigger({
 
   const bill = useMemo(() => buildBill(row.normalized), [row.normalized]);
   const invoice = useMemo(() => buildInvoice(row), [row]);
+  const isZeroRevenueOrder =
+    row.transactionType !== "คำสั่งซื้อ (OMS)" &&
+    row.income <= 0 &&
+    row.payout <= 0;
 
   function handleOpen() {
-    setTab(defaultTab);
+    setTab(isZeroRevenueOrder ? "bill" : defaultTab);
     setBuyerName(persistedBuyer.name);
     setBuyerTaxId(persistedBuyer.taxId);
     setBuyerAddress(persistedBuyer.address);
@@ -185,7 +189,7 @@ export function BillPreviewTrigger({
           type="button"
           onClick={handleOpen}
           className={cn(
-            "mono link inline-flex min-h-[40px] cursor-pointer items-center text-left max-[767px]:break-all min-[768px]:whitespace-nowrap text-[12px] min-[1280px]:text-[13px] tracking-tight bg-transparent border-0 p-0",
+            "mono link inline-flex min-h-[40px] min-[768px]:min-h-[26px] cursor-pointer items-center text-left max-[767px]:break-all min-[768px]:whitespace-nowrap text-[12.5px] min-[1280px]:text-[13px] tracking-tight bg-transparent border-0 p-0",
             className,
           )}
         >
@@ -229,8 +233,11 @@ export function BillPreviewTrigger({
                     (ยังไม่ผูก #ออเดอร์ใน shipnity)
                   </span>
                 )}
-                <Badge variant="default" size="sm">
-                  TikTok
+                <Badge
+                  variant={row.channel === "Shopee" ? "shopee" : "default"}
+                  size="sm"
+                >
+                  {row.channel === "Shopee" ? "Shopee" : "TikTok"}
                 </Badge>
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
@@ -239,11 +246,11 @@ export function BillPreviewTrigger({
             </div>
           </DialogHeader>
 
-          <div className="no-print flex flex-wrap items-center justify-between gap-2 border-b border-border bg-white px-4 py-2.5 sm:px-6">
+          <div className="no-print flex flex-wrap items-center justify-between gap-2 border-b border-border bg-white px-4 py-2 sm:px-6 sm:py-2.5">
             <div
               role="tablist"
               aria-label="เลือกประเภทเอกสาร"
-              className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1"
+              className="flex w-full flex-wrap items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto"
             >
               <Button
                 type="button"
@@ -254,47 +261,51 @@ export function BillPreviewTrigger({
                 onClick={() => setTab("bill")}
                 className={
                   tab === "bill"
-                    ? "shadow-xs"
-                    : "text-[#334155] hover:bg-white hover:text-[#0f172a]"
+                    ? "flex-1 justify-center shadow-xs sm:flex-initial"
+                    : "flex-1 justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:flex-initial"
                 }
               >
                 <IconFile size={15} /> รายละเอียดบิล
               </Button>
-              <Button
-                type="button"
-                role="tab"
-                aria-selected={tab === "invoice"}
-                variant={tab === "invoice" ? "default" : "ghost"}
-                size="xs"
-                onClick={() => setTab("invoice")}
-                className={
-                  tab === "invoice"
-                    ? "shadow-xs"
-                    : "text-[#334155] hover:bg-white hover:text-[#0f172a]"
-                }
-              >
-                <IconReceipt size={15} /> ใบกำกับฯ (อย่างย่อ)
-              </Button>
-              <Button
-                type="button"
-                role="tab"
-                aria-selected={tab === "invoice_full"}
-                variant={tab === "invoice_full" ? "default" : "ghost"}
-                size="xs"
-                onClick={() => setTab("invoice_full")}
-                className={
-                  tab === "invoice_full"
-                    ? "shadow-xs"
-                    : "text-[#334155] hover:bg-white hover:text-[#0f172a]"
-                }
-              >
-                <IconReceipt size={15} /> ใบกำกับฯ (แบบเต็มรูป)
-              </Button>
+              {!isZeroRevenueOrder ? (
+                <>
+                  <Button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "invoice"}
+                    variant={tab === "invoice" ? "default" : "ghost"}
+                    size="xs"
+                    onClick={() => setTab("invoice")}
+                    className={
+                      tab === "invoice"
+                        ? "flex-1 justify-center shadow-xs sm:flex-initial"
+                        : "flex-1 justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:flex-initial"
+                    }
+                  >
+                    <IconReceipt size={15} /> ใบกำกับฯ (อย่างย่อ)
+                  </Button>
+                  <Button
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === "invoice_full"}
+                    variant={tab === "invoice_full" ? "default" : "ghost"}
+                    size="xs"
+                    onClick={() => setTab("invoice_full")}
+                    className={
+                      tab === "invoice_full"
+                        ? "flex-1 justify-center shadow-xs sm:flex-initial"
+                        : "flex-1 justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:flex-initial"
+                    }
+                  >
+                    <IconReceipt size={15} /> ใบกำกับฯ (แบบเต็มรูป)
+                  </Button>
+                </>
+              ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               {row.paidDate ? (
-                <Button asChild variant="outline" size="xs">
+                <Button asChild variant="outline" size="xs" className="flex-1 sm:flex-initial">
                   <Link
                     href={`/days/${row.paidDate}`}
                     onClick={() => setOpen(false)}
@@ -308,6 +319,7 @@ export function BillPreviewTrigger({
                 variant="default"
                 size="xs"
                 disabled={navigatingPrint}
+                className="flex-1 sm:flex-initial"
               >
                 <Link href={fullPageHref} onClick={handleOpenFullPage}>
                   {navigatingPrint ? (
@@ -323,34 +335,37 @@ export function BillPreviewTrigger({
 
           {tab === "invoice" ? (
             <div className="no-print flex flex-wrap items-center justify-between gap-2 border-b border-border bg-[#f8fafc] px-4 py-2 sm:px-6">
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
                 <span className="text-xs font-bold text-[#334155]">
                   ขนาดกระดาษพิมพ์:
                 </span>
-                {[
-                  {
-                    key: "a6" as InvoicePaperSize,
-                    label: "100×150 มม. (A6)",
-                  },
-                  {
-                    key: "80mm" as InvoicePaperSize,
-                    label: "สลิป 80 มม.",
-                  },
-                  {
-                    key: "a4" as InvoicePaperSize,
-                    label: "A4 เต็มแผ่น",
-                  },
-                ].map((opt) => (
-                  <Button
-                    key={opt.key}
-                    type="button"
-                    variant={paperSize === opt.key ? "default" : "outline"}
-                    size="xs"
-                    onClick={() => setPaperSize(opt.key)}
-                  >
-                    {opt.label}
-                  </Button>
-                ))}
+                <div className="flex w-full flex-wrap items-center gap-1 sm:inline-flex sm:w-auto sm:gap-1.5">
+                  {[
+                    {
+                      key: "a6" as InvoicePaperSize,
+                      label: "100×150 มม. (A6)",
+                    },
+                    {
+                      key: "80mm" as InvoicePaperSize,
+                      label: "สลิป 80 มม.",
+                    },
+                    {
+                      key: "a4" as InvoicePaperSize,
+                      label: "A4 เต็มแผ่น",
+                    },
+                  ].map((opt) => (
+                    <Button
+                      key={opt.key}
+                      type="button"
+                      variant={paperSize === opt.key ? "default" : "outline"}
+                      size="xs"
+                      onClick={() => setPaperSize(opt.key)}
+                      className="flex-1 justify-center px-2 sm:flex-initial sm:px-2.5"
+                    >
+                      {opt.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
               {paperSize === "a6" ||
               paperSize === "a4-4up" ||

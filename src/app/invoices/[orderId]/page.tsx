@@ -81,16 +81,16 @@ export default async function InvoicePage({
         paperSize={paper}
         toolbarTop={
           <>
-            <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-border px-4 py-3 sm:px-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button asChild variant="outline" size="sm" className="h-9">
+            <div className="flex flex-col gap-2.5 border-b border-border px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-5">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <Button asChild variant="outline" size="sm" className="h-9 flex-1 sm:flex-initial">
                   <Link href={`/bills/${row.externalId}`}>
                     <IconArrowLeft size={16} /> กลับไปบิล
                   </Link>
                 </Button>
                 {row.paidDate ? (
                   <>
-                    <Button asChild variant="outline" size="sm" className="h-9">
+                    <Button asChild variant="outline" size="sm" className="h-9 flex-1 sm:flex-initial">
                       <Link
                         href={
                           mode === "full"
@@ -102,7 +102,7 @@ export default async function InvoicePage({
                       </Link>
                     </Button>
                     {/^\d{4}-\d{2}/.test(row.paidDate) ? (
-                      <Button asChild variant="outline" size="sm" className="h-9">
+                      <Button asChild variant="outline" size="sm" className="h-9 w-full sm:w-auto">
                         <Link
                           href={
                             mode === "full"
@@ -118,16 +118,16 @@ export default async function InvoicePage({
                 ) : null}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto sm:items-center">
                   <Button
                     asChild
                     variant={mode === "abbreviated" ? "default" : "ghost"}
                     size="xs"
                     className={
                       mode === "abbreviated"
-                        ? "shadow-xs"
-                        : "text-[#334155] hover:bg-white hover:text-[#0f172a]"
+                        ? "w-full shadow-xs sm:w-auto"
+                        : "w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
                     }
                   >
                     <Link href={buildHref("abbreviated", "a6")}>
@@ -140,8 +140,8 @@ export default async function InvoicePage({
                     size="xs"
                     className={
                       mode === "full"
-                        ? "shadow-xs"
-                        : "text-[#334155] hover:bg-white hover:text-[#0f172a]"
+                        ? "w-full shadow-xs sm:w-auto"
+                        : "w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
                     }
                   >
                     <Link href={buildHref("full", "a4")}>
@@ -149,17 +149,17 @@ export default async function InvoicePage({
                     </Link>
                   </Button>
                 </div>
-                <PrintButton />
+                <PrintButton className="w-full sm:w-auto" />
               </div>
             </div>
 
             {mode === "abbreviated" ? (
-              <div className="flex flex-wrap items-center justify-between gap-2.5 bg-[#f8fafc] px-4 py-2 sm:px-5">
-                <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-col gap-2 bg-[#f8fafc] px-3.5 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-5">
+                <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                   <span className="text-xs font-bold text-[#334155]">
                     ขนาดกระดาษพิมพ์:
                   </span>
-                  <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs">
+                  <div className="flex w-full flex-wrap items-center gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs sm:inline-flex sm:w-auto">
                     {[
                       {
                         key: "a6" as InvoicePaperSize,
@@ -183,8 +183,8 @@ export default async function InvoicePage({
                           size="xs"
                           className={
                             active
-                              ? "shadow-xs"
-                              : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                              ? "flex-1 justify-center px-2 shadow-xs sm:flex-initial"
+                              : "flex-1 justify-center px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:flex-initial"
                           }
                         >
                           <Link href={buildHref("abbreviated", opt.key)}>

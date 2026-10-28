@@ -22,9 +22,6 @@ export function BillDocument({
   trackingNo,
   courier,
   discountCode,
-  discountTotal,
-  shippingFeeCustomer,
-  shippingFeeSeller,
   marketplaceOrderRaw,
   productDetail,
   omsItems,
@@ -51,7 +48,53 @@ export function BillDocument({
     bill.feeExtraLines.length > 0 ||
     bill.feeTotal !== 0;
 
-  const channelLabel = "TikTok Shop";
+  const isShopee = channel === "Shopee";
+  const channelLabel = isShopee ? "Shopee" : "TikTok Shop";
+  const cpb = bill.customerPaymentBreakdown;
+  const customerPaidTotal = cpb?.total ?? bill.customerPayment;
+  const hasCustomerPaymentSection = customerPaidTotal > 0;
+  const hasCustomerSpecificDiff =
+    hasCustomerPaymentSection &&
+    cpb !== undefined &&
+    (cpb.tiktokProductDiscount !== 0 ||
+      cpb.shippingAfterDiscount > 0 ||
+      cpb.sellerShippingDiscount !== 0 ||
+      Math.abs(customerPaidTotal - bill.incomeTotal) >= 0.01);
+
+  const productBeforeLine = bill.incomeLines.find(
+    (line) => line.key === "productBeforeDiscount",
+  );
+  const incomeHeaderAmount =
+    productBeforeLine && productBeforeLine.amount !== 0
+      ? productBeforeLine.amount
+      : bill.incomeTotal;
+
+  const visibleIncomeLines = [
+    ...bill.incomeLines.filter((line) => line.key === "productBeforeDiscount"),
+    ...bill.incomeLines.filter(
+      (line) =>
+        line.key !== "productBeforeDiscount" &&
+        line.key !== "productAfterDiscount" &&
+        line.key !== "refundAfterDiscount",
+    ),
+    ...bill.incomeLines.filter(
+      (line) =>
+        line.key === "productAfterDiscount" ||
+        line.key === "refundAfterDiscount",
+    ),
+  ];
+
+  const extraReferenceLines = [
+    bill.rowIndexes && bill.rowIndexes.length > 0
+      ? `บรรทัดในไฟล์ Excel: แถวที่ ${bill.rowIndexes.join(", ")}${
+          bill.sourceRows > 1 ? ` (รวม ${bill.sourceRows} แถว)` : ""
+        }`
+      : null,
+    bill.productDetail &&
+    !["/", "-", "--", "N/A"].includes(bill.productDetail.trim())
+      ? `รายละเอียดสินค้าในไฟล์: ${bill.productDetail}`
+      : null,
+  ].filter(Boolean);
 
   return (
     <article className="bill-card">
@@ -119,13 +162,11 @@ export function BillDocument({
           </div>
         ) : null}
         <div>
-          <dt>ช่องทางจำหน่าย</dt>
-          <dd>{channelLabel}</dd>
-        </div>
-        <div>
           <dt>เลขที่ใบกำกับภาษี</dt>
           {invoiceNo ? (
             <dd className="mono">{invoiceNo}</dd>
+          ) : !isOmsPlaceholder && bill.incomeTotal <= 0 && bill.payout <= 0 ? (
+            <dd className="bill-empty-hint">ไม่ออกใบกำกับภาษี (ยอดสุทธิ 0 บาท)</dd>
           ) : (
             <dd className="bill-empty-hint">รอไฟล์ ออเดอร์ใน shipnity</dd>
           )}
@@ -165,10 +206,6 @@ export function BillDocument({
               : bill.transactionType}
           </dd>
         </div>
-        <div>
-          <dt>สกุลเงิน</dt>
-          <dd>{bill.currency}</dd>
-        </div>
         {bill.weightEstimated !== null ? (
           <div>
             <dt>น้ำหนักพัสดุโดยประมาณ</dt>
@@ -182,114 +219,6 @@ export function BillDocument({
           </div>
         ) : null}
       </dl>
-
-      {bill.customerPayment > 0 ||
-      bill.customerPaymentBreakdown?.total > 0 ? (
-        <section className="bill-section">
-          <div className="bill-section-head">
-            <span>ยอดที่ลูกค้าของคุณจ่าย</span>
-            <span>
-              {formatTHB(
-                bill.customerPaymentBreakdown?.total ?? bill.customerPayment,
-              )}
-            </span>
-          </div>
-          <div className="bill-rows">
-            <div className="bill-row font-semibold">
-              <span>ผลรวมย่อยของสินค้าหลังจากหักส่วนลด</span>
-              <span className="amount">
-                {formatTHB(
-                  bill.customerPaymentBreakdown
-                    ?.productSubtotalAfterDiscount ??
-                    Math.max(0, bill.customerPayment - bill.shippingCustomerFee),
-                )}
-              </span>
-            </div>
-            {bill.customerPaymentBreakdown ? (
-              <>
-                <div className="bill-row child">
-                  <span>ผลรวมย่อยของสินค้าก่อนหักส่วนลด</span>
-                  <span className="amount">
-                    {formatTHB(
-                      bill.customerPaymentBreakdown
-                        .productSubtotalBeforeDiscount,
-                    )}
-                  </span>
-                </div>
-                <div className="bill-row child">
-                  <span>ส่วนลดค่าสินค้าจากผู้ขาย</span>
-                  <span className="amount danger">
-                    {bill.customerPaymentBreakdown.sellerProductDiscount === 0
-                      ? "-฿0.00"
-                      : formatTHB(
-                          bill.customerPaymentBreakdown.sellerProductDiscount,
-                        )}
-                  </span>
-                </div>
-                <div className="bill-row child">
-                  <span>ส่วนลดสำหรับสินค้าจาก TikTok Shop</span>
-                  <span className="amount danger">
-                    {bill.customerPaymentBreakdown.tiktokProductDiscount === 0
-                      ? "-฿0.00"
-                      : formatTHB(
-                          bill.customerPaymentBreakdown.tiktokProductDiscount,
-                        )}
-                  </span>
-                </div>
-              </>
-            ) : null}
-            <div className="bill-row font-semibold">
-              <span>ค่าธรรมเนียมการจัดส่งหลังจากหักส่วนลด</span>
-              <span className="amount">
-                {formatTHB(
-                  bill.customerPaymentBreakdown?.shippingAfterDiscount ??
-                    bill.shippingCustomerFee,
-                )}
-              </span>
-            </div>
-            {bill.customerPaymentBreakdown ? (
-              <>
-                <div className="bill-row child">
-                  <span>ค่าธรรมเนียมการจัดส่งก่อนหักส่วนลด</span>
-                  <span className="amount">
-                    {formatTHB(
-                      bill.customerPaymentBreakdown.shippingBeforeDiscount,
-                    )}
-                  </span>
-                </div>
-                <div className="bill-row child">
-                  <span>ส่วนลดค่าจัดส่งจากผู้ขาย</span>
-                  <span className="amount">
-                    {bill.customerPaymentBreakdown.sellerShippingDiscount === 0
-                      ? "-฿0.00"
-                      : formatTHB(
-                          bill.customerPaymentBreakdown.sellerShippingDiscount,
-                        )}
-                  </span>
-                </div>
-                <div className="bill-row child">
-                  <span>ส่วนลดค่าจัดส่งจาก TikTok Shop</span>
-                  <span className="amount danger">
-                    {bill.customerPaymentBreakdown.tiktokShippingDiscount === 0
-                      ? "-฿0.00"
-                      : formatTHB(
-                          bill.customerPaymentBreakdown.tiktokShippingDiscount,
-                        )}
-                  </span>
-                </div>
-              </>
-            ) : null}
-            <div className="bill-row font-bold">
-              <span>ยอดรวม</span>
-              <span className="amount">
-                {formatTHB(
-                  bill.customerPaymentBreakdown?.total ?? bill.customerPayment,
-                )}
-              </span>
-            </div>
-          </div>
-        </section>
-      ) : null}
 
       <section className="bill-section">
         <div className="bill-section-head">
@@ -325,88 +254,29 @@ export function BillDocument({
                   bill.customerPayment > 0
                     ? Math.max(0, bill.customerPayment - bill.shippingCustomerFee)
                     : bill.incomeTotal;
-                const effectiveDiscount =
-                  discountTotal !== undefined && discountTotal > 0
-                    ? discountTotal
-                    : Math.max(0, listTotal - bill.incomeTotal);
-                const breakdown = bill.discountBreakdown ?? [];
-                return (
-                  <>
-                    {omsItems.map((it, idx) => {
-                      const netUnit =
-                        listTotal > 0
-                          ? (customerItemsTotal * it.unitPrice) / listTotal
-                          : it.unitPrice;
-                      return (
-                        <div key={`${it.skuCode}-${idx}`} className="bill-row">
-                          <span>
-                            <strong className="mono">{it.skuCode}</strong> ·{" "}
-                            {it.productName} × {it.quantity}{" "}
-                            <span className="text-xs text-muted-foreground">
-                              (ราคาตั้งต้น {formatTHB(it.unitPrice)}/ชิ้น)
-                            </span>
+                return omsItems.map((it, idx) => {
+                  const netUnit =
+                    listTotal > 0
+                      ? (customerItemsTotal * it.unitPrice) / listTotal
+                      : it.unitPrice;
+                  const lineNetTotal = netUnit * it.quantity;
+                  return (
+                    <div key={`${it.skuCode}-${idx}`} className="bill-row">
+                      <span>
+                        <strong className="mono">{it.skuCode}</strong> ·{" "}
+                        {it.productName} × {it.quantity}{" "}
+                        {omsItems.length > 1 || it.quantity > 1 ? (
+                          <span className="text-xs text-muted-foreground">
+                            (ราคาตั้งต้น {formatTHB(it.unitPrice)}/ชิ้น)
                           </span>
-                          <span className="amount">
-                            {formatTHB(netUnit)} × {it.quantity}
-                          </span>
-                        </div>
-                      );
-                    })}
-                    <div className="bill-row child">
-                      <span>ผลรวมย่อยของสินค้าก่อนหักส่วนลด ({omsItems.length} รายการ)</span>
-                      <span className="amount">{formatTHB(listTotal)}</span>
+                        ) : null}
+                      </span>
+                      <span className="amount">
+                        {formatTHB(lineNetTotal)}
+                      </span>
                     </div>
-                    {breakdown.length > 0 ? (
-                      breakdown.map((d) => (
-                        <div key={`oms-disc-${d.key}`} className="bill-row child">
-                          <span>
-                            {d.label}
-                            {d.key === "storeDiscount" && discountCode
-                              ? ` (โค้ด: ${discountCode})`
-                              : ""}
-                          </span>
-                          <span className={`amount${d.amount < 0 ? " danger" : ""}`}>
-                            {formatTHB(d.amount)}
-                          </span>
-                        </div>
-                      ))
-                    ) : effectiveDiscount > 0 ? (
-                      <div className="bill-row child">
-                        <span>
-                          ส่วนลดค่าสินค้าจากผู้ขาย
-                          {discountCode ? ` (โค้ดส่วนลด: ${discountCode})` : ""}
-                        </span>
-                        <span className="amount danger">
-                          -{formatTHB(effectiveDiscount)}
-                        </span>
-                      </div>
-                    ) : null}
-                    {bill.customerPayment > 0 ? (
-                      <div className="bill-row child">
-                        <span>ผลรวมย่อยของสินค้าหลังจากหักส่วนลด</span>
-                        <span className="amount">
-                          {formatTHB(customerItemsTotal)}
-                        </span>
-                      </div>
-                    ) : null}
-                    {shippingFeeCustomer !== undefined && shippingFeeCustomer > 0 ? (
-                      <div className="bill-row child">
-                        <span>ค่าธรรมเนียมการจัดส่งของลูกค้า</span>
-                        <span className="amount">{formatTHB(shippingFeeCustomer)}</span>
-                      </div>
-                    ) : null}
-                    {shippingFeeSeller !== undefined && shippingFeeSeller > 0 ? (
-                      <div className="bill-row child">
-                        <span>ยอดรวมค่าจัดส่งที่ร้านค้าจ่ายจริง</span>
-                        <span className="amount danger">-{formatTHB(shippingFeeSeller)}</span>
-                      </div>
-                    ) : null}
-                    <div className="bill-row font-bold">
-                      <span>ยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย</span>
-                      <span className="amount">{formatTHB(bill.incomeTotal)}</span>
-                    </div>
-                  </>
-                );
+                  );
+                });
               })()}
             </>
           ) : (
@@ -435,41 +305,123 @@ export function BillDocument({
                   รอไฟล์ สินค้าในออเดอร์ shipnity
                 </span>
               </div>
-              {bill.discountBreakdown && bill.discountBreakdown.length > 0 ? (
-                <>
-                  {bill.discountBreakdown.map((d) => (
-                    <div key={`settle-disc-${d.key}`} className="bill-row child">
-                      <span>{d.label}</span>
-                      <span className={`amount${d.amount < 0 ? " danger" : ""}`}>
-                        {formatTHB(d.amount)}
-                      </span>
-                    </div>
-                  ))}
-                </>
-              ) : null}
             </>
           )}
         </div>
       </section>
 
+      {hasCustomerSpecificDiff && cpb ? (
+        <section className="bill-section">
+          <div className="bill-section-head">
+            <span>ยอดที่ลูกค้าของคุณจ่าย</span>
+            <span>{formatTHB(customerPaidTotal)}</span>
+          </div>
+          <div className="bill-rows">
+            {cpb.shippingAfterDiscount > 0 || cpb.sellerShippingDiscount !== 0 ? (
+              <div className="bill-row font-semibold">
+                <span>ผลรวมย่อยของสินค้าหลังจากหักส่วนลด</span>
+                <span className="amount">
+                  {formatTHB(cpb.productSubtotalAfterDiscount)}
+                </span>
+              </div>
+            ) : null}
+            {cpb.sellerProductDiscount !== 0 || cpb.tiktokProductDiscount !== 0 ? (
+              <>
+                <div className="bill-row child">
+                  <span>ผลรวมย่อยของสินค้าก่อนหักส่วนลด</span>
+                  <span className="amount">
+                    {formatTHB(cpb.productSubtotalBeforeDiscount)}
+                  </span>
+                </div>
+                {cpb.sellerProductDiscount !== 0 ? (
+                  <div className="bill-row child">
+                    <span>
+                      ส่วนลดค่าสินค้าจากผู้ขาย
+                      {discountCode ? ` (โค้ด: ${discountCode})` : ""}
+                    </span>
+                    <span className="amount danger">
+                      {formatTHB(cpb.sellerProductDiscount)}
+                    </span>
+                  </div>
+                ) : null}
+                {cpb.tiktokProductDiscount !== 0 ? (
+                  <div className="bill-row child">
+                    <span>ส่วนลดสำหรับสินค้าจาก {channelLabel}</span>
+                    <span className="amount danger">
+                      {formatTHB(cpb.tiktokProductDiscount)}
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {cpb.shippingAfterDiscount > 0 || cpb.sellerShippingDiscount !== 0 ? (
+              <>
+                <div className="bill-row font-semibold">
+                  <span>ค่าธรรมเนียมการจัดส่งหลังจากหักส่วนลด</span>
+                  <span className="amount">
+                    {formatTHB(cpb.shippingAfterDiscount)}
+                  </span>
+                </div>
+                {cpb.shippingBeforeDiscount > 0 &&
+                (cpb.sellerShippingDiscount !== 0 ||
+                  cpb.tiktokShippingDiscount !== 0) ? (
+                  <div className="bill-row child">
+                    <span>ค่าธรรมเนียมการจัดส่งก่อนหักส่วนลด</span>
+                    <span className="amount">
+                      {formatTHB(cpb.shippingBeforeDiscount)}
+                    </span>
+                  </div>
+                ) : null}
+                {cpb.sellerShippingDiscount !== 0 ? (
+                  <div className="bill-row child">
+                    <span>ส่วนลดค่าจัดส่งจากผู้ขาย</span>
+                    <span className="amount danger">
+                      {formatTHB(cpb.sellerShippingDiscount)}
+                    </span>
+                  </div>
+                ) : null}
+                {cpb.tiktokShippingDiscount !== 0 ? (
+                  <div className="bill-row child">
+                    <span>ส่วนลดค่าจัดส่งจาก {channelLabel}</span>
+                    <span className="amount danger">
+                      {formatTHB(cpb.tiktokShippingDiscount)}
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       <section className="bill-section">
         <div className="bill-section-head">
-          <span>รายได้ทั้งหมด</span>
-          <span>{formatTHB(bill.incomeTotal)}</span>
+          <span>รายได้</span>
+          <span>{formatTHB(incomeHeaderAmount)}</span>
         </div>
-        <div className="bill-rows">
-          {bill.incomeLines.map((line) => (
-            <div
-              key={line.key}
-              className={`bill-row${line.depth === 1 ? " child" : ""}${
-                line.kind === "unknown" ? " unknown" : ""
-              }`}
-            >
-              <span>{line.label}</span>
-              <span className="amount">{formatTHB(line.amount)}</span>
-            </div>
-          ))}
-        </div>
+        {visibleIncomeLines.length > 0 ? (
+          <div className="bill-rows">
+            {visibleIncomeLines.map((line) => (
+              <div
+                key={line.key}
+                className={`bill-row${line.depth === 1 ? " child" : " font-semibold"}${
+                  line.kind === "unknown" ? " unknown" : ""
+                }`}
+              >
+                <span>
+                  {line.key === "storeDiscount"
+                    ? discountCode
+                      ? `${line.label} (แฟลชเซลล์ · โค้ด: ${discountCode})`
+                      : `${line.label} (แฟลชเซลล์)`
+                    : line.label}
+                </span>
+                <span className={`amount${line.amount < 0 ? " danger" : ""}`}>
+                  {formatTHB(line.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="bill-section">
@@ -482,7 +434,9 @@ export function BillDocument({
             <div className="bill-row muted">
               <span className="text-[11.5px] font-normal text-[#94a3b8]">
                 {isOmsPlaceholder
-                  ? "ยังไม่มีข้อมูลรายได้จาก TikTok"
+                  ? isShopee
+                    ? "คำสั่งซื้อจาก Shopee (ออเดอร์ใน shipnity)"
+                    : "ยังไม่มีข้อมูลรายได้จาก TikTok"
                   : "ไม่มีค่าธรรมเนียมที่ถูกหักในคำสั่งซื้อนี้"}
               </span>
               <span className="amount">{formatTHB(0)}</span>
@@ -522,12 +476,6 @@ export function BillDocument({
             <span>จำนวนการปรับยอด</span>
             <span>{formatTHB(bill.adjustment)}</span>
           </div>
-          <div className="bill-rows">
-            <div className="bill-row">
-              <span>จำนวนการปรับยอด</span>
-              <span className="amount">{formatTHB(bill.adjustment)}</span>
-            </div>
-          </div>
         </section>
       ) : null}
 
@@ -564,29 +512,12 @@ export function BillDocument({
         </ul>
       ) : null}
 
-      <details className="bill-extra">
-        <summary>ข้อมูลอ้างอิงจากไฟล์ · {source.filename}</summary>
-        <pre>
-          {[
-            `ไฟล์ต้นทาง: ${source.filename} (นำเข้าเมื่อ ${formatDateTime(source.importedAt)})`,
-            bill.rowIndexes && bill.rowIndexes.length > 0
-              ? `บรรทัดในไฟล์ Excel: แถวที่ ${bill.rowIndexes.join(", ")}${
-                  bill.sourceRows > 1 ? ` (รวม ${bill.sourceRows} แถว)` : ""
-                }`
-              : null,
-            `หมายเลขคำสั่งซื้อ (${channelLabel}): ${bill.externalId}`,
-            orderCode
-              ? `รหัสออเดอร์ shipnity: #${orderCode}`
-              : "สถานะการผูก shipnity: ยังไม่ผูกไฟล์ ออเดอร์ใน shipnity",
-            bill.productDetail &&
-            !["/", "-", "--", "N/A"].includes(bill.productDetail.trim())
-              ? `รายละเอียดสินค้าในไฟล์: ${bill.productDetail}`
-              : null,
-          ]
-            .filter(Boolean)
-            .join("\n")}
-        </pre>
-      </details>
+      {extraReferenceLines.length > 0 ? (
+        <details className="bill-extra">
+          <summary>ข้อมูลอ้างอิงจากไฟล์ · {source.filename}</summary>
+          <pre>{extraReferenceLines.join("\n")}</pre>
+        </details>
+      ) : null}
 
       <footer className="bill-source">
         <span>
@@ -598,7 +529,11 @@ export function BillDocument({
             ดูรายงานการนำเข้า
           </Link>
         </span>
-        <span>ตัวเลขทั้งหมดอ้างอิงจากรายละเอียดคำสั่งซื้อที่ export จาก TikTok Shop</span>
+        <span>
+          {isShopee
+            ? "ตัวเลขทั้งหมดอ้างอิงจากรายละเอียดคำสั่งซื้อ Shopee ในไฟล์ shipnity"
+            : "ตัวเลขทั้งหมดอ้างอิงจากรายละเอียดคำสั่งซื้อที่ export จาก TikTok Shop"}
+        </span>
       </footer>
     </article>
   );

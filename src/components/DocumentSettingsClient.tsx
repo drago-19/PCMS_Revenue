@@ -24,6 +24,7 @@ import { buildInvoice } from "@/lib/invoice";
 import type { TransactionRow } from "@/lib/queries";
 import {
   DEFAULT_SELLER,
+  formatRunningDocumentNo,
   type DefaultInvoicePaperSize,
   type SellerInfo,
   type VatCalculationBase,
@@ -43,8 +44,8 @@ const SAMPLE_TRANSACTION: TransactionRow = {
   adjustment: 0,
   payout: 508.21,
   productDetail: null,
-  weightEstimated: null,
-  weightCharged: null,
+  weightEstimated: 3500,
+  weightCharged: 3500,
   checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
   warnings: [],
   normalized: {
@@ -58,10 +59,13 @@ const SAMPLE_TRANSACTION: TransactionRow = {
       productBeforeDiscount: 1750,
       productAfterDiscount: 693,
       storeDiscount: -1057,
-      platformDiscount: -138.6,
+      platformDiscount: 138.6,
       customerPayment: 554.4,
+      shippingActual: -57,
       shippingCustomerFee: 0,
       shippingPlatformDiscount: 55,
+      weightEstimated: 3500,
+      weightCharged: 3500,
       feeTotal: -184.79,
       payout: 508.21,
     },
@@ -76,7 +80,7 @@ const SAMPLE_TRANSACTION: TransactionRow = {
     rowIndexes: [1],
   },
   createdAt: "2026-10-26T00:00:00Z",
-  invoiceNo: "TT2610/00422",
+  invoiceNo: "SEQ/00001",
   channel: "TikTok",
   orderCode: "DI27",
   customerName: "พ***นทร์ อ***ศรี",
@@ -136,8 +140,10 @@ const DRAFT_STORAGE_KEY = "pcms_document_settings_draft_v1";
 
 export function DocumentSettingsClient({
   initialSettings,
+  defaultSettings = DEFAULT_SELLER,
 }: {
   initialSettings: Required<SellerInfo>;
+  defaultSettings?: Required<SellerInfo>;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -177,7 +183,10 @@ export function DocumentSettingsClient({
       email: getInputVal("email", base.email),
       vatRate: Number.isFinite(rawVat) ? rawVat : base.vatRate,
       invoicePrefix: getInputVal("invoicePrefix", base.invoicePrefix).toUpperCase(),
+      receiptPrefix: getInputVal("receiptPrefix", base.receiptPrefix).toUpperCase(),
       footerNote: getInputVal("footerNote", base.footerNote),
+      showInvoiceNo: getCheckVal("showInvoiceNo", base.showInvoiceNo),
+      showReceiptNo: getCheckVal("showReceiptNo", base.showReceiptNo),
       showFeeBreakdown: getCheckVal("showFeeBreakdown", base.showFeeBreakdown),
       showShippingTracking: getCheckVal(
         "showShippingTracking",
@@ -226,12 +235,7 @@ export function DocumentSettingsClient({
   }
 
   const previewInvoice = useMemo(() => {
-    const built = buildInvoice(SAMPLE_TRANSACTION, form);
-    const prefix = (form.invoicePrefix ?? "").trim();
-    return {
-      ...built,
-      invoiceNo: `${prefix}2610/00422`,
-    };
+    return buildInvoice(SAMPLE_TRANSACTION, form);
   }, [form]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -281,6 +285,13 @@ export function DocumentSettingsClient({
       setForm(data.settings);
       setVatRateInput(String(data.settings.vatRate));
       setPreviewPaper(data.settings.defaultPaperSize);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("pcms:company-name-changed", {
+            detail: data.settings.name,
+          }),
+        );
+      }
       router.refresh();
       toast.success("บันทึกการตั้งค่าใบพิมพ์และข้อมูลบริษัทเรียบร้อยแล้ว");
     } catch {
@@ -292,9 +303,16 @@ export function DocumentSettingsClient({
 
   function handleResetDefault() {
     isDirtyRef.current = true;
-    setForm({ ...DEFAULT_SELLER });
-    setVatRateInput(String(DEFAULT_SELLER.vatRate));
-    setPreviewPaper(DEFAULT_SELLER.defaultPaperSize);
+    setForm({ ...defaultSettings });
+    setVatRateInput(String(defaultSettings.vatRate));
+    setPreviewPaper(defaultSettings.defaultPaperSize);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("pcms:company-name-changed", {
+          detail: defaultSettings.name,
+        }),
+      );
+    }
     toast.info("คืนค่าเริ่มต้นบนฟอร์มแล้ว กด 'บันทึกการตั้งค่าทั้งหมด' เพื่อยืนยัน");
   }
 
@@ -324,9 +342,17 @@ export function DocumentSettingsClient({
               <Input
                 name="name"
                 value={form.name}
-                onChange={(e) =>
-                  updateForm((prev) => ({ ...prev, name: e.target.value }))
-                }
+                onChange={(e) => {
+                  const nextName = e.target.value;
+                  updateForm((prev) => ({ ...prev, name: nextName }));
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(
+                      new CustomEvent("pcms:company-name-changed", {
+                        detail: nextName,
+                      }),
+                    );
+                  }
+                }}
                 placeholder="เช่น บริษัท ชีเฮง จำกัด (สำนักงานใหญ่)"
                 required
               />
@@ -403,10 +429,10 @@ export function DocumentSettingsClient({
               2. การคำนวณภาษีและรหัสเอกสาร (Tax & Numbering)
             </CardTitle>
             <CardDescription>
-              กำหนดอัตราภาษีมูลค่าเพิ่ม คำนำหน้าเลขใบกำกับภาษี และฐานยอดเงินที่ใช้คิดภาษี
+              กำหนดอัตราภาษีมูลค่าเพิ่ม เลขที่ใบกำกับฯ เริ่มต้น และเลขที่ใบเสร็จเริ่มต้นด้วยตัวเอง ระบบจะบวกเลขท้ายรันต่อไปทีละใบอัตโนมัติ (+1, +2, ...)
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
               <span>อัตราภาษีมูลค่าเพิ่ม (VAT %)</span>
               <Input
@@ -433,74 +459,48 @@ export function DocumentSettingsClient({
             </label>
 
             <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
-              <span>คำนำหน้าเลขที่ใบกำกับภาษี (Invoice Prefix)</span>
+              <span>เลขที่ใบกำกับฯ เริ่มต้น (กำหนดเองแล้วรันต่อ)</span>
               <Input
                 name="invoicePrefix"
                 value={form.invoicePrefix}
                 onChange={(e) =>
                   updateForm((prev) => ({
                     ...prev,
-                    invoicePrefix: e.target.value.toUpperCase(),
+                    invoicePrefix: e.target.value,
                   }))
                 }
-                placeholder="TT"
+                placeholder="เช่น TT2610/00001 หรือ INV-0001"
                 className="mono"
-                maxLength={16}
+                maxLength={32}
               />
+              <span className="mono text-[11px] font-normal text-muted-foreground break-all">
+                รันต่อเนื่อง: {formatRunningDocumentNo(form.invoicePrefix, 1, DEFAULT_SELLER.invoicePrefix)} →{" "}
+                {formatRunningDocumentNo(form.invoicePrefix, 2, DEFAULT_SELLER.invoicePrefix)} →{" "}
+                {formatRunningDocumentNo(form.invoicePrefix, 3, DEFAULT_SELLER.invoicePrefix)}
+              </span>
             </label>
 
-            <div className="flex flex-col gap-2 sm:col-span-2">
-              <span className="text-xs font-semibold text-foreground">
-                ฐานยอดเงินที่ใช้คำนวณภาษีมูลค่าเพิ่ม (VAT Base)
+            <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
+              <span>เลขที่ใบเสร็จ เริ่มต้น (กำหนดเองแล้วรันต่อ)</span>
+              <Input
+                name="receiptPrefix"
+                value={form.receiptPrefix}
+                onChange={(e) =>
+                  updateForm((prev) => ({
+                    ...prev,
+                    receiptPrefix: e.target.value,
+                  }))
+                }
+                placeholder="เช่น RC2610/00001 หรือ RC-0001"
+                className="mono"
+                maxLength={32}
+              />
+              <span className="mono text-[11px] font-normal text-muted-foreground break-all">
+                รันต่อเนื่อง: {formatRunningDocumentNo(form.receiptPrefix, 1, DEFAULT_SELLER.receiptPrefix)} →{" "}
+                {formatRunningDocumentNo(form.receiptPrefix, 2, DEFAULT_SELLER.receiptPrefix)} →{" "}
+                {formatRunningDocumentNo(form.receiptPrefix, 3, DEFAULT_SELLER.receiptPrefix)}
               </span>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {(
-                  [
-                    {
-                      id: "payout",
-                      title: "คิดจากยอดที่คุณได้รับจริง (Payout)",
-                      desc: "หักค่าธรรมเนียมแพลตฟอร์มออกก่อน แล้วถอด VAT จากเงินที่ร้านได้รับจริง (เช่น ฿508.21)",
-                    },
-                    {
-                      id: "customer_paid",
-                      title: "คิดจากยอดที่ลูกค้าจ่าย (Customer Paid)",
-                      desc: "ถอด VAT จากยอดที่ลูกค้าชำระ (เช่น ฿554.40) โดยไม่หักค่าธรรมเนียมแพลตฟอร์ม",
-                    },
-                  ] as {
-                    id: VatCalculationBase;
-                    title: string;
-                    desc: string;
-                  }[]
-                ).map((opt) => {
-                  const active = form.vatCalculationBase === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() =>
-                        updateForm((prev) => ({
-                          ...prev,
-                          vatCalculationBase: opt.id,
-                        }))
-                      }
-                      className={`flex flex-col items-start gap-1 rounded-xl border p-3 text-left transition ${
-                        active
-                          ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-                          : "border-border bg-card hover:bg-muted/50"
-                      }`}
-                    >
-                      <span className="text-xs font-bold text-foreground">
-                        {active ? "● " : "○ "}
-                        {opt.title}
-                      </span>
-                      <span className="text-xs leading-relaxed text-muted-foreground">
-                        {opt.desc}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            </label>
           </CardContent>
         </Card>
 
@@ -556,6 +556,14 @@ export function DocumentSettingsClient({
               {(
                 [
                   {
+                    key: "showInvoiceNo",
+                    label: "แสดงเลขที่ใบกำกับฯ (เลขที่ใบกำกับภาษี)",
+                  },
+                  {
+                    key: "showReceiptNo",
+                    label: "แสดงหมายเลขใบเสร็จ (ใบเสร็จ:)",
+                  },
+                  {
                     key: "showFeeBreakdown",
                     label: "แสดงบรรทัดส่วนลดชดเชย & หักค่าธรรมเนียมแพลตฟอร์ม",
                   },
@@ -577,6 +585,8 @@ export function DocumentSettingsClient({
                   },
                 ] as {
                   key:
+                    | "showInvoiceNo"
+                    | "showReceiptNo"
                     | "showFeeBreakdown"
                     | "showShippingTracking"
                     | "showSkuInAbbreviated"
@@ -595,12 +605,23 @@ export function DocumentSettingsClient({
                       name={toggle.key}
                       type="checkbox"
                       checked={checked}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const nextChecked = e.target.checked;
                         updateForm((prev) => ({
                           ...prev,
-                          [toggle.key]: e.target.checked,
-                        }))
-                      }
+                          [toggle.key]: nextChecked,
+                        }));
+                        if (
+                          toggle.key === "showSkuInFull" ||
+                          toggle.key === "showSignatureBlock"
+                        ) {
+                          setPreviewMode("full");
+                          setPreviewPaper("a4");
+                        } else if (toggle.key === "showSkuInAbbreviated") {
+                          setPreviewMode("abbreviated");
+                          setPreviewPaper(form.defaultPaperSize || "a6");
+                        }
+                      }}
                       className="size-4 accent-primary"
                     />
                     <span>{toggle.label}</span>
@@ -625,16 +646,22 @@ export function DocumentSettingsClient({
           </CardContent>
         </Card>
 
-        <div className="sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/95 p-3.5 shadow-lg backdrop-blur">
+        <div className="sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-border bg-card/95 p-3 shadow-lg backdrop-blur sm:gap-3 sm:p-3.5">
           <Button
             type="button"
             variant="outline"
             onClick={handleResetDefault}
             disabled={saving}
+            className="flex-1 sm:flex-initial"
           >
             <RotateCcwIcon className="size-4" /> คืนค่าเริ่มต้น
           </Button>
-          <Button type="submit" variant="default" disabled={saving}>
+          <Button
+            type="submit"
+            variant="default"
+            disabled={saving}
+            className="flex-1 sm:flex-initial"
+          >
             <SaveIcon className="size-4" />
             {saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่าทั้งหมด"}
           </Button>
@@ -643,7 +670,7 @@ export function DocumentSettingsClient({
 
       {/* ฝั่งขวา: ตัวอย่างใบพิมพ์แบบสด (Live Preview) */}
       <div className="flex flex-col gap-3 xl:col-span-6">
-        <Card data-invoice-preview-card className="sticky top-4">
+        <Card data-invoice-preview-card className="xl:sticky xl:top-4">
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -654,15 +681,15 @@ export function DocumentSettingsClient({
                   ทดสอบสลับขนาดกระดาษเพื่อดูการย่อขนาดตัวอักษรอัตโนมัติ (ไม่มีการตัดคำเป็น ...)
                 </CardDescription>
               </div>
-              <div className="inline-flex items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1">
+              <div className="grid w-full grid-cols-2 items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto">
                 <Button
                   type="button"
                   size="xs"
                   variant={previewMode === "abbreviated" ? "default" : "ghost"}
                   className={
                     previewMode === "abbreviated"
-                      ? "shadow-xs"
-                      : "text-[#334155] hover:bg-white hover:text-[#0f172a]"
+                      ? "w-full justify-center shadow-xs sm:w-auto"
+                      : "w-full justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
                   }
                   onClick={() => {
                     setPreviewMode("abbreviated");
@@ -677,8 +704,8 @@ export function DocumentSettingsClient({
                   variant={previewMode === "full" ? "default" : "ghost"}
                   className={
                     previewMode === "full"
-                      ? "shadow-xs"
-                      : "text-[#334155] hover:bg-white hover:text-[#0f172a]"
+                      ? "w-full justify-center shadow-xs sm:w-auto"
+                      : "w-full justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
                   }
                   onClick={() => {
                     setPreviewMode("full");
@@ -692,34 +719,37 @@ export function DocumentSettingsClient({
 
             {previewMode === "abbreviated" ? (
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5">
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
                   <span className="text-xs font-semibold text-muted-foreground">
                     ทดสอบขนาดกระดาษ:
                   </span>
-                  {(
-                    [
-                      { id: "a6", label: "100×150 มม. (A6)" },
-                      { id: "a4-4up", label: "A4 แบ่ง 4 ใบ" },
-                      { id: "80mm", label: "สลิป 80 มม." },
-                      { id: "a4", label: "A4 เต็มแผ่น" },
-                    ] as { id: InvoicePaperSize; label: string }[]
-                  ).map((opt) => (
-                    <Button
-                      key={opt.id}
-                      type="button"
-                      size="xs"
-                      variant={previewPaper === opt.id ? "default" : "outline"}
-                      onClick={() => {
-                        setPreviewPaper(opt.id);
-                        updateForm((prev) => ({
-                          ...prev,
-                          defaultPaperSize: opt.id,
-                        }));
-                      }}
-                    >
-                      {opt.label}
-                    </Button>
-                  ))}
+                  <div className="grid w-full grid-cols-2 gap-1.5 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center">
+                    {(
+                      [
+                        { id: "a6", label: "100×150 มม. (A6)" },
+                        { id: "a4-4up", label: "A4 แบ่ง 4 ใบ" },
+                        { id: "80mm", label: "สลิป 80 มม." },
+                        { id: "a4", label: "A4 เต็มแผ่น" },
+                      ] as { id: InvoicePaperSize; label: string }[]
+                    ).map((opt) => (
+                      <Button
+                        key={opt.id}
+                        type="button"
+                        size="xs"
+                        variant={previewPaper === opt.id ? "default" : "outline"}
+                        className="w-full justify-center sm:w-auto"
+                        onClick={() => {
+                          setPreviewPaper(opt.id);
+                          updateForm((prev) => ({
+                            ...prev,
+                            defaultPaperSize: opt.id,
+                          }));
+                        }}
+                      >
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
                 {previewPaper === "a6" ||
                 previewPaper === "a4-4up" ||

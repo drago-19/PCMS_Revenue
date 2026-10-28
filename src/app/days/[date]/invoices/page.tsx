@@ -15,8 +15,7 @@ import { Card } from "@/components/ui/card";
 import { formatDate, formatDateLong } from "@/lib/format";
 import { buildInvoice } from "@/lib/invoice";
 import {
-  getDailyBatch,
-  getOrderLinkStatus,
+  getBulkInvoicesBatch,
   listDailyBatches,
 } from "@/lib/queries";
 import { getDocumentSettings } from "@/lib/settings";
@@ -68,6 +67,9 @@ export default async function BulkInvoicesPage({
     mode?: string;
     paper?: string;
     link?: string;
+    channel?: string;
+    batch?: string;
+    batchSize?: string;
   }>;
 }) {
   const { date } = await params;
@@ -75,17 +77,31 @@ export default async function BulkInvoicesPage({
   const mode: InvoiceMode =
     resolvedSearchParams.mode === "full" ? "full" : "abbreviated";
   const rawLink = (resolvedSearchParams.link ?? "linked").trim();
+  const rawChannel = (resolvedSearchParams.channel ?? "all").trim();
+  const channelFilter: "all" | "TikTok" | "Shopee" =
+    rawChannel === "TikTok" || rawChannel === "Shopee" ? rawChannel : "all";
+  const rawBatchSize = Number(resolvedSearchParams.batchSize);
+  const batchSize: 100 | 200 | 500 =
+    rawBatchSize === 100 || rawBatchSize === 500 ? rawBatchSize : 200;
 
   const isDay = /^\d{4}-\d{2}-\d{2}$/.test(date);
   const isMonth = /^\d{4}-\d{2}$/.test(date);
   if (!isDay && !isMonth) notFound();
 
-  const [batch, allBatches, settings] = await Promise.all([
-    getDailyBatch(date),
+  const rawBatch = Number(resolvedSearchParams.batch);
+
+  const [bulkBatch, allBatches, settings] = await Promise.all([
+    getBulkInvoicesBatch({
+      date,
+      channelFilter,
+      rawLink,
+      batch: Number.isFinite(rawBatch) && rawBatch >= 1 ? rawBatch : 1,
+      batchSize,
+    }),
     listDailyBatches(400),
     getDocumentSettings(),
   ]);
-  if (!batch || batch.orders.length === 0) notFound();
+  if (!bulkBatch) notFound();
 
   const paper = parsePaperSize(
     resolvedSearchParams.paper,
@@ -98,47 +114,33 @@ export default async function BulkInvoicesPage({
     count: b.orderCount,
   }));
 
-  const channelFilteredOrders = batch.orders;
+  const {
+    billableTotalCount,
+    tiktokOrdersCount,
+    shopeeOrdersCount,
+    channelFilteredCount,
+    linkedOrdersCount,
+    unlinkedOrdersCount,
+    effectiveLinkFilter,
+    totalFilteredCount,
+    batchCount,
+    currentBatch,
+    batchStartIdx,
+    batchEndIdx,
+    missingOmsDates,
+    orders: pagedOrders,
+  } = bulkBatch;
 
-  const linkedOrders = channelFilteredOrders.filter(
-    (o) => getOrderLinkStatus(o) === "linked",
-  );
-  const unlinkedOrders = channelFilteredOrders.filter(
-    (o) => getOrderLinkStatus(o) !== "linked",
-  );
-
-  // ค่าเริ่มต้นคือพิมพ์เฉพาะบิลที่ผูกครบแล้ว (แต่ถ้าในรอบนั้นยังไม่มีบิลผูกครบเลย ให้แสดงทั้งหมดพร้อมคำเตือน)
-  const effectiveLinkFilter: "linked" | "all" | "unlinked" =
-    rawLink === "all"
-      ? "all"
-      : rawLink === "unlinked"
-        ? "unlinked"
-        : linkedOrders.length > 0
-          ? "linked"
-          : "all";
-
-  const finalOrders =
-    effectiveLinkFilter === "linked"
-      ? linkedOrders
-      : effectiveLinkFilter === "unlinked"
-        ? unlinkedOrders
-        : channelFilteredOrders;
-
-  const missingOmsDates = [
-    ...new Set(
-      unlinkedOrders
-        .map((o) => o.createdDate)
-        .filter((d): d is string => Boolean(d && d !== "unknown")),
-    ),
-  ].slice(0, 4);
-
-  const invoices = finalOrders.map((order) => buildInvoice(order, settings));
+  const invoices = pagedOrders.map((order) => buildInvoice(order, settings));
 
   function buildPrintHref(overrides: {
     nextDate?: string;
     nextMode?: InvoiceMode;
     nextPaper?: InvoicePaperSize;
     nextLink?: "linked" | "all" | "unlinked";
+    nextChannel?: "all" | "TikTok" | "Shopee";
+    nextBatch?: number;
+    nextBatchSize?: 100 | 200 | 500;
   }) {
     const targetDate = overrides.nextDate ?? date;
     const search = new URLSearchParams();
@@ -153,9 +155,21 @@ export default async function BulkInvoicesPage({
     ) {
       search.set("paper", targetPaper);
     }
+    const targetChannel = overrides.nextChannel ?? channelFilter;
+    if (targetChannel !== "all") {
+      search.set("channel", targetChannel);
+    }
     const targetLink = overrides.nextLink ?? effectiveLinkFilter;
     if (targetLink !== "linked") {
       search.set("link", targetLink);
+    }
+    const targetBatchSize = overrides.nextBatchSize ?? batchSize;
+    if (targetBatchSize !== 200) {
+      search.set("batchSize", String(targetBatchSize));
+    }
+    const targetBatch = overrides.nextBatch ?? 1;
+    if (targetBatch > 1) {
+      search.set("batch", String(targetBatch));
     }
     const qs = search.toString();
     return qs
@@ -208,10 +222,10 @@ export default async function BulkInvoicesPage({
   return (
     <>
       <style media="print">{pagePrintCss}</style>
-      <Card className="no-print sticky top-14 z-30 mb-5 w-full gap-0 overflow-hidden border-border bg-white/95 p-0 shadow-md backdrop-blur-md min-[1100px]:top-2">
+      <Card className="no-print mb-5 w-full gap-0 overflow-hidden border-border bg-white p-0 shadow-md min-[768px]:sticky min-[768px]:top-[61px] min-[768px]:z-30 min-[1100px]:top-0">
         {/* แถวที่ 1: กระจายเต็มความกว้าง (ซ้าย: ปุ่มกลับ | กลาง: เลือกรอบบิล + จำนวนใบ | ขวา: รูปแบบเอกสาร + ปุ่มพิมพ์) */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/80 px-4 py-2.5 sm:px-5">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2.5 border-b border-border/80 px-3.5 py-3 sm:px-5 min-[960px]:flex-row min-[960px]:flex-wrap min-[960px]:items-center min-[960px]:justify-between">
+          <div className="flex w-full items-center justify-between gap-2 min-[960px]:w-auto">
             <Button asChild variant="outline" size="xs" className="h-9 px-3">
               <Link
                 href={
@@ -224,39 +238,90 @@ export default async function BulkInvoicesPage({
                 {isDay ? "กลับหน้ารอบชำระ" : "กลับหน้าบิล"}
               </Link>
             </Button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold whitespace-nowrap text-foreground">
-              รอบบิล:
-            </span>
-            <DatePickerField
-              name="date"
-              defaultValue={date}
-              availableDates={availableDates}
-              routePattern="/days/[date]/invoices"
-              allowClear={false}
-              extraParams={{
-                mode: mode === "full" ? "full" : undefined,
-                paper:
-                  (mode === "abbreviated" &&
-                    paper !== (settings.defaultPaperSize ?? "a6")) ||
-                    (mode === "full" && paper !== "a4")
-                    ? paper
-                    : undefined,
-                link: effectiveLinkFilter !== "linked" ? effectiveLinkFilter : undefined,
-              }}
-            />
-            <Badge variant="default" size="sm" className="h-7 px-2.5 font-bold">
-              เตรียมพิมพ์ {invoices.length.toLocaleString("th-TH")} ใบ
+            <Badge
+              variant="default"
+              size="sm"
+              className="h-8 px-2.5 font-bold min-[960px]:hidden"
+            >
+              {batchCount > 1
+                ? `ชุดที่ ${currentBatch}/${batchCount} (${invoices.length} ใบ)`
+                : `เตรียมพิมพ์ ${invoices.length.toLocaleString("th-TH")} ใบ`}
             </Badge>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <span className="shrink-0 text-xs font-bold whitespace-nowrap text-foreground">
+                รอบบิล:
+              </span>
+              <DatePickerField
+                name="date"
+                defaultValue={date}
+                availableDates={availableDates}
+                routePattern="/days/[date]/invoices"
+                allowClear={false}
+                className="flex-1 sm:w-auto sm:flex-initial"
+                extraParams={{
+                  mode: mode === "full" ? "full" : undefined,
+                  paper:
+                    (mode === "abbreviated" &&
+                      paper !== (settings.defaultPaperSize ?? "a6")) ||
+                      (mode === "full" && paper !== "a4")
+                      ? paper
+                      : undefined,
+                  channel: channelFilter !== "all" ? channelFilter : undefined,
+                  link: effectiveLinkFilter !== "linked" ? effectiveLinkFilter : undefined,
+                }}
+              />
+            </div>
+            <div
+              role="group"
+              aria-label="กรองช่องทางพิมพ์ใบกำกับภาษี"
+              className="flex w-full flex-wrap items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto"
+            >
+              {[
+                { key: "all" as const, label: "ทุกช่องทาง", count: billableTotalCount },
+                { key: "TikTok" as const, label: "TikTok", count: tiktokOrdersCount },
+                { key: "Shopee" as const, label: "Shopee", count: shopeeOrdersCount },
+              ].map((ch) => {
+                const active = channelFilter === ch.key;
+                return (
+                  <Button
+                    key={ch.key}
+                    asChild
+                    variant={active ? "default" : "ghost"}
+                    size="xs"
+                    className={
+                      active
+                        ? ch.key === "Shopee"
+                          ? "h-8 min-h-[32px] flex-1 justify-center bg-[#ee4d2d] px-2 text-white shadow-xs hover:bg-[#d73211] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
+                          : "h-8 min-h-[32px] flex-1 justify-center px-2 shadow-xs sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
+                        : "h-8 min-h-[32px] flex-1 justify-center px-2 text-[#334155] hover:bg-white hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
+                    }
+                  >
+                    <Link href={buildPrintHref({ nextChannel: ch.key })}>
+                      {ch.label} ({ch.count.toLocaleString("th-TH")})
+                    </Link>
+                  </Button>
+                );
+              })}
+            </div>
+            <Badge
+              variant="default"
+              size="sm"
+              className="hidden h-7 px-2.5 font-bold min-[960px]:inline-flex"
+            >
+              {batchCount > 1
+                ? `พิมพ์ชุดที่ ${currentBatch}/${batchCount} (${(batchStartIdx + 1).toLocaleString("th-TH")}–${batchEndIdx.toLocaleString("th-TH")} จาก ${totalFilteredCount.toLocaleString("th-TH")} ใบ)`
+                : `เตรียมพิมพ์ ${invoices.length.toLocaleString("th-TH")} ใบ`}
+            </Badge>
+          </div>
+
+          <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
             <div
               role="group"
               aria-label="รูปแบบใบกำกับภาษี"
-              className="inline-flex items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1"
+              className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto sm:items-center"
             >
               <Button
                 asChild
@@ -264,8 +329,8 @@ export default async function BulkInvoicesPage({
                 size="xs"
                 className={
                   mode === "abbreviated"
-                    ? "h-8 min-h-[32px] shadow-xs"
-                    : "h-8 min-h-[32px] text-[#334155] hover:bg-white hover:text-[#0f172a]"
+                    ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
+                    : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
                 }
               >
                 <Link
@@ -283,8 +348,8 @@ export default async function BulkInvoicesPage({
                 size="xs"
                 className={
                   mode === "full"
-                    ? "h-8 min-h-[32px] shadow-xs"
-                    : "h-8 min-h-[32px] text-[#334155] hover:bg-white hover:text-[#0f172a]"
+                    ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
+                    : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
                 }
               >
                 <Link
@@ -294,22 +359,22 @@ export default async function BulkInvoicesPage({
                 </Link>
               </Button>
             </div>
-            <PrintButton />
+            <PrintButton className="w-full sm:w-auto" />
           </div>
         </div>
 
         {/* แถวที่ 2: กระจายเต็มความกว้างในบรรทัดเดียว (ซ้าย: คัดกรองสถานะ | ขวา: ขนาดกระดาษพิมพ์) */}
-        {unlinkedOrders.length > 0 || mode === "abbreviated" ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-[#f8fafc] px-4 py-2 sm:px-5">
-            {unlinkedOrders.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-2">
+        {unlinkedOrdersCount > 0 || mode === "abbreviated" ? (
+          <div className="flex flex-col gap-2.5 bg-[#f8fafc] px-3.5 py-2.5 sm:px-5 min-[960px]:flex-row min-[960px]:flex-wrap min-[960px]:items-center min-[960px]:justify-between">
+            {unlinkedOrdersCount > 0 ? (
+              <div className="flex w-full flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
                 <span className="text-xs font-bold whitespace-nowrap text-foreground">
                   คัดกรองบิล:
                 </span>
                 <div
                   role="group"
                   aria-label="คัดกรองสถานะการผูกไฟล์"
-                  className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white p-1"
+                  className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-white p-1 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center"
                 >
                   <Button
                     asChild
@@ -317,18 +382,18 @@ export default async function BulkInvoicesPage({
                     size="xs"
                     className={
                       effectiveLinkFilter === "linked"
-                        ? "h-8 min-h-[32px] px-2.5 shadow-2xs"
-                        : "h-8 min-h-[32px] px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                        ? "h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:w-auto"
+                        : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                     }
                   >
                     <Link href={buildPrintHref({ nextLink: "linked" })}>
                       <span
-                        className={`size-2 rounded-full ${effectiveLinkFilter === "linked"
+                        className={`size-2 shrink-0 rounded-full ${effectiveLinkFilter === "linked"
                             ? "bg-white"
                             : "bg-[#059669]"
                           }`}
                       />
-                      ข้อมูลครบ ({linkedOrders.length.toLocaleString("th-TH")})
+                      ข้อมูลครบ ({linkedOrdersCount.toLocaleString("th-TH")})
                     </Link>
                   </Button>
                   <Button
@@ -337,12 +402,12 @@ export default async function BulkInvoicesPage({
                     size="xs"
                     className={
                       effectiveLinkFilter === "all"
-                        ? "h-8 min-h-[32px] px-2.5 shadow-2xs"
-                        : "h-8 min-h-[32px] px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                        ? "h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:w-auto"
+                        : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                     }
                   >
                     <Link href={buildPrintHref({ nextLink: "all" })}>
-                      ทั้งหมด ({channelFilteredOrders.length.toLocaleString("th-TH")})
+                      ทั้งหมด ({channelFilteredCount.toLocaleString("th-TH")})
                     </Link>
                   </Button>
                   <Button
@@ -351,36 +416,36 @@ export default async function BulkInvoicesPage({
                     size="xs"
                     className={
                       effectiveLinkFilter === "unlinked"
-                        ? "h-8 min-h-[32px] px-2.5 shadow-2xs"
-                        : "h-8 min-h-[32px] px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                        ? "col-span-2 h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:col-span-1 sm:w-auto"
+                        : "col-span-2 h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:col-span-1 sm:w-auto"
                     }
                   >
                     <Link href={buildPrintHref({ nextLink: "unlinked" })}>
                       <span
-                        className={`size-2 rounded-full ${effectiveLinkFilter === "unlinked"
+                        className={`size-2 shrink-0 rounded-full ${effectiveLinkFilter === "unlinked"
                             ? "bg-white"
                             : "bg-[#d97706]"
                           }`}
                       />
-                      รอไฟล์ ออเดอร์ใน shipnity ({unlinkedOrders.length.toLocaleString("th-TH")})
+                      รอไฟล์ ออเดอร์ใน shipnity ({unlinkedOrdersCount.toLocaleString("th-TH")})
                     </Link>
                   </Button>
                 </div>
               </div>
             ) : (
-              <div />
+              <div className="hidden min-[960px]:block" />
             )}
 
             {mode === "abbreviated" ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
+                <div className="flex w-full flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
                   <span className="text-xs font-bold whitespace-nowrap text-foreground">
                     ขนาดกระดาษ:
                   </span>
                   <div
                     role="group"
                     aria-label="ขนาดกระดาษพิมพ์"
-                    className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white p-1"
+                    className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-white p-1 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center"
                   >
                     {[
                       {
@@ -409,8 +474,8 @@ export default async function BulkInvoicesPage({
                           size="xs"
                           className={
                             active
-                              ? "h-8 min-h-[32px] px-2.5 shadow-2xs"
-                              : "h-8 min-h-[32px] px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                              ? "h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:w-auto"
+                              : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                           }
                         >
                           <Link href={buildPrintHref({ nextPaper: opt.key })}>
@@ -429,16 +494,105 @@ export default async function BulkInvoicesPage({
           </div>
         ) : null}
 
+        {/* แถบแบ่งชุดพิมพ์ (Batch Print Pagination) เมื่อมีใบกำกับภาษีมากกว่า 100 ใบ ป้องกันเบราว์เซอร์ค้างเมื่อพิมพ์ทั้งเดือน */}
+        {totalFilteredCount > 100 ? (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-border/80 bg-[#f8fafc] px-3.5 py-2.5 sm:px-5 sm:py-2">
+            <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+              <span className="text-xs font-bold whitespace-nowrap text-foreground">
+                แบ่งชุดพิมพ์ ({totalFilteredCount.toLocaleString("th-TH")} ใบ):
+              </span>
+              <div
+                role="group"
+                aria-label="เลือกชุดใบกำกับภาษีที่ต้องการพิมพ์"
+                className="grid w-full grid-cols-2 gap-1.5 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-1"
+              >
+                {(() => {
+                  const visibleBatches: number[] = [];
+                  if (batchCount <= 12) {
+                    for (let i = 1; i <= batchCount; i++) visibleBatches.push(i);
+                  } else {
+                    const startB = Math.max(1, Math.min(currentBatch - 4, batchCount - 9));
+                    const endB = Math.min(batchCount, startB + 9);
+                    if (startB > 1) visibleBatches.push(1);
+                    for (let i = startB; i <= endB; i++) visibleBatches.push(i);
+                    if (endB < batchCount) visibleBatches.push(batchCount);
+                  }
+                  return visibleBatches.map((bNum) => {
+                    const i = bNum - 1;
+                    const sIdx = i * batchSize + 1;
+                    const eIdx = Math.min(totalFilteredCount, (i + 1) * batchSize);
+                    const active = currentBatch === bNum;
+                    return (
+                      <Button
+                        key={bNum}
+                        asChild
+                        variant={active ? "default" : "outline"}
+                        size="xs"
+                        className={
+                          active
+                            ? "h-8 min-h-[32px] w-full justify-center px-2.5 text-xs font-bold shadow-2xs sm:w-auto"
+                            : "h-8 min-h-[32px] w-full justify-center bg-white px-2.5 text-xs text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
+                        }
+                      >
+                        <Link href={buildPrintHref({ nextBatch: bNum })}>
+                          ชุด {bNum} ({sIdx.toLocaleString("th-TH")}–{eIdx.toLocaleString("th-TH")})
+                        </Link>
+                      </Button>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+
+            <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+              <span className="text-xs font-semibold whitespace-nowrap text-muted-foreground">
+                จำนวนต่อชุด:
+              </span>
+              <div
+                role="group"
+                aria-label="จำนวนใบกำกับภาษีต่อชุดพิมพ์"
+                className="grid w-full grid-cols-3 items-center gap-1 rounded-xl border border-border bg-white p-1 sm:inline-flex sm:w-auto"
+              >
+                {([100, 200, 500] as const).map((sz) => {
+                  const active = batchSize === sz;
+                  return (
+                    <Button
+                      key={sz}
+                      asChild
+                      variant={active ? "default" : "ghost"}
+                      size="xs"
+                      className={
+                        active
+                          ? "h-8 min-h-[32px] w-full justify-center px-2.5 text-xs font-bold sm:w-auto"
+                          : "h-8 min-h-[32px] w-full justify-center px-2.5 text-xs text-[#334155] hover:bg-[#f1f5f9] sm:w-auto"
+                      }
+                    >
+                      <Link
+                        href={buildPrintHref({
+                          nextBatchSize: sz,
+                          nextBatch: 1,
+                        })}
+                      >
+                        {sz} ใบ/ชุด
+                      </Link>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* แถบแจ้งเตือนบางๆ บรรทัดเดียวเมื่อมีบิลขาดไฟล์ OMS */}
-        {unlinkedOrders.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#fde68a] bg-[#fffbeb] px-4 py-2 text-xs text-[#92400e]">
-            <div className="flex items-center gap-2">
+        {unlinkedOrdersCount > 0 ? (
+          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-[#fde68a] bg-[#fffbeb] px-4 py-2 text-center text-xs text-[#92400e] text-balance">
+            <div className="flex items-center justify-center gap-2">
               <IconAlert size={14} className="shrink-0 text-[#d97706]" />
               <span>
                 คัดเฉพาะบิลที่ผูกข้อมูลครบ{" "}
-                <strong>{linkedOrders.length.toLocaleString("th-TH")} ใบ</strong>{" "}
+                <strong>{linkedOrdersCount.toLocaleString("th-TH")} ใบ</strong>{" "}
                 ขึ้นมาให้พิมพ์อัตโนมัติ (มีอีก{" "}
-                <strong>{unlinkedOrders.length.toLocaleString("th-TH")} ใบ</strong>{" "}
+                <strong>{unlinkedOrdersCount.toLocaleString("th-TH")} ใบ</strong>{" "}
                 ยังรอไฟล์ ออเดอร์ใน shipnity
                 {missingOmsDates.length > 0
                   ? ` · วันสั่งซื้อ ${missingOmsDates.map((d) => formatDate(d)).join(", ")}`

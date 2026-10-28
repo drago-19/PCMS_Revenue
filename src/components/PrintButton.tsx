@@ -1,14 +1,15 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { IconPrinter } from "./icons";
 
-export function PrintButton() {
+export function PrintButton({ className }: { className?: string }) {
   return (
     <Button
       type="button"
       variant="default"
-      className="no-print"
+      className={cn("no-print", className)}
       aria-label="พิมพ์ หรือ บันทึก PDF"
       onClick={() => window.print()}
     >

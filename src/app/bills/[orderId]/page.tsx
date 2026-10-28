@@ -33,11 +33,15 @@ export default async function BillDetailPage({
           </Link>
         </Button>
         <div className="bill-toolbar-actions">
-          <Button asChild variant="secondary" className="no-print">
-            <Link href={`/invoices/${row.externalId}`}>
-              <IconReceipt size={16} /> ใบกำกับภาษี
-            </Link>
-          </Button>
+          {row.transactionType === "คำสั่งซื้อ (OMS)" ||
+          row.income > 0 ||
+          row.payout > 0 ? (
+            <Button asChild variant="secondary" className="no-print">
+              <Link href={`/invoices/${row.externalId}`}>
+                <IconReceipt size={16} /> ใบกำกับภาษี
+              </Link>
+            </Button>
+          ) : null}
           {row.paidDate ? (
             <Button asChild variant="secondary" className="no-print">
               <Link href={`/days/${row.paidDate}`}>

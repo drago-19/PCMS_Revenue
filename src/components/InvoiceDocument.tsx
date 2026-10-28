@@ -1,14 +1,248 @@
-import type { InvoiceCustomer, InvoiceModel } from "@/lib/invoice";
-import { formatDate, formatDateLong, formatDateTime, formatTHB, round2 } from "@/lib/format";
+import type { InvoiceCustomer, InvoiceItem, InvoiceModel } from "@/lib/invoice";
+import {
+  formatDate,
+  formatDateLong,
+  formatDateTime,
+  formatTHB,
+  round2,
+} from "@/lib/format";
 import { formatSellerDisplayName } from "@/lib/seller";
 
-const exactCurrencyFormatter = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
 function formatReceiptTHB(value: number): string {
-  return `฿${exactCurrencyFormatter.format(round2(value))}`;
+  return formatTHB(value);
+}
+
+export function computeItemNetLineAmounts(
+  items: InvoiceItem[],
+  salesAmount: number,
+  platformCoupon = 0,
+): number[] {
+  const netItemsTotal = round2(
+    Math.max(0, salesAmount - Math.max(0, round2(platformCoupon))),
+  );
+  if (items.length === 0) return [];
+  if (items.length === 1) return [netItemsTotal];
+
+  const listTotal = items.reduce(
+    (acc, item) => acc + (item.unitPrice ?? 0) * item.qty,
+    0,
+  );
+  const totalQty = Math.max(
+    1,
+    items.reduce((acc, item) => acc + item.qty, 0),
+  );
+
+  const result: number[] = [];
+  let runningSum = 0;
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx]!;
+    if (idx === items.length - 1) {
+      result.push(round2(Math.max(0, netItemsTotal - runningSum)));
+    } else {
+      const rawShare =
+        listTotal > 0
+          ? (netItemsTotal * ((item.unitPrice ?? 0) * item.qty)) / listTotal
+          : (netItemsTotal * item.qty) / totalQty;
+      const rounded = round2(rawShare);
+      result.push(rounded);
+      runningSum = round2(runningSum + rounded);
+    }
+  }
+  return result;
+}
+
+export function getOrderedInvoiceBreakdownLines(
+  invoice: InvoiceModel,
+  options?: { useCustomerPaidBase?: boolean },
+): { key: string; label: string; amount: number }[] {
+  const isShopee = invoice.channel === "Shopee";
+  const channelLabel = isShopee ? "Shopee" : "TikTok Shop";
+  const actualShippingLabel =
+    invoice.weightCharged !== null && invoice.weightCharged > 0
+      ? `การจัดส่ง (น้ำหนักที่เรียกเก็บเงิน: ${invoice.weightCharged} ก.)`
+      : "การจัดส่ง";
+  const platformShippingDiscountLabel = `ส่วนลดค่าจัดส่งจาก ${channelLabel}`;
+  const useCustomerPaidBase =
+    options?.useCustomerPaidBase ??
+    invoice.seller.vatCalculationBase === "customer_paid";
+
+  const rawBreakdownLines: { key: string; label: string; amount: number }[] = [];
+
+  // 1. หมวดค่าขนส่ง (Shipping) — ดึงค่าตามจริงทั้งบวกและลบ
+  const hasDetailedShipping =
+    invoice.shippingActual !== 0 ||
+    invoice.shippingPlatformDiscount !== 0 ||
+    (invoice.shippingCustomerFee !== undefined &&
+      invoice.shippingCustomerFee !== 0) ||
+    (invoice.shippingSubsidy ?? 0) !== 0 ||
+    (invoice.guaranteeReimbursement ?? 0) !== 0 ||
+    (invoice.exchangeShipping ?? 0) !== 0 ||
+    (invoice.replacementShipping ?? 0) !== 0 ||
+    (invoice.shippingDiscountStore ?? 0) !== 0 ||
+    (invoice.returnShippingActual ?? 0) !== 0 ||
+    (invoice.shippingRefund ?? 0) !== 0;
+
+  if (hasDetailedShipping) {
+    if (invoice.shippingPlatformDiscount !== 0) {
+      rawBreakdownLines.push({
+        key: "shippingPlatformDiscount",
+        label: platformShippingDiscountLabel,
+        amount: invoice.shippingPlatformDiscount,
+      });
+    }
+    const custShippingFee = invoice.shippingCustomerFee ?? invoice.shippingFee;
+    if (custShippingFee !== 0) {
+      rawBreakdownLines.push({
+        key: "shippingCustomerFee",
+        label: "ค่าธรรมเนียมการจัดส่งของลูกค้า",
+        amount: custShippingFee,
+      });
+    }
+    if ((invoice.shippingSubsidy ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "shippingSubsidy",
+        label: "เงินสนับสนุนการจัดส่ง",
+        amount: invoice.shippingSubsidy!,
+      });
+    }
+    if ((invoice.guaranteeReimbursement ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "guaranteeReimbursement",
+        label: "การชดเชยโปรแกรมการรับประกัน",
+        amount: invoice.guaranteeReimbursement!,
+      });
+    }
+    if ((invoice.exchangeShipping ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "exchangeShipping",
+        label: "ค่าจัดส่งสินค้าที่แลกเปลี่ยน (ลูกค้าเป็นผู้จ่าย)",
+        amount: invoice.exchangeShipping!,
+      });
+    }
+    if ((invoice.replacementShipping ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "replacementShipping",
+        label: "ค่าจัดส่งสินค้าทดแทน (ลูกค้าเป็นผู้จ่าย)",
+        amount: invoice.replacementShipping!,
+      });
+    }
+    if ((invoice.shippingDiscountStore ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "shippingDiscountStore",
+        label: "ส่วนลดค่าจัดส่งจากร้านค้า",
+        amount: invoice.shippingDiscountStore!,
+      });
+    }
+    if (invoice.shippingActual !== 0) {
+      rawBreakdownLines.push({
+        key: "shippingActual",
+        label: actualShippingLabel,
+        amount: invoice.shippingActual,
+      });
+    }
+    if ((invoice.returnShippingActual ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "returnShippingActual",
+        label: "ค่าธรรมเนียมการจัดส่งสินค้าคืนตามจริง",
+        amount: invoice.returnShippingActual!,
+      });
+    }
+    if ((invoice.shippingRefund ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "shippingRefund",
+        label: "เงินคืนสำหรับค่าจัดส่ง",
+        amount: invoice.shippingRefund!,
+      });
+    }
+  } else if (invoice.shippingFee !== 0) {
+    rawBreakdownLines.push({
+      key: "shippingFee",
+      label: "ค่าจัดส่ง",
+      amount: invoice.shippingFee,
+    });
+  }
+
+  // 2. หมวดคูปอง / ส่วนลดแพลตฟอร์ม / รายการปรับยอด (ต่อลงมาจากค่าขนส่ง)
+  const hasExplicitPlatformFields =
+    invoice.platformDiscount !== undefined ||
+    invoice.platformCofundCoupon !== undefined;
+
+  if (hasExplicitPlatformFields) {
+    if ((invoice.platformDiscount ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "platformDiscount",
+        label: "ส่วนลดจากแพลตฟอร์ม",
+        amount: useCustomerPaidBase
+          ? -Math.abs(invoice.platformDiscount!)
+          : invoice.platformDiscount!,
+      });
+    }
+    if ((invoice.platformCofundCoupon ?? 0) !== 0) {
+      rawBreakdownLines.push({
+        key: "platformCofundCoupon",
+        label: "คูปองส่วนลดร่วมของแพลตฟอร์ม",
+        amount: useCustomerPaidBase
+          ? -Math.abs(invoice.platformCofundCoupon!)
+          : invoice.platformCofundCoupon!,
+      });
+    }
+  } else if (invoice.platformCoupon > 0) {
+    rawBreakdownLines.push({
+      key: useCustomerPaidBase ? "platformCoupon" : "platformDiscount",
+      label: useCustomerPaidBase
+        ? `ส่วนลดสำหรับสินค้าจาก ${channelLabel}`
+        : "ส่วนลดจากแพลตฟอร์ม",
+      amount: useCustomerPaidBase
+        ? -invoice.platformCoupon
+        : invoice.platformCoupon,
+    });
+  }
+
+  if ((invoice.sellerCofundCoupon ?? 0) !== 0) {
+    rawBreakdownLines.push({
+      key: "sellerCofundCoupon",
+      label: "คูปองส่วนลดร่วมของผู้ขาย",
+      amount: invoice.sellerCofundCoupon!,
+    });
+  }
+  if ((invoice.platformDiscountRefund ?? 0) !== 0) {
+    rawBreakdownLines.push({
+      key: "platformDiscountRefund",
+      label: "การคืนเงินส่วนลดจากแพลตฟอร์ม",
+      amount: invoice.platformDiscountRefund!,
+    });
+  }
+  if ((invoice.platformCofundCouponRefund ?? 0) !== 0) {
+    rawBreakdownLines.push({
+      key: "platformCofundCouponRefund",
+      label: "การคืนเงินคูปองส่วนลดร่วมของแพลตฟอร์ม",
+      amount: invoice.platformCofundCouponRefund!,
+    });
+  }
+  if ((invoice.sellerCofundCouponRefund ?? 0) !== 0) {
+    rawBreakdownLines.push({
+      key: "sellerCofundCouponRefund",
+      label: "การคืนเงินคูปองส่วนลดร่วมของผู้ขาย",
+      amount: invoice.sellerCofundCouponRefund!,
+    });
+  }
+  if (invoice.adjustment > 0) {
+    rawBreakdownLines.push({
+      key: "adjustment",
+      label: "จำนวนการปรับยอด",
+      amount: invoice.adjustment,
+    });
+  }
+  for (const extra of invoice.extraBreakdownLines ?? []) {
+    if (extra.amount !== 0) {
+      rawBreakdownLines.push(extra);
+    }
+  }
+
+  return [
+    ...rawBreakdownLines.filter((line) => line.amount >= 0),
+    ...rawBreakdownLines.filter((line) => line.amount < 0),
+  ];
 }
 
 export type InvoiceMode = "abbreviated" | "full";
@@ -44,7 +278,7 @@ export function InvoiceDocument({
       ? buyer.province
       : null,
     buyer.postalCode &&
-    (!buyer.address || !buyer.address.includes(buyer.postalCode))
+      (!buyer.address || !buyer.address.includes(buyer.postalCode))
       ? buyer.postalCode
       : null,
   ].filter(Boolean);
@@ -55,8 +289,8 @@ export function InvoiceDocument({
         ? `ลูกค้าทั่วไป (รอข้อมูลที่อยู่จากไฟล์ ออเดอร์ใน shipnity วันสั่งซื้อ ${formatDate(invoice.createdDate)})`
         : "ลูกค้าทั่วไป";
 
-  const channelLabel = "TikTok Shop";
-  const shippingCouponLabel = "ส่วนลดค่าจัดส่งจาก TikTok Shop";
+  const isShopee = invoice.channel === "Shopee";
+  const channelLabel = isShopee ? "Shopee" : "TikTok Shop";
 
   const isFull = mode === "full";
   const hasRichItems = invoice.items.some((item) => item.unitPrice !== undefined);
@@ -67,6 +301,8 @@ export function InvoiceDocument({
   const useCustomerPaidBase =
     invoice.seller.vatCalculationBase === "customer_paid" ||
     invoice.payout <= 0;
+  const showInvoiceNo = invoice.seller.showInvoiceNo !== false;
+  const showReceiptNo = invoice.seller.showReceiptNo !== false;
   const showSkuAbbrev = invoice.seller.showSkuInAbbreviated === true;
   const showSkuFull = invoice.seller.showSkuInFull !== false;
   const showShippingTracking = invoice.seller.showShippingTracking !== false;
@@ -76,9 +312,23 @@ export function InvoiceDocument({
     invoice.seller.phone ? `โทร. ${invoice.seller.phone}` : null,
     invoice.seller.email ? `อีเมล ${invoice.seller.email}` : null,
   ].filter(Boolean);
-  const totalBarLabel = useCustomerPaidBase
-    ? "ยอดที่ลูกค้าของคุณจ่าย (รวมภาษีมูลค่าเพิ่ม)"
-    : "ยอดการชำระเงินทั้งหมด (รวมภาษีมูลค่าเพิ่ม)";
+  const totalBarLabel = "ยอดรวมทั้งหมด (รวมภาษีมูลค่าเพิ่ม)";
+
+  const totalItemQty =
+    invoice.items.length === 0
+      ? 1
+      : invoice.items.reduce((acc, item) => acc + item.qty, 0);
+  const itemsNetTotal = round2(
+    Math.max(0, invoice.salesAmount - Math.max(0, round2(invoice.platformCoupon ?? 0))),
+  );
+  const itemNetAmounts = computeItemNetLineAmounts(
+    invoice.items,
+    invoice.salesAmount,
+    invoice.platformCoupon ?? 0,
+  );
+  const sortedBreakdownLines = getOrderedInvoiceBreakdownLines(invoice, {
+    useCustomerPaidBase,
+  });
 
   if (!isFull) {
     if (isSmallPaper) {
@@ -166,12 +416,14 @@ export function InvoiceDocument({
             className={`${sectionGapClass} rounded border border-[#cbd5e1] bg-[#f8fafc] px-1.5 py-0.5 text-[8.5px] leading-tight text-[#1e293b]`}
           >
             <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-              <span>
-                เลขที่ใบกำกับฯ:{" "}
-                <strong className="mono font-bold text-[#0f172a]">
-                  {invoice.invoiceNo ?? "-"}
-                </strong>
-              </span>
+              {showInvoiceNo ? (
+                <span>
+                  เลขที่ใบกำกับฯ:{" "}
+                  <strong className="mono font-bold text-[#0f172a]">
+                    {invoice.invoiceNo ?? "-"}
+                  </strong>
+                </span>
+              ) : null}
               <span>
                 วันที่:{" "}
                 <strong className="font-semibold text-[#0f172a]">
@@ -181,21 +433,24 @@ export function InvoiceDocument({
                 </strong>
               </span>
             </div>
-            <div className="mt-0.5 flex flex-wrap items-baseline justify-between gap-x-2 text-[#475569]">
-              <span>
-                ใบเสร็จ:{" "}
-                <strong className="mono text-[#0f172a]">{invoice.receiptNo}</strong>
-              </span>
-            </div>
+            {showReceiptNo ? (
+              <div className="mt-0.5 flex flex-wrap items-baseline justify-between gap-x-2 text-[#475569]">
+                <span>
+                  ใบเสร็จ:{" "}
+                  <strong className="mono text-[#0f172a]">
+                    {invoice.receiptNo}
+                  </strong>
+                </span>
+              </div>
+            ) : null}
           </div>
 
           {/* ข้อมูลผู้รับ & คำสั่งซื้อ — ย่อสัดส่วนตามกระดาษและห้ามใช้ truncate (...) เด็ดขาด */}
           <div
-            className={`${sectionGapClass} grid gap-1 border-b border-[#cbd5e1] pb-1 ${
-              is80mm
-                ? "grid-cols-1 text-[8.5px]"
-                : "grid-cols-12 text-[8.5px]"
-            }`}
+            className={`${sectionGapClass} grid gap-1 border-b border-[#cbd5e1] pb-1 ${is80mm
+              ? "grid-cols-1 text-[8.5px]"
+              : "grid-cols-12 text-[8.5px]"
+              }`}
           >
             <div className={is80mm ? "min-w-0" : "col-span-5 min-w-0 pr-1"}>
               <div className="font-extrabold text-[#0f172a]">ผู้รับ / ที่อยู่จัดส่ง</div>
@@ -216,19 +471,19 @@ export function InvoiceDocument({
             >
               <div className="font-extrabold text-[#0f172a]">รายละเอียดคำสั่งซื้อ</div>
               <dl className="mt-0.5 space-y-[1px] leading-tight">
-                <div className="flex items-baseline justify-between gap-1">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-1 gap-y-[1px]">
                   <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                     ออเดอร์ :
                   </dt>
-                  <dd className="mono whitespace-nowrap text-right font-bold tracking-tight text-[#0f172a]">
+                  <dd className="mono ml-auto whitespace-nowrap text-right font-bold tracking-tight text-[#0f172a]">
                     {invoice.orderId}
                   </dd>
                 </div>
-                <div className="flex items-baseline justify-between gap-1">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-1 gap-y-[1px]">
                   <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                     วันสั่งซื้อ :
                   </dt>
-                  <dd className="whitespace-nowrap text-right font-semibold text-[#0f172a]">
+                  <dd className="ml-auto whitespace-nowrap text-right font-semibold text-[#0f172a]">
                     {invoice.createdDate
                       ? formatDateLong(invoice.createdDate)
                       : invoice.paidDate
@@ -237,21 +492,21 @@ export function InvoiceDocument({
                   </dd>
                 </div>
                 {showShippingTracking && invoice.courier ? (
-                  <div className="flex items-baseline justify-between gap-1">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-1 gap-y-[1px]">
                     <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                       ขนส่ง :
                     </dt>
-                    <dd className="text-right font-medium text-[#0f172a]">
+                    <dd className="ml-auto text-right font-medium text-[#0f172a]">
                       {invoice.courier}
                     </dd>
                   </div>
                 ) : null}
                 {showShippingTracking && invoice.trackingNo ? (
-                  <div className="flex items-baseline justify-between gap-1">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-1 gap-y-[1px]">
                     <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                       เลขพัสดุ :
                     </dt>
-                    <dd className="mono whitespace-nowrap text-right font-semibold tracking-tight text-[#0f172a]">
+                    <dd className="mono ml-auto whitespace-nowrap text-right font-semibold tracking-tight text-[#0f172a]">
                       {invoice.trackingNo}
                     </dd>
                   </div>
@@ -262,14 +517,25 @@ export function InvoiceDocument({
 
           {/* ตารางรายการสินค้า */}
           <div className={sectionGapClass}>
+            <div
+              className={`mb-1 flex items-baseline justify-between gap-2 px-0.5 ${is80mm || isUltraDense ? "text-[8.5px]" : "text-[9px]"} font-extrabold text-[#0f172a]`}
+            >
+              <span>รายได้</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(invoice.salesAmount)} ({totalItemQty} ตัว)
+              </span>
+            </div>
             <table
               className={`w-full border-collapse ${is80mm || isUltraDense ? "text-[8.5px]" : "text-[9px]"}`}
             >
               <thead>
                 <tr className="border-y border-[#334155] bg-[#f1f5f9] text-[#0f172a]">
                   <th className={`${cellPadClass} text-left font-bold`}>รายละเอียด</th>
-                  <th className={`w-10 ${cellPadClass} text-right font-bold whitespace-nowrap`}>
+                  <th className={`w-9 ${cellPadClass} text-right font-bold whitespace-nowrap`}>
                     จำนวน
+                  </th>
+                  <th className={`w-14 ${cellPadClass} text-right font-bold whitespace-nowrap`}>
+                    ราคา
                   </th>
                 </tr>
               </thead>
@@ -289,16 +555,28 @@ export function InvoiceDocument({
                     <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
                       1
                     </td>
+                    <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                      {formatReceiptTHB(itemsNetTotal)}
+                    </td>
                   </tr>
                 ) : (
                   invoice.items.map((item, index) => {
                     const isNumericPlatformSku = /^\d{10,}$/.test(item.sku);
+                    const lineNetAmount = itemNetAmounts[index] ?? 0;
+                    const unitNetAmount =
+                      item.qty > 1 ? round2(lineNetAmount / item.qty) : null;
                     return (
                       <tr key={`${item.sku}-${index}`}>
                         <td className={`${cellPadClass} leading-tight text-[#0f172a]`}>
                           <span className="font-semibold text-[#0f172a]">
                             {item.name || `รหัสสินค้า ${item.sku}`}
                           </span>
+                          {unitNetAmount !== null ? (
+                            <span className="font-normal text-[#475569]">
+                              {" "}
+                              (ตัวละ {formatReceiptTHB(unitNetAmount)})
+                            </span>
+                          ) : null}
                           {!item.name && isNumericPlatformSku && invoice.createdDate ? (
                             <span className="ml-1 text-[8px] text-[#64748b]">
                               (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ {formatDate(invoice.createdDate)})
@@ -313,6 +591,9 @@ export function InvoiceDocument({
                         <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
                           {item.qty}
                         </td>
+                        <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                          {formatReceiptTHB(lineNetAmount)}
+                        </td>
                       </tr>
                     );
                   })
@@ -321,130 +602,30 @@ export function InvoiceDocument({
             </table>
           </div>
 
-          {/* สรุปยอด */}
+          {/* สรุปยอด (เรียงค่าที่เป็นบวกขึ้นก่อน แล้วค่อยแจงค่าที่ลบ) */}
           <div
             data-invoice-summary-block
             className={`${sectionGapClass} ${!is80mm && !is4Up ? "print:mt-auto print:pt-2" : ""} ${is80mm || isUltraDense ? "text-[8.5px]" : "text-[9px]"} leading-tight`}
           >
-            {useCustomerPaidBase ? (
-              <>
-                <div className={`flex items-center justify-between border-b border-[#e2e8f0] ${rowPadClass} font-semibold text-[#0f172a]`}>
-                  <span>ผลรวมย่อยของสินค้าก่อนหักส่วนลด</span>
-                  <span className="tabular-nums">
-                    {formatReceiptTHB(invoice.grossItemsTotal)}
-                  </span>
-                </div>
-                {invoice.storeDiscount > 0 ? (
-                  <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                    <span>
-                      ส่วนลดค่าสินค้าจากผู้ขาย
-                      {invoice.discountCode ? ` (${invoice.discountCode})` : ""}
-                    </span>
-                    <span className="tabular-nums">
-                      - {formatReceiptTHB(invoice.storeDiscount)}
-                    </span>
-                  </div>
-                ) : null}
-                {invoice.platformCoupon > 0 ? (
-                  <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                    <span>ส่วนลดสำหรับสินค้าจาก TikTok Shop</span>
-                    <span className="tabular-nums">
-                      - {formatReceiptTHB(invoice.platformCoupon)}
-                    </span>
-                  </div>
-                ) : null}
-                <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                  <span>ค่าธรรมเนียมการจัดส่งก่อนหักส่วนลด</span>
-                  <span className="tabular-nums">
-                    {formatReceiptTHB(invoice.shippingGross)}
-                  </span>
-                </div>
-                <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                  <span>{shippingCouponLabel}</span>
-                  <span className="tabular-nums">
-                    - {formatReceiptTHB(invoice.shippingCoupon)}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <>
-                {invoice.storeDiscount > 0 ? (
-                  <>
-                    <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                      <span>ยอดรวมค่าสินค้าก่อนหักส่วนลด</span>
-                      <span className="tabular-nums">
-                        {formatReceiptTHB(invoice.grossItemsTotal)}
-                      </span>
-                    </div>
-                    <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                      <span>
-                        ส่วนลดจากร้านค้า
-                        {invoice.discountCode ? ` (${invoice.discountCode})` : ""}
-                      </span>
-                      <span className="tabular-nums">
-                        - {formatReceiptTHB(invoice.storeDiscount)}
-                      </span>
-                    </div>
-                  </>
-                ) : null}
-                <div className={`flex items-center justify-between border-b border-[#e2e8f0] ${rowPadClass} font-semibold text-[#0f172a]`}>
-                  <span>ยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย</span>
-                  <span className="tabular-nums">
-                    {formatReceiptTHB(invoice.salesAmount)}
-                  </span>
-                </div>
-                {invoice.shippingFee > 0 ? (
-                  <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                    <span>ค่าธรรมเนียมการจัดส่งของลูกค้า</span>
-                    <span className="tabular-nums">
-                      {formatReceiptTHB(invoice.shippingFee)}
-                    </span>
-                  </div>
-                ) : null}
-                {invoice.feeTotal !== 0 ? (
-                  <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                    <span>ค่าธรรมเนียมทั้งหมด</span>
-                    <span className="tabular-nums">
-                      - {formatReceiptTHB(Math.abs(invoice.feeTotal))}
-                    </span>
-                  </div>
-                ) : null}
-                {invoice.adjustment !== 0 ? (
-                  <div className={`flex items-center justify-between ${rowPadClass} text-[#1e293b]`}>
-                    <span>จำนวนการปรับยอด</span>
-                    <span className="tabular-nums">
-                      {invoice.adjustment > 0 ? "+ " : "- "}
-                      {formatReceiptTHB(Math.abs(invoice.adjustment))}
-                    </span>
-                  </div>
-                ) : null}
-              </>
-            )}
+            {sortedBreakdownLines.map((line) => (
+              <div
+                key={line.key}
+                className={`flex items-baseline justify-between gap-2 ${rowPadClass} text-[#1e293b]`}
+              >
+                <span className="min-w-0">{line.label}</span>
+                <span className="shrink-0 whitespace-nowrap tabular-nums">
+                  {formatReceiptTHB(line.amount)}
+                </span>
+              </div>
+            ))}
 
             <div
-              className={`flex items-center justify-between border-y-[1.5px] border-[#0f172a] bg-[#f8fafc] px-1 py-0.5 ${is80mm || isUltraDense ? "text-[9.5px]" : "text-[10px]"} font-extrabold text-[#0f172a]`}
+              className={`flex items-baseline justify-between gap-2 border-y-[1.5px] border-[#0f172a] bg-[#f8fafc] px-1 py-0.5 ${is80mm || isUltraDense ? "text-[9.5px]" : "text-[10px]"} font-extrabold text-[#0f172a]`}
             >
-              <span>{totalBarLabel}</span>
-              <span className="tabular-nums">
+              <span className="min-w-0">{totalBarLabel}</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
                 {formatReceiptTHB(invoice.receiptTotal)}
               </span>
-            </div>
-
-            <div
-              className="mt-0.5 space-y-[1px] px-0.5 text-[8.5px] text-[#475569]"
-            >
-              <div className="flex items-center justify-between">
-                <span>มูลค่าสินค้า/บริการ (ก่อนภาษีมูลค่าเพิ่ม)</span>
-                <span className="tabular-nums font-medium text-[#1e293b]">
-                  {formatReceiptTHB(invoice.receiptPreVatAmount)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>ภาษีมูลค่าเพิ่ม (VAT {invoice.seller.vatRate}%)</span>
-                <span className="tabular-nums font-medium text-[#1e293b]">
-                  {formatReceiptTHB(invoice.receiptVatAmount)}
-                </span>
-              </div>
             </div>
           </div>
 
@@ -502,22 +683,30 @@ export function InvoiceDocument({
         {/* แถบอ้างอิงเอกสาร: หมายเลขใบเสร็จ, เลขที่ใบกำกับภาษี, วันที่ใบเสร็จ */}
         <div className="mt-3 rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-3.5 py-2.5 text-xs text-[#1e293b]">
           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 print:grid-cols-2">
-            <div className="flex items-baseline gap-1.5">
-              <span className="shrink-0 font-semibold text-[#475569]">
-                หมายเลขใบเสร็จ :
-              </span>
-              <span className="mono font-bold text-[#0f172a]">
-                {invoice.receiptNo}
-              </span>
-            </div>
-            <div className="flex items-baseline gap-1.5 sm:justify-end print:justify-end">
-              <span className="shrink-0 font-semibold text-[#475569]">
-                เลขที่ใบกำกับภาษี :
-              </span>
-              <span className="mono font-bold text-[#0f172a]">
-                {invoice.invoiceNo ?? "-"}
-              </span>
-            </div>
+            {showReceiptNo ? (
+              <div className="flex items-baseline gap-1.5">
+                <span className="shrink-0 font-semibold text-[#475569]">
+                  หมายเลขใบเสร็จ :
+                </span>
+                <span className="mono font-bold text-[#0f172a]">
+                  {invoice.receiptNo}
+                </span>
+              </div>
+            ) : null}
+            {showInvoiceNo ? (
+              <div
+                className={`flex items-baseline gap-1.5 ${
+                  showReceiptNo ? "sm:justify-end print:justify-end" : ""
+                }`}
+              >
+                <span className="shrink-0 font-semibold text-[#475569]">
+                  เลขที่ใบกำกับภาษี :
+                </span>
+                <span className="mono font-bold text-[#0f172a]">
+                  {invoice.invoiceNo ?? "-"}
+                </span>
+              </div>
+            ) : null}
             <div className="flex items-baseline gap-1.5">
               <span className="shrink-0 font-semibold text-[#475569]">
                 วันที่ใบเสร็จ :
@@ -528,7 +717,13 @@ export function InvoiceDocument({
                   : formatDateTime(invoice.issuedAt)}
               </span>
             </div>
-            <div className="flex items-baseline gap-1.5 sm:justify-end print:justify-end">
+            <div
+              className={`flex items-baseline gap-1.5 ${
+                showInvoiceNo || showReceiptNo
+                  ? "sm:justify-end print:justify-end"
+                  : ""
+              }`}
+            >
               <span className="shrink-0 font-semibold text-[#475569]">
                 ช่องทางจำหน่าย :
               </span>
@@ -575,19 +770,19 @@ export function InvoiceDocument({
               รายละเอียดคำสั่งซื้อ
             </h3>
             <dl className="mt-1.5 space-y-1">
-              <div className="flex items-baseline justify-between gap-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                 <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                   หมายเลขคำสั่งซื้อ :
                 </dt>
-                <dd className="mono text-right text-xs font-bold tracking-tight text-[#0f172a]">
+                <dd className="mono ml-auto text-right text-xs font-bold tracking-tight text-[#0f172a]">
                   {invoice.orderId}
                 </dd>
               </div>
-              <div className="flex items-baseline justify-between gap-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                 <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                   วันที่สั่งซื้อ :
                 </dt>
-                <dd className="text-right font-semibold text-[#0f172a]">
+                <dd className="ml-auto text-right font-semibold text-[#0f172a]">
                   {invoice.createdDate
                     ? formatDateLong(invoice.createdDate)
                     : invoice.paidDate
@@ -596,21 +791,21 @@ export function InvoiceDocument({
                 </dd>
               </div>
               {showShippingTracking && invoice.courier ? (
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                   <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                     ขนส่ง :
                   </dt>
-                  <dd className="text-right font-medium text-[#0f172a]">
+                  <dd className="ml-auto text-right font-medium text-[#0f172a]">
                     {invoice.courier}
                   </dd>
                 </div>
               ) : null}
               {showShippingTracking && invoice.trackingNo ? (
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                   <dt className="shrink-0 whitespace-nowrap text-[#475569]">
                     เลขพัสดุ :
                   </dt>
-                  <dd className="mono text-right text-xs font-semibold tracking-tight text-[#0f172a]">
+                  <dd className="mono ml-auto text-right text-xs font-semibold tracking-tight text-[#0f172a]">
                     {invoice.trackingNo}
                   </dd>
                 </div>
@@ -619,14 +814,23 @@ export function InvoiceDocument({
           </div>
         </div>
 
-        {/* ตารางรายการสินค้า: รายละเอียด | จำนวน (ตรงตามต้นฉบับใบเสร็จคำสั่งซื้อ) */}
+        {/* ตารางรายการสินค้า: รายละเอียด | จำนวน | ราคา */}
         <div className="mt-3">
+          <div className="mb-1.5 flex items-baseline justify-between gap-2 px-1 text-xs font-extrabold text-[#0f172a] sm:text-[13px]">
+            <span>รายได้</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums">
+              {formatReceiptTHB(invoice.salesAmount)} ({totalItemQty} ตัว)
+            </span>
+          </div>
           <table className="w-full border-collapse text-xs sm:text-[13px]">
             <thead>
               <tr className="border-y border-[#334155] bg-[#f1f5f9] text-[#0f172a]">
                 <th className="px-3 py-2 text-left font-bold">รายละเอียด</th>
-                <th className="w-24 px-3 py-2 text-right font-bold whitespace-nowrap">
+                <th className="w-20 px-3 py-2 text-right font-bold whitespace-nowrap">
                   จำนวน
+                </th>
+                <th className="w-28 px-3 py-2 text-right font-bold whitespace-nowrap">
+                  ราคา
                 </th>
               </tr>
             </thead>
@@ -646,16 +850,28 @@ export function InvoiceDocument({
                   <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-[#0f172a]">
                     1
                   </td>
+                  <td className="px-3 py-2.5 text-right font-semibold tabular-nums whitespace-nowrap text-[#0f172a]">
+                    {formatReceiptTHB(itemsNetTotal)}
+                  </td>
                 </tr>
               ) : (
                 invoice.items.map((item, index) => {
                   const isNumericPlatformSku = /^\d{10,}$/.test(item.sku);
+                  const lineNetAmount = itemNetAmounts[index] ?? 0;
+                  const unitNetAmount =
+                    item.qty > 1 ? round2(lineNetAmount / item.qty) : null;
                   return (
                     <tr key={`${item.sku}-${index}`}>
                       <td className="px-3 py-2.5 leading-snug text-[#0f172a]">
                         {item.name ? (
                           <span className="font-semibold text-[#0f172a]">
                             {item.name}
+                            {unitNetAmount !== null ? (
+                              <span className="font-normal text-[#475569]">
+                                {" "}
+                                (ตัวละ {formatReceiptTHB(unitNetAmount)})
+                              </span>
+                            ) : null}
                             {showSkuAbbrev && item.sku ? (
                               <span className="mono ml-1.5 text-xs font-normal text-[#64748b]">
                                 [{item.sku}]
@@ -667,6 +883,12 @@ export function InvoiceDocument({
                             <span className="mono font-semibold text-[#0f172a]">
                               รหัสสินค้า {item.sku}
                             </span>
+                            {unitNetAmount !== null ? (
+                              <span className="font-normal text-[#475569]">
+                                {" "}
+                                (ตัวละ {formatReceiptTHB(unitNetAmount)})
+                              </span>
+                            ) : null}
                             {isNumericPlatformSku && invoice.createdDate ? (
                               <span className="ml-1.5 text-xs text-[#64748b]">
                                 (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ{" "}
@@ -679,6 +901,9 @@ export function InvoiceDocument({
                       <td className="px-3 py-2.5 text-right font-bold tabular-nums text-[#0f172a]">
                         {item.qty}
                       </td>
+                      <td className="px-3 py-2.5 text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]">
+                        {formatReceiptTHB(lineNetAmount)}
+                      </td>
                     </tr>
                   );
                 })
@@ -687,124 +912,26 @@ export function InvoiceDocument({
           </table>
         </div>
 
-        {/* ตารางสรุปยอดด้านขวาล่าง แจงค่าต่างๆ ออกมาจากไฟล์ที่ Import จริง */}
+        {/* ตารางสรุปยอดด้านขวาล่าง แจงค่าต่างๆ ออกมาจากไฟล์ที่ Import จริง (เรียงค่าที่เป็นบวกขึ้นก่อน แล้วค่อยแจงค่าที่ลบ) */}
         <div className="mt-3.5 flex justify-end">
-          <div className="w-full max-w-sm text-xs sm:text-[13px]">
-            {useCustomerPaidBase ? (
-              <>
-                <div className="flex items-center justify-between border-b border-[#e2e8f0] py-1.5 font-semibold text-[#0f172a]">
-                  <span>ผลรวมย่อยของสินค้าก่อนหักส่วนลด</span>
-                  <span className="tabular-nums">
-                    {formatReceiptTHB(invoice.grossItemsTotal)}
-                  </span>
-                </div>
-                {invoice.storeDiscount > 0 ? (
-                  <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                    <span>
-                      ส่วนลดค่าสินค้าจากผู้ขาย
-                      {invoice.discountCode ? ` (${invoice.discountCode})` : ""}
-                    </span>
-                    <span className="tabular-nums">
-                      - {formatReceiptTHB(invoice.storeDiscount)}
-                    </span>
-                  </div>
-                ) : null}
-                {invoice.platformCoupon > 0 ? (
-                  <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                    <span>ส่วนลดสำหรับสินค้าจาก TikTok Shop</span>
-                    <span className="tabular-nums">
-                      - {formatReceiptTHB(invoice.platformCoupon)}
-                    </span>
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                  <span>ค่าธรรมเนียมการจัดส่งก่อนหักส่วนลด</span>
-                  <span className="tabular-nums">
-                    {formatReceiptTHB(invoice.shippingGross)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between pb-1.5 pt-1 text-[#1e293b]">
-                  <span>{shippingCouponLabel}</span>
-                  <span className="tabular-nums">
-                    - {formatReceiptTHB(invoice.shippingCoupon)}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <>
-                {invoice.storeDiscount > 0 ? (
-                  <>
-                    <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                      <span>ยอดรวมค่าสินค้าก่อนหักส่วนลด</span>
-                      <span className="tabular-nums">
-                        {formatReceiptTHB(invoice.grossItemsTotal)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                      <span>
-                        ส่วนลดจากร้านค้า
-                        {invoice.discountCode ? ` (${invoice.discountCode})` : ""}
-                      </span>
-                      <span className="tabular-nums">
-                        - {formatReceiptTHB(invoice.storeDiscount)}
-                      </span>
-                    </div>
-                  </>
-                ) : null}
-                <div className="flex items-center justify-between border-b border-[#e2e8f0] py-1.5 font-semibold text-[#0f172a]">
-                  <span>ยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย</span>
-                  <span className="tabular-nums">
-                    {formatReceiptTHB(invoice.salesAmount)}
-                  </span>
-                </div>
-                {invoice.shippingFee > 0 ? (
-                  <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                    <span>ค่าธรรมเนียมการจัดส่งของลูกค้า</span>
-                    <span className="tabular-nums">
-                      {formatReceiptTHB(invoice.shippingFee)}
-                    </span>
-                  </div>
-                ) : null}
-                {invoice.feeTotal !== 0 ? (
-                  <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                    <span>ค่าธรรมเนียมทั้งหมด</span>
-                    <span className="tabular-nums">
-                      - {formatReceiptTHB(Math.abs(invoice.feeTotal))}
-                    </span>
-                  </div>
-                ) : null}
-                {invoice.adjustment !== 0 ? (
-                  <div className="flex items-center justify-between py-1 text-[#1e293b]">
-                    <span>จำนวนการปรับยอด</span>
-                    <span className="tabular-nums">
-                      {invoice.adjustment > 0 ? "+ " : "- "}
-                      {formatReceiptTHB(Math.abs(invoice.adjustment))}
-                    </span>
-                  </div>
-                ) : null}
-              </>
-            )}
+          <div className="w-full max-w-md text-xs sm:text-[13px]">
+            {sortedBreakdownLines.map((line) => (
+              <div
+                key={line.key}
+                className="flex items-baseline justify-between gap-2 py-1 text-[#1e293b]"
+              >
+                <span className="min-w-0">{line.label}</span>
+                <span className="shrink-0 whitespace-nowrap tabular-nums">
+                  {formatReceiptTHB(line.amount)}
+                </span>
+              </div>
+            ))}
 
-            <div className="flex items-center justify-between border-y-2 border-[#0f172a] bg-[#f8fafc] px-3 py-2 text-sm font-extrabold text-[#0f172a]">
-              <span>{totalBarLabel}</span>
-              <span className="tabular-nums">
+            <div className="flex items-baseline justify-between gap-2 border-y-2 border-[#0f172a] bg-[#f8fafc] px-3 py-2 text-sm font-extrabold text-[#0f172a]">
+              <span className="min-w-0">{totalBarLabel}</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
                 {formatReceiptTHB(invoice.receiptTotal)}
               </span>
-            </div>
-
-            <div className="mt-1.5 space-y-1 px-1 text-xs text-[#475569]">
-              <div className="flex items-center justify-between">
-                <span>มูลค่าสินค้า/บริการ (ก่อนภาษีมูลค่าเพิ่ม)</span>
-                <span className="tabular-nums font-medium text-[#1e293b]">
-                  {formatReceiptTHB(invoice.receiptPreVatAmount)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>ภาษีมูลค่าเพิ่ม (VAT {invoice.seller.vatRate}%)</span>
-                <span className="tabular-nums font-medium text-[#1e293b]">
-                  {formatReceiptTHB(invoice.receiptVatAmount)}
-                </span>
-              </div>
             </div>
           </div>
         </div>
@@ -852,10 +979,18 @@ export function InvoiceDocument({
       </header>
 
       <div className="invoice-refs">
-        <div>
-          <span className="invoice-label">เลขที่เอกสาร</span>
-          <span className="mono">{invoice.invoiceNo ?? "-"}</span>
-        </div>
+        {showInvoiceNo ? (
+          <div>
+            <span className="invoice-label">เลขที่ใบกำกับภาษี</span>
+            <span className="mono">{invoice.invoiceNo ?? "-"}</span>
+          </div>
+        ) : null}
+        {showReceiptNo ? (
+          <div>
+            <span className="invoice-label">หมายเลขใบเสร็จ</span>
+            <span className="mono">{invoice.receiptNo}</span>
+          </div>
+        ) : null}
         <div>
           <span className="invoice-label">เลขคำสั่งซื้อ ({channelLabel})</span>
           <span className="mono">{invoice.orderId}</span>
@@ -929,214 +1064,165 @@ export function InvoiceDocument({
       {isFull ? (
         <div className="w-full overflow-x-auto print:overflow-visible">
           <table className="invoice-table">
-          <thead>
-            <tr>
-              <th style={{ width: "8%" }}>ลำดับ</th>
-              {showSkuFull ? (
-                <th style={{ width: "18%" }}>รหัสสินค้า (SKU)</th>
-              ) : null}
-              <th style={{ width: showSkuFull ? "36%" : "54%" }}>รายการสินค้า</th>
-              <th style={{ width: "10%" }} className="num">
-                จำนวน
-              </th>
-              <th style={{ width: "14%" }} className="num">
-                ราคา/หน่วย
-              </th>
-              <th style={{ width: "14%" }} className="num">
-                จำนวนเงิน
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoice.items.length === 0 ? (
+            <thead>
               <tr>
-                <td>1</td>
-                {showSkuFull ? <td className="mono">-</td> : null}
-                <td>สินค้าตามคำสั่งซื้อ #{invoice.orderCode ?? invoice.orderId}</td>
-                <td className="num">1</td>
-                <td className="num">{formatTHB(invoice.salesAmount)}</td>
-                <td className="num">{formatTHB(invoice.salesAmount)}</td>
+                <th style={{ width: "8%" }}>ลำดับ</th>
+                {showSkuFull ? (
+                  <th style={{ width: "18%" }}>รหัสสินค้า (SKU)</th>
+                ) : null}
+                <th style={{ width: showSkuFull ? "36%" : "54%" }}>รายการสินค้า</th>
+                <th style={{ width: "10%" }} className="num">
+                  จำนวน
+                </th>
+                <th style={{ width: "14%" }} className="num">
+                  ราคา/หน่วย
+                </th>
+                <th style={{ width: "14%" }} className="num">
+                  จำนวนเงิน
+                </th>
               </tr>
-            ) : (
-              invoice.items.map((item, index) => {
-                const unitPrice =
-                  item.unitPrice ??
-                  (index === 0 ? invoice.salesAmount / Math.max(1, item.qty) : 0);
-                const lineTotal =
-                  item.lineTotal ??
-                  (index === 0 ? invoice.salesAmount : 0);
-                return (
-                  <tr key={`${item.sku}-${index}`}>
-                    <td>{index + 1}</td>
-                    {showSkuFull ? (
-                      <td className="mono font-semibold">{item.sku}</td>
-                    ) : null}
-                    <td>{item.name || `สินค้า SKU ${item.sku}`}</td>
-                    <td className="num">{item.qty}</td>
-                    <td className="num">
-                      {item.unitPrice !== undefined || index === 0
-                        ? formatTHB(unitPrice)
-                        : "-"}
-                    </td>
-                    <td className="num">
-                      {item.lineTotal !== undefined || index === 0
-                        ? formatTHB(lineTotal)
-                        : "-"}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-            {useCustomerPaidBase ? (
-              <>
-                {invoice.discountTotal > 0 ? (
-                  <tr>
-                    <td colSpan={showSkuFull ? 5 : 4}>ส่วนลดค่าสินค้าจากผู้ขาย</td>
-                    <td className="num">-{formatTHB(invoice.discountTotal)}</td>
-                  </tr>
-                ) : null}
-                {invoice.platformCoupon > 0 ? (
-                  <tr>
-                    <td colSpan={showSkuFull ? 5 : 4}>
-                      ส่วนลดสำหรับสินค้าจาก TikTok Shop
-                    </td>
-                    <td className="num">-{formatTHB(invoice.platformCoupon)}</td>
-                  </tr>
-                ) : null}
+            </thead>
+            <tbody>
+              {invoice.items.length === 0 ? (
                 <tr>
-                  <td colSpan={showSkuFull ? 5 : 4}>
-                    ค่าธรรมเนียมการจัดส่งก่อนหักส่วนลด
-                  </td>
-                  <td className="num">{formatTHB(invoice.shippingGross)}</td>
-                </tr>
-                {invoice.shippingCoupon > 0 ? (
-                  <tr>
-                    <td colSpan={showSkuFull ? 5 : 4}>
-                      ส่วนลดค่าจัดส่งจาก TikTok Shop
-                    </td>
-                    <td className="num">-{formatTHB(invoice.shippingCoupon)}</td>
-                  </tr>
-                ) : null}
-              </>
-            ) : (
-              <>
-                {invoice.discountTotal > 0 ? (
-                  <tr>
-                    <td colSpan={showSkuFull ? 5 : 4}>ส่วนลดจากร้านค้า</td>
-                    <td className="num">-{formatTHB(invoice.discountTotal)}</td>
-                  </tr>
-                ) : null}
-                <tr>
-                  <td colSpan={showSkuFull ? 5 : 4}>
-                    ยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย
-                  </td>
+                  <td>1</td>
+                  {showSkuFull ? <td className="mono">-</td> : null}
+                  <td>สินค้าตามคำสั่งซื้อ #{invoice.orderCode ?? invoice.orderId}</td>
+                  <td className="num">1</td>
+                  <td className="num">{formatTHB(invoice.salesAmount)}</td>
                   <td className="num">{formatTHB(invoice.salesAmount)}</td>
                 </tr>
-                {invoice.shippingFee > 0 ? (
-                  <tr>
-                    <td colSpan={showSkuFull ? 5 : 4}>
-                      ค่าธรรมเนียมการจัดส่งของลูกค้า
-                    </td>
-                    <td className="num">{formatTHB(invoice.shippingFee)}</td>
-                  </tr>
-                ) : null}
-                {invoice.feeTotal !== 0 ? (
-                  <tr>
-                    <td colSpan={showSkuFull ? 5 : 4}>ค่าธรรมเนียมทั้งหมด</td>
-                    <td className="num">-{formatTHB(Math.abs(invoice.feeTotal))}</td>
-                  </tr>
-                ) : null}
-                {invoice.adjustment !== 0 ? (
-                  <tr>
-                    <td colSpan={showSkuFull ? 5 : 4}>จำนวนการปรับยอด</td>
-                    <td className="num">{formatTHB(invoice.adjustment)}</td>
-                  </tr>
-                ) : null}
-              </>
-            )}
-            <tr>
-              <td colSpan={showSkuFull ? 5 : 4}>
-                มูลค่าสินค้า/บริการ (ก่อนภาษีมูลค่าเพิ่ม)
-              </td>
-              <td className="num">{formatTHB(invoice.preVatAmount)}</td>
-            </tr>
-            <tr>
-              <td colSpan={showSkuFull ? 5 : 4}>
-                ภาษีมูลค่าเพิ่ม (VAT {invoice.seller.vatRate}%)
-              </td>
-              <td className="num">{formatTHB(invoice.vatAmount)}</td>
-            </tr>
-            <tr className="invoice-total-row">
-              <td colSpan={showSkuFull ? 5 : 4}>{totalBarLabel}</td>
-              <td className="num">{formatTHB(invoice.total)}</td>
-            </tr>
-          </tbody>
-        </table>
+              ) : (
+                invoice.items.map((item, index) => {
+                  const unitPrice =
+                    item.unitPrice ??
+                    (index === 0 ? invoice.salesAmount / Math.max(1, item.qty) : 0);
+                  const lineTotal =
+                    item.lineTotal ??
+                    (index === 0 ? invoice.salesAmount : 0);
+                  return (
+                    <tr key={`${item.sku}-${index}`}>
+                      <td>{index + 1}</td>
+                      {showSkuFull ? (
+                        <td className="mono font-semibold">{item.sku}</td>
+                      ) : null}
+                      <td>{item.name || `สินค้า SKU ${item.sku}`}</td>
+                      <td className="num">{item.qty}</td>
+                      <td className="num">
+                        {item.unitPrice !== undefined || index === 0
+                          ? formatTHB(unitPrice)
+                          : "-"}
+                      </td>
+                      <td className="num">
+                        {item.lineTotal !== undefined || index === 0
+                          ? formatTHB(lineTotal)
+                          : "-"}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+              {invoice.discountTotal > 0 ? (
+                <tr>
+                  <td colSpan={showSkuFull ? 5 : 4}>ส่วนลดค่าสินค้าจากผู้ขาย</td>
+                  <td className="num">-{formatTHB(invoice.discountTotal)}</td>
+                </tr>
+              ) : null}
+              <tr>
+                <td colSpan={showSkuFull ? 5 : 4} className="font-semibold">
+                  ยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย
+                </td>
+                <td className="num font-semibold">{formatTHB(invoice.salesAmount)}</td>
+              </tr>
+              {sortedBreakdownLines.map((line) => (
+                <tr key={line.key}>
+                  <td colSpan={showSkuFull ? 5 : 4}>{line.label}</td>
+                  <td className="num">{formatTHB(line.amount)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td colSpan={showSkuFull ? 5 : 4}>
+                  มูลค่าสินค้า/บริการ (ก่อนภาษีมูลค่าเพิ่ม)
+                </td>
+                <td className="num">{formatTHB(invoice.preVatAmount)}</td>
+              </tr>
+              <tr>
+                <td colSpan={showSkuFull ? 5 : 4}>
+                  ภาษีมูลค่าเพิ่ม (VAT {invoice.seller.vatRate}%)
+                </td>
+                <td className="num">{formatTHB(invoice.vatAmount)}</td>
+              </tr>
+              <tr className="invoice-total-row">
+                <td colSpan={showSkuFull ? 5 : 4}>{totalBarLabel}</td>
+                <td className="num">{formatTHB(invoice.total)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="w-full overflow-x-auto print:overflow-visible">
-        <table className="invoice-table">
-          <thead>
-            <tr>
-              <th style={{ width: hasRichItems ? "56%" : "70%" }}>รายการ</th>
-              {hasRichItems ? (
-                <th style={{ width: "16%" }} className="num">
-                  ราคา × จำนวน
+          <table className="invoice-table">
+            <thead>
+              <tr>
+                <th style={{ width: hasRichItems ? "56%" : "70%" }}>รายการ</th>
+                {hasRichItems ? (
+                  <th style={{ width: "16%" }} className="num">
+                    ราคา × จำนวน
+                  </th>
+                ) : null}
+                <th style={{ width: hasRichItems ? "28%" : "30%" }} className="num">
+                  จำนวนเงิน
                 </th>
-              ) : null}
-              <th style={{ width: hasRichItems ? "28%" : "30%" }} className="num">
-                จำนวนเงิน
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoice.items.length === 0 ? (
-              <tr>
-                <td colSpan={hasRichItems ? 2 : 1}>สินค้าตามคำสั่งซื้อ</td>
-                <td className="num">{formatTHB(invoice.salesAmount)}</td>
               </tr>
-            ) : (
-              invoice.items.map((item, index) => (
-                <tr key={`${item.sku}-${index}`}>
-                  <td>
-                    <strong className="mono">{item.sku}</strong>
-                    {item.name ? ` · ${item.name}` : ""} × {item.qty}
-                  </td>
-                  {hasRichItems ? (
-                    <td className="num">
-                      {item.unitPrice !== undefined
-                        ? `${formatTHB(item.unitPrice)} × ${item.qty}`
-                        : "-"}
-                    </td>
-                  ) : null}
-                  <td className="num">
-                    {item.lineTotal !== undefined
-                      ? formatTHB(item.lineTotal)
-                      : index === 0
-                        ? formatTHB(invoice.salesAmount)
-                        : ""}
-                  </td>
+            </thead>
+            <tbody>
+              {invoice.items.length === 0 ? (
+                <tr>
+                  <td colSpan={hasRichItems ? 2 : 1}>สินค้าตามคำสั่งซื้อ</td>
+                  <td className="num">{formatTHB(invoice.salesAmount)}</td>
                 </tr>
-              ))
-            )}
-            {hasRichItems && invoice.discountTotal > 0 ? (
+              ) : (
+                invoice.items.map((item, index) => (
+                  <tr key={`${item.sku}-${index}`}>
+                    <td>
+                      <strong className="mono">{item.sku}</strong>
+                      {item.name ? ` · ${item.name}` : ""} × {item.qty}
+                    </td>
+                    {hasRichItems ? (
+                      <td className="num">
+                        {item.unitPrice !== undefined
+                          ? `${formatTHB(item.unitPrice)} × ${item.qty}`
+                          : "-"}
+                      </td>
+                    ) : null}
+                    <td className="num">
+                      {item.lineTotal !== undefined
+                        ? formatTHB(item.lineTotal)
+                        : index === 0
+                          ? formatTHB(invoice.salesAmount)
+                          : ""}
+                    </td>
+                  </tr>
+                ))
+              )}
+              {hasRichItems && invoice.discountTotal > 0 ? (
+                <tr>
+                  <td colSpan={hasRichItems ? 2 : 1}>ส่วนลดร้านค้า</td>
+                  <td className="num">-{formatTHB(invoice.discountTotal)}</td>
+                </tr>
+              ) : null}
               <tr>
-                <td colSpan={hasRichItems ? 2 : 1}>ส่วนลดร้านค้า</td>
-                <td className="num">-{formatTHB(invoice.discountTotal)}</td>
+                <td colSpan={hasRichItems ? 2 : 1}>ค่าส่ง</td>
+                <td className="num">{formatTHB(invoice.shippingFee)}</td>
               </tr>
-            ) : null}
-            <tr>
-              <td colSpan={hasRichItems ? 2 : 1}>ค่าส่ง</td>
-              <td className="num">{formatTHB(invoice.shippingFee)}</td>
-            </tr>
-            <tr className="invoice-total-row">
-              <td colSpan={hasRichItems ? 2 : 1}>
-                ราคารวมภาษีมูลค่าเพิ่ม (รวมทั้งสิ้น)
-              </td>
-              <td className="num">{formatTHB(invoice.total)}</td>
-            </tr>
-          </tbody>
-        </table>
+              <tr className="invoice-total-row">
+                <td colSpan={hasRichItems ? 2 : 1}>
+                  ราคารวมภาษีมูลค่าเพิ่ม (รวมทั้งสิ้น)
+                </td>
+                <td className="num">{formatTHB(invoice.total)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       )}
 

@@ -1,4 +1,9 @@
-import { SELLER, type SellerInfo } from "./seller";
+import {
+  formatInvoiceNoWithPrefix,
+  formatReceiptNoWithPrefix,
+  SELLER,
+  type SellerInfo,
+} from "./seller";
 import { bahtText, round2 } from "./format";
 import type { TransactionRow } from "./queries";
 
@@ -38,11 +43,29 @@ export interface InvoiceModel {
   discountCode: string | null;
   storeDiscount: number;
   platformCoupon: number;
+  platformDiscount?: number;
+  platformCofundCoupon?: number;
+  sellerCofundCoupon?: number;
+  platformDiscountRefund?: number;
+  platformCofundCouponRefund?: number;
+  sellerCofundCouponRefund?: number;
   salesAmount: number;
   shippingFee: number;
+  shippingCustomerFee?: number;
   shippingGross: number;
   shippingCoupon: number;
+  shippingPlatformDiscount: number;
+  shippingDiscountStore?: number;
+  shippingSubsidy?: number;
+  guaranteeReimbursement?: number;
+  exchangeShipping?: number;
+  replacementShipping?: number;
   shippingActual: number;
+  returnShippingActual?: number;
+  shippingRefund?: number;
+  extraBreakdownLines?: { key: string; label: string; amount: number }[];
+  weightEstimated: number | null;
+  weightCharged: number | null;
   customerPayment: number;
   customerTotal: number;
   feeTotal: number;
@@ -95,9 +118,18 @@ export function buildInvoice(
     ...(sellerOverride ?? {}),
   };
   const fields = row.normalized.fields;
-  const salesAmount = round2(
-    Number(fields.productAfterDiscount ?? row.income ?? 0),
-  );
+  const rawIncome = Number(fields.incomeTotal ?? row.income ?? 0);
+  const rawPayout = Number(fields.payout ?? row.payout ?? 0);
+  const rawRefundAfter = Number(fields.refundAfterDiscount ?? 0);
+  const isZeroRefundedOrder =
+    row.transactionType !== "คำสั่งซื้อ (OMS)" &&
+    rawIncome <= 0 &&
+    rawPayout <= 0 &&
+    (rawRefundAfter < 0 || Number(fields.productAfterDiscount ?? 0) <= 0);
+
+  const salesAmount = isZeroRefundedOrder
+    ? 0
+    : round2(Number(fields.productAfterDiscount ?? row.income ?? 0));
   const shippingFee = round2(
     Number(row.shippingFeeCustomer ?? fields.shippingCustomerFee ?? 0),
   );
@@ -146,34 +178,93 @@ export function buildInvoice(
       Math.abs(Number(fields.platformCofundCoupon ?? 0)),
   );
 
-  const shippingCoupon = round2(
-    Math.abs(Number(fields.shippingPlatformDiscount ?? 0)) +
-      Math.abs(Number(fields.shippingDiscountStore ?? 0)),
+  // ดึงค่าจริงและเครื่องหมายจริงจากไฟล์ที่นำเข้าโดยตรง (ห้ามใช้ Math.abs กลับเครื่องหมายหรือคำนวณยอดใหม่เอง)
+  const platformDiscount = round2(Number(fields.platformDiscount ?? 0));
+  const platformCofundCoupon = round2(
+    Number(fields.platformCofundCoupon ?? 0),
+  );
+  const sellerCofundCoupon = round2(Number(fields.sellerCofundCoupon ?? 0));
+  const platformDiscountRefund = round2(
+    Number(fields.platformDiscountRefund ?? 0),
+  );
+  const platformCofundCouponRefund = round2(
+    Number(fields.platformCofundCouponRefund ?? 0),
+  );
+  const sellerCofundCouponRefund = round2(
+    Number(fields.sellerCofundCouponRefund ?? 0),
   );
 
-  const shippingActual = round2(Math.abs(Number(fields.shippingActual ?? 0)));
+  const shippingCustomerFee = round2(Number(fields.shippingCustomerFee ?? 0));
+  const shippingPlatformDiscount = round2(
+    Number(fields.shippingPlatformDiscount ?? 0),
+  );
+  const shippingDiscountStore = round2(
+    Number(fields.shippingDiscountStore ?? 0),
+  );
+  const shippingSubsidy = round2(Number(fields.shippingSubsidy ?? 0));
+  const guaranteeReimbursement = round2(
+    Number(fields.guaranteeReimbursement ?? 0),
+  );
+  const exchangeShipping = round2(Number(fields.exchangeShipping ?? 0));
+  const replacementShipping = round2(Number(fields.replacementShipping ?? 0));
 
-  // ค่าจัดส่งที่ดึงจากไฟล์ที่นำเข้าจริง (ไม่ใช้เลขคงที่):
-  // ถ้าระบุค่าส่งลูกค้า (shippingFee) หรือมีส่วนลดค่าส่งแพลตฟอร์ม (shippingCoupon) ให้ใช้ผลรวมตามจริงของบิลนั้น
-  // หากเป็น 0 ทั้งคู่แต่ในไฟล์ Settlement มี shippingActual ให้ดึงจาก shippingActual
+  const shippingCoupon = round2(
+    Math.abs(shippingPlatformDiscount) + Math.abs(shippingDiscountStore),
+  );
+
+  const shippingActual = round2(Number(fields.shippingActual ?? 0));
+  const returnShippingActual = round2(Number(fields.returnShippingActual ?? 0));
+  const shippingRefund = round2(Number(fields.shippingRefund ?? 0));
+
+  const extraBreakdownLines: { key: string; label: string; amount: number }[] =
+    [];
+  for (const uv of row.normalized.unknownValues ?? []) {
+    if (uv.amount !== 0 && (uv.category === "income" || uv.amount > 0)) {
+      extraBreakdownLines.push({
+        key: `custom_${uv.header}`,
+        label: uv.header,
+        amount: round2(uv.amount),
+      });
+    }
+  }
+
+  const weightCharged =
+    typeof row.weightCharged === "number" && row.weightCharged > 0
+      ? row.weightCharged
+      : typeof fields.weightCharged === "number" && fields.weightCharged > 0
+        ? fields.weightCharged
+        : null;
+
+  const weightEstimated =
+    typeof row.weightEstimated === "number" && row.weightEstimated > 0
+      ? row.weightEstimated
+      : typeof fields.weightEstimated === "number" && fields.weightEstimated > 0
+        ? fields.weightEstimated
+        : null;
+
   const shippingGross =
-    round2(shippingFee + shippingCoupon) > 0
-      ? round2(shippingFee + shippingCoupon)
-      : shippingActual;
+    Math.abs(shippingActual) > 0
+      ? Math.abs(shippingActual)
+      : round2(shippingFee + shippingCoupon) > 0
+        ? round2(shippingFee + shippingCoupon)
+        : 0;
 
   const customerPayment = round2(Number(fields.customerPayment ?? 0));
 
-  // สำหรับใบกำกับภาษีอย่างย่อ (รูปแบบใบเสร็จคำสั่งซื้อที่ CEO ต้องการ):
-  // - กรณีมีคูปองแพลตฟอร์ม (platformCoupon > 0): ยอดรวม = salesAmount (ราคาหลังส่วนลดร้านค้า) แล้วหักคูปองแพลตฟอร์ม
-  // - กรณีเป็นออเดอร์ OMS หรือส่วนลดร้านค้าล้วน (platformCoupon === 0): ยอดรวม = grossItemsTotal แล้วหักส่วนลด/คูปอง (derivedDiscount)
   const receiptSubtotal = platformCoupon > 0 ? salesAmount : grossItemsTotal;
   const receiptCoupon = platformCoupon > 0 ? platformCoupon : derivedDiscount;
-  const customerTotal = round2(
-    Math.max(
-      0,
-      receiptSubtotal + shippingGross - receiptCoupon - shippingCoupon,
-    ),
-  );
+
+  // ดึงยอดที่ลูกค้าจ่ายจริงจากไฟล์ (fields.customerPayment) โดยตรง ไม่คำนวณเอง
+  const customerTotal = isZeroRefundedOrder
+    ? 0
+    : customerPayment > 0
+      ? customerPayment
+      : round2(
+          Math.max(
+            0,
+            salesAmount + shippingFee - platformCoupon,
+          ),
+        );
 
   const feeTotal = round2(Number(row.feeTotal ?? fields.feeTotal ?? 0));
   const adjustment = round2(Number(row.adjustment ?? fields.adjustment ?? 0));
@@ -182,12 +273,20 @@ export function buildInvoice(
   const useCustomerPaidBase =
     activeSeller.vatCalculationBase === "customer_paid";
 
-  // ใช้ยอดที่ร้านได้รับจริง (payout / ยอดที่คุณได้รับ) เป็นค่าเริ่มต้น หรือสลับเป็นยอดที่ลูกค้าจ่ายตามตั้งค่า
-  const receiptTotal = useCustomerPaidBase
-    ? customerTotal
-    : payout > 0
-      ? payout
-      : customerTotal;
+  const customerFallbackTotal = isZeroRefundedOrder
+    ? 0
+    : customerTotal > 0
+      ? customerTotal
+      : round2(salesAmount + shippingFee);
+
+  // หน้าใบกำกับภาษีไม่นำค่าธรรมเนียมแพลตฟอร์มมาหัก แสดงยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย (salesAmount) โดยตรง
+  const receiptTotal = isZeroRefundedOrder
+    ? 0
+    : useCustomerPaidBase
+      ? customerFallbackTotal
+      : salesAmount > 0
+        ? salesAmount
+        : customerFallbackTotal;
 
   const vatRate =
     typeof activeSeller.vatRate === "number" && activeSeller.vatRate >= 0
@@ -196,25 +295,24 @@ export function buildInvoice(
   const receiptPreVatAmount = round2(receiptTotal / (1 + vatRate / 100));
   const receiptVatAmount = round2(receiptTotal - receiptPreVatAmount);
 
-  const total = useCustomerPaidBase
-    ? customerTotal > 0
-      ? customerTotal
-      : round2(salesAmount + shippingFee)
-    : payout > 0
-      ? payout
-      : round2(salesAmount + shippingFee);
+  const total = receiptTotal;
   const preVatAmount = round2(total / (1 + vatRate / 100));
   const vatAmount = round2(total - preVatAmount);
 
-  const dateCompact = (row.paidDate || row.createdDate || "")
-    .replace(/\D/g, "")
-    .slice(0, 8);
-  const receiptNo = dateCompact
-    ? `${dateCompact}-${row.externalId}`
-    : row.externalId;
+  const effectiveDate = row.paidDate || row.createdDate || "";
+  const formattedInvoiceNo = formatInvoiceNoWithPrefix(
+    row.invoiceNo,
+    activeSeller.invoicePrefix,
+    effectiveDate,
+  );
+  const receiptNo = formatReceiptNoWithPrefix(
+    row.invoiceNo,
+    activeSeller.receiptPrefix,
+    effectiveDate,
+  );
 
   return {
-    invoiceNo: row.invoiceNo,
+    invoiceNo: formattedInvoiceNo,
     receiptNo,
     orderId: row.externalId,
     orderCode: row.orderCode ?? null,
@@ -239,11 +337,29 @@ export function buildInvoice(
     discountCode: row.discountCode ?? null,
     storeDiscount: derivedDiscount,
     platformCoupon,
+    platformDiscount,
+    platformCofundCoupon,
+    sellerCofundCoupon,
+    platformDiscountRefund,
+    platformCofundCouponRefund,
+    sellerCofundCouponRefund,
     salesAmount,
     shippingFee,
+    shippingCustomerFee,
     shippingGross,
     shippingCoupon,
+    shippingPlatformDiscount,
+    shippingDiscountStore,
+    shippingSubsidy,
+    guaranteeReimbursement,
+    exchangeShipping,
+    replacementShipping,
     shippingActual,
+    returnShippingActual,
+    shippingRefund,
+    extraBreakdownLines,
+    weightEstimated,
+    weightCharged,
     customerPayment,
     customerTotal,
     feeTotal,
