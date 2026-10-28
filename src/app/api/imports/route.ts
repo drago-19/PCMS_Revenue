@@ -1,4 +1,5 @@
 import { recordAuditLog, requireApiAuth } from "@/lib/auth";
+import { saveColumnMappingRules } from "@/lib/column-mapping-settings";
 import { importWorkbook, type ImportProgressEvent, type ImportResult } from "@/lib/ingest/import-service";
 import { IngestError } from "@/lib/ingest/parse";
 import { deleteAllImports } from "@/lib/queries";
@@ -93,6 +94,11 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const rawCustomMapping = form.get("customMapping");
+    const rawSaveMapping = form.get("saveMapping");
+    const shouldSaveMapping =
+      rawSaveMapping === null ||
+      rawSaveMapping === "1" ||
+      rawSaveMapping === "true";
     let customMapping: Record<string, string> | undefined;
     if (typeof rawCustomMapping === "string" && rawCustomMapping.trim()) {
       try {
@@ -109,6 +115,25 @@ export async function POST(request: Request) {
       } catch {
         // ignore invalid json
       }
+    }
+
+    if (
+      customMapping &&
+      Object.keys(customMapping).length > 0 &&
+      shouldSaveMapping
+    ) {
+      await saveColumnMappingRules(
+        { headerToFieldKey: customMapping },
+        auth.session.sub,
+      );
+      await recordAuditLog({
+        actor: auth.session.sub,
+        action: "settings.column_mapping.save_from_upload",
+        ipAddress: auth.ip,
+        outcome: "success",
+        details: { mappedCount: Object.keys(customMapping).length },
+        requestId: auth.requestId,
+      });
     }
 
     if (!streamMode) {

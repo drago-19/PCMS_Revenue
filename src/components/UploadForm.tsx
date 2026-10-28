@@ -133,24 +133,33 @@ function getStepState(
 }
 
 const CUSTOM_MAPPING_FIELDS: { key: string; label: string }[] = [
-  { key: "orderCode", label: "เลขที่ออเดอร์ / รหัสคำสั่งซื้อ (จำเป็น)" },
-  { key: "skuCode", label: "รหัสสินค้า (SKU)" },
-  { key: "productName", label: "ชื่อสินค้า" },
-  { key: "unitPrice", label: "ราคาต่อชิ้น" },
-  { key: "quantity", label: "จำนวนชิ้น" },
-  { key: "salesAmount", label: "ยอดขายรวมออเดอร์" },
-  { key: "discountTotal", label: "ส่วนลดรวม" },
-  { key: "shippingFeeCustomer", label: "ค่าส่งที่เก็บลูกค้า" },
-  { key: "channel", label: "ช่องทางจำหน่าย (TikTok/Shopee/FB)" },
-  { key: "marketplaceOrderId", label: "เลขคำสั่งซื้อบน Marketplace" },
-  { key: "customerName", label: "ชื่อลูกค้า" },
-  { key: "customerPhone", label: "เบอร์โทรลูกค้า" },
-  { key: "customerAddress", label: "ที่อยู่จัดส่ง" },
-  { key: "postalCode", label: "รหัสไปรษณีย์" },
-  { key: "trackingNo", label: "เลขพัสดุ" },
-  { key: "courier", label: "ขนส่ง" },
-  { key: "createdDate", label: "วันที่สั่งซื้อ / วันที่สร้าง" },
-  { key: "paidDate", label: "วันที่โอนเงิน / ชำระเงิน" },
+  { key: "orderCode", label: "[shipnity] เลขที่ออเดอร์ / รหัสคำสั่งซื้อ (จำเป็น)" },
+  { key: "skuCode", label: "[shipnity] รหัสสินค้า (SKU)" },
+  { key: "productName", label: "[shipnity] ชื่อสินค้า" },
+  { key: "unitPrice", label: "[shipnity] ราคาต่อชิ้น" },
+  { key: "quantity", label: "[shipnity] จำนวนชิ้น" },
+  { key: "salesAmount", label: "[shipnity] ยอดขายรวมออเดอร์" },
+  { key: "discountTotal", label: "[shipnity] ส่วนลดรวม" },
+  { key: "shippingFeeCustomer", label: "[shipnity] ค่าส่งที่เก็บลูกค้า" },
+  { key: "channel", label: "[shipnity] ช่องทางจำหน่าย (TikTok)" },
+  { key: "marketplaceOrderId", label: "[shipnity] เลขคำสั่งซื้อบน Marketplace" },
+  { key: "customerName", label: "[shipnity] ชื่อลูกค้า" },
+  { key: "customerPhone", label: "[shipnity] เบอร์โทรลูกค้า" },
+  { key: "customerAddress", label: "[shipnity] ที่อยู่จัดส่ง" },
+  { key: "postalCode", label: "[shipnity] รหัสไปรษณีย์" },
+  { key: "trackingNo", label: "[shipnity] เลขพัสดุ" },
+  { key: "courier", label: "[shipnity] ขนส่ง" },
+  { key: "createdDate", label: "[shipnity] วันที่สั่งซื้อ / วันที่สร้าง" },
+  { key: "paidDate", label: "[shipnity] วันที่โอนเงิน / ชำระเงิน" },
+  { key: "orderId", label: "[TikTok รายได้] หมายเลขคำสั่งซื้อ/การปรับยอด" },
+  { key: "payout", label: "[TikTok รายได้] ยอดการชำระเงินทั้งหมด (รับสุทธิ)" },
+  { key: "incomeTotal", label: "[TikTok รายได้] รายได้ทั้งหมด" },
+  { key: "feeTotal", label: "[TikTok รายได้] ค่าธรรมเนียมทั้งหมด" },
+  { key: "adjustment", label: "[TikTok รายได้] การปรับยอด" },
+  { key: "productAfterDiscount", label: "[TikTok รายได้] ยอดรวมค่าสินค้าหลังหักส่วนลด" },
+  { key: "transactionType", label: "[TikTok รายได้] ประเภทธุรกรรม" },
+  { key: "paidAt", label: "[TikTok รายได้] เวลาที่ชำระเงินสำเร็จ" },
+  { key: "createdAt", label: "[TikTok รายได้] เวลาที่สร้างคำสั่งซื้อ" },
 ];
 
 export function UploadForm() {
@@ -164,6 +173,7 @@ export function UploadForm() {
   const [mappingFile, setMappingFile] = useState<File | null>(null);
   const [unrecognizedHeaders, setUnrecognizedHeaders] = useState<string[]>([]);
   const [fieldToHeader, setFieldToHeader] = useState<Record<string, string>>({});
+  const [saveMappingForFuture, setSaveMappingForFuture] = useState(true);
   const [progress, setProgress] = useState<UploadProgressState>({
     open: false,
     percent: 0,
@@ -378,6 +388,7 @@ export function UploadForm() {
       body.append("file", targetFile);
       if (customMap && Object.keys(customMap).length > 0) {
         body.append("customMapping", JSON.stringify(customMap));
+        body.append("saveMapping", saveMappingForFuture ? "1" : "0");
       }
       xhr.send(body);
     });
@@ -409,7 +420,11 @@ export function UploadForm() {
       setFieldToHeader({});
       setResult(payload.data);
       setFiles([]);
-      toast.success(`นำเข้าด้วย Custom Mapping สำเร็จ (${payload.data.orderCount} ออเดอร์)`);
+      toast.success(
+        saveMappingForFuture
+          ? `นำเข้าสำเร็จ (${payload.data.orderCount} ออเดอร์) และจำชื่อคอลัมน์ไว้ใช้ครั้งถัดไปแล้ว`
+          : `นำเข้าด้วย Custom Mapping สำเร็จ (${payload.data.orderCount} ออเดอร์)`,
+      );
       router.refresh();
     } finally {
       setBusy(false);
@@ -524,7 +539,7 @@ export function UploadForm() {
         <span className="dropzone-hint">
           {files.length > 0
             ? `${formatFileSize(files.reduce((acc, f) => acc + f.size, 0))} · พร้อมนำเข้าและแมปข้อมูลอัตโนมัติ`
-            : "รองรับ 1) ไฟล์ออเดอร์ OMS  2) ไฟล์รายได้ TikTok Shop  3) ไฟล์รายการสินค้า OMS (.xlsx / .csv)"}
+            : "รองรับ 1) ไฟล์ออเดอร์ใน shipnity  2) ไฟล์รายได้ TikTok Shop  3) ไฟล์สินค้าในออเดอร์ shipnity (.xlsx / .csv)"}
         </span>
       </label>
 
@@ -801,7 +816,7 @@ export function UploadForm() {
               </Badge>
             </div>
             <DialogDescription className="truncate">
-              ไฟล์: <strong className="font-mono">{mappingFile?.name ?? "-"}</strong> · เลือกคอลัมน์ในไฟล์ให้ตรงกับช่องข้อมูลของระบบ (รองรับ Synnity / Shopee / ไฟล์กำหนดเอง)
+              ไฟล์: <strong className="font-mono">{mappingFile?.name ?? "-"}</strong> · เลือกคอลัมน์ในไฟล์ให้ตรงกับช่องข้อมูลของระบบ (รองรับ shipnity / TikTok / ไฟล์กำหนดเอง)
             </DialogDescription>
           </DialogHeader>
 
@@ -859,6 +874,26 @@ export function UploadForm() {
                 </div>
               );
             })}
+          </div>
+
+          <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+            <div className="min-w-0">
+              <strong className="block text-xs font-semibold text-foreground">
+                บันทึกการจับคู่คอลัมน์นี้ไว้ใช้ครั้งถัดไปอัตโนมัติ
+              </strong>
+              <span className="block text-[11px] text-muted-foreground">
+                ระบบจะจำชื่อคอลัมน์ใหม่ลงฐานข้อมูล (app_settings) อัปโหลดครั้งหน้าไม่ต้องเลือกซ้ำ
+              </span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant={saveMappingForFuture ? "default" : "outline"}
+              aria-pressed={saveMappingForFuture}
+              onClick={() => setSaveMappingForFuture((prev) => !prev)}
+            >
+              {saveMappingForFuture ? "✓ บันทึกไว้ใช้ตลอด" : "ใช้เฉพาะครั้งนี้"}
+            </Button>
           </div>
 
           <DialogFooter className="mt-2 gap-2">

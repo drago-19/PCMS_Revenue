@@ -12,8 +12,18 @@ import {
   type FieldDef,
 } from "./catalog";
 import { round2 } from "../format";
+import {
+  lookupCustomFieldKey,
+  lookupUnknownColumnCategory,
+  type UnknownColumnCategory,
+} from "../column-mapping-settings";
 
 export type Primitive = string | number | boolean | Date | null;
+
+export interface ParseWorkbookOptions {
+  customMapping?: Record<string, string>;
+  unknownColumnCategories?: Record<string, UnknownColumnCategory>;
+}
 
 export interface IngestWarning {
   code: string;
@@ -39,6 +49,7 @@ export interface UnknownColumn {
   nonZeroNumeric: number;
   moneyLike: boolean;
   samples: string[];
+  category?: UnknownColumnCategory;
 }
 
 export interface ReportSummary {
@@ -67,6 +78,7 @@ export interface UnknownValue {
   header: string;
   amount: number;
   moneyLike: boolean;
+  category?: UnknownColumnCategory;
 }
 
 export interface NormalizedTransaction {
@@ -454,21 +466,75 @@ function buildFeeGroups(
   return groups;
 }
 
-function buildChecks(
+export function buildChecks(
   fields: Record<string, string | number>,
   groups: Record<string, FeeGroupValue>,
+  unknownValues: UnknownValue[] = [],
 ): TransactionChecks {
   const incomeTotal = toNumber(fields.incomeTotal);
   const feeTotal = toNumber(fields.feeTotal);
   const payout = toNumber(fields.payout);
   const adjustment = toNumber(fields.adjustment);
-  const incomeParts =
+
+  const extraIncome = round2(
+    unknownValues
+      .filter((u) => u.category === "income")
+      .reduce((sum, u) => sum + toNumber(u.amount), 0),
+  );
+  const extraFee = round2(
+    unknownValues
+      .filter((u) => u.category === "fee")
+      .reduce((sum, u) => sum + toNumber(u.amount), 0),
+  );
+  const extraAdjustment = round2(
+    unknownValues
+      .filter((u) => u.category === "adjustment")
+      .reduce((sum, u) => sum + toNumber(u.amount), 0),
+  );
+
+  const baseIncomeParts =
     toNumber(fields.productAfterDiscount) + toNumber(fields.refundAfterDiscount);
+  const rawIncomeDiff = round2(incomeTotal - baseIncomeParts);
+  const diffWithExtraIncome = round2(incomeTotal - (baseIncomeParts + extraIncome));
+
+  let incomeDiff = rawIncomeDiff;
+  let topLevelExtraIncome = 0;
+  if (extraIncome !== 0) {
+    if (Math.abs(diffWithExtraIncome) < Math.abs(rawIncomeDiff)) {
+      incomeDiff = diffWithExtraIncome;
+    } else {
+      topLevelExtraIncome = extraIncome;
+    }
+  }
+
   const feeGroupSum = Object.values(groups).reduce((sum, group) => sum + group.total, 0);
+  const rawFeeDiff = round2(feeTotal - feeGroupSum);
+  const diffWithExtraFee = round2(feeTotal - (feeGroupSum + extraFee));
+
+  let feeDiff = rawFeeDiff;
+  let topLevelExtraFee = 0;
+  if (extraFee !== 0) {
+    if (Math.abs(diffWithExtraFee) < Math.abs(rawFeeDiff)) {
+      feeDiff = diffWithExtraFee;
+    } else {
+      topLevelExtraFee = extraFee;
+    }
+  }
+
+  const rawPayoutDiff = round2(payout - (incomeTotal + feeTotal + adjustment));
+  const topLevelDelta = round2(topLevelExtraIncome + topLevelExtraFee + extraAdjustment);
+  const diffWithTopLevel = round2(
+    payout - (incomeTotal + feeTotal + adjustment + topLevelDelta),
+  );
+  const payoutDiff =
+    topLevelDelta !== 0 && Math.abs(diffWithTopLevel) <= Math.abs(rawPayoutDiff)
+      ? diffWithTopLevel
+      : rawPayoutDiff;
+
   return {
-    incomeDiff: round2(incomeTotal - incomeParts),
-    feeDiff: round2(feeTotal - feeGroupSum),
-    payoutDiff: round2(payout - (incomeTotal + feeTotal + adjustment)),
+    incomeDiff,
+    feeDiff,
+    payoutDiff,
   };
 }
 
@@ -480,8 +546,25 @@ function finalizeTransaction(
   return {
     ...transaction,
     feeGroups,
-    checks: buildChecks(transaction.fields, feeGroups),
+    checks: buildChecks(transaction.fields, feeGroups, transaction.unknownValues),
   };
+}
+
+export function recalculateTransactionWithRules(
+  transaction: NormalizedTransaction,
+  unknownColumnCategories?: Record<string, UnknownColumnCategory>,
+): NormalizedTransaction {
+  const updatedUnknowns: UnknownValue[] = (transaction.unknownValues ?? []).map((u) => {
+    const category = lookupUnknownColumnCategory(u.header, unknownColumnCategories);
+    return {
+      ...u,
+      ...(category ? { category } : { category: undefined }),
+    };
+  });
+  return finalizeTransaction({
+    ...transaction,
+    unknownValues: updatedUnknowns,
+  });
 }
 
 function rawValue(value: Primitive): string | number {
@@ -496,7 +579,10 @@ function rawValue(value: Primitive): string | number {
   return text.length > 800 ? `${text.slice(0, 800)}…` : text;
 }
 
-function isLikelyHeaderRow(mapping: MappingEntry[]): {
+function isLikelyHeaderRow(
+  mapping: MappingEntry[],
+  hasCustomMapping = false,
+): {
   valid: boolean;
   score: number;
   uniqueKeys: number;
@@ -506,7 +592,9 @@ function isLikelyHeaderRow(mapping: MappingEntry[]): {
   const coreHits = [...keys].filter((key) => CORE_KEYS.has(key)).length;
   const hasOrderId = keys.has("orderId");
   const hasMoney = keys.has("payout") || keys.has("incomeTotal") || keys.has("feeTotal");
-  const valid = hasOrderId && hasMoney && keys.size >= 5 && coreHits >= 2;
+  const minKeys = hasCustomMapping ? 2 : 5;
+  const minCore = hasCustomMapping ? 1 : 2;
+  const valid = hasOrderId && hasMoney && keys.size >= minKeys && coreHits >= minCore;
   return {
     valid,
     score: keys.size + coreHits * 6 + (hasOrderId ? 10 : 0) + (hasMoney ? 6 : 0),
@@ -515,11 +603,21 @@ function isLikelyHeaderRow(mapping: MappingEntry[]): {
   };
 }
 
-function mapRow(row: Primitive[], columnCount: number): MappingEntry[] {
+function mapRow(
+  row: Primitive[],
+  columnCount: number,
+  customMapping?: Record<string, string>,
+): MappingEntry[] {
   const entries: MappingEntry[] = [];
   for (let col = 0; col < columnCount; col++) {
     const header = String(row[col] ?? "").trim();
-    const match = header ? matchHeader(header) : null;
+    const customFieldKey = header ? lookupCustomFieldKey(header, customMapping) : null;
+    const customDef = customFieldKey ? FIELD_BY_KEY.get(customFieldKey) : undefined;
+    const match = customDef
+      ? { fieldKey: customDef.key, confidence: "exact" as const }
+      : header
+        ? matchHeader(header)
+        : null;
     entries.push({
       col,
       header,
@@ -557,9 +655,11 @@ function sheetNameHint(name: string): number {
 
 function findDetailSheet(
   sheets: { name: string; rows: Primitive[][] }[],
+  customMapping?: Record<string, string>,
 ): SheetCandidate {
   const candidates: SheetCandidate[] = [];
   const rejected: string[] = [];
+  const hasCustomMapping = Boolean(customMapping && Object.keys(customMapping).length > 0);
 
   for (const sheet of sheets) {
     const rows = sheet.rows;
@@ -569,8 +669,8 @@ function findDetailSheet(
     for (let index = 0; index < limit; index++) {
       const columnCount = Math.max(rows[index]?.length ?? 0, rows[index + 1]?.length ?? 0);
       if (columnCount === 0) continue;
-      const mapping = mapRow(rows[index], columnCount);
-      const info = isLikelyHeaderRow(mapping);
+      const mapping = mapRow(rows[index], columnCount, customMapping);
+      const info = isLikelyHeaderRow(mapping, hasCustomMapping);
       if (!info.valid) continue;
       const candidate: SheetCandidate = {
         sheetName: sheet.name,
@@ -888,9 +988,12 @@ function combineTransactions(
   return [...result, ...orderMap.values()];
 }
 
-export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<ParsedWorkbook> {
+export async function parseWorkbook(
+  input: Buffer | ArrayBuffer,
+  options?: ParseWorkbookOptions,
+): Promise<ParsedWorkbook> {
   const sheets = await readInputSheets(input);
-  const detail = findDetailSheet(sheets);
+  const detail = findDetailSheet(sheets, options?.customMapping);
   const headers = detail.mapping.map((entry) => entry.header);
   const columnCount = headers.length;
 
@@ -951,6 +1054,10 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
         if (samples.length < 3) samples.push(`${rawValue(value)}`);
       }
     }
+    const category = lookupUnknownColumnCategory(
+      entry.header,
+      options?.unknownColumnCategories,
+    );
     unknownColumns.push({
       col: entry.col,
       header: entry.header,
@@ -958,6 +1065,7 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
       nonZeroNumeric,
       moneyLike: isMoneyLikeHeader(entry.header),
       samples,
+      ...(category ? { category } : {}),
     });
   }
 
@@ -1093,6 +1201,7 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
         header: unknown.header,
         amount: round2(amount),
         moneyLike: unknown.moneyLike,
+        ...(unknown.category ? { category: unknown.category } : {}),
       });
     }
 
@@ -1140,10 +1249,11 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
       severity: "warning",
     });
   }
-  if (unknownColumns.length > 0) {
+  const unclassifiedUnknownColumns = unknownColumns.filter((column) => !column.category);
+  if (unclassifiedUnknownColumns.length > 0) {
     warnings.push({
       code: "UNKNOWN_COLUMNS",
-      message: `พบ ${unknownColumns.length} คอลัมน์ที่ระบบยังไม่รู้จัก: ${unknownColumns
+      message: `พบ ${unclassifiedUnknownColumns.length} คอลัมน์ที่ระบบยังไม่รู้จัก: ${unclassifiedUnknownColumns
         .map((column) => column.header)
         .join(", ")}`,
       severity: "warning",
@@ -1163,13 +1273,27 @@ export async function parseWorkbook(input: Buffer | ArrayBuffer): Promise<Parsed
       severity: "info",
     });
   }
-  const duplicateOrderCount = combined.filter((transaction) =>
+  const duplicateOrderTxs = combined.filter((transaction) =>
     transaction.warnings.some((warning) => warning.code === "DUPLICATE_ORDER_ROWS"),
-  ).length;
-  if (duplicateOrderCount > 0) {
+  );
+  if (duplicateOrderTxs.length > 0) {
+    const sampleDetails = duplicateOrderTxs
+      .slice(0, 10)
+      .map((tx) => {
+        const rowsText =
+          tx.rowIndexes && tx.rowIndexes.length > 0
+            ? `แถว ${tx.rowIndexes.join(", ")}`
+            : `${tx.sourceRows} แถว`;
+        return `#${tx.externalId} (${rowsText})`;
+      })
+      .join(" · ");
+    const moreText =
+      duplicateOrderTxs.length > 10
+        ? ` และอีก ${duplicateOrderTxs.length - 10} รายการ`
+        : "";
     warnings.push({
       code: "DUPLICATE_ORDER_ROWS",
-      message: `พบคำสั่งซื้อที่ปรากฏหลายแถว ${duplicateOrderCount} รายการ – รวมยอดเป็นบิลเดียวแล้ว`,
+      message: `พบคำสั่งซื้อที่ปรากฏหลายแถว ${duplicateOrderTxs.length} รายการ (${sampleDetails}${moreText}) – รวมยอดเป็นบิลเดียวแล้ว`,
       severity: "warning",
     });
   }

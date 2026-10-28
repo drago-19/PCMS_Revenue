@@ -545,9 +545,9 @@ export function ExcelFilePreviewDialog({
                     size="sm"
                   >
                     {fileType === "oms_orders"
-                      ? "1. ออเดอร์ OMS"
+                      ? "1. ออเดอร์ใน shipnity"
                       : fileType === "oms_items"
-                        ? "3. รายการสินค้า OMS"
+                        ? "3. สินค้าในออเดอร์ shipnity"
                         : "2. รายได้ TikTok"}
                   </Badge>
                 </DialogTitle>

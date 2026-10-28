@@ -7,9 +7,11 @@ import {
   IngestError,
   parseWorkbook,
   readInputSheets,
+  recalculateTransactionWithRules,
   type IngestWarning,
   type NormalizedTransaction,
   type ReportSummary,
+  type UnknownColumn,
 } from "./parse";
 import {
   detectAndParseOmsInput,
@@ -18,6 +20,10 @@ import {
   type ParsedOmsItem,
   type ParsedOmsOrder,
 } from "./oms-parse";
+import {
+  getColumnMappingRules,
+  lookupUnknownColumnCategory,
+} from "../column-mapping-settings";
 
 export interface ReconciliationMetric {
   key: "payout" | "income" | "fees" | "adjustment";
@@ -444,6 +450,23 @@ export async function reconcileAndSyncThreeFiles(
   fallbackImportId: number,
   nowIso: string,
 ): Promise<{ matchedOrders: number; syncedOmsBills: number }> {
+  // 0. Enforce TikTok-only policy: purge any non-TikTok rows from oms_orders, oms_order_items, and transactions
+  await query(
+    `DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'`,
+    [],
+    client,
+  );
+  await query(
+    `DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'`,
+    [],
+    client,
+  );
+  await query(
+    `DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') <> 'TikTok'`,
+    [],
+    client,
+  );
+
   // 1. Exact Marketplace Order ID match (against real Settlement rows)
   await query(
     `UPDATE oms_orders o
@@ -452,6 +475,7 @@ export async function reconcileAndSyncThreeFiles(
      FROM transactions t
      WHERE t.is_order = 1
        AND t.transaction_type <> 'คำสั่งซื้อ (OMS)'
+       AND COALESCE(NULLIF(o.channel, ''), 'TikTok') = 'TikTok'
        AND o.marketplace_order_norm IS NOT NULL
        AND o.marketplace_order_norm <> ''
        AND t.external_id = o.marketplace_order_norm
@@ -470,6 +494,7 @@ export async function reconcileAndSyncThreeFiles(
        JOIN transactions t
          ON t.is_order = 1
         AND t.transaction_type <> 'คำสั่งซื้อ (OMS)'
+        AND COALESCE(NULLIF(o.channel, ''), 'TikTok') = 'TikTok'
         AND o.marketplace_order_prefix IS NOT NULL
         AND LENGTH(o.marketplace_order_prefix) >= 14
         AND LEFT(t.external_id, 15) = o.marketplace_order_prefix
@@ -499,13 +524,13 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
-  // 4. For OMS orders that do NOT have a Settlement row (e.g. Shopee, Facebook, or unsettled TikTok orders),
-  //    create/upsert a bill row in transactions so all channels appear in /bills and can print tax invoices!
-  //    Use Marketplace Order ID (mpNorm) as external_id first whenever available, then link order_code (#OF7) to look up items!
+  // 4. For TikTok OMS orders that do NOT yet have a Settlement row (unsettled TikTok orders),
+  //    create/upsert a bill row in transactions so they appear in /bills and can be tracked.
   const unmatchedRows = await query<Record<string, unknown>>(
     `SELECT o.*
      FROM oms_orders o
      WHERE o.matched_external_id IS NULL
+       AND COALESCE(NULLIF(o.channel, ''), 'TikTok') = 'TikTok'
      ORDER BY o.paid_date DESC, o.order_code ASC`,
     [],
     client,
@@ -681,11 +706,11 @@ export async function reconcileAndSyncThreeFiles(
   await query(
     `UPDATE transactions t
      SET order_code = o.order_code,
-         channel = COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+         channel = 'TikTok'
      FROM oms_orders o
      WHERE t.is_order = 1
        AND (t.external_id = o.matched_external_id OR t.order_code = o.order_code)
-       AND (t.order_code IS DISTINCT FROM o.order_code OR t.channel IS DISTINCT FROM o.channel)`,
+       AND (t.order_code IS DISTINCT FROM o.order_code OR t.channel IS DISTINCT FROM 'TikTok')`,
     [],
     client,
   );
@@ -774,12 +799,13 @@ export async function refreshSummaryTables(
          ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
          ROUND(SUM(payout)::numeric, 2),
          ROUND(SUM(adjustment)::numeric, 2),
-         SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int,
+         0,
+         0,
          now()
        FROM transactions
        WHERE paid_date = ANY($1::text[])
+         AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok'
        GROUP BY paid_date`,
       [targetDates],
       client,
@@ -803,12 +829,13 @@ export async function refreshSummaryTables(
          ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
          ROUND(SUM(payout)::numeric, 2),
          ROUND(SUM(adjustment)::numeric, 2),
-         SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int,
+         0,
+         0,
          now()
        FROM transactions
        WHERE paid_date <> '' AND paid_date <> 'unknown'
+         AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok'
        GROUP BY paid_date`,
       [],
       client,
@@ -833,12 +860,13 @@ export async function refreshSummaryTables(
          COUNT(DISTINCT i.order_code)::int,
          ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
          ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
-         COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
-         COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
-         COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(i.quantity), 0)::int,
+         0,
+         0,
          now()
        FROM oms_order_items i
        WHERE i.sku_code = ANY($1::text[])
+         AND COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok'
        GROUP BY i.sku_code`,
       [targetSkus],
       client,
@@ -857,11 +885,12 @@ export async function refreshSummaryTables(
          COUNT(DISTINCT i.order_code)::int,
          ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
          ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
-         COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
-         COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
-         COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(i.quantity), 0)::int,
+         0,
+         0,
          now()
        FROM oms_order_items i
+       WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok'
        GROUP BY i.sku_code`,
       [],
       client,
@@ -907,17 +936,23 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
     message: "กำลังตรวจสอบประเภทไฟล์ (.xlsx / .csv) และอ่านข้อมูลตาราง...",
   });
 
+  const savedRules = await getColumnMappingRules();
+  const effectiveCustomMapping: Record<string, string> = {
+    ...savedRules.headerToFieldKey,
+    ...(options.customMapping ?? {}),
+  };
+
   // Check if this is File 1 (OMS Orders) or File 3 (OMS Items) first
   const omsParsed = await detectAndParseOmsInput(
     options.buffer,
-    options.customMapping,
+    effectiveCustomMapping,
   );
   if (omsParsed) {
     const now = new Date().toISOString();
     const fileLabel =
       omsParsed.fileType === "oms_orders"
-        ? "ไฟล์ออเดอร์รวมหลังบ้าน (OMS)"
-        : "ไฟล์รายการสินค้า (SKU Items)";
+        ? "ไฟล์ออเดอร์ใน shipnity"
+        : "ไฟล์สินค้าในออเดอร์ shipnity";
 
     reportProgress?.({
       stage: "reconciling",
@@ -1031,16 +1066,24 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
 
   let parsed;
   try {
-    parsed = await parseWorkbook(options.buffer);
+    parsed = await parseWorkbook(options.buffer, {
+      customMapping: effectiveCustomMapping,
+      unknownColumnCategories: savedRules.unknownColumnCategories,
+    });
   } catch (err) {
-    if (err instanceof IngestError && err.code === "NO_DETAIL_SHEET") {
+    if (
+      err instanceof IngestError &&
+      (err.code === "NO_DETAIL_SHEET" || err.code === "HEADER_NOT_FOUND")
+    ) {
       const sheets = await readInputSheets(options.buffer);
       const rawHeaders = extractRawHeadersFromSheets(sheets);
-      throw new IngestError(
-        "UNRECOGNIZED_HEADERS",
-        "ไม่รู้จักชื่อคอลัมน์ในไฟล์นี้ กรุณาจับคู่คอลัมน์เอง (Custom Column Mapping) เพื่อนำเข้า",
-        rawHeaders,
-      );
+      if (rawHeaders.length > 0) {
+        throw new IngestError(
+          "UNRECOGNIZED_HEADERS",
+          "ไม่รู้จักชื่อคอลัมน์ในไฟล์นี้ กรุณาจับคู่คอลัมน์เอง (Custom Column Mapping) เพื่อนำเข้า",
+          rawHeaders,
+        );
+      }
     }
     throw err;
   }
@@ -1375,4 +1418,168 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
     warnings,
     reconciliation,
   };
+}
+
+export async function reapplyColumnRulesToImport(
+  targetImportId?: number,
+): Promise<{ updatedImports: number; updatedTransactions: number }> {
+  const rules = await getColumnMappingRules();
+
+  return withTransaction(async (client) => {
+    const importRows = targetImportId
+      ? await query<Record<string, unknown>>(
+          `SELECT id, unknown_columns_json, warnings_json, report_json, file_type
+           FROM imports
+           WHERE id = $1 AND COALESCE(file_type, 'settlement') = 'settlement'`,
+          [targetImportId],
+          client,
+        )
+      : await query<Record<string, unknown>>(
+          `SELECT id, unknown_columns_json, warnings_json, report_json, file_type
+           FROM imports
+           WHERE COALESCE(file_type, 'settlement') = 'settlement'`,
+          [],
+          client,
+        );
+
+    let updatedImports = 0;
+    let updatedTransactions = 0;
+
+    for (const imp of importRows) {
+      const impId = Number(imp.id);
+      const unknownColumns = parseJsonField<UnknownColumn[]>(
+        imp.unknown_columns_json,
+        [],
+      ).map((col) => {
+        const category = lookupUnknownColumnCategory(
+          col.header,
+          rules.unknownColumnCategories,
+        );
+        return {
+          ...col,
+          ...(category ? { category } : { category: undefined }),
+        };
+      });
+
+      const report = parseJsonField<ReportSummary>(imp.report_json, {
+        found: false,
+        sheetName: null,
+        periodStart: null,
+        periodEnd: null,
+        timezone: "UTC+7",
+        currency: "THB",
+        totals: {},
+        raw: [],
+      });
+
+      const txRows = await query<{
+        id: number | string;
+        normalized_json: unknown;
+      }>(
+        `SELECT id, normalized_json FROM transactions WHERE import_id = $1`,
+        [impId],
+        client,
+      );
+
+      const recalculatedTxs: NormalizedTransaction[] = [];
+      const txIds: number[] = [];
+      const checksPayloads: string[] = [];
+      const normalizedPayloads: string[] = [];
+
+      for (const txRow of txRows) {
+        const norm = parseJsonField<NormalizedTransaction | null>(
+          txRow.normalized_json,
+          null,
+        );
+        if (!norm) continue;
+        const recalculated = recalculateTransactionWithRules(
+          norm,
+          rules.unknownColumnCategories,
+        );
+        recalculatedTxs.push(recalculated);
+        txIds.push(Number(txRow.id));
+        checksPayloads.push(JSON.stringify(recalculated.checks));
+        normalizedPayloads.push(JSON.stringify({ ...recalculated, raw: {} }));
+      }
+
+      if (txIds.length > 0) {
+        await query(
+          `UPDATE transactions AS t
+           SET checks_json = u.checks_json::jsonb,
+               normalized_json = u.normalized_json::jsonb
+           FROM unnest($1::int[], $2::text[], $3::text[]) AS u(id, checks_json, normalized_json)
+           WHERE t.id = u.id`,
+          [txIds, checksPayloads, normalizedPayloads],
+          client,
+        );
+        updatedTransactions += txIds.length;
+      }
+
+      const reconciliation = buildReconciliation(recalculatedTxs, report);
+      const existingWarnings = parseJsonField<IngestWarning[]>(
+        imp.warnings_json,
+        [],
+      ).filter(
+        (w) =>
+          w.code !== "UNKNOWN_COLUMNS" &&
+          w.code !== "ORDER_CHECK_FAILURE" &&
+          w.code !== "RECONCILIATION_MISMATCH",
+      );
+
+      const unclassifiedUnknowns = unknownColumns.filter((c) => !c.category);
+      if (unclassifiedUnknowns.length > 0) {
+        existingWarnings.push({
+          code: "UNKNOWN_COLUMNS",
+          message: `พบ ${unclassifiedUnknowns.length} คอลัมน์ที่ระบบยังไม่รู้จัก: ${unclassifiedUnknowns
+            .map((column) => column.header)
+            .join(", ")}`,
+          severity: "warning",
+        });
+      }
+      if (reconciliation.matched === false) {
+        const differences = reconciliation.metrics
+          .filter((metric) => metric.matched === false)
+          .map((metric) => `${metric.label} ต่าง ${metric.diff}`)
+          .join(", ");
+        existingWarnings.push({
+          code: "RECONCILIATION_MISMATCH",
+          message: `ยอดรวมจากรายละเอียดไม่ตรงกับชีตสรุป: ${differences}`,
+          severity: "warning",
+        });
+      }
+      if (reconciliation.orderCheckFailures > 0) {
+        existingWarnings.push({
+          code: "ORDER_CHECK_FAILURE",
+          message: `มี ${reconciliation.orderCheckFailures} บิลที่ยอดรายได้/ค่าธรรมเนียม/ยอดชำระ ไม่ลงตัวตามสูตร – ระบบจะแสดงส่วนต่างในบิล`,
+          severity: "warning",
+        });
+      }
+
+      const nextStatus: "ok" | "warning" = existingWarnings.some(
+        (w) => w.severity === "warning" || w.severity === "error",
+      )
+        ? "warning"
+        : "ok";
+
+      await query(
+        `UPDATE imports
+         SET unknown_columns_json = $1::jsonb,
+             reconciliation_json = $2::jsonb,
+             warnings_json = $3::jsonb,
+             status = $4
+         WHERE id = $5`,
+        [
+          JSON.stringify(unknownColumns),
+          JSON.stringify(reconciliation),
+          JSON.stringify(existingWarnings),
+          nextStatus,
+          impId,
+        ],
+        client,
+      );
+      updatedImports++;
+    }
+
+    return { updatedImports, updatedTransactions };
+  });
 }

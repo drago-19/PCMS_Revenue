@@ -9,6 +9,7 @@ import {
   type Primitive,
 } from "./parse";
 import { round2 } from "../format";
+import { lookupCustomFieldKey } from "../column-mapping-settings";
 
 export type DetectedFileType = "settlement" | "oms_orders" | "oms_items";
 
@@ -423,11 +424,20 @@ export async function detectAndParseOmsInput(
       for (let c = 0; c < row.length; c++) {
         const h = String(row[c] ?? "").trim();
         if (!h) continue;
-        const customField = customMapping?.[h];
+        const customField = lookupCustomFieldKey(h, customMapping);
         if (customField) {
-          itemMap.set(customField, c);
-          orderMap.set(customField, c);
-          continue;
+          if (Object.prototype.hasOwnProperty.call(OMS_ITEM_ALIASES, customField)) {
+            itemMap.set(customField, c);
+          }
+          if (Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customField)) {
+            orderMap.set(customField, c);
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(OMS_ITEM_ALIASES, customField) ||
+            Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customField)
+          ) {
+            continue;
+          }
         }
         const itemKey = matchAliasMap(h, OMS_ITEM_ALIASES);
         if (itemKey && !itemMap.has(itemKey)) itemMap.set(itemKey, c);
@@ -470,10 +480,19 @@ export async function detectAndParseOmsInput(
       primaryHeaderRow = headerIdx + 1;
       primaryHeaders = headers;
       primaryMapping = headers.map((h, idx) => {
+        const customFk = lookupCustomFieldKey(h, customMapping);
+        const validCustomFk =
+          customFk &&
+          (detectedSheetType === "oms_items"
+            ? Object.prototype.hasOwnProperty.call(OMS_ITEM_ALIASES, customFk)
+            : Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customFk))
+            ? customFk
+            : null;
         const fk =
-          detectedSheetType === "oms_items"
+          validCustomFk ??
+          (detectedSheetType === "oms_items"
             ? matchAliasMap(h, OMS_ITEM_ALIASES)
-            : matchAliasMap(h, OMS_ORDER_ALIASES);
+            : matchAliasMap(h, OMS_ORDER_ALIASES));
         return {
           col: idx,
           header: h,
@@ -496,6 +515,9 @@ export async function detectAndParseOmsInput(
         const orderCode = cleanText(get("orderCode"));
         if (!orderCode) continue;
 
+        const channel = normalizeChannel(get("channel"));
+        if (channel !== "TikTok") continue;
+
         totalDataRows++;
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";
         const paidDate = parseDateValue(get("paidDate")).iso ?? createdDate;
@@ -504,7 +526,7 @@ export async function detectAndParseOmsInput(
 
         parsedOrders.push({
           orderCode,
-          channel: normalizeChannel(get("channel")),
+          channel,
           customerName: cleanText(get("customerName")),
           customerPhone: cleanText(get("customerPhone")),
           contactName: cleanText(get("contactName")),
@@ -542,6 +564,9 @@ export async function detectAndParseOmsInput(
         const orderCode = cleanText(get("orderCode"));
         if (!skuCode || !orderCode) continue;
 
+        const channel = normalizeChannel(get("channel"));
+        if (channel !== "TikTok") continue;
+
         totalDataRows++;
         const nextLine = (lineCounter.get(orderCode) ?? 0) + 1;
         lineCounter.set(orderCode, nextLine);
@@ -566,7 +591,7 @@ export async function detectAndParseOmsInput(
           paidDate,
           createdDate,
           courier: cleanText(get("courier")),
-          channel: normalizeChannel(get("channel")),
+          channel,
           bank: cleanText(get("bank")),
           note: cleanText(get("note")),
           trackingNo: cleanText(get("trackingNo")),

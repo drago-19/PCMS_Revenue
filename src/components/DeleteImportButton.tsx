@@ -140,7 +140,7 @@ export function ClearAllImportsButton({ totalFiles }: { totalFiles: number }) {
         <DialogHeader className="pr-11">
           <DialogTitle>ยืนยันการล้างข้อมูลทั้งหมดในฐานข้อมูล</DialogTitle>
           <DialogDescription>
-            ต้องการลบไฟล์ที่นำเข้าทั้งหมด ({totalFiles.toLocaleString("th-TH")} ไฟล์) รวมถึงบิล รายการออเดอร์ OMS รหัสสินค้า (`products`) และรีเซ็ตเลขใบกำกับภาษีกลับเป็น 0 ทั้งหมดหรือไม่?
+            ต้องการลบไฟล์ที่นำเข้าทั้งหมด ({totalFiles.toLocaleString("th-TH")} ไฟล์) รวมถึงบิล รายการออเดอร์ใน shipnity รหัสสินค้า (`products`) และรีเซ็ตเลขใบกำกับภาษีกลับเป็น 0 ทั้งหมดหรือไม่?
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">

@@ -234,7 +234,7 @@ export const FEE_GROUPS: FeeGroupDef[] = [
   { key: "commission", label: "ค่าคอมมิชชั่น TikTok Shop", fields: ["commission"], children: [], sort: 20 },
   {
     key: "shipping",
-    label: "ค่าจัดส่งโดยผู้ขาย",
+    label: "ยอดรวมค่าจัดส่งที่ร้านค้าจ่ายจริง",
     fields: ["shippingTotal"],
     children: [
       "shippingActual",
