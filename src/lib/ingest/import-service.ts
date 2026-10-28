@@ -1016,6 +1016,13 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
         });
       }
     }
+    await withTransaction(async (client) => {
+      await reconcileAndSyncThreeFiles(
+        client,
+        existingId,
+        new Date().toISOString(),
+      );
+    });
     const result = await readExistingImport(existingId);
     if (result) {
       reportProgress?.({

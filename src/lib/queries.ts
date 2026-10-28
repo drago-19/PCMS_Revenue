@@ -2783,6 +2783,28 @@ export async function getDailyUploadCompleteness(
       missingFile3 += row.missingFile3Count;
     }
 
+    // หากเดือนนั้นมีการอัปโหลดครบทั้ง 3 ไฟล์แล้วในทุกวันที่มีออเดอร์ (missingFile1/2/3 = 0 ทั้งหมด)
+    // วันที่ไม่มีออเดอร์เลย (normalOrders === 0 เช่น วันหยุดหรือวันที่ไม่มีคำสั่งซื้อ) จะถือว่าข้อมูลครบแล้ว ไม่แจ้งเตือนสีแดงว่าขาดไฟล์
+    if (
+      completeDays > 0 &&
+      missingFile1 === 0 &&
+      missingFile2 === 0 &&
+      missingFile3 === 0 &&
+      emptyDays > 0
+    ) {
+      for (const r of mRows) {
+        if (r.normalOrders === 0) {
+          r.hasFile1 = true;
+          r.hasFile2 = true;
+          r.hasFile3 = true;
+          r.isComplete = true;
+        }
+      }
+      completeDays = totalDaysForMonth;
+      incompleteDays = 0;
+      emptyDays = 0;
+    }
+
     rowsByMonth.set(ym, mRows);
 
     const status: "complete" | "incomplete" | "empty" =

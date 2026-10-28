@@ -186,7 +186,10 @@ export function UploadForm() {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  function chooseFiles(fileList: FileList | File[] | null) {
+  function chooseFiles(
+    fileList: FileList | File[] | null,
+    autoStartUpload = true,
+  ) {
     setError(null);
     setErrorDetails([]);
     setResult(null);
@@ -205,6 +208,9 @@ export function UploadForm() {
       return;
     }
     setFiles(nextFiles);
+    if (autoStartUpload && nextFiles.length > 0 && !busy) {
+      void upload(nextFiles);
+    }
   }
 
   async function uploadSingleFile(
@@ -431,8 +437,9 @@ export function UploadForm() {
     }
   }
 
-  async function upload() {
-    if (files.length === 0 || busy) return;
+  async function upload(overrideFiles?: File[]) {
+    const targetFiles = overrideFiles ?? files;
+    if (targetFiles.length === 0 || busy) return;
     setBusy(true);
     setError(null);
     setErrorDetails([]);
@@ -444,8 +451,12 @@ export function UploadForm() {
       let pendingMappingFile: { file: File; headers: string[] } | null = null;
       const failedMessages: string[] = [];
 
-      for (let i = 0; i < files.length; i++) {
-        const payload = await uploadSingleFile(files[i], i, files.length);
+      for (let i = 0; i < targetFiles.length; i++) {
+        const payload = await uploadSingleFile(
+          targetFiles[i],
+          i,
+          targetFiles.length,
+        );
         if (!payload.ok) {
           if (
             payload.code === "UNRECOGNIZED_HEADERS" &&
@@ -454,13 +465,13 @@ export function UploadForm() {
           ) {
             if (!pendingMappingFile) {
               pendingMappingFile = {
-                file: files[i],
+                file: targetFiles[i],
                 headers: payload.details,
               };
             }
             continue;
           }
-          failedMessages.push(`${files[i].name}: ${payload.error}`);
+          failedMessages.push(`${targetFiles[i].name}: ${payload.error}`);
           continue;
         }
         completed.push(payload.data);
@@ -550,7 +561,10 @@ export function UploadForm() {
           className="sr-only"
           aria-label="เลือกไฟล์ .xlsx หรือ .csv"
           disabled={busy}
-          onChange={(event) => chooseFiles(event.target.files)}
+          onClick={(event) => {
+            event.currentTarget.value = "";
+          }}
+          onChange={(event) => chooseFiles(event.target.files, true)}
         />
         <span className="dropzone-icon">
           <IconUpload size={26} />
@@ -560,7 +574,7 @@ export function UploadForm() {
             ? files[0].name
             : files.length > 1
               ? `เลือกไว้ ${files.length} ไฟล์พร้อมนำเข้า`
-              : "ลากไฟล์ .xlsx หรือ .csv มาวาง (เลือกพร้อมกันทั้ง 3 ไฟล์ได้)"}
+              : "คลิกเลือกไฟล์ หรือลากไฟล์ .xlsx / .csv มาวาง (เลือกพร้อมกันกี่ไฟล์ก็ได้)"}
         </strong>
         {files.length > 1 ? (
           <div className="mt-1 flex max-w-full flex-wrap items-center justify-center gap-1.5 px-2">
@@ -583,7 +597,7 @@ export function UploadForm() {
         <span className="dropzone-hint max-w-full px-2 break-words">
           {files.length > 0
             ? `${formatFileSize(files.reduce((acc, f) => acc + f.size, 0))} · พร้อมนำเข้าและแมปข้อมูลอัตโนมัติ`
-            : "รองรับ 1) ไฟล์ออเดอร์ใน shipnity  2) ไฟล์รายได้ TikTok Shop  3) ไฟล์สินค้าในออเดอร์ shipnity (.xlsx / .csv)"}
+            : "เมื่อเลือกไฟล์แล้วกด Open ระบบจะเริ่มนำเข้าและแมปข้อมูลทั้ง 3 ไฟล์ให้อัตโนมัติทันที"}
         </span>
       </label>
 
@@ -591,7 +605,7 @@ export function UploadForm() {
         <Button
           type="button"
           variant="default"
-          onClick={upload}
+          onClick={() => void upload()}
           disabled={files.length === 0 || busy}
           loading={busy}
         >
@@ -605,7 +619,7 @@ export function UploadForm() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => chooseFiles(null)}
+            onClick={() => chooseFiles(null, false)}
             disabled={busy}
           >
             ล้างไฟล์ที่เลือก
