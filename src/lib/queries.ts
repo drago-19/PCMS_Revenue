@@ -2605,68 +2605,75 @@ export async function getDailyUploadCompleteness(
   }
   const availableYears = Array.from(availableYearsSet).sort((a, b) => b - a);
 
-  const rawRows = await query<Record<string, unknown>>(
-    `WITH items_by_order AS (
-       SELECT DISTINCT order_code
-       FROM oms_order_items
-     ),
-     settled_paid_dates AS (
-       SELECT DISTINCT paid_date AS d
-       FROM transactions
-       WHERE is_order = 1
-         AND transaction_type <> 'คำสั่งซื้อ (OMS)'
-         AND paid_date LIKE $1 || '-%'
-     )
-     SELECT
-       ${dateCol} AS d,
-       COUNT(*)::int AS normal_orders,
-       SUM(
-         CASE
-           WHEN t.order_code IS NOT NULL
-            AND t.order_code <> ''
-            AND ibo.order_code IS NOT NULL
-            AND (t.channel <> 'TikTok' OR t.transaction_type <> 'คำสั่งซื้อ (OMS)')
-           THEN 1
-           ELSE 0
-         END
-       )::int AS complete_count,
-       SUM(
-         CASE
-           WHEN t.order_code IS NULL OR t.order_code = ''
-           THEN 1
-           ELSE 0
-         END
-       )::int AS missing_file1_count,
-       SUM(
-         CASE
-           WHEN t.order_code IS NOT NULL
-            AND t.order_code <> ''
-            AND ibo.order_code IS NULL
-           THEN 1
-           ELSE 0
-         END
-       )::int AS missing_file2_count,
-       SUM(
-         CASE
-           WHEN t.channel = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
-           THEN 1
-           ELSE 0
-         END
-       )::int AS missing_file3_count,
-       MAX(CASE WHEN spd.d IS NOT NULL THEN 1 ELSE 0 END)::int AS has_paid_settlement
-     FROM transactions t
-     LEFT JOIN items_by_order ibo ON ibo.order_code = t.order_code
-     LEFT JOIN settled_paid_dates spd ON spd.d = ${dateCol}
-     WHERE t.is_order = 1
-       AND t.income > 0
-       AND ${dateCol} LIKE $1 || '-%'
-       AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
-     GROUP BY ${dateCol}
-     ORDER BY ${dateCol} ASC`,
-    [String(selectedYear)],
-    db,
-  );
+  const hasItemsSql = `(NULLIF(t.product_detail, '') IS NOT NULL OR EXISTS (SELECT 1 FROM oms_order_items oi WHERE oi.order_code = t.order_code))`;
+
+  const [rawRows, recentImportRows] = await Promise.all([
+    query<Record<string, unknown>>(
+      `WITH settled_paid_dates AS (
+         SELECT DISTINCT paid_date AS d
+         FROM transactions
+         WHERE is_order = 1
+           AND transaction_type <> 'คำสั่งซื้อ (OMS)'
+           AND paid_date LIKE $1 || '-%'
+       )
+       SELECT
+         ${dateCol} AS d,
+         COUNT(*)::int AS normal_orders,
+         SUM(
+           CASE
+             WHEN t.order_code IS NOT NULL
+              AND t.order_code <> ''
+              AND ${hasItemsSql}
+              AND (t.channel <> 'TikTok' OR t.transaction_type <> 'คำสั่งซื้อ (OMS)')
+             THEN 1
+             ELSE 0
+           END
+         )::int AS complete_count,
+         SUM(
+           CASE
+             WHEN t.order_code IS NULL OR t.order_code = ''
+             THEN 1
+             ELSE 0
+           END
+         )::int AS missing_file1_count,
+         SUM(
+           CASE
+             WHEN t.order_code IS NOT NULL
+              AND t.order_code <> ''
+              AND NOT ${hasItemsSql}
+             THEN 1
+             ELSE 0
+           END
+         )::int AS missing_file2_count,
+         SUM(
+           CASE
+             WHEN t.channel = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+             THEN 1
+             ELSE 0
+           END
+         )::int AS missing_file3_count,
+         MAX(CASE WHEN spd.d IS NOT NULL THEN 1 ELSE 0 END)::int AS has_paid_settlement
+       FROM transactions t
+       LEFT JOIN settled_paid_dates spd ON spd.d = ${dateCol}
+       WHERE t.is_order = 1
+         AND t.income > 0
+         AND ${dateCol} LIKE $1 || '-%'
+         AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+       GROUP BY ${dateCol}
+       ORDER BY ${dateCol} ASC`,
+      [String(selectedYear)],
+      db,
+    ),
+    query<Record<string, unknown>>(
+      `SELECT id, filename, file_type, period_start, period_end, order_count, imported_at
+       FROM imports
+       ORDER BY id DESC
+       LIMIT 6`,
+      [],
+      db,
+    ),
+  ]);
 
   const byDate = new Map<string, DailyUploadCompletenessRow>();
   let maxDateInYear = "";
@@ -2802,15 +2809,6 @@ export async function getDailyUploadCompleteness(
   }
 
   const rows = rowsByMonth.get(selectedMonth) ?? [];
-
-  const recentImportRows = await query<Record<string, unknown>>(
-    `SELECT id, filename, file_type, period_start, period_end, order_count, imported_at
-     FROM imports
-     ORDER BY id DESC
-     LIMIT 6`,
-    [],
-    db,
-  );
 
   const summary = rows.reduce(
     (acc, r) => {

@@ -1828,7 +1828,10 @@ test("getDailyUploadCompleteness reports complete days, missing files per day, a
       if (clean.includes("SELECT DISTINCT SUBSTRING")) {
         return { rows: [{ ym: "2026-10" }] };
       }
-      if (clean.includes("WITH items_by_order AS")) {
+      if (
+        clean.includes("WITH items_by_order AS") ||
+        clean.includes("WITH settled_paid_dates AS")
+      ) {
         return {
           rows: [
             {
@@ -1861,7 +1864,14 @@ test("getDailyUploadCompleteness reports complete days, missing files per day, a
     { month: "2026-10", mode: "created" },
     mockDb as never,
   );
+  assert.equal(report.year, 2026);
   assert.equal(report.month, "2026-10");
+  assert.equal(report.monthsOverview.length, 10);
+  const octOverview = report.monthsOverview.find((m) => m.month === "2026-10");
+  assert.ok(octOverview);
+  assert.equal(octOverview.status, "incomplete");
+  assert.equal(octOverview.completeDays, 1);
+  assert.equal(octOverview.incompleteDays, 2);
   assert.equal(report.rows.length, 3); // 01, 02 (gap), 03
   assert.equal(report.rows[0]?.date, "2026-10-01");
   assert.equal(report.rows[0]?.isComplete, false);
@@ -1876,5 +1886,84 @@ test("getDailyUploadCompleteness reports complete days, missing files per day, a
   assert.equal(report.summary.completeDays, 1);
   assert.equal(report.summary.incompleteDays, 2);
 });
+
+test("listBills supports filtering by createdDate (order creation date)", async () => {
+  const { listBills } = await import("../src/lib/queries");
+
+  const capturedQueries: { sql: string; params: unknown[] }[] = [];
+  const mockDb = {
+    async query(sql: string, params: unknown[] = []) {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      capturedQueries.push({ sql: clean, params });
+      if (clean.includes("non_pos_all")) {
+        return {
+          rows: [
+            {
+              non_pos_all: 0,
+              non_pos_income: 0,
+              non_pos_fees: 0,
+              non_pos_payout: 0,
+              non_pos_tiktok: 0,
+              non_pos_shopee: 0,
+              non_pos_linked: 0,
+              non_pos_oms_only: 0,
+              non_pos_unlinked: 0,
+              refund_fee_count: 0,
+              refund_fee_payout: 0,
+              zero_count: 0,
+            },
+          ],
+        };
+      }
+      if (clean.includes("SELECT COUNT(*) AS all_count")) {
+        return {
+          rows: [
+            {
+              all_count: 94,
+              linked_count: 94,
+              oms_only_count: 0,
+              unlinked_count: 0,
+            },
+          ],
+        };
+      }
+      if (clean.includes("SELECT COUNT(*) AS count")) {
+        return {
+          rows: [
+            {
+              count: 94,
+              income: 12000,
+              fees: -1800,
+              payout: 10200,
+              tiktok_count: 94,
+              shopee_count: 0,
+              min_paid_date: "2026-10-03",
+              max_paid_date: "2026-10-06",
+              distinct_dates: 3,
+            },
+          ],
+        };
+      }
+      if (clean.includes("WITH page_ids AS")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const res = await listBills(
+    { createdDate: "2026-09-29" },
+    mockDb as never,
+  );
+  assert.equal(res.total, 94);
+  assert.equal(res.linkCounts.all, 94);
+  const hasCreatedDateFilter = capturedQueries.some(
+    (q) =>
+      q.sql.includes("COALESCE(NULLIF(t.created_date, ''), t.paid_date) =") &&
+      q.params.includes("2026-09-29"),
+  );
+  assert.equal(hasCreatedDateFilter, true);
+});
+
 
 
