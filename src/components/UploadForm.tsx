@@ -441,6 +441,9 @@ export function UploadForm() {
 
     try {
       const completed: UploadResult[] = [];
+      let pendingMappingFile: { file: File; headers: string[] } | null = null;
+      const failedMessages: string[] = [];
+
       for (let i = 0; i < files.length; i++) {
         const payload = await uploadSingleFile(files[i], i, files.length);
         if (!payload.ok) {
@@ -449,24 +452,48 @@ export function UploadForm() {
             payload.details &&
             payload.details.length > 0
           ) {
-            setProgress((prev) => ({ ...prev, open: false }));
-            setMappingFile(files[i]);
-            setUnrecognizedHeaders(payload.details);
-            setFieldToHeader({});
-            toast.info("พบหัวตารางรูปแบบใหม่ กรุณาเลือกจับคู่คอลัมน์");
-            return;
+            if (!pendingMappingFile) {
+              pendingMappingFile = {
+                file: files[i],
+                headers: payload.details,
+              };
+            }
+            continue;
           }
-          setError(`${files[i].name}: ${payload.error}`);
-          setErrorDetails(payload.details ?? []);
-          toast.error(`${files[i].name}: ${payload.error}`);
-          return;
+          failedMessages.push(`${files[i].name}: ${payload.error}`);
+          continue;
         }
         completed.push(payload.data);
       }
 
+      if (completed.length > 0) {
+        const last = completed[completed.length - 1] ?? null;
+        setResult(last);
+        setBatchResults(completed);
+        router.refresh();
+      }
+
+      if (pendingMappingFile) {
+        setProgress((prev) => ({ ...prev, open: false }));
+        setMappingFile(pendingMappingFile.file);
+        setUnrecognizedHeaders(pendingMappingFile.headers);
+        setFieldToHeader({});
+        toast.info(
+          completed.length > 0
+            ? `นำเข้าสำเร็จ ${completed.length} ไฟล์ · พบหัวตารางใหม่ใน ${pendingMappingFile.file.name}`
+            : "พบหัวตารางรูปแบบใหม่ กรุณาเลือกจับคู่คอลัมน์",
+        );
+        return;
+      }
+
+      if (failedMessages.length > 0) {
+        const joined = failedMessages.join(" | ");
+        setError(joined);
+        toast.error(joined);
+        return;
+      }
+
       const last = completed[completed.length - 1] ?? null;
-      setResult(last);
-      setBatchResults(completed);
       setFiles([]);
       if (inputRef.current) inputRef.current.value = "";
       if (completed.length > 1) {
@@ -476,7 +503,6 @@ export function UploadForm() {
       } else if (last) {
         toast.success(`นำเข้าสำเร็จ (${last.orderCount} ออเดอร์)`);
       }
-      router.refresh();
     } catch {
       const msg = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองอีกครั้ง";
       setError(msg);

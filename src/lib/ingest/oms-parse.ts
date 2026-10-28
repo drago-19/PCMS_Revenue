@@ -409,7 +409,7 @@ export async function detectAndParseOmsInput(
 
   for (const sheet of sheets) {
     const rows = sheet.rows;
-    if (rows.length < 2) continue;
+    if (rows.length < 1) continue;
     const scanLimit = Math.min(20, rows.length);
 
     let detectedSheetType: "oms_orders" | "oms_items" | null = null;
@@ -603,6 +603,14 @@ export async function detectAndParseOmsInput(
 
   if (!primaryType) {
     return null;
+  }
+
+  if (totalDataRows === 0) {
+    warnings.push({
+      code: "EMPTY_OMS_FILE",
+      message: "ไฟล์นี้มีเฉพาะหัวตาราง (ไม่มีรายการคำสั่งซื้อ 0 แถว) ระบบข้ามการสร้างบิลให้เรียบร้อย",
+      severity: "info",
+    });
   }
 
   const allDates = [
