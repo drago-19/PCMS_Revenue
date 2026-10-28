@@ -555,14 +555,32 @@ export function UploadForm() {
         <span className="dropzone-icon">
           <IconUpload size={26} />
         </span>
-        <strong className="break-all">
+        <strong className="max-w-full px-2 break-words">
           {files.length === 1
             ? files[0].name
             : files.length > 1
-              ? `เลือกไว้ ${files.length} ไฟล์ (${files.map((f) => f.name).join(", ")})`
+              ? `เลือกไว้ ${files.length} ไฟล์พร้อมนำเข้า`
               : "ลากไฟล์ .xlsx หรือ .csv มาวาง (เลือกพร้อมกันทั้ง 3 ไฟล์ได้)"}
         </strong>
-        <span className="dropzone-hint">
+        {files.length > 1 ? (
+          <div className="mt-1 flex max-w-full flex-wrap items-center justify-center gap-1.5 px-2">
+            {files.slice(0, 4).map((f) => (
+              <Badge
+                key={f.name}
+                variant="secondary"
+                className="max-w-[220px] truncate font-mono text-[11px]"
+              >
+                {f.name}
+              </Badge>
+            ))}
+            {files.length > 4 ? (
+              <Badge variant="info" className="font-semibold text-[11px]">
+                +อีก {files.length - 4} ไฟล์
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
+        <span className="dropzone-hint max-w-full px-2 break-words">
           {files.length > 0
             ? `${formatFileSize(files.reduce((acc, f) => acc + f.size, 0))} · พร้อมนำเข้าและแมปข้อมูลอัตโนมัติ`
             : "รองรับ 1) ไฟล์ออเดอร์ใน shipnity  2) ไฟล์รายได้ TikTok Shop  3) ไฟล์สินค้าในออเดอร์ shipnity (.xlsx / .csv)"}
@@ -834,27 +852,27 @@ export function UploadForm() {
         }}
       >
         <DialogContent className="sm:max-w-xl" showCloseButton={!busy}>
-          <DialogHeader className="pr-14">
+          <DialogHeader className="pr-12">
             <div className="flex flex-wrap items-center gap-2">
               <DialogTitle>จับคู่คอลัมน์เอง (Custom Column Mapping)</DialogTitle>
               <Badge variant="warning" size="sm">
                 รูปแบบใหม่
               </Badge>
             </div>
-            <DialogDescription className="truncate">
-              ไฟล์: <strong className="font-mono">{mappingFile?.name ?? "-"}</strong> · เลือกคอลัมน์ในไฟล์ให้ตรงกับช่องข้อมูลของระบบ (รองรับ shipnity / TikTok / ไฟล์กำหนดเอง)
+            <DialogDescription className="break-words leading-relaxed">
+              ไฟล์: <strong className="font-mono break-all">{mappingFile?.name ?? "-"}</strong> · เลือกคอลัมน์ในไฟล์ให้ตรงกับช่องข้อมูลของระบบ (รองรับ shipnity / TikTok / ไฟล์กำหนดเอง)
             </DialogDescription>
           </DialogHeader>
 
-          <div className="max-h-[55dvh] space-y-2.5 overflow-y-auto pr-1">
+          <div className="max-h-[55dvh] min-w-0 space-y-2.5 overflow-y-auto pr-1">
             {CUSTOM_MAPPING_FIELDS.map((field) => {
               const selectedHeader = fieldToHeader[field.key] ?? "";
               return (
                 <div
                   key={field.key}
-                  className="flex flex-col gap-1.5 rounded-lg border border-border bg-muted/20 p-2.5 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-muted/20 p-2.5 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <span className="text-xs font-medium text-foreground">
+                  <span className="min-w-0 break-words text-xs font-medium text-foreground">
                     {field.label}
                   </span>
                   <DropdownMenu>
@@ -863,7 +881,7 @@ export function UploadForm() {
                         type="button"
                         variant={selectedHeader ? "secondary" : "outline"}
                         size="sm"
-                        className="w-full justify-between font-mono text-xs sm:w-64"
+                        className="w-full shrink-0 justify-between font-mono text-xs sm:w-56"
                       >
                         <span className="truncate">
                           {selectedHeader || "— ไม่ระบุคอลัมน์ —"}
@@ -902,7 +920,7 @@ export function UploadForm() {
             })}
           </div>
 
-          <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+          <div className="mt-1 flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <strong className="block text-xs font-semibold text-foreground">
                 บันทึกการจับคู่คอลัมน์นี้ไว้ใช้ครั้งถัดไปอัตโนมัติ
@@ -914,6 +932,7 @@ export function UploadForm() {
             <Button
               type="button"
               size="sm"
+              className="w-full shrink-0 sm:w-auto"
               variant={saveMappingForFuture ? "default" : "outline"}
               aria-pressed={saveMappingForFuture}
               onClick={() => setSaveMappingForFuture((prev) => !prev)}
