@@ -3,6 +3,11 @@ const numberFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 0,
 });
 
+const currencyFormatter = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+});
+
 export function round2(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -13,7 +18,11 @@ export function formatNumber(value: number): string {
 }
 
 export function formatTHB(value: number): string {
-  return `฿${numberFormatter.format(round2(value))}`;
+  const r = round2(value);
+  if (r < 0) {
+    return `-฿${currencyFormatter.format(Math.abs(r))}`;
+  }
+  return `฿${currencyFormatter.format(r)}`;
 }
 
 export function formatPlainAmount(value: number): string {

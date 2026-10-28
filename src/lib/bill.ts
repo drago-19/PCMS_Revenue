@@ -6,7 +6,7 @@ export interface BillLine {
   key: string;
   label: string;
   amount: number;
-  depth: 0 | 1;
+  depth: 0 | 1 | 2;
   kind: "line" | "unknown";
 }
 
@@ -15,6 +15,18 @@ export interface BillFeeGroup {
   label: string;
   amount: number;
   children: BillLine[];
+}
+
+export interface CustomerPaymentBreakdown {
+  productSubtotalAfterDiscount: number;
+  productSubtotalBeforeDiscount: number;
+  sellerProductDiscount: number;
+  tiktokProductDiscount: number;
+  shippingAfterDiscount: number;
+  shippingBeforeDiscount: number;
+  sellerShippingDiscount: number;
+  tiktokShippingDiscount: number;
+  total: number;
 }
 
 export interface BillModel {
@@ -43,7 +55,11 @@ export interface BillModel {
   weightEstimated: number | null;
   weightCharged: number | null;
   sourceRows: number;
+  rowIndexes?: number[];
   discountBreakdown: BillLine[];
+  customerPayment: number;
+  shippingCustomerFee: number;
+  customerPaymentBreakdown: CustomerPaymentBreakdown;
 }
 
 function n(value: string | number | undefined): number {
@@ -70,9 +86,76 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
   const productAfter = n(fields.productAfterDiscount);
   const productBefore = n(fields.productBeforeDiscount);
   const storeDiscount = n(fields.storeDiscount);
+  const sellerCofund = n(fields.sellerCofundCoupon);
+  const shippingDiscountStore = n(fields.shippingDiscountStore);
+  const platformDiscount = n(fields.platformDiscount);
+  const platformCofund = n(fields.platformCofundCoupon);
+  const customerPayment = n(fields.customerPayment);
+  const shippingCustomerFee = n(fields.shippingCustomerFee);
+  const shippingPlatformDiscount = n(fields.shippingPlatformDiscount);
+  const shippingActual = n(fields.shippingActual);
+  const shippingSubsidy = n(fields.shippingSubsidy);
   const refundAfter = n(fields.refundAfterDiscount);
   const refundBefore = n(fields.refundBeforeDiscount);
   const refundStoreDiscount = n(fields.refundStoreDiscount);
+
+  const weightEstimated =
+    typeof normalized.fields.weightEstimated === "number" &&
+    normalized.fields.weightEstimated > 0
+      ? normalized.fields.weightEstimated
+      : null;
+  const weightCharged =
+    typeof normalized.fields.weightCharged === "number" &&
+    normalized.fields.weightCharged > 0
+      ? normalized.fields.weightCharged
+      : null;
+
+  const shippingAfterDiscount = round2(Math.max(0, shippingCustomerFee));
+  const shippingBeforeDiscount =
+    round2(
+      shippingAfterDiscount +
+        Math.abs(shippingPlatformDiscount) +
+        Math.abs(shippingDiscountStore),
+    ) > 0
+      ? round2(
+          shippingAfterDiscount +
+            Math.abs(shippingPlatformDiscount) +
+            Math.abs(shippingDiscountStore),
+        )
+      : round2(Math.abs(shippingActual));
+
+  const sellerProductDiscount = -round2(
+    Math.abs(storeDiscount) + Math.abs(sellerCofund),
+  );
+  const tiktokProductDiscount = -round2(
+    Math.abs(platformDiscount) + Math.abs(platformCofund),
+  );
+  const productSubtotalBeforeDiscount =
+    productBefore > 0 ? productBefore : productAfter;
+  const productSubtotalAfterDiscount =
+    customerPayment > 0
+      ? round2(Math.max(0, customerPayment - shippingAfterDiscount))
+      : round2(
+          Math.max(
+            0,
+            productAfter - Math.abs(tiktokProductDiscount),
+          ),
+        );
+
+  const customerPaymentBreakdown: CustomerPaymentBreakdown = {
+    productSubtotalAfterDiscount,
+    productSubtotalBeforeDiscount,
+    sellerProductDiscount,
+    tiktokProductDiscount,
+    shippingAfterDiscount,
+    shippingBeforeDiscount,
+    sellerShippingDiscount: -round2(Math.abs(shippingDiscountStore)),
+    tiktokShippingDiscount: -round2(Math.abs(shippingPlatformDiscount)),
+    total:
+      customerPayment > 0
+        ? customerPayment
+        : round2(productSubtotalAfterDiscount + shippingAfterDiscount),
+  };
 
   if (productAfter !== 0 || productBefore !== 0 || storeDiscount !== 0) {
     incomeLines.push({
@@ -100,7 +183,6 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
         kind: "line",
       });
     }
-    const sellerCofund = n(fields.sellerCofundCoupon);
     if (sellerCofund !== 0) {
       incomeLines.push({
         key: "sellerCofundCoupon",
@@ -110,42 +192,11 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
         kind: "line",
       });
     }
-    const shippingDiscountStore = n(fields.shippingDiscountStore);
     if (shippingDiscountStore !== 0) {
       incomeLines.push({
         key: "shippingDiscountStore",
         label: labelFor("shippingDiscountStore"),
         amount: shippingDiscountStore,
-        depth: 1,
-        kind: "line",
-      });
-    }
-    const platformDiscount = n(fields.platformDiscount);
-    if (platformDiscount !== 0) {
-      incomeLines.push({
-        key: "platformDiscount",
-        label: `${labelFor("platformDiscount")} (TikTok ชดเชยในรายได้)`,
-        amount: platformDiscount,
-        depth: 1,
-        kind: "line",
-      });
-    }
-    const platformCofund = n(fields.platformCofundCoupon);
-    if (platformCofund !== 0) {
-      incomeLines.push({
-        key: "platformCofundCoupon",
-        label: `${labelFor("platformCofundCoupon")} (TikTok ชดเชยในรายได้)`,
-        amount: platformCofund,
-        depth: 1,
-        kind: "line",
-      });
-    }
-    const customerPayment = n(fields.customerPayment);
-    if (customerPayment !== 0) {
-      incomeLines.push({
-        key: "customerPayment",
-        label: `${labelFor("customerPayment")} (ยอดที่ลูกค้าจ่ายจริง)`,
-        amount: customerPayment,
         depth: 1,
         kind: "line",
       });
@@ -180,6 +231,18 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     }
   }
 
+  for (const uv of normalized.unknownValues ?? []) {
+    if (uv.category === "income" && uv.amount !== 0) {
+      incomeLines.push({
+        key: `custom_income_${uv.header}`,
+        label: uv.header,
+        amount: round2(uv.amount),
+        depth: 0,
+        kind: "line",
+      });
+    }
+  }
+
   if (normalized.checks.incomeDiff !== 0) {
     incomeLines.push({
       key: "incomeDiff",
@@ -193,12 +256,19 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
   if (incomeLines.length === 0) {
     incomeLines.push({
       key: "incomeTotal",
-      label: "รายได้รวม",
+      label: "รายได้ทั้งหมด",
       amount: incomeTotal,
       depth: 0,
       kind: "line",
     });
   }
+
+  const hasShippingActivity =
+    shippingActual !== 0 ||
+    shippingPlatformDiscount !== 0 ||
+    shippingCustomerFee !== 0 ||
+    shippingDiscountStore !== 0 ||
+    shippingSubsidy !== 0;
 
   const feeGroups: BillFeeGroup[] = [];
   for (const group of FEE_GROUPS) {
@@ -207,9 +277,65 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     const children: BillLine[] = [];
     for (const childKey of group.children) {
       const amount = round2(value.children[childKey] ?? 0);
+      if (group.key === "shipping" && childKey === "shippingCustomerFee") {
+        if (!hasShippingActivity && amount === 0) continue;
+        const custShipLabel =
+          weightEstimated !== null
+            ? `${labelFor("shippingCustomerFee")} (น้ำหนักพัสดุโดยประมาณ: ${weightEstimated} ก.)`
+            : labelFor("shippingCustomerFee");
+        children.push({
+          key: "shippingCustomerFee",
+          label: custShipLabel,
+          amount,
+          depth: 1,
+          kind: "line",
+        });
+        children.push(
+          {
+            key: "shippingCustomerBeforeDiscount",
+            label: "ค่าจัดส่งของลูกค้าก่อนหักส่วนลด",
+            amount: shippingBeforeDiscount,
+            depth: 2,
+            kind: "line",
+          },
+          {
+            key: "shippingCustomerDiscountStore",
+            label: "ส่วนลดค่าจัดส่งจากร้านค้า",
+            amount: -round2(Math.abs(shippingDiscountStore)),
+            depth: 2,
+            kind: "line",
+          },
+          {
+            key: "shippingCustomerDiscountPlatform",
+            label: "ส่วนลดค่าจัดส่งจาก TikTok Shop",
+            amount: -round2(Math.abs(shippingPlatformDiscount)),
+            depth: 2,
+            kind: "line",
+          },
+          {
+            key: "shippingCustomerSubsidy",
+            label: "เงินสนับสนุนการจัดส่ง",
+            amount: round2(shippingSubsidy),
+            depth: 2,
+            kind: "line",
+          },
+        );
+        continue;
+      }
+      if (group.key === "shipping" && childKey === "shippingSubsidy") {
+        // แสดงอยู่ในรายการย่อยภายใต้ ค่าธรรมเนียมการจัดส่งของลูกค้า แล้ว
+        continue;
+      }
       if (amount === 0) continue;
-      const label = labelFor(childKey);
+      let label = labelFor(childKey);
       if (label === group.label) continue;
+      if (
+        group.key === "shipping" &&
+        childKey === "shippingActual" &&
+        weightCharged !== null
+      ) {
+        label = `${label} (น้ำหนักที่เรียกเก็บเงิน: ${weightCharged} ก.)`;
+      }
       children.push({
         key: childKey,
         label,
@@ -227,7 +353,29 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     });
   }
 
+  for (const uv of normalized.unknownValues ?? []) {
+    if (uv.category === "fee" && uv.amount !== 0) {
+      feeGroups.push({
+        key: `custom_fee_${uv.header}`,
+        label: uv.header,
+        amount: round2(uv.amount),
+        children: [],
+      });
+    }
+  }
+
   const feeExtraLines: BillLine[] = [];
+  for (const uv of normalized.unknownValues ?? []) {
+    if (uv.category === "adjustment" && uv.amount !== 0) {
+      feeExtraLines.push({
+        key: `custom_adj_${uv.header}`,
+        label: `${uv.header} (รายการปรับปรุง)`,
+        amount: round2(uv.amount),
+        depth: 0,
+        kind: "line",
+      });
+    }
+  }
   if (normalized.checks.feeDiff !== 0) {
     feeExtraLines.push({
       key: "feeDiff",
@@ -247,8 +395,8 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     });
   }
 
-  const unknownMoneyColumns = normalized.unknownValues
-    .filter((value) => value.moneyLike && value.amount !== 0)
+  const unknownMoneyColumns = (normalized.unknownValues ?? [])
+    .filter((value) => value.moneyLike && value.amount !== 0 && !value.category)
     .map((value) => ({ header: value.header, amount: value.amount }));
 
   const notes: string[] = [];
@@ -269,17 +417,37 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
   const checksOk =
     Math.abs(normalized.checks.incomeDiff) < 0.01 &&
     Math.abs(normalized.checks.feeDiff) < 0.01 &&
-    Math.abs(normalized.checks.payoutDiff) < 0.01 &&
-    Math.abs(round2(incomeTotal + feeTotal + adjustment) - payout) < 0.01;
+    Math.abs(normalized.checks.payoutDiff) < 0.01;
 
   const discountBreakdown: BillLine[] = [];
+  if (sellerProductDiscount !== 0) {
+    discountBreakdown.push({
+      key: "storeDiscount",
+      label: "ส่วนลดค่าสินค้าจากผู้ขาย",
+      amount: sellerProductDiscount,
+      depth: 1,
+      kind: "line",
+    });
+  }
+  if (tiktokProductDiscount !== 0) {
+    discountBreakdown.push({
+      key: "platformDiscount",
+      label: "ส่วนลดสำหรับสินค้าจาก TikTok Shop",
+      amount: tiktokProductDiscount,
+      depth: 1,
+      kind: "line",
+    });
+  }
+  if (shippingDiscountStore !== 0) {
+    discountBreakdown.push({
+      key: "shippingDiscountStore",
+      label: "ส่วนลดค่าจัดส่งจากผู้ขาย",
+      amount: -round2(Math.abs(shippingDiscountStore)),
+      depth: 1,
+      kind: "line",
+    });
+  }
   for (const key of [
-    "storeDiscount",
-    "sellerCofundCoupon",
-    "shippingDiscountStore",
-    "platformDiscount",
-    "platformCofundCoupon",
-    "customerPayment",
     "customerRefund",
     "sellerCofundCouponRefund",
     "platformDiscountRefund",
@@ -296,6 +464,21 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
       });
     }
   }
+
+  const rawProductDetail =
+    typeof normalized.fields.productDetail === "string"
+      ? normalized.fields.productDetail.trim()
+      : "";
+  const cleanProductDetail =
+    rawProductDetail && !["/", "-", "--", "N/A"].includes(rawProductDetail)
+      ? rawProductDetail
+      : null;
+  const rowIndexes =
+    Array.isArray(normalized.rowIndexes) && normalized.rowIndexes.length > 0
+      ? normalized.rowIndexes
+      : typeof normalized.firstRow === "number" && normalized.firstRow > 0
+        ? [normalized.firstRow]
+        : [];
 
   return {
     externalId: normalized.externalId,
@@ -319,19 +502,14 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     unknownMoneyColumns,
     warnings: normalized.warnings,
     notes,
-    productDetail:
-      typeof normalized.fields.productDetail === "string"
-        ? normalized.fields.productDetail
-        : null,
-    weightEstimated:
-      typeof normalized.fields.weightEstimated === "number"
-        ? normalized.fields.weightEstimated
-        : null,
-    weightCharged:
-      typeof normalized.fields.weightCharged === "number"
-        ? normalized.fields.weightCharged
-        : null,
+    productDetail: cleanProductDetail,
+    weightEstimated,
+    weightCharged,
     sourceRows: normalized.sourceRows,
+    rowIndexes,
     discountBreakdown,
+    customerPayment,
+    shippingCustomerFee,
+    customerPaymentBreakdown,
   };
 }

@@ -1,4 +1,6 @@
 import { query, queryOne, withTransaction, type Queryable } from "./db";
+import type { SellerInfo } from "./seller";
+import { getDocumentSettings } from "./settings";
 import {
   readInputSheets,
   type IngestWarning,
@@ -92,6 +94,9 @@ export interface TransactionRow {
   importImportedAt?: string;
   channel: string;
   orderCode: string | null;
+  buyerName?: string | null;
+  buyerTaxId?: string | null;
+  buyerAddress?: string | null;
   customerName?: string | null;
   customerPhone?: string | null;
   customerAddress?: string | null;
@@ -105,6 +110,28 @@ export interface TransactionRow {
   shippingFeeSeller?: number;
   marketplaceOrderRaw?: string | null;
   omsItems?: OmsLineItem[];
+  sellerSettings?: SellerInfo;
+}
+
+export type OrderLinkStatus = "linked" | "unlinked" | "oms_only";
+
+export function getOrderLinkStatus(row: TransactionRow): OrderLinkStatus {
+  const hasOmsCode = Boolean(row.orderCode && row.orderCode.trim() !== "");
+  if (!hasOmsCode) {
+    return "unlinked";
+  }
+  if (row.transactionType === "คำสั่งซื้อ (OMS)") {
+    return "oms_only";
+  }
+  return "linked";
+}
+
+export interface BillLinkCounts {
+  all: number;
+  linked: number;
+  unlinked: number;
+  omsOnly: number;
+  missingOmsCreatedDates: string[];
 }
 
 export interface DailyBatchRow {
@@ -145,6 +172,7 @@ export interface BillListResult {
     distinctDates: number;
   };
   channelCounts: Record<string, number>;
+  linkCounts: BillLinkCounts;
 }
 
 export interface OverallStats {
@@ -268,6 +296,9 @@ export function mapTransaction(row: Record<string, unknown>): TransactionRow {
     importImportedAt: row.import_imported_at ? String(row.import_imported_at) : undefined,
     channel: row.channel ? String(row.channel) : "TikTok",
     orderCode: row.order_code ? String(row.order_code) : null,
+    buyerName: row.buyer_name ? String(row.buyer_name) : null,
+    buyerTaxId: row.buyer_tax_id ? String(row.buyer_tax_id) : null,
+    buyerAddress: row.buyer_address ? String(row.buyer_address) : null,
   };
 }
 
@@ -275,6 +306,7 @@ async function enrichTransactionsWithOms(
   txRows: TransactionRow[],
   db?: Queryable,
 ): Promise<TransactionRow[]> {
+  const sellerSettings = await getDocumentSettings(db);
   const orderCodes = [
     ...new Set(
       txRows
@@ -282,7 +314,9 @@ async function enrichTransactionsWithOms(
         .filter((code): code is string => Boolean(code)),
     ),
   ];
-  if (orderCodes.length === 0) return txRows;
+  if (orderCodes.length === 0) {
+    return txRows.map((tx) => ({ ...tx, sellerSettings }));
+  }
 
   const [orderMetaRows, itemRows] = await Promise.all([
     query<Record<string, unknown>>(
@@ -345,11 +379,12 @@ async function enrichTransactionsWithOms(
   }
 
   return txRows.map((tx) => {
-    if (!tx.orderCode) return tx;
+    if (!tx.orderCode) return { ...tx, sellerSettings };
     const o = orderMap.get(tx.orderCode);
     const it = itemMap.get(tx.orderCode);
     return {
       ...tx,
+      sellerSettings,
       channel: o?.channel ? String(o.channel) : tx.channel,
       customerName: (o?.customer_name ? String(o.customer_name) : null) ?? it?.name ?? null,
       customerPhone: (o?.customer_phone ? String(o.customer_phone) : null) ?? it?.phone ?? null,
@@ -432,6 +467,24 @@ export async function getImport(
     db,
   );
   return row ? mapImport(row) : null;
+}
+
+export async function listDuplicateOrderTransactionsForImport(
+  importId: number,
+  db?: Queryable,
+): Promise<TransactionRow[]> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
+     FROM transactions t
+     LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+     LEFT JOIN imports i ON i.id = t.import_id
+     WHERE t.import_id = $1
+       AND COALESCE((t.normalized_json->>'sourceRows')::int, 1) > 1
+     ORDER BY t.paid_date DESC, t.external_id ASC`,
+    [importId],
+    db,
+  );
+  return enrichTransactionsWithOms(rows.map(mapTransaction), db);
 }
 
 export async function getLatestImport(db?: Queryable): Promise<ImportRow | null> {
@@ -820,12 +873,13 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
              ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
              ROUND(SUM(payout)::numeric, 2),
              ROUND(SUM(adjustment)::numeric, 2),
-             SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
-             SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
-             SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+             SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int,
+             0,
+             0,
              now()
            FROM transactions
            WHERE paid_date = ANY($1::text[])
+             AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok'
            GROUP BY paid_date`,
           [affectedDates],
           target,
@@ -849,12 +903,13 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
              COUNT(DISTINCT i.order_code)::int,
              ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
              ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
-             COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
-             COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
-             COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+             COALESCE(SUM(i.quantity), 0)::int,
+             0,
+             0,
              now()
            FROM oms_order_items i
            WHERE i.sku_code = ANY($1::text[])
+             AND COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok'
            GROUP BY i.sku_code`,
           [affectedSkus],
           target,
@@ -1116,27 +1171,39 @@ export async function listDailyBatchesPaged(
   };
 }
 
+const ORDER_LINK_PRIORITY_SQL = `(
+  CASE
+    WHEN (t.order_code IS NOT NULL AND t.order_code <> '' AND t.transaction_type <> 'คำสั่งซื้อ (OMS)') THEN 0
+    WHEN (t.order_code IS NOT NULL AND t.order_code <> '') THEN 1
+    ELSE 2
+  END
+)`;
+
 export async function getDailyBatch(
   date: string,
   db?: Queryable,
 ): Promise<DailyBatch | null> {
+  const isMonth = /^\d{4}-\d{2}$/.test(date);
+  const dateWhere = isMonth ? "paid_date LIKE $1 || '-%'" : "paid_date = $1";
+  const txDateWhere = isMonth ? "t.paid_date LIKE $1 || '-%'" : "t.paid_date = $1";
+
   let summaryRow = await queryOne<Record<string, unknown>>(
     `SELECT
-       transaction_count,
-       order_count,
-       order_payout,
-       order_income,
-       order_fees,
-       other_count,
-       other_payout,
-       total_payout,
-       adjustment
+       COALESCE(SUM(transaction_count), 0) AS transaction_count,
+       COALESCE(SUM(order_count), 0) AS order_count,
+       ROUND(COALESCE(SUM(order_payout), 0)::numeric, 2) AS order_payout,
+       ROUND(COALESCE(SUM(order_income), 0)::numeric, 2) AS order_income,
+       ROUND(COALESCE(SUM(order_fees), 0)::numeric, 2) AS order_fees,
+       COALESCE(SUM(other_count), 0) AS other_count,
+       ROUND(COALESCE(SUM(other_payout), 0)::numeric, 2) AS other_payout,
+       ROUND(COALESCE(SUM(total_payout), 0)::numeric, 2) AS total_payout,
+       ROUND(COALESCE(SUM(adjustment), 0)::numeric, 2) AS adjustment
      FROM daily_summaries
-     WHERE paid_date = $1`,
+     WHERE ${dateWhere}`,
     [date],
     db,
   );
-  if (!summaryRow) {
+  if (!summaryRow || Number(summaryRow.transaction_count ?? 0) === 0) {
     summaryRow = await queryOne<Record<string, unknown>>(
       `SELECT
         COUNT(*) AS transaction_count,
@@ -1148,7 +1215,9 @@ export async function getDailyBatch(
         ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2) AS other_payout,
         ROUND(SUM(payout)::numeric, 2) AS total_payout,
         ROUND(SUM(adjustment)::numeric, 2) AS adjustment
-      FROM transactions WHERE paid_date = $1`,
+      FROM transactions
+      WHERE ${dateWhere}
+        AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok'`,
       [date],
       db,
     );
@@ -1160,8 +1229,9 @@ export async function getDailyBatch(
      FROM transactions t
      LEFT JOIN invoice_registry r ON r.order_id = t.external_id
      LEFT JOIN imports i ON i.id = t.import_id
-     WHERE t.paid_date = $1
-     ORDER BY t.is_order DESC, t.external_id ASC`,
+     WHERE ${txDateWhere}
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok'
+     ORDER BY t.is_order DESC, t.paid_date DESC, ${ORDER_LINK_PRIORITY_SQL} ASC, t.external_id ASC`,
     [date],
     db,
   );
@@ -1192,6 +1262,7 @@ export async function listBills(
     q?: string;
     channel?: string;
     status?: "all" | "ok" | "mismatch";
+    linkStatus?: "all" | "linked" | "unlinked" | "oms_only";
     page?: number;
     pageSize?: number;
   } = {},
@@ -1201,13 +1272,25 @@ export async function listBills(
   const q = escapeLikePattern(options.q ?? "");
   const channel = (options.channel ?? "all").trim().slice(0, 32);
   const status = options.status ?? "all";
+  const linkStatus = options.linkStatus ?? "all";
   const pageSize = Math.min(500, Math.max(10, options.pageSize ?? 20));
   const page = Math.max(1, options.page ?? 1);
-  const baseClauses = ["t.is_order = 1"];
+  const baseClauses = [
+    "t.is_order = 1",
+    "COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok'",
+  ];
   const baseParams: unknown[] = [];
+  const isMonthFilter = /^\d{4}-\d{2}$/.test(date);
+  const isYearFilter = /^\d{4}$/.test(date);
+
   if (date) {
-    baseClauses.push(`t.paid_date = $${baseParams.length + 1}`);
-    baseParams.push(date);
+    if (isMonthFilter || isYearFilter) {
+      baseClauses.push(`t.paid_date LIKE $${baseParams.length + 1}`);
+      baseParams.push(`${date}-%`);
+    } else {
+      baseClauses.push(`t.paid_date = $${baseParams.length + 1}`);
+      baseParams.push(date);
+    }
   }
   if (q) {
     baseClauses.push(
@@ -1225,16 +1308,57 @@ export async function listBills(
     );
   }
 
-  const clauses = [...baseClauses];
-  const params = [...baseParams];
-  if (channel && channel !== "all") {
-    clauses.push(`COALESCE(NULLIF(t.channel, ''), 'TikTok') = $${params.length + 1}`);
-    params.push(channel);
+  const clausesWithoutLink = [...baseClauses];
+  const paramsWithoutLink = [...baseParams];
+
+  const whereWithoutLink = clausesWithoutLink.join(" AND ");
+  const [linkStatsRow, missingDatesRows] = await Promise.all([
+    queryOne<Record<string, unknown>>(
+      `SELECT
+         COUNT(*) AS all_count,
+         SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 0 THEN 1 ELSE 0 END) AS linked_count,
+         SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 1 THEN 1 ELSE 0 END) AS oms_only_count,
+         SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 2 THEN 1 ELSE 0 END) AS unlinked_count
+       FROM transactions t
+       WHERE ${whereWithoutLink}`,
+      paramsWithoutLink,
+      db,
+    ),
+    query<{ created_date: string }>(
+      `SELECT DISTINCT t.created_date
+       FROM transactions t
+       WHERE ${whereWithoutLink}
+         AND ${ORDER_LINK_PRIORITY_SQL} = 2
+         AND t.created_date <> ''
+         AND t.created_date <> 'unknown'
+       ORDER BY t.created_date DESC
+       LIMIT 6`,
+      paramsWithoutLink,
+      db,
+    ),
+  ]);
+
+  const linkCounts: BillLinkCounts = {
+    all: Number(linkStatsRow?.all_count ?? 0),
+    linked: Number(linkStatsRow?.linked_count ?? 0),
+    omsOnly: Number(linkStatsRow?.oms_only_count ?? 0),
+    unlinked: Number(linkStatsRow?.unlinked_count ?? 0),
+    missingOmsCreatedDates: missingDatesRows.map((r) => String(r.created_date)),
+  };
+
+  const clauses = [...clausesWithoutLink];
+  const params = [...paramsWithoutLink];
+  if (linkStatus === "linked") {
+    clauses.push(`${ORDER_LINK_PRIORITY_SQL} = 0`);
+  } else if (linkStatus === "oms_only") {
+    clauses.push(`${ORDER_LINK_PRIORITY_SQL} = 1`);
+  } else if (linkStatus === "unlinked") {
+    clauses.push(`${ORDER_LINK_PRIORITY_SQL} = 2`);
   }
   const where = clauses.join(" AND ");
 
   // Fast Path for Billion-Row Scale: read counts, totals, channelCounts, and dateScope from pre-aggregated daily_summaries
-  const canUseFastSummary = !q && status === "all";
+  const canUseFastSummary = !q && status === "all" && linkStatus === "all";
   let fastSummaryUsed = false;
   let total = 0;
   let summaryIncome = 0;
@@ -1247,8 +1371,16 @@ export async function listBills(
 
   if (canUseFastSummary) {
     const dsParams: unknown[] = [];
-    const dsWhere = date ? "WHERE paid_date = $1" : "";
-    if (date) dsParams.push(date);
+    let dsWhere = "";
+    if (date) {
+      if (isMonthFilter || isYearFilter) {
+        dsWhere = "WHERE paid_date LIKE $1";
+        dsParams.push(`${date}-%`);
+      } else {
+        dsWhere = "WHERE paid_date = $1";
+        dsParams.push(date);
+      }
+    }
 
     const dsRow = await queryOne<Record<string, unknown>>(
       `SELECT
@@ -1257,8 +1389,6 @@ export async function listBills(
          ROUND(COALESCE(SUM(order_fees), 0)::numeric, 2) AS order_fees,
          ROUND(COALESCE(SUM(order_payout), 0)::numeric, 2) AS order_payout,
          COALESCE(SUM(tiktok_count), 0) AS tiktok_count,
-         COALESCE(SUM(shopee_count), 0) AS shopee_count,
-         COALESCE(SUM(facebook_count), 0) AS facebook_count,
          MIN(paid_date) AS min_paid_date,
          MAX(paid_date) AS max_paid_date,
          COUNT(*) AS distinct_dates
@@ -1270,46 +1400,20 @@ export async function listBills(
 
     const dsOrderCount = Number(dsRow?.order_count ?? 0);
     if (dsOrderCount > 0) {
-      const tk = Number(dsRow?.tiktok_count ?? 0);
-      const sp = Number(dsRow?.shopee_count ?? 0);
-      const fb = Number(dsRow?.facebook_count ?? 0);
-      if (tk > 0) channelCounts.TikTok = tk;
-      if (sp > 0) channelCounts.Shopee = sp;
-      if (fb > 0) channelCounts.Facebook = fb;
+      channelCounts.TikTok = dsOrderCount;
       channelCounts.all = dsOrderCount;
       minPaidDate = dsRow?.min_paid_date ? String(dsRow.min_paid_date) : null;
       maxPaidDate = dsRow?.max_paid_date ? String(dsRow.max_paid_date) : null;
       distinctDates = Number(dsRow?.distinct_dates ?? 0);
-
-      if (!channel || channel === "all") {
-        fastSummaryUsed = true;
-        total = dsOrderCount;
-        summaryIncome = Number(dsRow?.order_income ?? 0);
-        summaryFees = Number(dsRow?.order_fees ?? 0);
-        summaryPayout = Number(dsRow?.order_payout ?? 0);
-      }
+      fastSummaryUsed = true;
+      total = dsOrderCount;
+      summaryIncome = Number(dsRow?.order_income ?? 0);
+      summaryFees = Number(dsRow?.order_fees ?? 0);
+      summaryPayout = Number(dsRow?.order_payout ?? 0);
     }
   }
 
   if (!fastSummaryUsed) {
-    if (channelCounts.all === 0) {
-      const baseWhere = baseClauses.join(" AND ");
-      const channelRows = await query<{ channel: string; c: string | number }>(
-        `SELECT COALESCE(NULLIF(t.channel, ''), 'TikTok') AS channel, COUNT(*) AS c
-         FROM transactions t
-         WHERE ${baseWhere}
-         GROUP BY COALESCE(NULLIF(t.channel, ''), 'TikTok')`,
-        baseParams,
-        db,
-      );
-      for (const cr of channelRows) {
-        const ch = String(cr.channel || "TikTok");
-        const c = Number(cr.c ?? 0);
-        channelCounts[ch] = (channelCounts[ch] ?? 0) + c;
-        channelCounts.all += c;
-      }
-    }
-
     const summaryRow = await queryOne<Record<string, unknown>>(
       `SELECT COUNT(*) AS count,
               ROUND(SUM(t.income)::numeric, 2) AS income,
@@ -1330,6 +1434,8 @@ export async function listBills(
     minPaidDate = summaryRow?.min_paid_date ? String(summaryRow.min_paid_date) : null;
     maxPaidDate = summaryRow?.max_paid_date ? String(summaryRow.max_paid_date) : null;
     distinctDates = Number(summaryRow?.distinct_dates ?? 0);
+    channelCounts.TikTok = total;
+    channelCounts.all = total;
   }
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -1340,7 +1446,7 @@ export async function listBills(
      LEFT JOIN invoice_registry r ON r.order_id = t.external_id
      LEFT JOIN imports i ON i.id = t.import_id
      WHERE ${where}
-     ORDER BY t.paid_date DESC, t.external_id DESC
+     ORDER BY t.paid_date DESC, ${ORDER_LINK_PRIORITY_SQL} ASC, t.external_id DESC
      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, pageSize, (safePage - 1) * pageSize],
     db,
@@ -1366,6 +1472,7 @@ export async function listBills(
       distinctDates,
     },
     channelCounts,
+    linkCounts,
   };
 }
 
@@ -1378,7 +1485,9 @@ export async function getBill(
      FROM transactions t
      LEFT JOIN invoice_registry r ON r.order_id = t.external_id
      LEFT JOIN imports i ON i.id = t.import_id
-     WHERE (t.external_id = $1 OR t.order_code = $1) AND t.is_order = 1
+     WHERE (t.external_id = $1 OR t.order_code = $1)
+       AND t.is_order = 1
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok'
      ORDER BY t.paid_date DESC LIMIT 1`,
     [orderId],
     db,
@@ -1398,6 +1507,54 @@ export async function getInvoiceNo(
     db,
   );
   return row ? row.invoice_no : null;
+}
+
+export async function updateOrderBuyerInfo(
+  orderId: string,
+  input: {
+    buyerName?: string | null;
+    buyerTaxId?: string | null;
+    buyerAddress?: string | null;
+  },
+  db?: Queryable,
+): Promise<{
+  orderId: string;
+  buyerName: string | null;
+  buyerTaxId: string | null;
+  buyerAddress: string | null;
+} | null> {
+  const cleanOrderId = String(orderId ?? "").trim();
+  if (!cleanOrderId) return null;
+
+  const cleanName = (input.buyerName ?? "").trim().slice(0, 300) || null;
+  const cleanTaxId = (input.buyerTaxId ?? "").trim().slice(0, 40) || null;
+  const cleanAddress = (input.buyerAddress ?? "").trim().slice(0, 600) || null;
+
+  const rows = await query<{
+    external_id: string;
+    buyer_name: string | null;
+    buyer_tax_id: string | null;
+    buyer_address: string | null;
+  }>(
+    `UPDATE transactions
+     SET buyer_name = $2,
+         buyer_tax_id = $3,
+         buyer_address = $4
+     WHERE (external_id = $1 OR order_code = $1)
+       AND is_order = 1
+     RETURNING external_id, buyer_name, buyer_tax_id, buyer_address`,
+    [cleanOrderId, cleanName, cleanTaxId, cleanAddress],
+    db,
+  );
+
+  const first = rows[0];
+  if (!first) return null;
+  return {
+    orderId: String(first.external_id),
+    buyerName: first.buyer_name ? String(first.buyer_name) : null,
+    buyerTaxId: first.buyer_tax_id ? String(first.buyer_tax_id) : null,
+    buyerAddress: first.buyer_address ? String(first.buyer_address) : null,
+  };
 }
 
 export interface SkuSummaryRow {
@@ -1434,7 +1591,7 @@ export async function listSkuSummariesPaged(
   const q = escapeLikePattern(options.q ?? "");
   const channel = (options.channel ?? "all").trim().slice(0, 32);
 
-  const clauses: string[] = [];
+  const clauses: string[] = ["s.tiktok_qty > 0"];
   const params: unknown[] = [];
   if (q) {
     clauses.push(
@@ -1442,14 +1599,7 @@ export async function listSkuSummariesPaged(
     );
     params.push(`%${q}%`, `%${q}%`);
   }
-  if (channel === "TikTok") {
-    clauses.push("s.tiktok_qty > 0");
-  } else if (channel === "Shopee") {
-    clauses.push("s.shopee_qty > 0");
-  } else if (channel === "Facebook") {
-    clauses.push("s.facebook_qty > 0");
-  }
-  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const where = `WHERE ${clauses.join(" AND ")}`;
 
   const summaryRow = await queryOne<Record<string, unknown>>(
     `SELECT

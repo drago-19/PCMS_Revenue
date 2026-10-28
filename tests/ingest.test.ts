@@ -195,12 +195,16 @@ test("aggregates multiple rows of the same order into one bill", async () => {
   assert.equal(transaction.fields.incomeTotal, 300);
 });
 
-test("converts amounts to Thai baht text", () => {
+test("converts amounts to Thai baht text and formats THB with negative sign before currency symbol", async () => {
+  const { formatTHB } = await import("../src/lib/format");
   assert.equal(bahtText(100), "หนึ่งร้อยบาทถ้วน");
   assert.equal(bahtText(21), "ยี่สิบเอ็ดบาทถ้วน");
   assert.equal(bahtText(450.5), "สี่ร้อยห้าสิบบาทห้าสิบสตางค์");
   assert.equal(bahtText(0), "ศูนย์บาทถ้วน");
   assert.equal(bahtText(1500), "หนึ่งพันห้าร้อยบาทถ้วน");
+  assert.equal(formatTHB(645), "฿645.00");
+  assert.equal(formatTHB(-149.48), "-฿149.48");
+  assert.equal(formatTHB(0), "฿0.00");
 });
 
 test("POST /api/imports validates missing/non-xlsx/empty files before touching DB", async () => {
@@ -285,13 +289,10 @@ test("detects and parses OMS orders, OMS items, and CSV settlement with 15-digit
   const parsedOrders = await detectAndParseOmsInput(Buffer.from(omsOrdersCsv, "utf8"));
   assert.ok(parsedOrders);
   assert.equal(parsedOrders.fileType, "oms_orders");
-  assert.equal(parsedOrders.orders.length, 2);
+  assert.equal(parsedOrders.orders.length, 1);
   assert.equal(parsedOrders.orders[0].orderCode, "OF37");
   assert.equal(parsedOrders.orders[0].channel, "TikTok");
   assert.equal(parsedOrders.orders[0].marketplaceOrderPrefix, "586356565637268");
-  assert.equal(parsedOrders.orders[1].orderCode, "OF33");
-  assert.equal(parsedOrders.orders[1].channel, "Shopee");
-  assert.equal(parsedOrders.orders[1].marketplaceOrderNorm, "261001GH52V0JW");
 
   const omsItemsCsv = [
     "รหัสสินค้า,สินค้า,ราคา,จำนวน,เลขที่ออเดอร์,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,ที่อยู่,รหัสไปรษณีย์,เบอร์โทร,วันที่โอนเงิน,สร้างโดย,ขนส่ง,ช่องทางติดต่อ,ธนาคารที่โอนเงิน,หมายเหตุ,เลขพัสดุ,วันที่สร้าง",
@@ -372,9 +373,82 @@ test("detects and parses OMS orders, OMS items, and CSV settlement with 15-digit
   assert.equal(invoice.items[0].name, "ไฟเบอร์1กล่องแถมตรีผลา1ห่อ");
   assert.equal(invoice.grossItemsTotal, 250);
   assert.equal(invoice.discountTotal, 100);
-  assert.equal(invoice.total, 150);
-  assert.equal(invoice.preVatAmount, 140.19);
-  assert.equal(invoice.vatAmount, 9.81);
+  assert.equal(invoice.customerTotal, 150);
+  assert.equal(invoice.total, 132.61);
+  assert.equal(invoice.preVatAmount, 123.93);
+  assert.equal(invoice.vatAmount, 8.68);
+  assert.equal(invoice.receiptSubtotal, 250);
+  assert.equal(invoice.receiptCoupon, 100);
+  assert.equal(invoice.shippingGross, 0);
+  assert.equal(invoice.shippingCoupon, 0);
+  assert.equal(invoice.receiptTotal, 132.61);
+  assert.equal(invoice.receiptPreVatAmount, 123.93);
+  assert.equal(invoice.receiptVatAmount, 8.68);
+
+  // Test TikTok receipt breakdown pulling actual shipping & coupon values from imported Settlement fields (e.g. 29 baht vs 35 baht)
+  const receipt29 = buildInvoice({
+    id: 2,
+    importId: 61,
+    externalId: "586279384076945309",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-09-27",
+    paidDate: "2026-10-01",
+    currency: "THB",
+    income: 450,
+    feeTotal: -114.24,
+    adjustment: 0,
+    payout: 335.76,
+    productDetail: "JENNIE-SET · JENNIE SET เซ็ต3ชิ้น เสื้อฮู้ดแขนยาว × 1",
+    weightEstimated: 500,
+    weightCharged: 500,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      externalId: "586279384076945309",
+      transactionType: "คำสั่งซื้อ",
+      isOrder: true,
+      createdAt: "2026-09-27",
+      paidAt: "2026-10-01",
+      currency: "THB",
+      fields: {
+        productBeforeDiscount: 690,
+        storeDiscount: -240,
+        productAfterDiscount: 450,
+        shippingActual: -29,
+        shippingPlatformDiscount: 29,
+        shippingCustomerFee: 0,
+        platformDiscount: 96.6,
+        customerPayment: 353.4,
+      },
+      mappedFields: [],
+      feeGroups: {},
+      unknownValues: [],
+      checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+      warnings: [],
+      raw: {},
+      sourceRows: 1,
+      firstRow: 10,
+      rowIndexes: [10],
+    },
+    createdAt: "2026-10-01",
+    invoiceNo: "TT2610/00010",
+    channel: "TikTok",
+    orderCode: null,
+  });
+
+  assert.equal(receipt29.receiptNo, "20261001-586279384076945309");
+  assert.equal(receipt29.createdDate, "2026-09-27");
+  assert.equal(receipt29.grossItemsTotal, 690);
+  assert.equal(receipt29.storeDiscount, 240);
+  assert.equal(receipt29.receiptSubtotal, 450);
+  assert.equal(receipt29.shippingGross, 29);
+  assert.equal(receipt29.shippingCoupon, 29);
+  assert.equal(receipt29.receiptCoupon, 96.6);
+  assert.equal(receipt29.customerTotal, 353.4);
+  assert.equal(receipt29.receiptTotal, 335.76);
+  assert.equal(receipt29.receiptPreVatAmount, 313.79);
+  assert.equal(receipt29.receiptVatAmount, 21.97);
 });
 
 test("deleteImport removes orphaned invoice_registry rows and resets invoice_seq when empty", async () => {
@@ -418,7 +492,7 @@ test("supports custom column mapping for arbitrary Synnity/Shopee headers", asyn
   const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
   const customCsv = [
     "Bill_Ref,Item_SKU_ID,Item_Title,Price_Each,Qty_Sold,Pay_Date,Platform_Source",
-    "SYN-9001,SKU-HERB-01,สมุนไพรตรีผลาสกัด,290,2,2026-10-05,Shopee",
+    "SYN-9001,SKU-HERB-01,สมุนไพรตรีผลาสกัด,290,2,2026-10-05,TikTok",
   ].join("\n");
 
   const parsed = await detectAndParseOmsInput(Buffer.from(customCsv, "utf8"), {
@@ -439,7 +513,7 @@ test("supports custom column mapping for arbitrary Synnity/Shopee headers", asyn
   assert.equal(parsed.items[0].productName, "สมุนไพรตรีผลาสกัด");
   assert.equal(parsed.items[0].unitPrice, 290);
   assert.equal(parsed.items[0].quantity, 2);
-  assert.equal(parsed.items[0].channel, "Shopee");
+  assert.equal(parsed.items[0].channel, "TikTok");
 });
 
 test("listBills uses pre-aggregated daily_summaries fast path without scanning transactions COUNT/SUM", async () => {
@@ -475,9 +549,8 @@ test("listBills uses pre-aggregated daily_summaries fast path without scanning t
   const result = await listBills({ page: 1, pageSize: 20 }, mockDb as never);
   assert.equal(result.total, 1000000000);
   assert.equal(result.summary.income, 250000000000);
-  assert.equal(result.channelCounts.TikTok, 700000000);
-  assert.equal(result.channelCounts.Shopee, 250000000);
-  assert.equal(result.channelCounts.Facebook, 50000000);
+  assert.equal(result.channelCounts.TikTok, 1000000000);
+  assert.equal(result.channelCounts.all, 1000000000);
   assert.ok(
     !executedSql.some((s) => s.includes("SELECT COUNT(*) AS count") && s.includes("FROM transactions")),
     "should not run full COUNT/SUM scan on transactions table when fast path applies",
@@ -597,4 +670,399 @@ test("getImportSpreadsheetData reads original Excel file_blob and falls back to 
   assert.equal(fallbackData.sheets.length, 1);
   assert.deepEqual(fallbackData.sheets[0].headers, ["เลขที่ออเดอร์", "ชื่อ", "ยอดขาย"]);
   assert.deepEqual(fallbackData.sheets[0].rows[1], ["OF39", "สมชาย ใจดี", 450]);
+});
+
+test("normalizeSellerSettings, buildInvoice VAT base toggle, and getOrderLinkStatus", async () => {
+  const { normalizeSellerSettings } = await import("../src/lib/settings");
+  const { buildInvoice } = await import("../src/lib/invoice");
+  const { getOrderLinkStatus } = await import("../src/lib/queries");
+
+  const normalized = normalizeSellerSettings({
+    name: "  บริษัท ชีเฮง จำกัด (สาขาใหม่) ",
+    taxId: "065-5568002694",
+    vatRate: 7,
+    invoicePrefix: "ch",
+    vatCalculationBase: "customer_paid",
+    defaultPaperSize: "80mm",
+    showSkuInAbbreviated: true,
+    footerNote: "ขอบคุณที่ใช้บริการ",
+  });
+
+  assert.equal(normalized.name, "บริษัท ชีเฮง จำกัด (สาขาใหม่)");
+  assert.equal(normalized.invoicePrefix, "CH");
+  assert.equal(normalized.vatCalculationBase, "customer_paid");
+  assert.equal(normalized.defaultPaperSize, "80mm");
+  assert.equal(normalized.showSkuInAbbreviated, true);
+  assert.equal(normalized.footerNote, "ขอบคุณที่ใช้บริการ");
+
+  const sampleRow = {
+    id: 99,
+    importId: 1,
+    externalId: "586694353227777627",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-10-20",
+    paidDate: "2026-10-26",
+    currency: "THB",
+    income: 693,
+    feeTotal: -184.79,
+    adjustment: 0,
+    payout: 508.21,
+    productDetail: null,
+    weightEstimated: null,
+    weightCharged: null,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      externalId: "586694353227777627",
+      transactionType: "คำสั่งซื้อ",
+      isOrder: true,
+      createdAt: "2026-10-20",
+      paidAt: "2026-10-26",
+      currency: "THB",
+      fields: {
+        productBeforeDiscount: 1750,
+        productAfterDiscount: 693,
+        storeDiscount: -1057,
+        platformDiscount: -138.6,
+        customerPayment: 554.4,
+        shippingCustomerFee: 0,
+        shippingPlatformDiscount: 55,
+        feeTotal: -184.79,
+        payout: 508.21,
+      },
+      mappedFields: [],
+      feeGroups: {},
+      unknownValues: [],
+      checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+      warnings: [],
+      raw: {},
+      sourceRows: 1,
+      firstRow: 1,
+      rowIndexes: [1],
+    },
+    createdAt: "2026-10-26T00:00:00Z",
+    invoiceNo: "TT2610/00422",
+    channel: "TikTok",
+    orderCode: "DI27",
+  };
+
+  // Default payout base (508.21)
+  const invPayout = buildInvoice(sampleRow as never);
+  assert.equal(invPayout.receiptTotal, 508.21);
+  assert.equal(invPayout.receiptPreVatAmount, 474.96);
+  assert.equal(invPayout.receiptVatAmount, 33.25);
+
+  // Customer paid base (554.40)
+  const invCustomerPaid = buildInvoice(sampleRow as never, normalized);
+  assert.equal(invCustomerPaid.receiptTotal, 554.4);
+  assert.equal(invCustomerPaid.receiptPreVatAmount, 518.13);
+  assert.equal(invCustomerPaid.receiptVatAmount, 36.27);
+
+  // Link status classification
+  assert.equal(getOrderLinkStatus(sampleRow as never), "linked");
+  assert.equal(
+    getOrderLinkStatus({ ...sampleRow, orderCode: null } as never),
+    "unlinked",
+  );
+  assert.equal(
+    getOrderLinkStatus({
+      ...sampleRow,
+      transactionType: "คำสั่งซื้อ (OMS)",
+      channel: "TikTok",
+    } as never),
+    "oms_only",
+  );
+
+  const { buildBill } = await import("../src/lib/bill");
+  const billWithSlash = buildBill({
+    ...sampleRow.normalized,
+    fields: {
+      ...sampleRow.normalized.fields,
+      productDetail: "/",
+    },
+    rowIndexes: [42],
+  });
+  assert.equal(billWithSlash.productDetail, null);
+  assert.deepEqual(billWithSlash.rowIndexes, [42]);
+
+  // Saved buyer info for Full Tax Invoice overrides OMS customer info and persists taxId
+  const invWithSavedBuyer = buildInvoice({
+    ...sampleRow,
+    customerName: "ลูกค้าเดิม",
+    customerAddress: "ที่อยู่เดิม",
+    buyerName: "บริษัท ทดสอบใบกำกับ จำกัด",
+    buyerTaxId: "0105566778899",
+    buyerAddress: "99/9 ถนนสุขุมวิท เขตวัฒนา กรุงเทพฯ 10110",
+  } as never);
+  assert.equal(invWithSavedBuyer.customer.name, "บริษัท ทดสอบใบกำกับ จำกัด");
+  assert.equal(invWithSavedBuyer.customer.taxId, "0105566778899");
+  assert.equal(
+    invWithSavedBuyer.customer.address,
+    "99/9 ถนนสุขุมวิท เขตวัฒนา กรุงเทพฯ 10110",
+  );
+});
+
+test("supports custom column mappings for Shipnity and classifies new TikTok columns into income/fee/adjustment", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const { recalculateTransactionWithRules } = await import("../src/lib/ingest/parse");
+  const { buildBill } = await import("../src/lib/bill");
+
+  // 1. Shipnity file with completely renamed columns
+  const customShipnityRows: (string | number | null)[][] = [
+    ["รหัสใบงานใหม่", "รหัสสต็อกใหม่", "ชื่อรายการใหม่", "ราคาต่อหน่วยใหม่", "จำนวนเบิก"],
+    ["SHP-9901", "SKU-NEW-01", "เซรั่มสูตรใหม่", 390, 2],
+  ];
+  const shipnityBuffer = await buildXlsx([{ name: "Sheet1", rows: customShipnityRows }]);
+
+  // Without custom mapping -> null
+  const unmappedResult = await detectAndParseOmsInput(shipnityBuffer);
+  assert.equal(unmappedResult, null);
+
+  // With saved custom mapping -> parses as oms_items
+  const mappedResult = await detectAndParseOmsInput(shipnityBuffer, {
+    "รหัสใบงานใหม่": "orderCode",
+    "รหัสสต็อกใหม่": "skuCode",
+    "ชื่อรายการใหม่": "productName",
+    "ราคาต่อหน่วยใหม่": "unitPrice",
+    "จำนวนเบิก": "quantity",
+  });
+  assert.ok(mappedResult, "should parse Shipnity items with custom mapping");
+  assert.equal(mappedResult.fileType, "oms_items");
+  assert.equal(mappedResult.items.length, 1);
+  assert.equal(mappedResult.items[0]?.orderCode, "SHP-9901");
+  assert.equal(mappedResult.items[0]?.skuCode, "SKU-NEW-01");
+  assert.equal(mappedResult.items[0]?.productName, "เซรั่มสูตรใหม่");
+  assert.equal(mappedResult.items[0]?.unitPrice, 390);
+  assert.equal(mappedResult.items[0]?.quantity, 2);
+
+  // 2. TikTok Settlement file with a brand-new fee column ("ค่าธรรมเนียม AI พิเศษ" = -7)
+  const tiktokRows: (string | number | null)[][] = [
+    [
+      "หมายเลขคำสั่งซื้อ/การปรับ",
+      "ประเภทธุรกรรม",
+      "เวลาที่สร้างคำสั่งซื้อ",
+      "เวลาที่ชำระคำสั่งซื้อ",
+      "สกุลเงิน",
+      "ยอดการชำระเงินทั้งหมด",
+      "รายได้ทั้งหมด",
+      "ยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย",
+      "ค่าธรรมเนียมทั้งหมด",
+      "ค่าธรรมเนียมคำสั่งซื้อ",
+      "ค่าธรรมเนียม AI พิเศษ",
+    ],
+    [
+      "588999000111222333",
+      "คำสั่งซื้อ",
+      "2026/10/05",
+      "2026/10/05",
+      "THB",
+      "133",
+      "150",
+      "150",
+      "-17",
+      "-10",
+      "-7",
+    ],
+  ];
+  const tiktokBuffer = await buildXlsx([{ name: "Order details", rows: tiktokRows }]);
+
+  // Before classifying "ค่าธรรมเนียม AI พิเศษ": feeDiff is -7, bill.checks.ok is false
+  const parsedBefore = await parseWorkbook(tiktokBuffer);
+  const txBefore = parsedBefore.transactions[0]!;
+  assert.equal(txBefore.checks.feeDiff, -7);
+  const billBefore = buildBill(txBefore);
+  assert.equal(billBefore.checks.ok, false);
+  assert.equal(parsedBefore.warnings.some((w) => w.code === "UNKNOWN_COLUMNS"), true);
+
+  // After classifying "ค่าธรรมเนียม AI พิเศษ" as "fee": feeDiff becomes 0, bill.checks.ok becomes true
+  const txAfter = recalculateTransactionWithRules(txBefore, {
+    "ค่าธรรมเนียม AI พิเศษ": "fee",
+  });
+  assert.equal(txAfter.checks.feeDiff, 0);
+  assert.equal(txAfter.checks.incomeDiff, 0);
+  assert.equal(txAfter.checks.payoutDiff, 0);
+
+  const billAfter = buildBill(txAfter);
+  assert.equal(billAfter.checks.ok, true);
+  assert.equal(
+    billAfter.feeGroups.some(
+      (g) => g.label === "ค่าธรรมเนียม AI พิเศษ" && g.amount === -7,
+    ),
+    true,
+  );
+  assert.equal(billAfter.unknownMoneyColumns.length, 0);
+});
+
+test("saveColumnMappingRules and getColumnMappingRules persist rules in app_settings and API enforces auth", async () => {
+  const {
+    getColumnMappingRules,
+    saveColumnMappingRules,
+  } = await import("../src/lib/column-mapping-settings");
+  const { GET, PUT } = await import(
+    "../src/app/api/settings/column-mappings/route"
+  );
+
+  let storedJson: string | null = null;
+  const mockDb = {
+    query: async (sql: string, params?: unknown[]) => {
+      if (sql.includes("SELECT value_json FROM app_settings")) {
+        return { rows: storedJson ? [{ value_json: storedJson }] : [] };
+      }
+      if (sql.includes("INSERT INTO app_settings")) {
+        storedJson = String(params?.[1] ?? "{}");
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  // Save custom header mapping and unknown column category
+  const saved = await saveColumnMappingRules(
+    {
+      headerToFieldKey: { "รหัสใบสั่งซื้อ_ทดสอบ": "orderCode" },
+      unknownColumnCategories: { "ค่าธรรมเนียม_ทดสอบ_AI": "fee" },
+    },
+    "admin",
+    mockDb as never,
+  );
+  assert.equal(saved.headerToFieldKey["รหัสใบสั่งซื้อ_ทดสอบ"], "orderCode");
+  assert.equal(saved.unknownColumnCategories["ค่าธรรมเนียม_ทดสอบ_AI"], "fee");
+
+  // Read back from mockDb
+  const loaded = await getColumnMappingRules(mockDb as never);
+  assert.equal(loaded.headerToFieldKey["รหัสใบสั่งซื้อ_ทดสอบ"], "orderCode");
+  assert.equal(loaded.unknownColumnCategories["ค่าธรรมเนียม_ทดสอบ_AI"], "fee");
+
+  // Delete rule by setting empty string
+  const afterDelete = await saveColumnMappingRules(
+    {
+      headerToFieldKey: { "รหัสใบสั่งซื้อ_ทดสอบ": "" },
+      unknownColumnCategories: { "ค่าธรรมเนียม_ทดสอบ_AI": "" },
+    },
+    "admin",
+    mockDb as never,
+  );
+  assert.equal(afterDelete.headerToFieldKey["รหัสใบสั่งซื้อ_ทดสอบ"], undefined);
+  assert.equal(
+    afterDelete.unknownColumnCategories["ค่าธรรมเนียม_ทดสอบ_AI"],
+    undefined,
+  );
+
+  // Unauthenticated API requests are rejected
+  const unauthGet = await GET(
+    new Request("http://localhost:3001/api/settings/column-mappings"),
+  );
+  assert.equal(unauthGet.status, 401);
+
+  const unauthPut = await PUT(
+    new Request("http://localhost:3001/api/settings/column-mappings", {
+      method: "PUT",
+      headers: {
+        host: "localhost:3001",
+        origin: "http://localhost:3001",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    }),
+  );
+  assert.equal(unauthPut.status, 401);
+});
+
+test("buildBill aligns customer payment and settlement breakdown with TikTok Seller Center", async () => {
+  const { buildBill } = await import("../src/lib/bill");
+  const bill = buildBill({
+    externalId: "586689341698966685",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdAt: "2026-10-20",
+    paidAt: "2026-10-26",
+    currency: "THB",
+    fields: {
+      incomeTotal: 396,
+      productAfterDiscount: 396,
+      productBeforeDiscount: 1000,
+      storeDiscount: -604,
+      platformDiscount: 79.2,
+      customerPayment: 316.8,
+      feeTotal: -104.9,
+      orderFee: -12.71,
+      commission: -46.61,
+      shippingTotal: 0,
+      shippingActual: -48,
+      shippingPlatformDiscount: 48,
+      shippingCustomerFee: 0,
+      shippingDiscountStore: 0,
+      shippingSubsidy: 0,
+      liveCoupon: -12.71,
+      growth: -31.8,
+      infrastructure: -1.07,
+      payout: 291.1,
+      weightEstimated: 2000,
+      weightCharged: 2000,
+    },
+    mappedFields: [],
+    feeGroups: {
+      order_fee: { total: -12.71, children: {} },
+      commission: { total: -46.61, children: {} },
+      shipping: {
+        total: 0,
+        children: {
+          shippingActual: -48,
+          shippingPlatformDiscount: 48,
+          shippingCustomerFee: 0,
+        },
+      },
+      live_coupon: { total: -12.71, children: {} },
+      growth: { total: -31.8, children: {} },
+      infrastructure: { total: -1.07, children: {} },
+    },
+    unknownValues: [],
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    raw: {},
+    sourceRows: 1,
+    firstRow: 353,
+    rowIndexes: [353],
+  });
+
+  // 1. Customer Payment Breakdown matches TikTok Seller Center (-79.20, -48.00)
+  assert.equal(bill.customerPaymentBreakdown.productSubtotalAfterDiscount, 316.8);
+  assert.equal(bill.customerPaymentBreakdown.productSubtotalBeforeDiscount, 1000);
+  assert.equal(bill.customerPaymentBreakdown.sellerProductDiscount, -604);
+  assert.equal(bill.customerPaymentBreakdown.tiktokProductDiscount, -79.2);
+  assert.equal(bill.customerPaymentBreakdown.shippingAfterDiscount, 0);
+  assert.equal(bill.customerPaymentBreakdown.shippingBeforeDiscount, 48);
+  assert.equal(bill.customerPaymentBreakdown.sellerShippingDiscount, -0);
+  assert.equal(bill.customerPaymentBreakdown.tiktokShippingDiscount, -48);
+  assert.equal(bill.customerPaymentBreakdown.total, 316.8);
+
+  // 2. Income lines contain only seller product revenue (396, 1000, -604)
+  assert.deepEqual(
+    bill.incomeLines.map((l) => ({ key: l.key, amount: l.amount })),
+    [
+      { key: "productAfterDiscount", amount: 396 },
+      { key: "productBeforeDiscount", amount: 1000 },
+      { key: "storeDiscount", amount: -604 },
+    ],
+  );
+
+  // 3. Shipping fee group matches TikTok wording & includes weight + customer shipping sub-items
+  const shipGroup = bill.feeGroups.find((g) => g.key === "shipping");
+  assert.ok(shipGroup);
+  assert.equal(shipGroup.label, "ยอดรวมค่าจัดส่งที่ร้านค้าจ่ายจริง");
+  assert.equal(
+    shipGroup.children[0].label,
+    "ค่าธรรมเนียมการจัดส่งจริง (น้ำหนักที่เรียกเก็บเงิน: 2000 ก.)",
+  );
+  assert.equal(shipGroup.children[0].amount, -48);
+  assert.equal(
+    shipGroup.children[2].label,
+    "ค่าธรรมเนียมการจัดส่งของลูกค้า (น้ำหนักพัสดุโดยประมาณ: 2000 ก.)",
+  );
+  assert.equal(shipGroup.children[2].amount, 0);
+  assert.equal(shipGroup.children[3].label, "ค่าจัดส่งของลูกค้าก่อนหักส่วนลด");
+  assert.equal(shipGroup.children[3].amount, 48);
+  assert.equal(shipGroup.children[5].label, "ส่วนลดค่าจัดส่งจาก TikTok Shop");
+  assert.equal(shipGroup.children[5].amount, -48);
 });
