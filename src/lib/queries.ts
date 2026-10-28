@@ -1765,6 +1765,7 @@ const BILL_CATEGORY_SQL: Record<BillCategoryKey, string> = {
 export async function listBills(
   options: {
     date?: string;
+    createdDate?: string;
     q?: string;
     channel?: string;
     status?: "all" | "ok" | "mismatch";
@@ -1777,6 +1778,7 @@ export async function listBills(
   db?: Queryable,
 ): Promise<BillListResult> {
   const date = (options.date ?? "").trim().slice(0, 32);
+  const createdDate = (options.createdDate ?? "").trim().slice(0, 32);
   const q = escapeLikePattern(options.q ?? "");
   const channel = (options.channel ?? "all").trim().slice(0, 32);
   const status = options.status ?? "all";
@@ -1805,6 +1807,21 @@ export async function listBills(
     } else {
       baseClauses.push(`t.paid_date = $${baseParams.length + 1}`);
       baseParams.push(date);
+    }
+  }
+  if (createdDate) {
+    const isCreatedMonthFilter = /^\d{4}-\d{2}$/.test(createdDate);
+    const isCreatedYearFilter = /^\d{4}$/.test(createdDate);
+    if (isCreatedMonthFilter || isCreatedYearFilter) {
+      baseClauses.push(
+        `COALESCE(NULLIF(t.created_date, ''), t.paid_date) LIKE $${baseParams.length + 1}`,
+      );
+      baseParams.push(`${createdDate}-%`);
+    } else {
+      baseClauses.push(
+        `COALESCE(NULLIF(t.created_date, ''), t.paid_date) = $${baseParams.length + 1}`,
+      );
+      baseParams.push(createdDate);
     }
   }
   if (q) {
@@ -1875,7 +1892,11 @@ export async function listBills(
   ];
   const whereWithoutLink = clausesWithoutLink.join(" AND ");
   const canUseFastLinkCounts =
-    category === "normal" && !q && status === "all" && channel === "all";
+    category === "normal" &&
+    !q &&
+    !createdDate &&
+    status === "all" &&
+    channel === "all";
   let fastLinkStatsRow: Record<string, unknown> | null = null;
   if (canUseFastLinkCounts) {
     const dsLinkParams: unknown[] = [];
@@ -1974,7 +1995,11 @@ export async function listBills(
 
   // Fast Path for Billion-Row Scale: read counts, totals, channelCounts, and dateScope from pre-aggregated daily_summaries
   const canUseFastSummary =
-    category === "normal" && !q && status === "all" && linkStatus === "all";
+    category === "normal" &&
+    !q &&
+    !createdDate &&
+    status === "all" &&
+    linkStatus === "all";
   let fastSummaryUsed = false;
   let total = 0;
   let summaryIncome = 0;
@@ -2463,15 +2488,34 @@ export interface DailyUploadCompletenessRow {
   isComplete: boolean;
 }
 
+export interface MonthlyCompletenessOverview {
+  month: string;
+  monthIndex: number;
+  totalDays: number;
+  completeDays: number;
+  incompleteDays: number;
+  emptyDays: number;
+  totalNormalOrders: number;
+  totalCompleteOrders: number;
+  missingFile1: number;
+  missingFile2: number;
+  missingFile3: number;
+  status: "complete" | "incomplete" | "empty";
+}
+
 export interface DailyUploadCompletenessReport {
+  year: number;
+  availableYears: number[];
   month: string;
   availableMonths: string[];
+  monthsOverview: MonthlyCompletenessOverview[];
   mode: UploadDateMode;
   rows: DailyUploadCompletenessRow[];
   summary: {
     totalDays: number;
     completeDays: number;
     incompleteDays: number;
+    emptyDays: number;
     totalNormalOrders: number;
     totalCompleteOrders: number;
     totalMissingFile1: number;
@@ -2489,8 +2533,25 @@ export interface DailyUploadCompletenessReport {
   }[];
 }
 
+function getCalendarDaysInMonth(
+  year: number,
+  monthNum: number,
+  maxDateIso: string,
+): number {
+  const daysInMonth = new Date(Date.UTC(year, monthNum, 0)).getUTCDate();
+  const ym = `${year}-${String(monthNum).padStart(2, "0")}`;
+  const maxYm = maxDateIso.slice(0, 7);
+  if (ym === maxYm) {
+    const maxDay = Number(maxDateIso.slice(8, 10));
+    if (Number.isFinite(maxDay) && maxDay >= 1 && maxDay <= daysInMonth) {
+      return maxDay;
+    }
+  }
+  return daysInMonth;
+}
+
 export async function getDailyUploadCompleteness(
-  options?: { month?: string; mode?: UploadDateMode },
+  options?: { year?: number | string; month?: string; mode?: UploadDateMode },
   db?: Queryable,
 ): Promise<DailyUploadCompletenessReport> {
   const mode: UploadDateMode = options?.mode === "paid" ? "paid" : "created";
@@ -2515,16 +2576,46 @@ export async function getDailyUploadCompleteness(
     .map((r) => String(r.ym ?? ""))
     .filter((ym) => /^\d{4}-\d{2}$/.test(ym));
 
-  const fallbackMonth = new Date().toISOString().slice(0, 7);
-  const selectedMonth =
-    options?.month && /^\d{4}-\d{2}$/.test(options.month)
-      ? options.month
-      : availableMonths[0] ?? fallbackMonth;
+  const currentYear = new Date().getUTCFullYear();
+  const requestedYearNum = options?.year ? Number(options.year) : NaN;
+  const hasValidRequestedYear =
+    Number.isFinite(requestedYearNum) &&
+    requestedYearNum >= 2000 &&
+    requestedYearNum <= 2100;
+
+  let selectedMonth: string;
+  if (options?.month && /^\d{4}-\d{2}$/.test(options.month)) {
+    selectedMonth = options.month;
+  } else if (hasValidRequestedYear) {
+    const monthsInRequestedYear = availableMonths.filter((ym) =>
+      ym.startsWith(`${requestedYearNum}-`),
+    );
+    selectedMonth = monthsInRequestedYear[0] ?? `${requestedYearNum}-01`;
+  } else {
+    selectedMonth = availableMonths[0] ?? new Date().toISOString().slice(0, 7);
+  }
+
+  const selectedYear = Number(selectedMonth.slice(0, 4)) || currentYear;
+  const availableYearsSet = new Set<number>([currentYear, selectedYear]);
+  for (const ym of availableMonths) {
+    const y = Number(ym.slice(0, 4));
+    if (Number.isFinite(y) && y >= 2000 && y <= 2100) {
+      availableYearsSet.add(y);
+    }
+  }
+  const availableYears = Array.from(availableYearsSet).sort((a, b) => b - a);
 
   const rawRows = await query<Record<string, unknown>>(
     `WITH items_by_order AS (
        SELECT DISTINCT order_code
        FROM oms_order_items
+     ),
+     settled_paid_dates AS (
+       SELECT DISTINCT paid_date AS d
+       FROM transactions
+       WHERE is_order = 1
+         AND transaction_type <> 'คำสั่งซื้อ (OMS)'
+         AND paid_date LIKE $1 || '-%'
      )
      SELECT
        ${dateCol} AS d,
@@ -2561,9 +2652,11 @@ export async function getDailyUploadCompleteness(
            THEN 1
            ELSE 0
          END
-       )::int AS missing_file3_count
+       )::int AS missing_file3_count,
+       MAX(CASE WHEN spd.d IS NOT NULL THEN 1 ELSE 0 END)::int AS has_paid_settlement
      FROM transactions t
      LEFT JOIN items_by_order ibo ON ibo.order_code = t.order_code
+     LEFT JOIN settled_paid_dates spd ON spd.d = ${dateCol}
      WHERE t.is_order = 1
        AND t.income > 0
        AND ${dateCol} LIKE $1 || '-%'
@@ -2571,26 +2664,49 @@ export async function getDailyUploadCompleteness(
        AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
      GROUP BY ${dateCol}
      ORDER BY ${dateCol} ASC`,
-    [selectedMonth],
+    [String(selectedYear)],
     db,
   );
 
   const byDate = new Map<string, DailyUploadCompletenessRow>();
+  let maxDateInYear = "";
   for (const r of rawRows) {
     const date = String(r.d ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (date > maxDateInYear) maxDateInYear = date;
     const normalOrders = Number(r.normal_orders ?? 0);
-    const completeCount = Number(r.complete_count ?? 0);
-    const missingFile1Count = Number(r.missing_file1_count ?? 0);
-    const missingFile2Count = Number(r.missing_file2_count ?? 0);
-    const missingFile3Count = Number(r.missing_file3_count ?? 0);
-    const hasFile1 = normalOrders > 0 && missingFile1Count === 0;
-    const hasFile2 = normalOrders > 0 && missingFile1Count === 0 && missingFile2Count === 0;
-    const hasFile3 = normalOrders > 0 && missingFile3Count === 0;
-    const isComplete =
+    const rawMissingFile1 = Number(r.missing_file1_count ?? 0);
+    const rawMissingFile2 = Number(r.missing_file2_count ?? 0);
+    const rawMissingFile3 = Number(r.missing_file3_count ?? 0);
+    const hasPaidSettlement = Number(r.has_paid_settlement ?? 0) > 0;
+
+    const hasFile1Orders = normalOrders - rawMissingFile1;
+    const hasFile2Orders = hasFile1Orders - rawMissingFile2;
+    const hasFile3Orders = normalOrders - rawMissingFile3;
+
+    // ถือว่าอัปโหลดไฟล์ของวันนั้นแล้วเมื่อมีข้อมูลของไฟล์นั้นในวันดังกล่าว:
+    // - ไฟล์ 1 (ออเดอร์ Shipnity): มีออเดอร์ที่มี order_code ในวันนั้น (และขาดไม่เกิน 5%)
+    // - ไฟล์ 2 (สินค้า Shipnity): มีออเดอร์ที่มีรายการสินค้าในวันนั้น (และขาดไม่เกิน 5%)
+    // - ไฟล์ 3 (รายได้ TikTok): มีรายการโอนเงินจริงของวันนั้นแล้ว (ทั้งตามวันสั่งซื้อหรือวันโอนเงิน paid_date)
+    const hasFile1 =
       normalOrders > 0 &&
-      missingFile1Count === 0 &&
-      missingFile2Count === 0 &&
-      missingFile3Count === 0;
+      hasFile1Orders > 0 &&
+      rawMissingFile1 / normalOrders < 0.05;
+    const hasFile2 =
+      normalOrders > 0 &&
+      hasFile1 &&
+      hasFile2Orders > 0 &&
+      rawMissingFile2 / normalOrders < 0.05;
+    const hasFile3 =
+      normalOrders > 0 && (hasFile3Orders > 0 || hasPaidSettlement);
+
+    const missingFile1Count = hasFile1 ? 0 : rawMissingFile1;
+    const missingFile2Count = hasFile2 ? 0 : rawMissingFile2;
+    const missingFile3Count = hasFile3 ? 0 : rawMissingFile3;
+    const isComplete = normalOrders > 0 && hasFile1 && hasFile2 && hasFile3;
+    const completeCount = isComplete
+      ? normalOrders
+      : Number(r.complete_count ?? 0);
 
     byDate.set(date, {
       date,
@@ -2606,33 +2722,86 @@ export async function getDailyUploadCompleteness(
     });
   }
 
-  // Fill calendar days from day 01 up to the max date in selectedMonth so gap days are visible
-  const existingDates = Array.from(byDate.keys()).sort();
-  const rows: DailyUploadCompletenessRow[] = [];
-  if (existingDates.length > 0) {
-    const maxDay = Number(existingDates[existingDates.length - 1]!.slice(8, 10));
-    for (let day = 1; day <= maxDay; day++) {
+  const maxMonthInYear = maxDateInYear
+    ? Math.max(Number(maxDateInYear.slice(5, 7)), Number(selectedMonth.slice(5, 7)))
+    : 12;
+
+  const monthsOverview: MonthlyCompletenessOverview[] = [];
+  const rowsByMonth = new Map<string, DailyUploadCompletenessRow[]>();
+
+  for (let m = 1; m <= maxMonthInYear; m++) {
+    const ym = `${selectedYear}-${String(m).padStart(2, "0")}`;
+    const totalDaysForMonth = getCalendarDaysInMonth(
+      selectedYear,
+      m,
+      maxDateInYear,
+    );
+    const mRows: DailyUploadCompletenessRow[] = [];
+    let completeDays = 0;
+    let incompleteDays = 0;
+    let emptyDays = 0;
+    let totalNormalOrders = 0;
+    let totalCompleteOrders = 0;
+    let missingFile1 = 0;
+    let missingFile2 = 0;
+    let missingFile3 = 0;
+
+    for (let day = 1; day <= totalDaysForMonth; day++) {
       const dd = String(day).padStart(2, "0");
-      const iso = `${selectedMonth}-${dd}`;
+      const iso = `${ym}-${dd}`;
       const existing = byDate.get(iso);
-      if (existing) {
-        rows.push(existing);
+      const row: DailyUploadCompletenessRow = existing ?? {
+        date: iso,
+        normalOrders: 0,
+        completeCount: 0,
+        missingFile1Count: 0,
+        missingFile2Count: 0,
+        missingFile3Count: 0,
+        hasFile1: false,
+        hasFile2: false,
+        hasFile3: false,
+        isComplete: false,
+      };
+      mRows.push(row);
+      if (row.isComplete) {
+        completeDays += 1;
       } else {
-        rows.push({
-          date: iso,
-          normalOrders: 0,
-          completeCount: 0,
-          missingFile1Count: 0,
-          missingFile2Count: 0,
-          missingFile3Count: 0,
-          hasFile1: false,
-          hasFile2: false,
-          hasFile3: false,
-          isComplete: false,
-        });
+        incompleteDays += 1;
+        if (row.normalOrders === 0) emptyDays += 1;
       }
+      totalNormalOrders += row.normalOrders;
+      totalCompleteOrders += row.completeCount;
+      missingFile1 += row.missingFile1Count;
+      missingFile2 += row.missingFile2Count;
+      missingFile3 += row.missingFile3Count;
     }
+
+    rowsByMonth.set(ym, mRows);
+
+    const status: "complete" | "incomplete" | "empty" =
+      totalNormalOrders === 0
+        ? "empty"
+        : incompleteDays === 0 && completeDays > 0
+          ? "complete"
+          : "incomplete";
+
+    monthsOverview.push({
+      month: ym,
+      monthIndex: m,
+      totalDays: totalDaysForMonth,
+      completeDays,
+      incompleteDays,
+      emptyDays,
+      totalNormalOrders,
+      totalCompleteOrders,
+      missingFile1,
+      missingFile2,
+      missingFile3,
+      status,
+    });
   }
+
+  const rows = rowsByMonth.get(selectedMonth) ?? [];
 
   const recentImportRows = await query<Record<string, unknown>>(
     `SELECT id, filename, file_type, period_start, period_end, order_count, imported_at
@@ -2646,8 +2815,12 @@ export async function getDailyUploadCompleteness(
   const summary = rows.reduce(
     (acc, r) => {
       acc.totalDays += 1;
-      if (r.isComplete) acc.completeDays += 1;
-      else acc.incompleteDays += 1;
+      if (r.isComplete) {
+        acc.completeDays += 1;
+      } else {
+        acc.incompleteDays += 1;
+        if (r.normalOrders === 0) acc.emptyDays += 1;
+      }
       acc.totalNormalOrders += r.normalOrders;
       acc.totalCompleteOrders += r.completeCount;
       acc.totalMissingFile1 += r.missingFile1Count;
@@ -2659,6 +2832,7 @@ export async function getDailyUploadCompleteness(
       totalDays: 0,
       completeDays: 0,
       incompleteDays: 0,
+      emptyDays: 0,
       totalNormalOrders: 0,
       totalCompleteOrders: 0,
       totalMissingFile1: 0,
@@ -2668,9 +2842,12 @@ export async function getDailyUploadCompleteness(
   );
 
   return {
+    year: selectedYear,
+    availableYears,
     month: selectedMonth,
     availableMonths:
       availableMonths.length > 0 ? availableMonths : [selectedMonth],
+    monthsOverview,
     mode,
     rows,
     summary,
