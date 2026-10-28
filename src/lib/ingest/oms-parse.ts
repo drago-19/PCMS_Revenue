@@ -98,8 +98,21 @@ export function normalizeChannel(raw: Primitive | undefined): string {
   const text = String(raw ?? "").trim();
   const lower = text.toLowerCase();
   if (!lower || lower === "-") return "TikTok";
-  if (lower.includes("tiktok") || lower.includes("tik tok")) return "TikTok";
-  if (lower.includes("shopee")) return "Shopee";
+  if (
+    lower.includes("tiktok") ||
+    lower.includes("tik tok") ||
+    lower.includes("ติ๊กต") ||
+    lower === "ตต"
+  ) {
+    return "TikTok";
+  }
+  if (
+    lower.includes("shopee") ||
+    lower.includes("ช้อปปี้") ||
+    lower.includes("ช๊อปปี้")
+  ) {
+    return "Shopee";
+  }
   if (lower.includes("facebook") || lower === "fb" || lower.includes("เพจ")) return "Facebook";
   if (lower.includes("lazada")) return "Lazada";
   if (lower.includes("line")) return "LINE";

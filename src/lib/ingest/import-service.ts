@@ -509,6 +509,11 @@ export async function reconcileAndSyncThreeFiles(
         AND LENGTH(o.marketplace_order_prefix) >= 14
         AND LEFT(t.external_id, 15) = o.marketplace_order_prefix
        WHERE o.matched_external_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM oms_orders o2
+           WHERE o2.matched_external_id = t.external_id
+             AND o2.order_code <> o.order_code
+         )
        ORDER BY o.order_code,
          CASE WHEN ABS(t.income - o.sales_amount) < 0.01 THEN 0 ELSE 1 END,
          CASE WHEN t.created_date = o.created_date THEN 0 ELSE 1 END,
@@ -525,15 +530,19 @@ export async function reconcileAndSyncThreeFiles(
 
   // 3. If an OMS order now matched a real Settlement row, remove any temporary 'คำสั่งซื้อ (OMS)' row for that order_code
   //    Backed by partial index ix_transactions_oms_temp
-  await query(
+  const deletedTempRows = await query<{ paid_date: string }>(
     `DELETE FROM transactions t
      USING oms_orders o
      WHERE t.transaction_type = 'คำสั่งซื้อ (OMS)'
        AND o.matched_external_id IS NOT NULL
-       AND (t.order_code = o.order_code OR t.external_id = o.order_code OR t.external_id = o.marketplace_order_norm)`,
+       AND (t.order_code = o.order_code OR t.external_id = o.order_code OR t.external_id = o.marketplace_order_norm)
+     RETURNING t.paid_date`,
     [],
     client,
   );
+  const deletedTempPaidDates = deletedTempRows
+    .map((r) => String(r.paid_date ?? ""))
+    .filter((d) => d && d !== "unknown");
 
   // 4. For TikTok & Shopee OMS orders that do NOT have a Settlement row (newly imported or not yet in transactions),
   //    create/upsert a bill row in transactions so they appear in /bills and can be tracked.
@@ -734,6 +743,19 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
+  // 5b. Keep oms_order_items.channel aligned with oms_orders.channel (e.g. Shopee vs TikTok)
+  await query(
+    `UPDATE oms_order_items i
+     SET channel = o.channel
+     FROM oms_orders o
+     WHERE i.order_code = o.order_code
+       AND (i.import_id = $1 OR o.import_id = $1)
+       AND o.channel IN ('TikTok', 'Shopee')
+       AND i.channel IS DISTINCT FROM o.channel`,
+    [fallbackImportId],
+    client,
+  );
+
   // 6. Sync human-readable SKU + Product Name summary into transactions.product_detail
   //    Incremental: only aggregate order_codes touched in this import or transactions still missing product_detail
   await query(
@@ -769,7 +791,10 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
-  await refreshSummaryTables(client, { importId: fallbackImportId });
+  await refreshSummaryTables(client, {
+    importId: fallbackImportId,
+    dates: deletedTempPaidDates,
+  });
 
   return {
     matchedOrders: Number(matchedCountRow?.c ?? 0),
@@ -793,7 +818,12 @@ export async function refreshSummaryTables(
        SELECT DISTINCT t.paid_date
        FROM oms_orders o
        JOIN transactions t ON t.external_id = o.matched_external_id AND t.is_order = 1
-       WHERE o.import_id = $1 AND t.paid_date <> '' AND t.paid_date <> 'unknown'`,
+       WHERE o.import_id = $1 AND t.paid_date <> '' AND t.paid_date <> 'unknown'
+       UNION
+       SELECT DISTINCT o.paid_date
+       FROM oms_orders o
+       JOIN transactions t ON t.external_id = o.matched_external_id AND t.is_order = 1
+       WHERE t.import_id = $1 AND o.paid_date <> '' AND o.paid_date <> 'unknown'`,
       [scope.importId],
       client,
     );

@@ -2478,6 +2478,8 @@ export type UploadDateMode = "created" | "paid";
 export interface DailyUploadCompletenessRow {
   date: string;
   normalOrders: number;
+  tiktokOrders: number;
+  shopeeOrders: number;
   completeCount: number;
   missingFile1Count: number;
   missingFile2Count: number;
@@ -2496,6 +2498,8 @@ export interface MonthlyCompletenessOverview {
   incompleteDays: number;
   emptyDays: number;
   totalNormalOrders: number;
+  totalTiktokOrders: number;
+  totalShopeeOrders: number;
   totalCompleteOrders: number;
   missingFile1: number;
   missingFile2: number;
@@ -2517,6 +2521,8 @@ export interface DailyUploadCompletenessReport {
     incompleteDays: number;
     emptyDays: number;
     totalNormalOrders: number;
+    totalTiktokOrders: number;
+    totalShopeeOrders: number;
     totalCompleteOrders: number;
     totalMissingFile1: number;
     totalMissingFile2: number;
@@ -2621,10 +2627,24 @@ export async function getDailyUploadCompleteness(
          COUNT(*)::int AS normal_orders,
          SUM(
            CASE
+             WHEN COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok'
+             THEN 1
+             ELSE 0
+           END
+         )::int AS tiktok_orders,
+         SUM(
+           CASE
+             WHEN t.channel = 'Shopee'
+             THEN 1
+             ELSE 0
+           END
+         )::int AS shopee_orders,
+         SUM(
+           CASE
              WHEN t.order_code IS NOT NULL
               AND t.order_code <> ''
               AND ${hasItemsSql}
-              AND (t.channel <> 'TikTok' OR t.transaction_type <> 'คำสั่งซื้อ (OMS)')
+              AND (COALESCE(NULLIF(t.channel, ''), 'TikTok') <> 'TikTok' OR t.transaction_type <> 'คำสั่งซื้อ (OMS)')
              THEN 1
              ELSE 0
            END
@@ -2647,7 +2667,7 @@ export async function getDailyUploadCompleteness(
          )::int AS missing_file2_count,
          SUM(
            CASE
-             WHEN t.channel = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+             WHEN COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
              THEN 1
              ELSE 0
            END
@@ -2679,9 +2699,29 @@ export async function getDailyUploadCompleteness(
   let maxDateInYear = "";
   for (const r of rawRows) {
     const date = String(r.d ?? "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && date > maxDateInYear) {
+      maxDateInYear = date;
+    }
+  }
+
+  let recentCutoffDate = "";
+  if (maxDateInYear) {
+    const maxTs = Date.parse(`${maxDateInYear}T00:00:00Z`);
+    if (Number.isFinite(maxTs)) {
+      recentCutoffDate = new Date(maxTs - 7 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+    }
+  }
+
+  for (const r of rawRows) {
+    const date = String(r.d ?? "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    if (date > maxDateInYear) maxDateInYear = date;
     const normalOrders = Number(r.normal_orders ?? 0);
+    const shopeeOrders = Number(r.shopee_orders ?? 0);
+    const tiktokOrders = Number(
+      r.tiktok_orders ?? Math.max(0, normalOrders - shopeeOrders),
+    );
     const rawMissingFile1 = Number(r.missing_file1_count ?? 0);
     const rawMissingFile2 = Number(r.missing_file2_count ?? 0);
     const rawMissingFile3 = Number(r.missing_file3_count ?? 0);
@@ -2689,12 +2729,15 @@ export async function getDailyUploadCompleteness(
 
     const hasFile1Orders = normalOrders - rawMissingFile1;
     const hasFile2Orders = hasFile1Orders - rawMissingFile2;
-    const hasFile3Orders = normalOrders - rawMissingFile3;
+    const tiktokSettledOrders = Math.max(0, tiktokOrders - rawMissingFile3);
 
-    // ถือว่าอัปโหลดไฟล์ของวันนั้นแล้วเมื่อมีข้อมูลของไฟล์นั้นในวันดังกล่าว:
-    // - ไฟล์ 1 (ออเดอร์ Shipnity): มีออเดอร์ที่มี order_code ในวันนั้น (และขาดไม่เกิน 5%)
-    // - ไฟล์ 2 (สินค้า Shipnity): มีออเดอร์ที่มีรายการสินค้าในวันนั้น (และขาดไม่เกิน 5%)
-    // - ไฟล์ 3 (รายได้ TikTok): มีรายการโอนเงินจริงของวันนั้นแล้ว (ทั้งตามวันสั่งซื้อหรือวันโอนเงิน paid_date)
+    // แยกตรวจสอบ TikTok และ Shopee ตามกฎของระบบ:
+    // - ไฟล์ 1 (ออเดอร์ Shipnity — TikTok + Shopee): มีออเดอร์ที่มี order_code ในวันนั้น (และขาดไม่เกิน 5%)
+    // - ไฟล์ 2 (สินค้า Shipnity — TikTok + Shopee): มีออเดอร์ที่มีรายการสินค้าในวันนั้น (และขาดไม่เกิน 5%)
+    // - ไฟล์ 3 (รายได้ TikTok — เฉพาะ TikTok เท่านั้น ห้ามนำ Shopee มาคิดรวม):
+    //   * หากวันนั้นมีเฉพาะออเดอร์ Shopee (tiktokOrders === 0) ถือว่าครบ (เพราะ Shopee ใช้แค่ 2 ไฟล์จาก Shipnity)
+    //   * หากมีออเดอร์ TikTok ต้องมีบิล TikTok ที่จับคู่รายได้แล้ว >= 95% (ขาดไม่เกิน 5%)
+    //     ยกเว้นช่วง 7 วันล่าสุดของข้อมูล (recentCutoffDate) ที่ของยังอยู่ระหว่างขนส่ง/รอ COD หากอัปไฟล์รายได้ถึงวันนั้นแล้วให้ถือว่าครบ
     const hasFile1 =
       normalOrders > 0 &&
       hasFile1Orders > 0 &&
@@ -2704,8 +2747,14 @@ export async function getDailyUploadCompleteness(
       hasFile1 &&
       hasFile2Orders > 0 &&
       rawMissingFile2 / normalOrders < 0.05;
+    const isRecentInTransitWindow =
+      mode === "created" && recentCutoffDate !== "" && date >= recentCutoffDate;
     const hasFile3 =
-      normalOrders > 0 && (hasFile3Orders > 0 || hasPaidSettlement);
+      normalOrders > 0 &&
+      (tiktokOrders === 0
+        ? true
+        : (tiktokSettledOrders > 0 && rawMissingFile3 / tiktokOrders < 0.05) ||
+          (isRecentInTransitWindow && hasPaidSettlement));
 
     const missingFile1Count = hasFile1 ? 0 : rawMissingFile1;
     const missingFile2Count = hasFile2 ? 0 : rawMissingFile2;
@@ -2718,6 +2767,8 @@ export async function getDailyUploadCompleteness(
     byDate.set(date, {
       date,
       normalOrders,
+      tiktokOrders,
+      shopeeOrders,
       completeCount,
       missingFile1Count,
       missingFile2Count,
@@ -2748,6 +2799,8 @@ export async function getDailyUploadCompleteness(
     let incompleteDays = 0;
     let emptyDays = 0;
     let totalNormalOrders = 0;
+    let totalTiktokOrders = 0;
+    let totalShopeeOrders = 0;
     let totalCompleteOrders = 0;
     let missingFile1 = 0;
     let missingFile2 = 0;
@@ -2760,6 +2813,8 @@ export async function getDailyUploadCompleteness(
       const row: DailyUploadCompletenessRow = existing ?? {
         date: iso,
         normalOrders: 0,
+        tiktokOrders: 0,
+        shopeeOrders: 0,
         completeCount: 0,
         missingFile1Count: 0,
         missingFile2Count: 0,
@@ -2777,32 +2832,48 @@ export async function getDailyUploadCompleteness(
         if (row.normalOrders === 0) emptyDays += 1;
       }
       totalNormalOrders += row.normalOrders;
+      totalTiktokOrders += row.tiktokOrders;
+      totalShopeeOrders += row.shopeeOrders;
       totalCompleteOrders += row.completeCount;
       missingFile1 += row.missingFile1Count;
       missingFile2 += row.missingFile2Count;
       missingFile3 += row.missingFile3Count;
     }
 
-    // หากเดือนนั้นมีการอัปโหลดครบทั้ง 3 ไฟล์แล้วในทุกวันที่มีออเดอร์ (missingFile1/2/3 = 0 ทั้งหมด)
-    // วันที่ไม่มีออเดอร์เลย (normalOrders === 0 เช่น วันหยุดหรือวันที่ไม่มีคำสั่งซื้อ) จะถือว่าข้อมูลครบแล้ว ไม่แจ้งเตือนสีแดงว่าขาดไฟล์
+    // วันที่ไม่มีออเดอร์เลย (normalOrders === 0 เช่น วันหยุดหรือวันที่ไม่มีคำสั่งซื้อ)
+    // ที่อยู่ในช่วงวันที่ที่มีการอัปโหลดข้อมูลของเดือนนั้นแล้ว (ระหว่างวันแรกถึงวันสุดท้ายที่มีออเดอร์ครบในเดือนนั้น)
+    // จะถือว่าตรวจสอบครบแล้ว (ไม่มีคำสั่งซื้อ 0 บิล) ส่วนช่วงวันที่ก่อน/หลังที่ยังไม่ได้อัปโหลดไฟล์เลย (เช่น 1–14 มิ.ย.) จะยังแสดงว่ายังไม่อัปโหลด
+    const completeDatesInMonth = mRows
+      .filter((r) => r.normalOrders > 0 && r.isComplete)
+      .map((r) => r.date);
+    const minCompleteDateInMonth = completeDatesInMonth[0] ?? "";
+    const maxCompleteDateInMonth =
+      completeDatesInMonth[completeDatesInMonth.length - 1] ?? "";
+
     if (
-      completeDays > 0 &&
+      completeDatesInMonth.length > 0 &&
       missingFile1 === 0 &&
       missingFile2 === 0 &&
       missingFile3 === 0 &&
       emptyDays > 0
     ) {
+      let newlyCompletedEmpty = 0;
       for (const r of mRows) {
-        if (r.normalOrders === 0) {
+        if (
+          r.normalOrders === 0 &&
+          r.date >= minCompleteDateInMonth &&
+          r.date <= maxCompleteDateInMonth
+        ) {
           r.hasFile1 = true;
           r.hasFile2 = true;
           r.hasFile3 = true;
           r.isComplete = true;
+          newlyCompletedEmpty += 1;
         }
       }
-      completeDays = totalDaysForMonth;
-      incompleteDays = 0;
-      emptyDays = 0;
+      completeDays += newlyCompletedEmpty;
+      incompleteDays -= newlyCompletedEmpty;
+      emptyDays -= newlyCompletedEmpty;
     }
 
     rowsByMonth.set(ym, mRows);
@@ -2822,6 +2893,8 @@ export async function getDailyUploadCompleteness(
       incompleteDays,
       emptyDays,
       totalNormalOrders,
+      totalTiktokOrders,
+      totalShopeeOrders,
       totalCompleteOrders,
       missingFile1,
       missingFile2,
@@ -2842,6 +2915,8 @@ export async function getDailyUploadCompleteness(
         if (r.normalOrders === 0) acc.emptyDays += 1;
       }
       acc.totalNormalOrders += r.normalOrders;
+      acc.totalTiktokOrders += r.tiktokOrders;
+      acc.totalShopeeOrders += r.shopeeOrders;
       acc.totalCompleteOrders += r.completeCount;
       acc.totalMissingFile1 += r.missingFile1Count;
       acc.totalMissingFile2 += r.missingFile2Count;
@@ -2854,6 +2929,8 @@ export async function getDailyUploadCompleteness(
       incompleteDays: 0,
       emptyDays: 0,
       totalNormalOrders: 0,
+      totalTiktokOrders: 0,
+      totalShopeeOrders: 0,
       totalCompleteOrders: 0,
       totalMissingFile1: 0,
       totalMissingFile2: 0,

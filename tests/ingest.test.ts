@@ -1885,6 +1885,63 @@ test("getDailyUploadCompleteness reports complete days, missing files per day, a
   assert.equal(report.summary.totalDays, 3);
   assert.equal(report.summary.completeDays, 1);
   assert.equal(report.summary.incompleteDays, 2);
+
+  // Verify TikTok vs Shopee separation: Shopee orders never satisfy missing TikTok File 3,
+  // while Shopee-only days only require File 1 & File 2 from Shipnity.
+  const channelMockDb = {
+    async query(sql: string) {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      if (clean.includes("SELECT DISTINCT SUBSTRING")) {
+        return { rows: [{ ym: "2026-07" }] };
+      }
+      if (clean.includes("WITH settled_paid_dates AS")) {
+        return {
+          rows: [
+            {
+              d: "2026-07-27",
+              normal_orders: 22,
+              tiktok_orders: 21,
+              shopee_orders: 1,
+              complete_count: 3,
+              missing_file1_count: 0,
+              missing_file2_count: 0,
+              missing_file3_count: 19,
+              has_paid_settlement: 0,
+            },
+            {
+              d: "2026-07-28",
+              normal_orders: 5,
+              tiktok_orders: 0,
+              shopee_orders: 5,
+              complete_count: 5,
+              missing_file1_count: 0,
+              missing_file2_count: 0,
+              missing_file3_count: 0,
+              has_paid_settlement: 0,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+  const channelReport = await getDailyUploadCompleteness(
+    { month: "2026-07", mode: "created" },
+    channelMockDb as never,
+  );
+  const day27 = channelReport.rows.find((r) => r.date === "2026-07-27");
+  const day28 = channelReport.rows.find((r) => r.date === "2026-07-28");
+  assert.ok(day27);
+  assert.equal(day27.hasFile1, true);
+  assert.equal(day27.hasFile2, true);
+  assert.equal(day27.hasFile3, false);
+  assert.equal(day27.missingFile3Count, 19);
+  assert.equal(day27.isComplete, false);
+  assert.ok(day28);
+  assert.equal(day28.hasFile1, true);
+  assert.equal(day28.hasFile2, true);
+  assert.equal(day28.hasFile3, true);
+  assert.equal(day28.isComplete, true);
 });
 
 test("listBills supports filtering by createdDate (order creation date)", async () => {
