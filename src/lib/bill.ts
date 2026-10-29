@@ -265,11 +265,12 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
 
   const feeGroups: BillFeeGroup[] = [];
   for (const group of FEE_GROUPS) {
-    const value = normalized.feeGroups[group.key];
+    const value = normalized.feeGroups?.[group.key];
     if (!value) continue;
+    const childrenMap = value.children ?? {};
     const children: BillLine[] = [];
     for (const childKey of group.children) {
-      const amount = round2(value.children[childKey] ?? 0);
+      const amount = round2(childrenMap[childKey] ?? 0);
       if (amount === 0) continue;
       let label = labelFor(childKey);
       if (label === group.label) continue;
@@ -288,11 +289,12 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
         kind: "line",
       });
     }
-    if (value.total === 0 && children.length === 0) continue;
+    const groupTotal = round2(value.total ?? 0);
+    if (groupTotal === 0 && children.length === 0) continue;
     feeGroups.push({
       key: group.key,
       label: group.label,
-      amount: round2(value.total),
+      amount: groupTotal,
       children,
     });
   }

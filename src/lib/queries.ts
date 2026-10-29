@@ -95,6 +95,7 @@ export interface TransactionRow {
   importImportedAt?: string;
   channel: string;
   orderCode: string | null;
+  omsOrderUid?: string | null;
   buyerName?: string | null;
   buyerTaxId?: string | null;
   buyerAddress?: string | null;
@@ -177,6 +178,15 @@ export interface BillListResult {
     fees: number;
     payout: number;
     count: number;
+  };
+  periodNetSummary: {
+    orderCount: number;
+    orderIncome: number;
+    orderFees: number;
+    orderPayout: number;
+    otherCount: number;
+    otherPayout: number;
+    totalPayout: number;
   };
   dateScope: {
     minPaidDate: string | null;
@@ -315,8 +325,14 @@ export function mapTransaction(row: Record<string, unknown>): TransactionRow {
       !isZeroRevenueSettlement && row.invoice_no ? String(row.invoice_no) : null,
     importFilename: row.import_filename ? String(row.import_filename) : undefined,
     importImportedAt: row.import_imported_at ? String(row.import_imported_at) : undefined,
-    channel: row.channel ? String(row.channel) : "TikTok",
+    channel:
+      txType !== "คำสั่งซื้อ (OMS)"
+        ? "TikTok"
+        : row.channel
+          ? String(row.channel)
+          : "TikTok",
     orderCode: row.order_code ? String(row.order_code) : null,
+    omsOrderUid: row.oms_order_uid ? String(row.oms_order_uid) : null,
     buyerName: row.buyer_name ? String(row.buyer_name) : null,
     buyerTaxId: row.buyer_tax_id ? String(row.buyer_tax_id) : null,
     buyerAddress: row.buyer_address ? String(row.buyer_address) : null,
@@ -328,14 +344,22 @@ async function enrichTransactionsWithOms(
   db?: Queryable,
 ): Promise<TransactionRow[]> {
   const sellerSettings = await getDocumentSettings(db);
-  const orderCodes = [
+  const orderUids = [
     ...new Set(
       txRows
+        .map((r) => r.omsOrderUid)
+        .filter((uid): uid is string => Boolean(uid)),
+    ),
+  ];
+  const fallbackCodes = [
+    ...new Set(
+      txRows
+        .filter((r) => !r.omsOrderUid && r.orderCode)
         .map((r) => r.orderCode)
         .filter((code): code is string => Boolean(code)),
     ),
   ];
-  if (orderCodes.length === 0) {
+  if (orderUids.length === 0 && fallbackCodes.length === 0) {
     return txRows.map((tx) => ({
       ...tx,
       invoiceNo: formatInvoiceNoWithPrefix(
@@ -349,38 +373,53 @@ async function enrichTransactionsWithOms(
 
   const [orderMetaRows, itemRows] = await Promise.all([
     query<Record<string, unknown>>(
-      "SELECT * FROM oms_orders WHERE order_code = ANY($1::text[])",
-      [orderCodes],
+      `SELECT * FROM oms_orders
+       WHERE ($1::text[] IS NOT NULL AND order_uid = ANY($1::text[]))
+          OR ($2::text[] IS NOT NULL AND order_code = ANY($2::text[]))`,
+      [
+        orderUids.length > 0 ? orderUids : null,
+        fallbackCodes.length > 0 ? fallbackCodes : null,
+      ],
       db,
     ),
     query<Record<string, unknown>>(
-      "SELECT * FROM oms_order_items WHERE order_code = ANY($1::text[]) ORDER BY order_code ASC, line_no ASC",
-      [orderCodes],
+      `SELECT * FROM oms_order_items
+       WHERE ($1::text[] IS NOT NULL AND order_uid = ANY($1::text[]))
+          OR ($2::text[] IS NOT NULL AND order_code = ANY($2::text[]))
+       ORDER BY order_uid ASC, line_no ASC`,
+      [
+        orderUids.length > 0 ? orderUids : null,
+        fallbackCodes.length > 0 ? fallbackCodes : null,
+      ],
       db,
     ),
   ]);
 
-  const orderMap = new Map<string, Record<string, unknown>>();
+  const orderByUid = new Map<string, Record<string, unknown>>();
+  const orderByCode = new Map<string, Record<string, unknown>>();
   for (const o of orderMetaRows) {
-    orderMap.set(String(o.order_code), o);
+    if (o.order_uid) orderByUid.set(String(o.order_uid), o);
+    if (o.order_code) orderByCode.set(String(o.order_code), o);
   }
 
-  const itemMap = new Map<
-    string,
-    {
-      items: OmsLineItem[];
-      address: string | null;
-      postalCode: string | null;
-      phone: string | null;
-      name: string | null;
-      trackingNo: string | null;
-      courier: string | null;
-    }
-  >();
+  type ItemBucket = {
+    items: OmsLineItem[];
+    address: string | null;
+    postalCode: string | null;
+    phone: string | null;
+    name: string | null;
+    trackingNo: string | null;
+    courier: string | null;
+  };
+  const itemByUid = new Map<string, ItemBucket>();
+  const itemByCode = new Map<string, ItemBucket>();
 
   for (const it of itemRows) {
+    const uid = it.order_uid ? String(it.order_uid) : "";
     const code = String(it.order_code);
-    let entry = itemMap.get(code);
+    const key = uid || code;
+    const targetMap = uid ? itemByUid : itemByCode;
+    let entry = targetMap.get(key);
     if (!entry) {
       entry = {
         items: [],
@@ -391,7 +430,10 @@ async function enrichTransactionsWithOms(
         trackingNo: null,
         courier: null,
       };
-      itemMap.set(code, entry);
+      targetMap.set(key, entry);
+      if (uid && !itemByCode.has(code)) {
+        itemByCode.set(code, entry);
+      }
     }
     entry.items.push({
       skuCode: String(it.sku_code ?? ""),
@@ -413,16 +455,71 @@ async function enrichTransactionsWithOms(
       sellerSettings.invoicePrefix,
       tx.paidDate || tx.createdDate,
     );
-    if (!tx.orderCode) {
+    if (!tx.omsOrderUid && !tx.orderCode) {
       return { ...tx, invoiceNo: formattedInvoiceNo, sellerSettings };
     }
-    const o = orderMap.get(tx.orderCode);
-    const it = itemMap.get(tx.orderCode);
+    const o =
+      (tx.omsOrderUid ? orderByUid.get(tx.omsOrderUid) : undefined) ??
+      (tx.orderCode ? orderByCode.get(tx.orderCode) : undefined);
+    const it =
+      (tx.omsOrderUid ? itemByUid.get(tx.omsOrderUid) : undefined) ??
+      (tx.orderCode ? itemByCode.get(tx.orderCode) : undefined);
+    const resolvedChannel =
+      tx.transactionType !== "คำสั่งซื้อ (OMS)"
+        ? "TikTok"
+        : o?.channel
+          ? String(o.channel)
+          : tx.channel;
+    const shipCust =
+      o?.shipping_fee_customer !== undefined
+        ? Number(o.shipping_fee_customer)
+        : Number(tx.normalized.fields.shippingCustomerFee ?? 0);
+    const shipSellerAbs =
+      o?.shipping_fee_seller !== undefined
+        ? Math.abs(Number(o.shipping_fee_seller))
+        : Math.abs(Number(tx.feeTotal ?? 0));
+    const effectiveFeeTotal = shipSellerAbs > 0 ? -shipSellerAbs : Number(tx.feeTotal ?? 0);
+    const enrichedNormalized =
+      tx.transactionType === "คำสั่งซื้อ (OMS)"
+        ? {
+            ...tx.normalized,
+            fields: {
+              ...tx.normalized.fields,
+              customerPayment:
+                Number(tx.normalized.fields.customerPayment ?? 0) > 0
+                  ? Number(tx.normalized.fields.customerPayment)
+                  : Number(tx.income ?? 0),
+              shippingCustomerFee: shipCust,
+              shippingTotal: effectiveFeeTotal,
+              shippingSellerTotal: effectiveFeeTotal,
+              shippingActual: effectiveFeeTotal,
+              shippingActualFee: effectiveFeeTotal,
+            },
+            feeGroups:
+              shipSellerAbs > 0 || shipCust > 0
+                ? {
+                    ...tx.normalized.feeGroups,
+                    shipping: {
+                      total: effectiveFeeTotal,
+                      children: {
+                        ...(shipSellerAbs > 0
+                          ? { shippingActual: effectiveFeeTotal }
+                          : {}),
+                        ...(shipCust > 0
+                          ? { shippingCustomerFee: shipCust }
+                          : {}),
+                      },
+                    },
+                  }
+                : {},
+          }
+        : tx.normalized;
     return {
       ...tx,
+      normalized: enrichedNormalized,
       invoiceNo: formattedInvoiceNo,
       sellerSettings,
-      channel: o?.channel ? String(o.channel) : tx.channel,
+      channel: resolvedChannel,
       customerName: (o?.customer_name ? String(o.customer_name) : null) ?? it?.name ?? null,
       customerPhone: (o?.customer_phone ? String(o.customer_phone) : null) ?? it?.phone ?? null,
       customerAddress: it?.address ?? null,
@@ -461,7 +558,7 @@ export async function listImports(
 }
 
 export async function listImportsPaged(
-  options: { page?: number; pageSize?: number } = {},
+  options: { page?: number; pageSize?: number; date?: string } = {},
   db?: Queryable,
 ): Promise<{
   rows: ImportRow[];
@@ -469,20 +566,68 @@ export async function listImportsPaged(
   page: number;
   pageSize: number;
   pageCount: number;
+  totals: {
+    orderCount: number;
+    latestPaidDate: string | null;
+  };
 }> {
   const pageSize = Math.min(200, Math.max(10, options.pageSize ?? 20));
   const rawPage = Math.max(1, options.page ?? 1);
-  const countRow = await queryOne<{ c: string | number }>(
-    "SELECT COUNT(*) AS c FROM imports",
-    [],
+  const date = (options.date ?? "").trim().slice(0, 32);
+
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (date) {
+    const isMonthFilter = /^\d{4}-\d{2}$/.test(date);
+    const isYearFilter = /^\d{4}$/.test(date);
+    const isDayFilter = /^\d{4}-\d{2}-\d{2}$/.test(date);
+
+    if (isDayFilter) {
+      clauses.push(
+        `((period_start IS NOT NULL AND period_end IS NOT NULL AND period_start <= $1 AND period_end >= $1) OR period_start = $1 OR period_end = $1)`,
+      );
+      params.push(date);
+    } else if (isMonthFilter) {
+      const mStart = `${date}-01`;
+      const mEnd = `${date}-31`;
+      clauses.push(
+        `((period_start IS NOT NULL AND period_end IS NOT NULL AND period_start <= $1 AND period_end >= $2) OR period_start LIKE $3 OR period_end LIKE $3)`,
+      );
+      params.push(mEnd, mStart, `${date}-%`);
+    } else if (isYearFilter) {
+      const yStart = `${date}-01-01`;
+      const yEnd = `${date}-12-31`;
+      clauses.push(
+        `((period_start IS NOT NULL AND period_end IS NOT NULL AND period_start <= $1 AND period_end >= $2) OR period_start LIKE $3 OR period_end LIKE $3)`,
+      );
+      params.push(yEnd, yStart, `${date}-%`);
+    } else {
+      const safeDate = escapeLikePattern(date);
+      clauses.push(
+        `(period_start LIKE $1 ESCAPE '\\' OR period_end LIKE $1 ESCAPE '\\' OR filename ILIKE $1 ESCAPE '\\')`,
+      );
+      params.push(`%${safeDate}%`);
+    }
+  }
+
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+
+  const aggRow = await queryOne<Record<string, unknown>>(
+    `SELECT
+       COUNT(*) AS c,
+       COALESCE(SUM(order_count), 0) AS order_count,
+       MAX(COALESCE(NULLIF(period_end, ''), NULLIF(period_start, ''))) AS latest_paid_date
+     FROM imports ${where}`,
+    params,
     db,
   );
-  const total = Number(countRow?.c ?? 0);
+  const total = Number(aggRow?.c ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(rawPage, pageCount);
   const rows = await query<Record<string, unknown>>(
-    `SELECT ${IMPORT_META_COLS} FROM imports ORDER BY id DESC LIMIT $1 OFFSET $2`,
-    [pageSize, (page - 1) * pageSize],
+    `SELECT ${IMPORT_META_COLS} FROM imports ${where} ORDER BY id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, pageSize, (page - 1) * pageSize],
     db,
   );
   return {
@@ -491,6 +636,12 @@ export async function listImportsPaged(
     page,
     pageSize,
     pageCount,
+    totals: {
+      orderCount: Number(aggRow?.order_count ?? 0),
+      latestPaidDate: aggRow?.latest_paid_date
+        ? String(aggRow.latest_paid_date)
+        : null,
+    },
   };
 }
 
@@ -944,7 +1095,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
              i.sku_code,
              MAX(i.product_name),
              COALESCE(SUM(i.quantity), 0)::int,
-             COUNT(DISTINCT i.order_code)::int,
+             COUNT(DISTINCT COALESCE(NULLIF(i.order_uid, ''), i.order_code))::int,
              ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
              ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
              COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
@@ -1131,10 +1282,21 @@ export async function listDailyBatchesPaged(
   page: number;
   pageSize: number;
   pageCount: number;
+  totals: {
+    orderCount: number;
+    orderIncome: number;
+    orderFees: number;
+    orderPayout: number;
+    totalPayout: number;
+  };
 }> {
   const pageSize = Math.min(200, Math.max(10, options.pageSize ?? 20));
   const rawPage = Math.max(1, options.page ?? 1);
-  const q = escapeLikePattern(options.q ?? "");
+  const rawQ = (options.q ?? "").trim();
+  const isMonthFilter = /^\d{4}-\d{2}$/.test(rawQ);
+  const isYearFilter = /^\d{4}$/.test(rawQ);
+  const isDayFilter = /^\d{4}-\d{2}-\d{2}$/.test(rawQ);
+  const q = escapeLikePattern(rawQ);
   const sortKey: DailyBatchSortKey =
     options.sort && options.sort in DAILY_BATCH_SORT_SQL
       ? options.sort
@@ -1148,14 +1310,32 @@ export async function listDailyBatchesPaged(
   );
   if (Number(summaryCountRow?.c ?? 0) > 0) {
     const sParams: unknown[] = [];
-    const sWhere = q ? "WHERE paid_date LIKE $1 ESCAPE '\\'" : "";
-    if (q) sParams.push(`%${q}%`);
-    const countRow = await queryOne<{ c: string | number }>(
-      `SELECT COUNT(*) AS c FROM daily_summaries ${sWhere}`,
+    let sWhere = "";
+    if (rawQ) {
+      if (isDayFilter) {
+        sWhere = "WHERE paid_date = $1";
+        sParams.push(rawQ);
+      } else if (isMonthFilter || isYearFilter) {
+        sWhere = "WHERE paid_date LIKE $1";
+        sParams.push(`${rawQ}-%`);
+      } else {
+        sWhere = "WHERE paid_date LIKE $1 ESCAPE '\\'";
+        sParams.push(`%${q}%`);
+      }
+    }
+    const aggRow = await queryOne<Record<string, unknown>>(
+      `SELECT
+         COUNT(*) AS c,
+         COALESCE(SUM(order_count), 0) AS order_count,
+         ROUND(COALESCE(SUM(order_income), 0)::numeric, 2) AS order_income,
+         ROUND(COALESCE(SUM(order_fees), 0)::numeric, 2) AS order_fees,
+         ROUND(COALESCE(SUM(order_payout), 0)::numeric, 2) AS order_payout,
+         ROUND(COALESCE(SUM(total_payout), 0)::numeric, 2) AS total_payout
+       FROM daily_summaries ${sWhere}`,
       sParams,
       db,
     );
-    const total = Number(countRow?.c ?? 0);
+    const total = Number(aggRow?.c ?? 0);
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(rawPage, pageCount);
     const rows = await query<Record<string, unknown>>(
@@ -1194,22 +1374,44 @@ export async function listDailyBatchesPaged(
       page,
       pageSize,
       pageCount,
+      totals: {
+        orderCount: Number(aggRow?.order_count ?? 0),
+        orderIncome: Number(aggRow?.order_income ?? 0),
+        orderFees: Number(aggRow?.order_fees ?? 0),
+        orderPayout: Number(aggRow?.order_payout ?? 0),
+        totalPayout: Number(aggRow?.total_payout ?? 0),
+      },
     };
   }
 
   const params: unknown[] = [];
   let dateFilter = "paid_date <> '' AND paid_date <> 'unknown'";
-  if (q) {
-    dateFilter += ` AND paid_date LIKE $${params.length + 1} ESCAPE '\\'`;
-    params.push(`%${q}%`);
+  if (rawQ) {
+    if (isDayFilter) {
+      dateFilter += ` AND paid_date = $${params.length + 1}`;
+      params.push(rawQ);
+    } else if (isMonthFilter || isYearFilter) {
+      dateFilter += ` AND paid_date LIKE $${params.length + 1}`;
+      params.push(`${rawQ}-%`);
+    } else {
+      dateFilter += ` AND paid_date LIKE $${params.length + 1} ESCAPE '\\'`;
+      params.push(`%${q}%`);
+    }
   }
 
-  const countRow = await queryOne<{ c: string | number }>(
-    `SELECT COUNT(DISTINCT paid_date) AS c FROM transactions WHERE ${dateFilter}`,
+  const aggRow = await queryOne<Record<string, unknown>>(
+    `SELECT
+       COUNT(DISTINCT paid_date) AS c,
+       COALESCE(SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END), 0) AS order_count,
+       ROUND(COALESCE(SUM(CASE WHEN is_order = 1 THEN income ELSE 0 END), 0)::numeric, 2) AS order_income,
+       ROUND(COALESCE(SUM(CASE WHEN is_order = 1 THEN fee_total ELSE 0 END), 0)::numeric, 2) AS order_fees,
+       ROUND(COALESCE(SUM(CASE WHEN is_order = 1 THEN payout ELSE 0 END), 0)::numeric, 2) AS order_payout,
+       ROUND(COALESCE(SUM(payout), 0)::numeric, 2) AS total_payout
+     FROM transactions WHERE ${dateFilter}`,
     params,
     db,
   );
-  const total = Number(countRow?.c ?? 0);
+  const total = Number(aggRow?.c ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(rawPage, pageCount);
 
@@ -1251,12 +1453,25 @@ export async function listDailyBatchesPaged(
     page,
     pageSize,
     pageCount,
+    totals: {
+      orderCount: Number(aggRow?.order_count ?? 0),
+      orderIncome: Number(aggRow?.order_income ?? 0),
+      orderFees: Number(aggRow?.order_fees ?? 0),
+      orderPayout: Number(aggRow?.order_payout ?? 0),
+      totalPayout: Number(aggRow?.total_payout ?? 0),
+    },
   };
 }
 
 const ORDER_LINK_PRIORITY_SQL = `(
   CASE
-    WHEN (t.order_code IS NOT NULL AND t.order_code <> '' AND t.transaction_type <> 'คำสั่งซื้อ (OMS)') THEN 0
+    WHEN (
+      t.order_code IS NOT NULL AND t.order_code <> ''
+      AND (
+        t.transaction_type <> 'คำสั่งซื้อ (OMS)'
+        OR (t.channel = 'Shopee' AND NULLIF(t.product_detail, '') IS NOT NULL)
+      )
+    ) THEN 0
     WHEN (t.order_code IS NOT NULL AND t.order_code <> '') THEN 1
     ELSE 2
   END
@@ -2010,36 +2225,49 @@ export async function listBills(
   let distinctDates = 0;
   const channelCounts: Record<string, number> = { all: 0, TikTok: 0, Shopee: 0 };
 
-  if (canUseFastSummary) {
-    const dsParams: unknown[] = [];
-    let dsWhere = "";
-    if (date) {
-      if (isMonthFilter || isYearFilter) {
-        dsWhere = "WHERE paid_date LIKE $1";
-        dsParams.push(`${date}-%`);
-      } else {
-        dsWhere = "WHERE paid_date = $1";
-        dsParams.push(date);
-      }
+  const dsParams: unknown[] = [];
+  let dsWhere = "";
+  if (date) {
+    if (isMonthFilter || isYearFilter) {
+      dsWhere = "WHERE paid_date LIKE $1";
+      dsParams.push(`${date}-%`);
+    } else {
+      dsWhere = "WHERE paid_date = $1";
+      dsParams.push(date);
     }
+  }
 
-    const dsRow = await queryOne<Record<string, unknown>>(
-      `SELECT
-         COALESCE(SUM(order_count), 0) AS order_count,
-         ROUND(COALESCE(SUM(order_income), 0)::numeric, 2) AS order_income,
-         ROUND(COALESCE(SUM(order_fees), 0)::numeric, 2) AS order_fees,
-         ROUND(COALESCE(SUM(order_payout), 0)::numeric, 2) AS order_payout,
-         COALESCE(SUM(tiktok_count), 0) AS tiktok_count,
-         COALESCE(SUM(shopee_count), 0) AS shopee_count,
-         MIN(paid_date) AS min_paid_date,
-         MAX(paid_date) AS max_paid_date,
-         COUNT(*) AS distinct_dates
-       FROM daily_summaries
-       ${dsWhere}`,
-      dsParams,
-      db,
-    );
+  const dsRow = await queryOne<Record<string, unknown>>(
+    `SELECT
+       COALESCE(SUM(order_count), 0) AS order_count,
+       ROUND(COALESCE(SUM(order_income), 0)::numeric, 2) AS order_income,
+       ROUND(COALESCE(SUM(order_fees), 0)::numeric, 2) AS order_fees,
+       ROUND(COALESCE(SUM(order_payout), 0)::numeric, 2) AS order_payout,
+       COALESCE(SUM(other_count), 0) AS other_count,
+       ROUND(COALESCE(SUM(other_payout), 0)::numeric, 2) AS other_payout,
+       ROUND(COALESCE(SUM(total_payout), 0)::numeric, 2) AS total_payout,
+       COALESCE(SUM(tiktok_count), 0) AS tiktok_count,
+       COALESCE(SUM(shopee_count), 0) AS shopee_count,
+       MIN(paid_date) AS min_paid_date,
+       MAX(paid_date) AS max_paid_date,
+       COUNT(*) AS distinct_dates
+     FROM daily_summaries
+     ${dsWhere}`,
+    dsParams,
+    db,
+  );
 
+  const periodNetSummary = {
+    orderCount: Number(dsRow?.order_count ?? 0),
+    orderIncome: Number(dsRow?.order_income ?? 0),
+    orderFees: Number(dsRow?.order_fees ?? 0),
+    orderPayout: Number(dsRow?.order_payout ?? 0),
+    otherCount: Number(dsRow?.other_count ?? 0),
+    otherPayout: Number(dsRow?.other_payout ?? 0),
+    totalPayout: Number(dsRow?.total_payout ?? 0),
+  };
+
+  if (canUseFastSummary) {
     const dsOrderCount = Number(dsRow?.order_count ?? 0);
     if (dsOrderCount > 0) {
       const dsTikTokCount = Number(dsRow?.tiktok_count ?? 0);
@@ -2197,6 +2425,7 @@ export async function listBills(
       fees: summaryFees,
       payout: summaryPayout,
     },
+    periodNetSummary,
     dateScope: {
       minPaidDate,
       maxPaidDate,
@@ -2327,6 +2556,7 @@ export async function listSkuSummariesPaged(
     page?: number;
     pageSize?: number;
     q?: string;
+    date?: string;
     channel?: string;
     sort?: SkuSortKey;
   } = {},
@@ -2347,10 +2577,126 @@ export async function listSkuSummariesPaged(
   const pageSize = Math.min(200, Math.max(10, options.pageSize ?? 20));
   const rawPage = Math.max(1, options.page ?? 1);
   const q = escapeLikePattern(options.q ?? "");
+  const date = (options.date ?? "").trim().slice(0, 32);
   const channel = (options.channel ?? "all").trim().slice(0, 32);
   const sortKey: SkuSortKey =
     options.sort && options.sort in SKU_SORT_SQL ? options.sort : "qty_desc";
   const orderBySql = SKU_SORT_SQL[sortKey];
+
+  if (date) {
+    const isMonthFilter = /^\d{4}-\d{2}$/.test(date);
+    const isYearFilter = /^\d{4}$/.test(date);
+    const isDayFilter = /^\d{4}-\d{2}-\d{2}$/.test(date);
+
+    const itemClauses: string[] = [
+      "COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')",
+    ];
+    const itemParams: unknown[] = [];
+
+    if (isDayFilter) {
+      itemClauses.push(
+        `COALESCE(NULLIF(i.paid_date, ''), i.created_date) = $${itemParams.length + 1}`,
+      );
+      itemParams.push(date);
+    } else if (isMonthFilter || isYearFilter) {
+      itemClauses.push(
+        `COALESCE(NULLIF(i.paid_date, ''), i.created_date) LIKE $${itemParams.length + 1}`,
+      );
+      itemParams.push(`${date}-%`);
+    } else {
+      const safeDate = escapeLikePattern(date);
+      itemClauses.push(
+        `COALESCE(NULLIF(i.paid_date, ''), i.created_date) LIKE $${itemParams.length + 1} ESCAPE '\\'`,
+      );
+      itemParams.push(`%${safeDate}%`);
+    }
+
+    if (channel === "TikTok") {
+      itemClauses.push("COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok'");
+    } else if (channel === "Shopee") {
+      itemClauses.push("i.channel = 'Shopee'");
+    }
+
+    if (q) {
+      itemClauses.push(
+        `(i.sku_code ILIKE $${itemParams.length + 1} ESCAPE '\\' OR i.product_name ILIKE $${itemParams.length + 2} ESCAPE '\\')`,
+      );
+      itemParams.push(`%${q}%`, `%${q}%`);
+    }
+
+    const itemWhere = `WHERE ${itemClauses.join(" AND ")}`;
+    const filteredCteSql = `
+      WITH s AS (
+        SELECT
+          i.sku_code,
+          MAX(i.product_name) AS product_name,
+          COALESCE(SUM(i.quantity), 0)::int AS total_qty,
+          COUNT(DISTINCT COALESCE(NULLIF(i.order_uid, ''), i.order_code))::int AS order_count,
+          ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2) AS gross_amount,
+          ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2) AS net_sales_amount,
+          COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int AS tiktok_qty,
+          COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int AS shopee_qty,
+          0::int AS facebook_qty
+        FROM oms_order_items i
+        ${itemWhere}
+        GROUP BY i.sku_code
+      )
+    `;
+
+    const summaryRow = await queryOne<Record<string, unknown>>(
+      `${filteredCteSql}
+       SELECT
+         COUNT(*) AS sku_count,
+         COALESCE(SUM(s.total_qty), 0) AS total_qty,
+         ROUND(COALESCE(SUM(s.gross_amount), 0)::numeric, 2) AS gross_amount,
+         ROUND(COALESCE(SUM(s.net_sales_amount), 0)::numeric, 2) AS net_sales_amount
+       FROM s`,
+      itemParams,
+      db,
+    );
+
+    const total = Number(summaryRow?.sku_count ?? 0);
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(rawPage, pageCount);
+
+    const rows = await query<Record<string, unknown>>(
+      `${filteredCteSql}
+       SELECT
+         s.*,
+         COALESCE(p.default_price, 0) AS default_price
+       FROM s
+       LEFT JOIN products p ON p.sku_code = s.sku_code
+       ORDER BY ${orderBySql}
+       LIMIT $${itemParams.length + 1} OFFSET $${itemParams.length + 2}`,
+      [...itemParams, pageSize, (page - 1) * pageSize],
+      db,
+    );
+
+    return {
+      rows: rows.map((r) => ({
+        skuCode: String(r.sku_code ?? ""),
+        productName: String(r.product_name ?? ""),
+        defaultPrice: Number(r.default_price ?? 0),
+        totalQty: Number(r.total_qty ?? 0),
+        orderCount: Number(r.order_count ?? 0),
+        grossAmount: Number(r.gross_amount ?? 0),
+        netSalesAmount: Number(r.net_sales_amount ?? 0),
+        tiktokQty: Number(r.tiktok_qty ?? 0),
+        shopeeQty: Number(r.shopee_qty ?? 0),
+        facebookQty: Number(r.facebook_qty ?? 0),
+      })),
+      total,
+      page,
+      pageSize,
+      pageCount,
+      totals: {
+        skuCount: total,
+        totalQty: Number(summaryRow?.total_qty ?? 0),
+        grossAmount: Number(summaryRow?.gross_amount ?? 0),
+        netSalesAmount: Number(summaryRow?.net_sales_amount ?? 0),
+      },
+    };
+  }
 
   const clauses: string[] = ["(s.tiktok_qty > 0 OR s.shopee_qty > 0)"];
   const params: unknown[] = [];
@@ -2504,6 +2850,7 @@ export interface MonthlyCompletenessOverview {
   missingFile1: number;
   missingFile2: number;
   missingFile3: number;
+  hasUploadedSettlement?: boolean;
   status: "complete" | "incomplete" | "empty";
 }
 
@@ -2611,9 +2958,9 @@ export async function getDailyUploadCompleteness(
   }
   const availableYears = Array.from(availableYearsSet).sort((a, b) => b - a);
 
-  const hasItemsSql = `(NULLIF(t.product_detail, '') IS NOT NULL OR EXISTS (SELECT 1 FROM oms_order_items oi WHERE oi.order_code = t.order_code))`;
+  const hasItemsSql = `(NULLIF(t.product_detail, '') IS NOT NULL OR EXISTS (SELECT 1 FROM oms_order_items oi WHERE (NULLIF(t.oms_order_uid, '') IS NOT NULL AND oi.order_uid = t.oms_order_uid) OR (NULLIF(t.oms_order_uid, '') IS NULL AND oi.order_code = t.order_code)))`;
 
-  const [rawRows, recentImportRows] = await Promise.all([
+  const [rawRows, recentImportRows, importPeriodRows] = await Promise.all([
     query<Record<string, unknown>>(
       `WITH settled_paid_dates AS (
          SELECT DISTINCT paid_date AS d
@@ -2693,7 +3040,34 @@ export async function getDailyUploadCompleteness(
       [],
       db,
     ),
+    query<Record<string, unknown>>(
+      `SELECT file_type, period_start, period_end
+       FROM imports
+       WHERE period_start IS NOT NULL
+         AND period_end IS NOT NULL
+         AND period_start ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         AND period_end ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         AND period_start >= '2000-01-01'`,
+      [],
+      db,
+    ),
   ]);
+
+  const settlementPeriods: { start: string; end: string }[] = [];
+  for (const r of importPeriodRows) {
+    const ft = String(r.file_type ?? "settlement");
+    const start = String(r.period_start ?? "");
+    const end = String(r.period_end ?? "");
+    if (
+      ft === "settlement" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(start) &&
+      /^\d{4}-\d{2}-\d{2}$/.test(end)
+    ) {
+      settlementPeriods.push({ start, end });
+    }
+  }
+  const isDateInSettlementPeriods = (iso: string): boolean =>
+    settlementPeriods.some((p) => iso >= p.start && iso <= p.end);
 
   const byDate = new Map<string, DailyUploadCompletenessRow>();
   let maxDateInYear = "";
@@ -2821,7 +3195,7 @@ export async function getDailyUploadCompleteness(
         missingFile3Count: 0,
         hasFile1: false,
         hasFile2: false,
-        hasFile3: false,
+        hasFile3: isDateInSettlementPeriods(iso),
         isComplete: false,
       };
       mRows.push(row);
@@ -2841,8 +3215,9 @@ export async function getDailyUploadCompleteness(
     }
 
     // วันที่ไม่มีออเดอร์เลย (normalOrders === 0 เช่น วันหยุดหรือวันที่ไม่มีคำสั่งซื้อ)
-    // ที่อยู่ในช่วงวันที่ที่มีการอัปโหลดข้อมูลของเดือนนั้นแล้ว (ระหว่างวันแรกถึงวันสุดท้ายที่มีออเดอร์ครบในเดือนนั้น)
-    // จะถือว่าตรวจสอบครบแล้ว (ไม่มีคำสั่งซื้อ 0 บิล) ส่วนช่วงวันที่ก่อน/หลังที่ยังไม่ได้อัปโหลดไฟล์เลย (เช่น 1–14 มิ.ย.) จะยังแสดงว่ายังไม่อัปโหลด
+    // ที่อยู่ในช่วงวันที่ที่มีการอัปโหลดข้อมูลของเดือนนั้นแล้ว (ระหว่างวันแรกถึงวันสุดท้ายที่มีออเดอร์ครบในเดือนนั้น
+    // หรืออยู่ในช่วงวันที่ของไฟล์รายได้ TikTok ที่อัปโหลดแล้ว) และบิลทั้งหมดในเดือนนั้นครบทั้ง 3 ไฟล์แล้ว
+    // จะถือว่าตรวจสอบครบแล้ว (ไม่มีคำสั่งซื้อ 0 บิล)
     const completeDatesInMonth = mRows
       .filter((r) => r.normalOrders > 0 && r.isComplete)
       .map((r) => r.date);
@@ -2861,8 +3236,9 @@ export async function getDailyUploadCompleteness(
       for (const r of mRows) {
         if (
           r.normalOrders === 0 &&
-          r.date >= minCompleteDateInMonth &&
-          r.date <= maxCompleteDateInMonth
+          ((r.date >= minCompleteDateInMonth &&
+            r.date <= maxCompleteDateInMonth) ||
+            r.hasFile3)
         ) {
           r.hasFile1 = true;
           r.hasFile2 = true;
@@ -2899,6 +3275,7 @@ export async function getDailyUploadCompleteness(
       missingFile1,
       missingFile2,
       missingFile3,
+      hasUploadedSettlement: mRows.some((r) => r.hasFile3),
       status,
     });
   }

@@ -51,6 +51,7 @@ export interface ImportResult {
   rowCount: number;
   orderCount: number;
   transactionCount: number;
+  systemOrderCount?: number;
   periodStart: string | null;
   periodEnd: string | null;
   headerSignature: string;
@@ -156,13 +157,23 @@ function parseJsonField<T>(value: unknown, fallback: T): T {
   return value as T;
 }
 
-async function readExistingImport(id: number): Promise<ImportResult | null> {
-  const row = await queryOne<Record<string, unknown>>(
-    `SELECT id, filename, file_type, status, row_count, order_count, transaction_count,
-            period_start, period_end, header_signature, warnings_json, reconciliation_json
-     FROM imports WHERE id = $1`,
-    [id],
+async function readSystemOrderCount(): Promise<number> {
+  const row = await queryOne<{ c: string | number }>(
+    "SELECT COALESCE(SUM(order_count), 0) AS c FROM daily_summaries",
   );
+  return Number(row?.c ?? 0);
+}
+
+async function readExistingImport(id: number): Promise<ImportResult | null> {
+  const [row, systemOrderCount] = await Promise.all([
+    queryOne<Record<string, unknown>>(
+      `SELECT id, filename, file_type, status, row_count, order_count, transaction_count,
+              period_start, period_end, header_signature, warnings_json, reconciliation_json
+       FROM imports WHERE id = $1`,
+      [id],
+    ),
+    readSystemOrderCount(),
+  ]);
   if (!row) return null;
   return {
     importId: Number(row.id),
@@ -173,6 +184,7 @@ async function readExistingImport(id: number): Promise<ImportResult | null> {
     rowCount: Number(row.row_count),
     orderCount: Number(row.order_count),
     transactionCount: Number(row.transaction_count),
+    systemOrderCount,
     periodStart: row.period_start ? String(row.period_start) : null,
     periodEnd: row.period_end ? String(row.period_end) : null,
     headerSignature: String(row.header_signature ?? ""),
@@ -194,7 +206,7 @@ function invoicePrefix(paidAt: string): string {
   return `${SELLER.invoicePrefix}${yy}${mm}`;
 }
 
-async function saveOmsOrdersBatch(
+export async function saveOmsOrdersBatch(
   orders: ParsedOmsOrder[],
   importId: number,
   client: Queryable,
@@ -202,7 +214,7 @@ async function saveOmsOrdersBatch(
   if (orders.length === 0) return;
   const deduped = new Map<string, ParsedOmsOrder>();
   for (const order of orders) {
-    deduped.set(order.orderCode, order);
+    deduped.set(order.orderUid, order);
   }
   const uniqueOrders = [...deduped.values()];
   const BATCH_SIZE = 300;
@@ -214,11 +226,12 @@ async function saveOmsOrdersBatch(
 
     for (let i = 0; i < chunk.length; i++) {
       const o = chunk[i]!;
-      const base = i * 26;
+      const base = i * 27;
       placeholders.push(
-        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16},$${base + 17},$${base + 18},$${base + 19},$${base + 20},$${base + 21},$${base + 22},$${base + 23},$${base + 24},$${base + 25},$${base + 26})`,
+        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16},$${base + 17},$${base + 18},$${base + 19},$${base + 20},$${base + 21},$${base + 22},$${base + 23},$${base + 24},$${base + 25},$${base + 26},$${base + 27})`,
       );
       params.push(
+        o.orderUid,
         o.orderCode,
         importId,
         o.channel,
@@ -250,13 +263,14 @@ async function saveOmsOrdersBatch(
 
     await query(
       `INSERT INTO oms_orders (
-        order_code, import_id, channel, customer_name, customer_phone, contact_name,
+        order_uid, order_code, import_id, channel, customer_name, customer_phone, contact_name,
         courier, shipping_fee_customer, shipping_fee_seller, province, bank, tracking_no,
         note, created_by, created_date, paid_date, printed_date,
         marketplace_order_raw, marketplace_order_norm, marketplace_order_prefix, marketplace_order_float,
         discount_code, discount_total, total_qty, sales_amount, profit_amount
       ) VALUES ${placeholders.join(", ")}
-      ON CONFLICT (order_code) DO UPDATE SET
+      ON CONFLICT (order_uid) DO UPDATE SET
+        order_code = EXCLUDED.order_code,
         import_id = EXCLUDED.import_id,
         channel = EXCLUDED.channel,
         customer_name = COALESCE(EXCLUDED.customer_name, oms_orders.customer_name),
@@ -282,6 +296,11 @@ async function saveOmsOrdersBatch(
         total_qty = CASE WHEN EXCLUDED.total_qty > 0 THEN EXCLUDED.total_qty ELSE oms_orders.total_qty END,
         sales_amount = EXCLUDED.sales_amount,
         profit_amount = EXCLUDED.profit_amount,
+        matched_external_id = CASE
+          WHEN EXCLUDED.channel = 'Shopee' THEN NULL
+          WHEN oms_orders.marketplace_order_norm IS DISTINCT FROM EXCLUDED.marketplace_order_norm THEN NULL
+          ELSE oms_orders.matched_external_id
+        END,
         updated_at = now()`,
       params,
       client,
@@ -289,20 +308,20 @@ async function saveOmsOrdersBatch(
   }
 }
 
-async function saveOmsItemsBatch(
+export async function saveOmsItemsBatch(
   items: ParsedOmsItem[],
   importId: number,
   client: Queryable,
 ): Promise<void> {
   if (items.length === 0) return;
 
-  const orderCodes = [...new Set(items.map((item) => item.orderCode))];
-  const ORDER_CODE_CHUNK = 1000;
-  for (let start = 0; start < orderCodes.length; start += ORDER_CODE_CHUNK) {
-    const codeChunk = orderCodes.slice(start, start + ORDER_CODE_CHUNK);
+  const orderUids = [...new Set(items.map((item) => item.orderUid))];
+  const ORDER_UID_CHUNK = 1000;
+  for (let start = 0; start < orderUids.length; start += ORDER_UID_CHUNK) {
+    const uidChunk = orderUids.slice(start, start + ORDER_UID_CHUNK);
     await query(
-      "DELETE FROM oms_order_items WHERE order_code = ANY($1::text[])",
-      [codeChunk],
+      "DELETE FROM oms_order_items WHERE order_uid = ANY($1::text[])",
+      [uidChunk],
       client,
     );
   }
@@ -315,12 +334,13 @@ async function saveOmsItemsBatch(
 
     for (let i = 0; i < chunk.length; i++) {
       const it = chunk[i]!;
-      const base = i * 21;
+      const base = i * 22;
       placeholders.push(
-        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16},$${base + 17},$${base + 18},$${base + 19},$${base + 20},$${base + 21})`,
+        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16},$${base + 17},$${base + 18},$${base + 19},$${base + 20},$${base + 21},$${base + 22})`,
       );
       params.push(
         importId,
+        it.orderUid,
         it.orderCode,
         it.lineNo,
         it.skuCode,
@@ -346,13 +366,14 @@ async function saveOmsItemsBatch(
 
     await query(
       `INSERT INTO oms_order_items (
-        import_id, order_code, line_no, sku_code, product_name, unit_price, quantity,
+        import_id, order_uid, order_code, line_no, sku_code, product_name, unit_price, quantity,
         order_sales_amount, shipping_fee_customer, sender_name, customer_name,
         customer_address, postal_code, customer_phone, paid_date, created_date,
         courier, channel, bank, note, tracking_no
       ) VALUES ${placeholders.join(", ")}
-      ON CONFLICT (order_code, line_no) DO UPDATE SET
+      ON CONFLICT (order_uid, line_no) DO UPDATE SET
         import_id = EXCLUDED.import_id,
+        order_code = EXCLUDED.order_code,
         sku_code = EXCLUDED.sku_code,
         product_name = EXCLUDED.product_name,
         unit_price = EXCLUDED.unit_price,
@@ -406,13 +427,14 @@ async function saveOmsItemsBatch(
     );
   }
 
-  // Ensure baseline oms_orders exist even if File 3 (items) was uploaded before File 1 (orders)
-  for (let start = 0; start < orderCodes.length; start += ORDER_CODE_CHUNK) {
-    const codeChunk = orderCodes.slice(start, start + ORDER_CODE_CHUNK);
+  // Ensure baseline oms_orders exist even if File 2 (items) was uploaded before File 1 (orders)
+  for (let start = 0; start < orderUids.length; start += ORDER_UID_CHUNK) {
+    const uidChunk = orderUids.slice(start, start + ORDER_UID_CHUNK);
     await query(
       `WITH agg AS (
          SELECT
-           order_code,
+           order_uid,
+           MAX(order_code) AS order_code,
            MAX(channel) AS channel,
            MAX(customer_name) AS customer_name,
            MAX(customer_phone) AS customer_phone,
@@ -427,27 +449,27 @@ async function saveOmsItemsBatch(
            SUM(unit_price * quantity) AS list_total,
            MAX(order_sales_amount) AS sales_amount
          FROM oms_order_items
-         WHERE order_code = ANY($1::text[])
-         GROUP BY order_code
+         WHERE order_uid = ANY($1::text[])
+         GROUP BY order_uid
        )
        INSERT INTO oms_orders (
-         order_code, import_id, channel, customer_name, customer_phone, courier,
+         order_uid, order_code, import_id, channel, customer_name, customer_phone, courier,
          shipping_fee_customer, bank, tracking_no, note, created_date, paid_date,
          discount_total, total_qty, sales_amount, profit_amount
        )
        SELECT
-         a.order_code, $2, COALESCE(a.channel, 'TikTok'), a.customer_name, a.customer_phone, a.courier,
+         a.order_uid, a.order_code, $2, COALESCE(a.channel, 'TikTok'), a.customer_name, a.customer_phone, a.courier,
          COALESCE(a.shipping_fee_customer, 0), a.bank, a.tracking_no, a.note,
          COALESCE(a.created_date, ''), COALESCE(a.paid_date, ''),
          GREATEST(0, COALESCE(a.list_total, 0) - COALESCE(a.sales_amount, 0)),
          COALESCE(a.total_qty, 1), COALESCE(a.sales_amount, 0), COALESCE(a.sales_amount, 0)
        FROM agg a
-       ON CONFLICT (order_code) DO UPDATE SET
+       ON CONFLICT (order_uid) DO UPDATE SET
          customer_name = COALESCE(oms_orders.customer_name, EXCLUDED.customer_name),
          customer_phone = COALESCE(oms_orders.customer_phone, EXCLUDED.customer_phone),
          tracking_no = COALESCE(oms_orders.tracking_no, EXCLUDED.tracking_no),
          total_qty = CASE WHEN oms_orders.total_qty > 0 THEN oms_orders.total_qty ELSE EXCLUDED.total_qty END`,
-      [codeChunk, importId],
+      [uidChunk, importId],
       client,
     );
   }
@@ -475,6 +497,27 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
+  // 0b. Never allow Shopee OMS orders to hold a TikTok Settlement matched_external_id,
+  //     and never allow TikTok Settlement rows to have channel = 'Shopee'
+  await query(
+    `UPDATE oms_orders
+     SET matched_external_id = NULL,
+         updated_at = now()
+     WHERE channel = 'Shopee'
+       AND matched_external_id IS NOT NULL`,
+    [],
+    client,
+  );
+  await query(
+    `UPDATE transactions
+     SET channel = 'TikTok'
+     WHERE is_order = 1
+       AND transaction_type <> 'คำสั่งซื้อ (OMS)'
+       AND channel <> 'TikTok'`,
+    [],
+    client,
+  );
+
   // 1. Exact Marketplace Order ID match (scoped to unmatched OMS orders or current import)
   await query(
     `UPDATE oms_orders o
@@ -494,11 +537,10 @@ export async function reconcileAndSyncThreeFiles(
   );
 
   // 2. Smart Prefix (15-digit) + Amount + Date match for TikTok 18-digit Order IDs rounded to scientific notation by Excel
-  //    Backed by ix_oms_orders_unmatched + ix_transactions_ext_prefix15
   await query(
     `WITH candidates AS (
-       SELECT DISTINCT ON (o.order_code)
-         o.order_code,
+       SELECT DISTINCT ON (o.order_uid)
+         o.order_uid,
          t.external_id
        FROM oms_orders o
        JOIN transactions t
@@ -512,9 +554,9 @@ export async function reconcileAndSyncThreeFiles(
          AND NOT EXISTS (
            SELECT 1 FROM oms_orders o2
            WHERE o2.matched_external_id = t.external_id
-             AND o2.order_code <> o.order_code
+             AND o2.order_uid <> o.order_uid
          )
-       ORDER BY o.order_code,
+       ORDER BY o.order_uid,
          CASE WHEN ABS(t.income - o.sales_amount) < 0.01 THEN 0 ELSE 1 END,
          CASE WHEN t.created_date = o.created_date THEN 0 ELSE 1 END,
          ABS(t.income - o.sales_amount) ASC
@@ -523,19 +565,21 @@ export async function reconcileAndSyncThreeFiles(
      SET matched_external_id = c.external_id,
          updated_at = now()
      FROM candidates c
-     WHERE o.order_code = c.order_code`,
+     WHERE o.order_uid = c.order_uid`,
     [],
     client,
   );
 
-  // 3. If an OMS order now matched a real Settlement row, remove any temporary 'คำสั่งซื้อ (OMS)' row for that order_code
-  //    Backed by partial index ix_transactions_oms_temp
+  // 3. If an OMS order now matched a real Settlement row, remove any temporary 'คำสั่งซื้อ (OMS)' row for that exact order_uid
   const deletedTempRows = await query<{ paid_date: string }>(
     `DELETE FROM transactions t
      USING oms_orders o
      WHERE t.transaction_type = 'คำสั่งซื้อ (OMS)'
        AND o.matched_external_id IS NOT NULL
-       AND (t.order_code = o.order_code OR t.external_id = o.order_code OR t.external_id = o.marketplace_order_norm)
+       AND (
+         t.oms_order_uid = o.order_uid
+         OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
+       )
      RETURNING t.paid_date`,
     [],
     client,
@@ -555,10 +599,14 @@ export async function reconcileAndSyncThreeFiles(
          o.import_id = $1
          OR NOT EXISTS (
            SELECT 1 FROM transactions t
-           WHERE t.is_order = 1 AND t.order_code = o.order_code
+           WHERE t.is_order = 1
+             AND (
+               t.oms_order_uid = o.order_uid
+               OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
+             )
          )
        )
-     ORDER BY o.paid_date DESC, o.order_code ASC`,
+     ORDER BY o.paid_date DESC, o.order_uid ASC`,
     [fallbackImportId],
     client,
   );
@@ -567,19 +615,20 @@ export async function reconcileAndSyncThreeFiles(
   for (let start = 0; start < unmatchedRows.length; start += BATCH_SIZE) {
     const chunk = unmatchedRows.slice(start, start + BATCH_SIZE);
     const extIds: string[] = [];
-    const orderCodesInChunk: string[] = [];
+    const orderUidsInChunk: string[] = [];
     const prefixes: string[] = [];
     const params: unknown[] = [];
     const placeholders: string[] = [];
 
     for (let i = 0; i < chunk.length; i++) {
       const r = chunk[i]!;
+      const orderUid = String(r.order_uid);
       const orderCode = String(r.order_code);
       const channel = String(r.channel ?? "TikTok");
       const mpNorm = r.marketplace_order_norm ? String(r.marketplace_order_norm) : "";
       const mpRaw = r.marketplace_order_raw ? String(r.marketplace_order_raw) : "";
-      const externalId = mpNorm && mpNorm !== "-" ? mpNorm : orderCode;
-      orderCodesInChunk.push(orderCode);
+      const externalId = mpNorm && mpNorm !== "-" ? mpNorm : orderUid;
+      orderUidsInChunk.push(orderUid);
 
       const createdDate = String(r.created_date ?? "");
       const paidDate = String(r.paid_date || createdDate || "");
@@ -609,12 +658,15 @@ export async function reconcileAndSyncThreeFiles(
           paidAt: paidDate,
           currency: "THB",
           incomeTotal,
+          customerPayment: salesAmount,
           productAfterDiscount,
           productBeforeDiscount,
           storeDiscount: discountTotal > 0 ? -discountTotal : 0,
           shippingCustomerFee: shippingCustomer,
           feeTotal,
+          shippingTotal: feeTotal,
           shippingSellerTotal: feeTotal,
+          shippingActual: feeTotal,
           shippingActualFee: feeTotal,
           adjustment: 0,
           payout,
@@ -626,21 +678,26 @@ export async function reconcileAndSyncThreeFiles(
           "paidAt",
           "currency",
           "incomeTotal",
+          "customerPayment",
           "productAfterDiscount",
           "productBeforeDiscount",
           "storeDiscount",
           "shippingCustomerFee",
           "feeTotal",
+          "shippingTotal",
           "shippingSellerTotal",
+          "shippingActual",
           "payout",
         ],
         feeGroups:
-          shippingSeller > 0
+          shippingSeller > 0 || shippingCustomer > 0
             ? {
                 shipping: {
                   total: feeTotal,
                   children: {
-                    shippingActualFee: feeTotal,
+                    ...(shippingSeller > 0
+                      ? { shippingActual: feeTotal }
+                      : {}),
                     ...(shippingCustomer > 0
                       ? { shippingCustomerFee: shippingCustomer }
                       : {}),
@@ -662,9 +719,9 @@ export async function reconcileAndSyncThreeFiles(
       };
 
       const targetImportId = Number(r.import_id ?? fallbackImportId);
-      const base = i * 21;
+      const base = i * 22;
       placeholders.push(
-        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16}::jsonb,$${base + 17}::jsonb,$${base + 18}::jsonb,$${base + 19},$${base + 20},$${base + 21})`,
+        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16}::jsonb,$${base + 17}::jsonb,$${base + 18}::jsonb,$${base + 19},$${base + 20},$${base + 21},$${base + 22})`,
       );
       params.push(
         targetImportId,
@@ -688,6 +745,7 @@ export async function reconcileAndSyncThreeFiles(
         nowIso,
         channel,
         orderCode,
+        orderUid,
       );
       extIds.push(externalId);
       prefixes.push(invoicePrefix(paidDate));
@@ -698,9 +756,9 @@ export async function reconcileAndSyncThreeFiles(
        WHERE is_order = 1
          AND (
            external_id = ANY($1::text[])
-           OR (transaction_type = 'คำสั่งซื้อ (OMS)' AND (order_code = ANY($2::text[]) OR external_id = ANY($2::text[])))
+           OR (transaction_type = 'คำสั่งซื้อ (OMS)' AND oms_order_uid = ANY($2::text[]))
          )`,
-      [extIds, orderCodesInChunk],
+      [extIds, orderUidsInChunk],
       client,
     );
 
@@ -709,7 +767,7 @@ export async function reconcileAndSyncThreeFiles(
         import_id, external_id, transaction_type, is_order, created_date, paid_date,
         currency, income, fee_total, adjustment, payout, related_order_id,
         product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
-        normalized_json, created_at, channel, order_code
+        normalized_json, created_at, channel, order_code, oms_order_uid
       ) VALUES ${placeholders.join(", ")}`,
       params,
       client,
@@ -729,26 +787,50 @@ export async function reconcileAndSyncThreeFiles(
     );
   }
 
-  // 5. Stamp order_code and channel onto matched transactions (scoped to current import or unstamped transactions)
+  // 5. Stamp order_code, oms_order_uid, and channel onto matched transactions
+  //    TikTok Settlement rows (transaction_type <> 'คำสั่งซื้อ (OMS)') strictly match via external_id = o.matched_external_id
+  //    and ALWAYS keep channel = 'TikTok'
   await query(
     `UPDATE transactions t
      SET order_code = o.order_code,
-         channel = COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+         oms_order_uid = o.order_uid,
+         channel = CASE
+           WHEN t.transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 'TikTok'
+           ELSE COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+         END
      FROM oms_orders o
      WHERE t.is_order = 1
-       AND (t.import_id = $1 OR o.import_id = $1 OR t.order_code IS NULL OR t.order_code = '')
-       AND (t.external_id = o.matched_external_id OR t.order_code = o.order_code)
-       AND (t.order_code IS DISTINCT FROM o.order_code OR t.channel IS DISTINCT FROM COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok'))`,
+       AND (t.import_id = $1 OR o.import_id = $1 OR t.oms_order_uid IS NULL OR t.oms_order_uid = '')
+       AND (
+         (t.transaction_type <> 'คำสั่งซื้อ (OMS)' AND t.external_id = o.matched_external_id)
+         OR (
+           t.transaction_type = 'คำสั่งซื้อ (OMS)'
+           AND (
+             t.oms_order_uid = o.order_uid
+             OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
+           )
+         )
+       )
+       AND (
+         t.order_code IS DISTINCT FROM o.order_code
+         OR t.oms_order_uid IS DISTINCT FROM o.order_uid
+         OR t.channel IS DISTINCT FROM (
+           CASE
+             WHEN t.transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 'TikTok'
+             ELSE COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+           END
+         )
+       )`,
     [fallbackImportId],
     client,
   );
 
-  // 5b. Keep oms_order_items.channel aligned with oms_orders.channel (e.g. Shopee vs TikTok)
+  // 5b. Keep oms_order_items.channel aligned with oms_orders.channel by order_uid
   await query(
     `UPDATE oms_order_items i
      SET channel = o.channel
      FROM oms_orders o
-     WHERE i.order_code = o.order_code
+     WHERE i.order_uid = o.order_uid
        AND (i.import_id = $1 OR o.import_id = $1)
        AND o.channel IN ('TikTok', 'Shopee')
        AND i.channel IS DISTINCT FROM o.channel`,
@@ -756,30 +838,29 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
-  // 6. Sync human-readable SKU + Product Name summary into transactions.product_detail
-  //    Incremental: only aggregate order_codes touched in this import or transactions still missing product_detail
+  // 6. Sync human-readable SKU + Product Name summary into transactions.product_detail by order_uid
   await query(
     `WITH affected_orders AS (
-       SELECT DISTINCT order_code FROM oms_order_items WHERE import_id = $1
+       SELECT DISTINCT order_uid FROM oms_order_items WHERE import_id = $1
        UNION
-       SELECT DISTINCT order_code FROM oms_orders WHERE import_id = $1
+       SELECT DISTINCT order_uid FROM oms_orders WHERE import_id = $1
        UNION
-       SELECT DISTINCT order_code FROM transactions WHERE import_id = $1 AND order_code IS NOT NULL AND order_code <> ''
+       SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE import_id = $1 AND oms_order_uid IS NOT NULL AND oms_order_uid <> ''
        UNION
-       SELECT DISTINCT order_code FROM transactions WHERE is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND product_detail IS NULL
+       SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE is_order = 1 AND oms_order_uid IS NOT NULL AND oms_order_uid <> '' AND product_detail IS NULL
      ),
      item_summary AS (
        SELECT
-         i.order_code,
+         i.order_uid,
          STRING_AGG(i.sku_code || ' · ' || i.product_name || ' × ' || i.quantity::text, '; ' ORDER BY i.line_no) AS summary_text
        FROM oms_order_items i
-       JOIN affected_orders a ON a.order_code = i.order_code
-       GROUP BY i.order_code
+       JOIN affected_orders a ON a.order_uid = i.order_uid
+       GROUP BY i.order_uid
      )
      UPDATE transactions t
      SET product_detail = s.summary_text
      FROM item_summary s
-     WHERE t.order_code = s.order_code
+     WHERE t.oms_order_uid = s.order_uid
        AND t.product_detail IS DISTINCT FROM s.summary_text`,
     [fallbackImportId],
     client,
@@ -791,6 +872,8 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
+  await syncMonthlyInvoiceRegistry(client, fallbackImportId);
+
   await refreshSummaryTables(client, {
     importId: fallbackImportId,
     dates: deletedTempPaidDates,
@@ -800,6 +883,74 @@ export async function reconcileAndSyncThreeFiles(
     matchedOrders: Number(matchedCountRow?.c ?? 0),
     syncedOmsBills: unmatchedRows.length,
   };
+}
+
+export async function syncMonthlyInvoiceRegistry(
+  client: Queryable,
+  importId?: number,
+): Promise<void> {
+  await query(
+    `DELETE FROM invoice_registry r
+     WHERE NOT EXISTS (
+       SELECT 1 FROM transactions t
+       WHERE t.external_id = r.order_id AND t.is_order = 1
+     )`,
+    [],
+    client,
+  );
+
+  await query(
+    `WITH tx_ym AS (
+       SELECT r.order_id,
+              r.invoice_no,
+              r.created_at,
+              t.import_id,
+              COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') AS eff_date,
+              CASE
+                WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
+                THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
+                     || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
+                ELSE '0000'
+              END AS yymm
+       FROM invoice_registry r
+       JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
+     ),
+     dirty_months AS (
+       SELECT DISTINCT yymm FROM tx_ym
+       WHERE ($1::int IS NULL OR import_id = $1)
+          OR invoice_no NOT LIKE ('SEQ/' || yymm || '/%')
+       UNION
+       SELECT DISTINCT SUBSTRING(invoice_no FROM 5 FOR 4) AS yymm
+       FROM tx_ym
+       WHERE invoice_no LIKE 'SEQ/____/%'
+         AND SUBSTRING(invoice_no FROM 5 FOR 4) <> yymm
+     ),
+     ordered AS (
+       SELECT tx_ym.order_id,
+              tx_ym.yymm,
+              ROW_NUMBER() OVER (
+                PARTITION BY tx_ym.yymm
+                ORDER BY tx_ym.eff_date ASC, tx_ym.created_at ASC, tx_ym.order_id ASC
+              ) AS rn
+       FROM tx_ym
+       JOIN dirty_months dm ON dm.yymm = tx_ym.yymm
+     )
+     UPDATE invoice_registry r
+     SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0')
+     FROM ordered o
+     WHERE r.order_id = o.order_id
+       AND r.invoice_no IS DISTINCT FROM ('SEQ/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0'))`,
+    [importId ?? null],
+    client,
+  );
+
+  await query(
+    `UPDATE invoice_registry
+     SET invoice_no = 'SEQ/' || SUBSTRING(invoice_no FROM 13)
+     WHERE invoice_no LIKE '__TMP_SEQ__/%'`,
+    [],
+    client,
+  );
 }
 
 export async function refreshSummaryTables(
@@ -868,8 +1019,8 @@ export async function refreshSummaryTables(
          SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
          0,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type = 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND (
            ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
@@ -907,8 +1058,8 @@ export async function refreshSummaryTables(
          SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
          0,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type = 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND (
            ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
@@ -940,7 +1091,7 @@ export async function refreshSummaryTables(
          i.sku_code,
          MAX(i.product_name),
          COALESCE(SUM(i.quantity), 0)::int,
-         COUNT(DISTINCT i.order_code)::int,
+         COUNT(DISTINCT COALESCE(NULLIF(i.order_uid, ''), i.order_code))::int,
          ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
          ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
          COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
@@ -965,7 +1116,7 @@ export async function refreshSummaryTables(
          i.sku_code,
          MAX(i.product_name),
          COALESCE(SUM(i.quantity), 0)::int,
-         COUNT(DISTINCT i.order_code)::int,
+         COUNT(DISTINCT COALESCE(NULLIF(i.order_uid, ''), i.order_code))::int,
          ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
          ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
          COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
@@ -1027,7 +1178,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
         const effectiveOrders =
           reParsed.orders.length > 0
             ? reParsed.orders.length
-            : new Set(reParsed.items.map((i) => i.orderCode)).size;
+            : new Set(reParsed.items.map((i) => i.orderUid)).size;
         await withTransaction(async (client) => {
           await query(
             `UPDATE imports
@@ -1113,7 +1264,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       const effectiveOrders =
         omsParsed.orders.length > 0
           ? omsParsed.orders.length
-          : new Set(omsParsed.items.map((i) => i.orderCode)).size;
+          : new Set(omsParsed.items.map((i) => i.orderUid)).size;
 
       const inserted = await queryOne<{ id: string | number }>(
         `INSERT INTO imports (
@@ -1178,6 +1329,8 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       total: omsParsed.dataRowCount,
     });
 
+    const systemOrderCount = await readSystemOrderCount();
+
     return {
       importId,
       duplicate: false,
@@ -1187,6 +1340,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       rowCount: omsParsed.dataRowCount,
       orderCount: effectiveOrderCount,
       transactionCount: omsParsed.dataRowCount,
+      systemOrderCount,
       periodStart: omsParsed.periodStart,
       periodEnd: omsParsed.periodEnd,
       headerSignature: omsParsed.headerSignature,
@@ -1551,6 +1705,8 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
     total: parsed.transactions.length,
   });
 
+  const systemOrderCount = await readSystemOrderCount();
+
   return {
     importId,
     duplicate: false,
@@ -1560,6 +1716,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
     rowCount: parsed.dataRowCount,
     orderCount: orderTransactions.length,
     transactionCount: parsed.transactions.length,
+    systemOrderCount,
     periodStart,
     periodEnd,
     headerSignature: parsed.headerSignature,

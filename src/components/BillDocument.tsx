@@ -445,7 +445,11 @@ export function BillDocument({
           {bill.feeGroups.map((group) => (
             <div key={group.key} className="bill-group">
               <div className="bill-row group">
-                <span>{group.label}</span>
+                <span>
+                  {isOmsPlaceholder && isShopee && group.key === "shipping"
+                    ? "ยอดรวมค่าธรรมเนียมและค่าส่งที่ร้านจ่าย"
+                    : group.label}
+                </span>
                 <span className="amount">{formatTHB(group.amount)}</span>
               </div>
               {group.children.map((child) => (
@@ -455,7 +459,14 @@ export function BillDocument({
                     child.depth === 2 ? " pl-7 text-[12px] text-[#475569]" : ""
                   }`}
                 >
-                  <span>{child.label}</span>
+                  <span>
+                    {isOmsPlaceholder &&
+                    isShopee &&
+                    group.key === "shipping" &&
+                    child.key === "shippingActual"
+                      ? "ค่าธรรมเนียมและค่าส่งที่ร้านจ่าย (ตามไฟล์ Shipnity)"
+                      : child.label}
+                  </span>
                   <span className="amount">{formatTHB(child.amount)}</span>
                 </div>
               ))}
