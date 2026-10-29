@@ -345,7 +345,7 @@ export function toNumber(value: Primitive | undefined): number {
 
 function isoFromParts(year: number, month: number, day: number): string | null {
   if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
-  if (year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (year < 2000 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return null;
   const check = new Date(Date.UTC(year, month - 1, day));
   if (
     check.getUTCFullYear() !== year ||

@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-10-28-v10";
+const SCHEMA_VERSION = "2026-10-29-v13";
 
 export type { CompanyId };
 
@@ -238,15 +238,18 @@ ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_type TEXT NOT NULL DEFAULT 'se
 ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_blob BYTEA;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'TikTok';
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS order_code TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS oms_order_uid TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_name TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_tax_id TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_address TEXT;
 
 CREATE INDEX IF NOT EXISTS ix_transactions_channel ON transactions(channel);
 CREATE INDEX IF NOT EXISTS ix_transactions_order_code ON transactions(order_code);
+CREATE INDEX IF NOT EXISTS ix_transactions_oms_order_uid ON transactions(oms_order_uid);
 
 CREATE TABLE IF NOT EXISTS oms_orders (
-  order_code TEXT PRIMARY KEY,
+  order_uid TEXT PRIMARY KEY,
+  order_code TEXT NOT NULL,
   import_id BIGINT REFERENCES imports(id) ON DELETE SET NULL,
   channel TEXT NOT NULL DEFAULT 'TikTok',
   customer_name TEXT,
@@ -276,6 +279,9 @@ CREATE TABLE IF NOT EXISTS oms_orders (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE oms_orders ADD COLUMN IF NOT EXISTS order_uid TEXT;
+
+CREATE INDEX IF NOT EXISTS ix_oms_orders_order_code ON oms_orders(order_code);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_mp_norm ON oms_orders(marketplace_order_norm);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_mp_prefix ON oms_orders(marketplace_order_prefix);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_matched_ext ON oms_orders(matched_external_id);
@@ -288,6 +294,7 @@ CREATE INDEX IF NOT EXISTS ix_oms_orders_unmatched ON oms_orders(order_code)
 CREATE TABLE IF NOT EXISTS oms_order_items (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   import_id BIGINT REFERENCES imports(id) ON DELETE CASCADE,
+  order_uid TEXT NOT NULL DEFAULT '',
   order_code TEXT NOT NULL,
   line_no INTEGER NOT NULL DEFAULT 1,
   sku_code TEXT NOT NULL,
@@ -308,12 +315,17 @@ CREATE TABLE IF NOT EXISTS oms_order_items (
   bank TEXT,
   note TEXT,
   tracking_no TEXT,
-  UNIQUE(order_code, line_no)
+  UNIQUE(order_uid, line_no)
 );
 
+ALTER TABLE oms_order_items ADD COLUMN IF NOT EXISTS order_uid TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS ix_oms_items_order_uid ON oms_order_items(order_uid);
 CREATE INDEX IF NOT EXISTS ix_oms_items_order_code ON oms_order_items(order_code);
 CREATE INDEX IF NOT EXISTS ix_oms_items_sku_code ON oms_order_items(sku_code);
 CREATE INDEX IF NOT EXISTS ix_oms_items_import ON oms_order_items(import_id);
+CREATE INDEX IF NOT EXISTS ix_oms_items_paid_date ON oms_order_items(paid_date);
+CREATE INDEX IF NOT EXISTS ix_oms_items_created_date ON oms_order_items(created_date);
 
 CREATE TABLE IF NOT EXISTS products (
   sku_code TEXT PRIMARY KEY,
@@ -499,6 +511,44 @@ BEGIN
     FOR EACH ROW EXECUTE FUNCTION prevent_audit_log_mutation();
   END IF;
 
+  -- Migrate oms_orders primary key from order_code to order_uid and oms_order_items unique constraint to (order_uid, line_no)
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+    WHERE c.conrelid = 'oms_orders'::regclass
+      AND c.contype = 'p'
+      AND a.attname = 'order_code'
+  ) THEN
+    UPDATE oms_orders
+    SET order_uid = order_code || '|' || SUBSTRING(COALESCE(NULLIF(paid_date, ''), created_date) FROM 1 FOR 7) || '|' || COALESCE(NULLIF(NULLIF(tracking_no, '-'), '--'), NULLIF(paid_date, ''), created_date)
+    WHERE order_uid IS NULL OR order_uid = '';
+
+    ALTER TABLE oms_orders ALTER COLUMN order_uid SET NOT NULL;
+    ALTER TABLE oms_orders DROP CONSTRAINT oms_orders_pkey;
+    ALTER TABLE oms_orders ADD PRIMARY KEY (order_uid);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    WHERE c.conrelid = 'oms_order_items'::regclass
+      AND c.conname = 'oms_order_items_order_code_line_no_key'
+  ) THEN
+    UPDATE oms_order_items
+    SET order_uid = order_code || '|' || SUBSTRING(COALESCE(NULLIF(paid_date, ''), created_date) FROM 1 FOR 7) || '|' || COALESCE(NULLIF(NULLIF(tracking_no, '-'), '--'), NULLIF(paid_date, ''), created_date)
+    WHERE order_uid IS NULL OR order_uid = '';
+
+    ALTER TABLE oms_order_items DROP CONSTRAINT oms_order_items_order_code_line_no_key;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint c
+      WHERE c.conrelid = 'oms_order_items'::regclass
+        AND c.conname = 'oms_order_items_order_uid_line_no_key'
+    ) THEN
+      ALTER TABLE oms_order_items ADD CONSTRAINT oms_order_items_order_uid_line_no_key UNIQUE (order_uid, line_no);
+    END IF;
+  END IF;
+
   -- Fast check on pre-aggregated summary tables only (never full-scan billion-row tables on startup)
   IF EXISTS (
     SELECT 1 FROM daily_summaries WHERE facebook_count > 0
@@ -565,7 +615,7 @@ BEGIN
       i.sku_code,
       MAX(i.product_name),
       COALESCE(SUM(i.quantity), 0)::int,
-      COUNT(DISTINCT i.order_code)::int,
+      COUNT(DISTINCT COALESCE(NULLIF(i.order_uid, ''), i.order_code))::int,
       ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
       ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
@@ -575,6 +625,49 @@ BEGIN
     FROM oms_order_items i
     WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
     GROUP BY i.sku_code;
+  END IF;
+
+  -- Migrate invoice_registry to monthly running sequence ('SEQ/YYMM/00001') partitioned by bill month
+  IF EXISTS (
+    SELECT 1 FROM invoice_registry WHERE invoice_no NOT LIKE 'SEQ/____/%'
+  ) THEN
+    DELETE FROM invoice_registry r
+    WHERE NOT EXISTS (
+      SELECT 1 FROM transactions t
+      WHERE t.external_id = r.order_id AND t.is_order = 1
+    );
+
+    WITH ordered AS (
+      SELECT r.order_id,
+             CASE
+               WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
+               THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
+                    || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
+               ELSE '0000'
+             END AS yymm,
+             ROW_NUMBER() OVER (
+               PARTITION BY
+                 CASE
+                   WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
+                   THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
+                        || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
+                   ELSE '0000'
+                 END
+               ORDER BY COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') ASC,
+                        r.created_at ASC,
+                        r.order_id ASC
+             ) AS rn
+      FROM invoice_registry r
+      LEFT JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
+    )
+    UPDATE invoice_registry r
+    SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0')
+    FROM ordered o
+    WHERE r.order_id = o.order_id;
+
+    UPDATE invoice_registry
+    SET invoice_no = 'SEQ/' || SUBSTRING(invoice_no FROM 13)
+    WHERE invoice_no LIKE '__TMP_SEQ__/%';
   END IF;
 END $$;
 `;

@@ -13,7 +13,23 @@ import { lookupCustomFieldKey } from "../column-mapping-settings";
 
 export type DetectedFileType = "settlement" | "oms_orders" | "oms_items";
 
+export function buildOmsOrderUid(
+  orderCode: string,
+  paidDate: string,
+  createdDate: string,
+  trackingNo: string | null | undefined,
+): string {
+  const code = orderCode.trim();
+  const trk =
+    trackingNo && trackingNo !== "-" && trackingNo !== "--"
+      ? trackingNo.trim()
+      : "";
+  const ym = (paidDate || createdDate || "").slice(0, 7);
+  return `${code}|${ym}|${trk || paidDate || createdDate}`;
+}
+
 export interface ParsedOmsOrder {
+  orderUid: string;
   orderCode: string;
   channel: string;
   customerName: string | null;
@@ -42,6 +58,7 @@ export interface ParsedOmsOrder {
 }
 
 export interface ParsedOmsItem {
+  orderUid: string;
   orderCode: string;
   lineNo: number;
   skuCode: string;
@@ -536,9 +553,17 @@ export async function detectAndParseOmsInput(
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";
         const paidDate = parseDateValue(get("paidDate")).iso ?? createdDate;
         const printedDate = parseDateValue(get("printedDate")).iso ?? "";
+        const trackingNo = cleanText(get("trackingNo"));
         const mp = normalizeMarketplaceId(get("marketplaceOrderId"));
+        const orderUid = buildOmsOrderUid(
+          orderCode,
+          paidDate,
+          createdDate,
+          trackingNo,
+        );
 
         parsedOrders.push({
+          orderUid,
           orderCode,
           channel,
           customerName: cleanText(get("customerName")),
@@ -549,7 +574,7 @@ export async function detectAndParseOmsInput(
           shippingFeeSeller: round2(toNumber(get("shippingFeeSeller"))),
           province: cleanText(get("province")),
           bank: cleanText(get("bank")),
-          trackingNo: cleanText(get("trackingNo")),
+          trackingNo,
           note: cleanText(get("note")),
           createdBy: cleanText(get("createdBy")),
           createdDate,
@@ -582,13 +607,20 @@ export async function detectAndParseOmsInput(
         if (channel !== "TikTok" && channel !== "Shopee") continue;
 
         totalDataRows++;
-        const nextLine = (lineCounter.get(orderCode) ?? 0) + 1;
-        lineCounter.set(orderCode, nextLine);
-
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";
         const paidDate = parseDateValue(get("paidDate")).iso ?? createdDate;
+        const trackingNo = cleanText(get("trackingNo"));
+        const orderUid = buildOmsOrderUid(
+          orderCode,
+          paidDate,
+          createdDate,
+          trackingNo,
+        );
+        const nextLine = (lineCounter.get(orderUid) ?? 0) + 1;
+        lineCounter.set(orderUid, nextLine);
 
         parsedItems.push({
+          orderUid,
           orderCode,
           lineNo: nextLine,
           skuCode,
@@ -608,7 +640,7 @@ export async function detectAndParseOmsInput(
           channel,
           bank: cleanText(get("bank")),
           note: cleanText(get("note")),
-          trackingNo: cleanText(get("trackingNo")),
+          trackingNo,
         });
       }
     }
