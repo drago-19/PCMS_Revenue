@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { DatePickerField } from "@/components/DatePickerField";
+import { FilterForm } from "@/components/FilterForm";
 import { EmptyState, PageHeader, StatCard } from "@/components/PageHeader";
 import { PaginationBar } from "@/components/PaginationBar";
 import {
@@ -22,8 +24,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatTHB } from "@/lib/format";
-import { type SkuSortKey, listSkuSummariesPaged } from "@/lib/queries";
+import { formatDate, formatDateLong, formatTHB } from "@/lib/format";
+import {
+  type SkuSortKey,
+  listDailyBatches,
+  listSkuSummariesPaged,
+} from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -40,17 +46,42 @@ const VALID_SKU_SORTS: SkuSortKey[] = [
   "price_asc",
 ];
 
+const THAI_MONTHS_SHORT = [
+  "",
+  "ม.ค.",
+  "ก.พ.",
+  "มี.ค.",
+  "เม.ย.",
+  "พ.ค.",
+  "มิ.ย.",
+  "ก.ค.",
+  "ส.ค.",
+  "ก.ย.",
+  "ต.ค.",
+  "พ.ย.",
+  "ธ.ค.",
+];
+
+function formatYearMonthLabel(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  if (!m) return ym;
+  const monthIdx = Number(m[2]);
+  return `${THAI_MONTHS_SHORT[monthIdx] ?? m[2]} ${m[1]}`;
+}
+
 export default async function ProductsPage({
   searchParams,
 }: {
   searchParams: Promise<{
     q?: string;
+    date?: string;
     sort?: string;
     page?: string;
   }>;
 }) {
   const params = await searchParams;
   const q = (params.q ?? "").trim();
+  const date = (params.date ?? "").trim();
   const rawSort = (params.sort ?? "qty_desc").trim() as SkuSortKey;
   const sort: SkuSortKey = VALID_SKU_SORTS.includes(rawSort)
     ? rawSort
@@ -60,9 +91,13 @@ export default async function ProductsPage({
   function buildProductsHref(overrides: {
     nextSort?: SkuSortKey;
     nextPage?: number;
+    nextDate?: string;
   }) {
     const search = new URLSearchParams();
     if (q) search.set("q", q);
+    const targetDate =
+      overrides.nextDate !== undefined ? overrides.nextDate : date;
+    if (targetDate) search.set("date", targetDate);
     const targetSort = overrides.nextSort ?? sort;
     if (targetSort !== "qty_desc") search.set("sort", targetSort);
     const targetPage = overrides.nextPage ?? 1;
@@ -71,21 +106,47 @@ export default async function ProductsPage({
     return qs ? `/products?${qs}` : "/products";
   }
 
-  const result = await listSkuSummariesPaged({
-    q,
-    sort,
-    page,
-    pageSize: 20,
-  });
+  const [result, dailyBatches] = await Promise.all([
+    listSkuSummariesPaged({
+      q,
+      date,
+      sort,
+      page,
+      pageSize: 20,
+    }),
+    listDailyBatches(1000),
+  ]);
 
-  const hasFilters = Boolean(q || sort !== "qty_desc");
+  const availableDates = dailyBatches.map((b) => ({
+    date: b.date,
+    count: b.orderCount,
+  }));
+
+  const isMonthSelected = /^\d{4}-\d{2}$/.test(date);
+  const isDaySelected = /^\d{4}-\d{2}-\d{2}$/.test(date);
+  const isYearSelected = /^\d{4}$/.test(date);
+  const scopeHintLabel = date
+    ? isMonthSelected
+      ? `เฉพาะเดือน ${formatYearMonthLabel(date)}`
+      : isDaySelected
+        ? `เฉพาะวันที่ ${formatDateLong(date)} (${formatDate(date)})`
+        : isYearSelected
+          ? `เฉพาะปี ${date}`
+          : `ตามวันที่ "${date}"`
+    : null;
+
+  const hasFilters = Boolean(q || date || sort !== "qty_desc");
 
   return (
     <div className="workspace-page">
       <PageHeader
         eyebrow="TikTok Shop & Shopee · SKU Summary Table"
         title="หมวดสรุปยอดขายตามรหัสสินค้า (SKU)"
-        description="ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop และ Shopee ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
+        description={
+          scopeHintLabel
+            ? `กำลังแสดงข้อมูล: ${scopeHintLabel} · ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop และ Shopee`
+            : "ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop และ Shopee ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
+        }
         actions={
           <Button asChild variant="default">
             <Link href="/import">
@@ -99,28 +160,43 @@ export default async function ProductsPage({
         <StatCard
           label="รหัสสินค้าที่ขายได้ (SKU)"
           value={`${result.totals.skuCount.toLocaleString("th-TH")} รหัส`}
-          hint="รวมรหัสสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity"
+          hint={
+            scopeHintLabel ??
+            "รวมรหัสสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity"
+          }
           tone="brand"
           icon={<IconFile size={19} />}
         />
         <StatCard
           label="จำนวนที่ขายได้รวม"
           value={`${result.totals.totalQty.toLocaleString("th-TH")} ชิ้น`}
-          hint="รวมคำสั่งซื้อ TikTok Shop"
+          hint={
+            scopeHintLabel
+              ? `จำนวนชิ้นรวม (${scopeHintLabel})`
+              : "รวมคำสั่งซื้อ TikTok Shop และ Shopee"
+          }
           tone="positive"
           icon={<IconReceipt size={19} />}
         />
         <StatCard
           label="มูลค่าราคาตั้งต้นรวม"
           value={formatTHB(result.totals.grossAmount)}
-          hint="คำนวณจาก ราคาตั้งต้น × จำนวนชิ้น"
+          hint={
+            scopeHintLabel
+              ? `ราคาตั้งต้น × จำนวนชิ้น (${scopeHintLabel})`
+              : "คำนวณจาก ราคาตั้งต้น × จำนวนชิ้น"
+          }
           tone="default"
           icon={<IconTrend size={19} />}
         />
         <StatCard
           label="ยอดขายออเดอร์สุทธิรวม"
           value={formatTHB(result.totals.netSalesAmount)}
-          hint="หลังหักส่วนลดร้านค้า"
+          hint={
+            scopeHintLabel
+              ? `หลังหักส่วนลดร้านค้า (${scopeHintLabel})`
+              : "หลังหักส่วนลดร้านค้า"
+          }
           tone="positive"
           icon={<IconWallet size={19} />}
         />
@@ -138,13 +214,9 @@ export default async function ProductsPage({
                   Shopee
                 </Badge>
               </div>
-             
             </div>
 
-            <form
-              className="flex flex-1 flex-wrap items-center gap-2 min-[640px]:flex-nowrap min-[980px]:justify-end"
-              method="get"
-            >
+            <FilterForm className="flex flex-1 flex-wrap items-center gap-2 min-[980px]:justify-end">
               {sort !== "qty_desc" ? (
                 <input type="hidden" name="sort" value={sort} />
               ) : null}
@@ -159,6 +231,18 @@ export default async function ProductsPage({
                   className="h-full min-h-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
                 />
               </div>
+              <DatePickerField
+                name="date"
+                defaultValue={date}
+                placeholder="ทุกวันชำระ (เลือกเดือน/วัน)"
+                availableDates={availableDates}
+                basePath="/products"
+                className="w-full sm:w-auto"
+                extraParams={{
+                  q: q || undefined,
+                  sort: sort !== "qty_desc" ? sort : undefined,
+                }}
+              />
               <Button
                 type="submit"
                 variant="default"
@@ -174,10 +258,12 @@ export default async function ProductsPage({
                   size="sm"
                   className="h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial"
                 >
-                  <Link href="/products">ล้างตัวกรอง</Link>
+                  <Link href="/products" scroll={false}>
+                    ล้างตัวกรอง
+                  </Link>
                 </Button>
               ) : null}
-            </form>
+            </FilterForm>
           </div>
         </div>
 
@@ -211,6 +297,7 @@ export default async function ProductsPage({
                           sort === "price_asc" ? "price_desc" : "price_asc",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>ราคาตั้งต้น/ชิ้น</span>
@@ -229,6 +316,7 @@ export default async function ProductsPage({
                         nextSort: sort === "qty_asc" ? "qty_desc" : "qty_asc",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>รวมจำนวนชิ้น</span>
@@ -248,6 +336,7 @@ export default async function ProductsPage({
                           sort === "orders_asc" ? "orders_desc" : "orders_asc",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>จำนวนออเดอร์</span>
@@ -267,6 +356,7 @@ export default async function ProductsPage({
                           sort === "gross_asc" ? "gross_desc" : "gross_asc",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>มูลค่ารวมตั้งต้น</span>
@@ -337,7 +427,13 @@ export default async function ProductsPage({
                       </TableCell>
                       <TableCell data-label="ดูบิล" className="num">
                         <Button asChild variant="outline" size="xs">
-                          <Link href={`/bills?q=${encodeURIComponent(row.skuCode)}`}>
+                          <Link
+                            href={
+                              date
+                                ? `/bills?q=${encodeURIComponent(row.skuCode)}&date=${encodeURIComponent(date)}`
+                                : `/bills?q=${encodeURIComponent(row.skuCode)}`
+                            }
+                          >
                             ดูบิลสินค้านี้
                           </Link>
                         </Button>
@@ -350,11 +446,12 @@ export default async function ProductsPage({
                 <TableRow>
                   <TableCell
                     colSpan={3}
-                    data-label="สรุปยอดรวมทั้งหมด"
+                    data-label="สรุปยอดรวม"
                     className="font-bold text-[#0f172a]"
                   >
-                    รวมทั้งหมด ({result.totals.skuCount.toLocaleString("th-TH")}{" "}
-                    รหัสสินค้า)
+                    {scopeHintLabel
+                      ? `รวม${scopeHintLabel} (${result.totals.skuCount.toLocaleString("th-TH")} รหัสสินค้า)`
+                      : `รวมทั้งหมด (${result.totals.skuCount.toLocaleString("th-TH")} รหัสสินค้า)`}
                   </TableCell>
                   <TableCell
                     data-label=""
@@ -390,6 +487,7 @@ export default async function ProductsPage({
               basePath="/products"
               extraParams={{
                 q: q || undefined,
+                date: date || undefined,
                 sort: sort !== "qty_desc" ? sort : undefined,
               }}
             />

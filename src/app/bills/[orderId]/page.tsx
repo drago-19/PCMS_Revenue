@@ -44,8 +44,8 @@ export default async function BillDetailPage({
           ) : null}
           {row.paidDate ? (
             <Button asChild variant="secondary" className="no-print">
-              <Link href={`/days/${row.paidDate}`}>
-                <IconCalendar size={16} /> ดูรอบชำระ
+              <Link href={`/bills?date=${encodeURIComponent(row.paidDate)}`}>
+                <IconCalendar size={16} /> ดูบิลรอบนี้
               </Link>
             </Button>
           ) : null}

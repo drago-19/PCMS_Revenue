@@ -42,7 +42,7 @@ export function PaginationBar({
     const parsed = Number(jumpValue);
     if (!Number.isFinite(parsed)) return;
     const target = Math.max(1, Math.min(pageCount, Math.round(parsed)));
-    router.push(buildHref(target));
+    router.push(buildHref(target), { scroll: false });
   }
 
   const startItem = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -67,12 +67,12 @@ export function PaginationBar({
           {page > 1 ? (
             <>
               <Button asChild variant="outline" size="xs" className="w-full sm:w-auto">
-                <Link href={buildHref(1)} aria-label="หน้าแรก">
+                <Link href={buildHref(1)} scroll={false} aria-label="หน้าแรก">
                   « หน้าแรก
                 </Link>
               </Button>
               <Button asChild variant="secondary" size="xs" className="w-full sm:w-auto">
-                <Link href={buildHref(page - 1)} aria-label="หน้าก่อนหน้า">
+                <Link href={buildHref(page - 1)} scroll={false} aria-label="หน้าก่อนหน้า">
                   ‹ ก่อนหน้า
                 </Link>
               </Button>
@@ -91,12 +91,12 @@ export function PaginationBar({
           {page < pageCount ? (
             <>
               <Button asChild variant="secondary" size="xs" className="w-full sm:order-4 sm:w-auto">
-                <Link href={buildHref(page + 1)} aria-label="หน้าถัดไป">
+                <Link href={buildHref(page + 1)} scroll={false} aria-label="หน้าถัดไป">
                   ถัดไป ›
                 </Link>
               </Button>
               <Button asChild variant="outline" size="xs" className="w-full sm:order-5 sm:w-auto">
-                <Link href={buildHref(pageCount)} aria-label="หน้าสุดท้าย">
+                <Link href={buildHref(pageCount)} scroll={false} aria-label="หน้าสุดท้าย">
                   สุดท้าย »
                 </Link>
               </Button>

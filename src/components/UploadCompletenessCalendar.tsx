@@ -65,7 +65,14 @@ function formatMonthLong(ym: string): string {
 
 function getShortDayMissingTags(row: DailyUploadCompletenessRow): string[] {
   if (row.normalOrders === 0) {
-    return ["ยังไม่อัปทั้ง 3 ไฟล์"];
+    if (!row.hasFile1 && !row.hasFile2 && !row.hasFile3) {
+      return ["ยังไม่อัปทั้ง 3 ไฟล์"];
+    }
+    const tags: string[] = [];
+    if (!row.hasFile1) tags.push("ขาดออเดอร์");
+    if (!row.hasFile2) tags.push("ขาดสินค้า");
+    if (!row.hasFile3) tags.push("ขาดรายได้ TikTok");
+    return tags;
   }
   const tags: string[] = [];
   if (row.missingFile1Count > 0) {
@@ -113,14 +120,14 @@ export function UploadCompletenessCalendar({
     const qs = new URLSearchParams();
     qs.set("month", ym);
     if (report.mode !== "created") qs.set("mode", report.mode);
-    return `/import?${qs.toString()}#completeness-check`;
+    return `/import?${qs.toString()}`;
   };
 
   const buildYearHref = (year: number) => {
     const qs = new URLSearchParams();
     qs.set("year", String(year));
     if (report.mode !== "created") qs.set("mode", report.mode);
-    return `/import?${qs.toString()}#completeness-check`;
+    return `/import?${qs.toString()}`;
   };
 
   return (
@@ -172,6 +179,7 @@ export function UploadCompletenessCalendar({
           >
             <Link
               href={buildYearHref(report.year - 1)}
+              scroll={false}
               aria-label={`ดูปี ${report.year - 1}`}
             >
               ‹ {report.year - 1}
@@ -188,7 +196,9 @@ export function UploadCompletenessCalendar({
                 variant={active ? "default" : "outline"}
                 className="min-h-10 px-3 font-extrabold"
               >
-                <Link href={buildYearHref(y)}>ปี {y}</Link>
+                <Link href={buildYearHref(y)} scroll={false}>
+                  ปี {y}
+                </Link>
               </Button>
             );
           })}
@@ -201,6 +211,7 @@ export function UploadCompletenessCalendar({
           >
             <Link
               href={buildYearHref(report.year + 1)}
+              scroll={false}
               aria-label={`ดูปี ${report.year + 1}`}
             >
               {report.year + 1} ›
@@ -219,7 +230,11 @@ export function UploadCompletenessCalendar({
               const isMonthComplete = m.status === "complete";
               const shortMissing: string[] = [];
               if (m.totalNormalOrders === 0) {
-                shortMissing.push("ยังไม่อัปทั้ง 3 ไฟล์");
+                if (m.hasUploadedSettlement) {
+                  shortMissing.push("ไม่มีบิล TikTok · ขาดออเดอร์ · ขาดสินค้า");
+                } else {
+                  shortMissing.push("ยังไม่อัปทั้ง 3 ไฟล์");
+                }
               } else {
                 if (m.missingFile1 > 0) shortMissing.push("ขาดออเดอร์");
                 if (m.missingFile1 + m.missingFile2 > 0)
@@ -236,6 +251,7 @@ export function UploadCompletenessCalendar({
                 <Link
                   key={m.month}
                   href={buildMonthHref(m.month)}
+                  scroll={false}
                   className={cn(
                     "group flex min-h-[72px] flex-col justify-between rounded-xl border p-2.5 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     isMonthComplete
@@ -302,7 +318,13 @@ export function UploadCompletenessCalendar({
           </div>
 
           {selectedMonthOverview && !selectedMonthOverview.completeDays && selectedMonthOverview.totalNormalOrders === 0 ? (
-            <Badge variant="danger">เดือนนี้ยังไม่ได้อัปโหลดทั้ง 3 ไฟล์</Badge>
+            selectedMonthOverview.hasUploadedSettlement ? (
+              <Badge variant="info">
+                อัปไฟล์รายได้ TikTok แล้ว (ไม่มีบิล TikTok ในเดือนนี้)
+              </Badge>
+            ) : (
+              <Badge variant="danger">เดือนนี้ยังไม่ได้อัปโหลดทั้ง 3 ไฟล์</Badge>
+            )
           ) : null}
         </div>
 
@@ -440,7 +462,13 @@ export function UploadCompletenessCalendar({
               {incompleteDays.map((row) => {
                 const missingParts: string[] = [];
                 if (row.normalOrders === 0) {
-                  missingParts.push("ยังไม่อัปทั้ง 3 ไฟล์");
+                  if (row.hasFile3) {
+                    missingParts.push(
+                      "อัป TikTok แล้ว (0 บิล) · ขาดไฟล์ออเดอร์และสินค้า Shipnity",
+                    );
+                  } else {
+                    missingParts.push("ยังไม่อัปทั้ง 3 ไฟล์");
+                  }
                 } else {
                   if (row.missingFile1Count > 0) {
                     missingParts.push(
@@ -516,7 +544,9 @@ export function UploadCompletenessCalendar({
                 {selectedDay.normalOrders === 0
                   ? selectedDay.isComplete
                     ? "วันนี้ไม่มีรายการคำสั่งซื้อในระบบ (0 บิล)"
-                    : "ยังไม่มีข้อมูลคำสั่งซื้อในวันนี้ (0 บิล)"
+                    : selectedDay.hasFile3
+                      ? "ในไฟล์ TikTok ที่อัปโหลดแล้ว ไม่มีบิลในวันนี้ (0 บิล) · ยังขาดไฟล์ Shipnity ของเดือนนี้"
+                      : "ยังไม่มีข้อมูลคำสั่งซื้อในวันนี้ (0 บิล)"
                   : `บิลขายปกติทั้งหมด ${formatNumber(selectedDay.normalOrders)} บิล (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล · Shopee ${formatNumber(selectedDay.shopeeOrders)} บิล)`}
               </DialogDescription>
             </DialogHeader>
@@ -543,12 +573,12 @@ export function UploadCompletenessCalendar({
                   )}
                 >
                   {selectedDay.normalOrders === 0
-                    ? selectedDay.isComplete
+                    ? selectedDay.hasFile1
                       ? "✓ ไม่มีคำสั่งซื้อ (0 บิล)"
                       : "ยังไม่อัปโหลด"
                     : selectedDay.hasFile1
                       ? `✓ ครบ (${formatNumber(selectedDay.normalOrders - selectedDay.missingFile1Count)} บิล)`
-                      : `✕ ขาด ${formatNumber(selectedDay.missingFile1Count)} บิล`}
+                      : `✕ ขาด ${formatNumber(selectedDay.missingFile1Count)}/${formatNumber(selectedDay.normalOrders)} บิล`}
                 </span>
               </div>
 
@@ -573,12 +603,12 @@ export function UploadCompletenessCalendar({
                   )}
                 >
                   {selectedDay.normalOrders === 0
-                    ? selectedDay.isComplete
+                    ? selectedDay.hasFile2
                       ? "✓ ไม่มีคำสั่งซื้อ (0 บิล)"
                       : "ยังไม่อัปโหลด"
                     : selectedDay.hasFile2
                       ? `✓ ครบ (${formatNumber(selectedDay.normalOrders - selectedDay.missingFile1Count - selectedDay.missingFile2Count)} บิล)`
-                      : `✕ ขาด ${formatNumber(selectedDay.missingFile1Count + selectedDay.missingFile2Count)} บิล`}
+                      : `✕ ขาด ${formatNumber(selectedDay.missingFile1Count + selectedDay.missingFile2Count)}/${formatNumber(selectedDay.normalOrders)} บิล`}
                 </span>
               </div>
 
@@ -603,14 +633,14 @@ export function UploadCompletenessCalendar({
                   )}
                 >
                   {selectedDay.normalOrders === 0
-                    ? selectedDay.isComplete
-                      ? "✓ ไม่มีคำสั่งซื้อ (0 บิล)"
+                    ? selectedDay.hasFile3
+                      ? "✓ อัปโหลดแล้ว (ไม่มีบิลในวันนี้)"
                       : "ยังไม่อัปโหลด"
                     : selectedDay.tiktokOrders === 0
                       ? `✓ ไม่ต้องใช้ (มีเฉพาะ Shopee ${formatNumber(selectedDay.shopeeOrders)} บิล)`
                       : selectedDay.hasFile3
                         ? `✓ ครบ (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล)`
-                        : `✕ ขาด ${formatNumber(selectedDay.missingFile3Count)} บิล TikTok`}
+                        : `✕ ขาด ${formatNumber(selectedDay.missingFile3Count)} จาก ${formatNumber(selectedDay.tiktokOrders)} บิล TikTok`}
                 </span>
               </div>
             </div>

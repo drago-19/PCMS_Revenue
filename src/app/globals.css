@@ -52,6 +52,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: var(--font-latin), var(--font-thai), "Noto Sans Thai", "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
 }
 
 :root {
@@ -97,13 +99,15 @@
   }
 
   body {
-    font-family: "IBM Plex Sans Thai", "Noto Sans Thai", "Sarabun", "Leelawadee UI",
-      "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-family: var(--font-latin), var(--font-thai), "Noto Sans Thai", "Inter",
+      "Leelawadee UI", "Segoe UI", system-ui, -apple-system, sans-serif;
     background: var(--bg);
     color: var(--ink);
     font-size: 15px;
     line-height: 1.55;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
   }
 
@@ -183,7 +187,7 @@
 }
 
 .mono {
-  font-family: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono), "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
   letter-spacing: -0.01em;
 }
@@ -1657,7 +1661,7 @@ table.data {
 }
 
 .side-tip code {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono), "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
   font-size: 11.5px;
   background: rgba(255, 255, 255, 0.7);
   padding: 1px 5px;
@@ -1707,7 +1711,7 @@ table.data {
 }
 
 .warning-list li strong {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono), "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
   font-size: 10.5px;
   letter-spacing: 0.02em;
   color: var(--muted-foreground);

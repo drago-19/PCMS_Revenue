@@ -96,7 +96,7 @@ export function DatePickerField({
         }
       }
       const qs = search.toString()
-      router.push(qs ? `${targetPath}?${qs}` : targetPath)
+      router.push(qs ? `${targetPath}?${qs}` : targetPath, { scroll: false })
       return
     }
 
@@ -113,7 +113,7 @@ export function DatePickerField({
         search.delete(name)
       }
       const qs = search.toString()
-      router.push(qs ? `${basePath}?${qs}` : basePath)
+      router.push(qs ? `${basePath}?${qs}` : basePath, { scroll: false })
       return
     }
 

@@ -2,8 +2,8 @@ import Link from "next/link";
 import { PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
 import {
   IconAlert,
-  IconCalendar,
   IconChevronRight,
+  IconFile,
   IconHistory,
   IconReceipt,
   IconTrend,
@@ -37,8 +37,8 @@ export default async function DashboardPage() {
         actions={
           <>
             <Button asChild variant="secondary">
-              <Link href="/days">
-                <IconCalendar size={16} /> ดูรอบชำระรายวัน
+              <Link href="/bills">
+                <IconReceipt size={16} /> ดูบิลคำสั่งซื้อทั้งหมด
               </Link>
             </Button>
             <Button asChild variant="default">
@@ -150,8 +150,8 @@ export default async function DashboardPage() {
               </div>
               <div className="hero-actions">
                 <Button asChild variant="default">
-                  <Link href={`/days/${latest.date}`}>
-                    เปิดดูรอบชำระนี้ ({latest.orderCount.toLocaleString("th-TH")} บิล){" "}
+                  <Link href={`/bills?date=${latest.date}`}>
+                    เปิดดูบิลรอบนี้ ({latest.orderCount.toLocaleString("th-TH")} บิล){" "}
                     <IconChevronRight size={16} />
                   </Link>
                 </Button>
@@ -183,27 +183,6 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 gap-[14px] min-[768px]:grid-cols-2 min-[1180px]:grid-cols-4">
             <Card className="flex flex-col justify-between p-5">
               <div>
-                <div className="mb-3 inline-flex size-10 items-center justify-center rounded-xl bg-[#fff0f3] text-[#fe2c55]">
-                  <IconCalendar size={20} />
-                </div>
-                <h3 className="text-base font-bold text-foreground">
-                  หมวดรอบชำระเงินรายวัน
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  ดูตารางสรุปยอดโอนแยกตามวัน แสดงหน้าละ 20 รอบ พร้อมเปิดดูบิลและพิมพ์ใบกำกับฯ รายวัน
-                </p>
-              </div>
-              <div className="mt-4 pt-3 border-t border-border">
-                <Button asChild variant="secondary" size="sm" className="w-full justify-between">
-                  <Link href="/days">
-                    เปิดหมวดรอบรายวัน <IconChevronRight size={15} />
-                  </Link>
-                </Button>
-              </div>
-            </Card>
-
-            <Card className="flex flex-col justify-between p-5">
-              <div>
                 <div className="mb-3 inline-flex size-10 items-center justify-center rounded-xl bg-[#ecfdf5] text-[#059669]">
                   <IconReceipt size={20} />
                 </div>
@@ -211,7 +190,7 @@ export default async function DashboardPage() {
                   หมวดบิลคำสั่งซื้อทั้งหมด
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  ค้นหาเลขคำสั่งซื้อ กรองสถานะยอดตรง/ต้องตรวจสอบ และเปิดดูบิลหรือใบกำกับฯ แบบป๊อปอัป
+                  ค้นหาเลขคำสั่งซื้อ เลือกดูรายวัน/รายเดือน กรองสถานะ และเปิดดูบิลหรือพิมพ์ใบกำกับฯ ได้ทันที
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-border">
@@ -219,6 +198,27 @@ export default async function DashboardPage() {
                   <Link href="/bills">
                     ค้นหาบิลทั้งหมด ({stats.orderCount.toLocaleString("th-TH")}){" "}
                     <IconChevronRight size={15} />
+                  </Link>
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="flex flex-col justify-between p-5">
+              <div>
+                <div className="mb-3 inline-flex size-10 items-center justify-center rounded-xl bg-[#fff0f3] text-[#fe2c55]">
+                  <IconFile size={20} />
+                </div>
+                <h3 className="text-base font-bold text-foreground">
+                  หมวดสรุปยอดรหัสสินค้า (SKU)
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ดูจำนวนชิ้นและยอดขายแยกตามรหัสสินค้า (SKU) เลือกกรองรายเดือนหรือรายวันได้
+                </p>
+              </div>
+              <div className="mt-4 pt-3 border-t border-border">
+                <Button asChild variant="secondary" size="sm" className="w-full justify-between">
+                  <Link href="/products">
+                    เปิดสรุปยอด SKU <IconChevronRight size={15} />
                   </Link>
                 </Button>
               </div>

@@ -34,7 +34,6 @@ import {
 import { cn } from "@/lib/utils";
 import {
   AppMark,
-  IconCalendar,
   IconFile,
   IconHistory,
   IconHome,
@@ -51,14 +50,6 @@ const items = [
     match: (pathname: string) => pathname === "/",
   },
   {
-    href: "/days",
-    label: "รอบชำระเงินรายวัน",
-    sub: "Daily Settlements",
-    icon: IconCalendar,
-    match: (pathname: string) =>
-      pathname === "/days" || pathname.startsWith("/days/"),
-  },
-  {
     href: "/bills",
     label: "บิลคำสั่งซื้อทั้งหมด",
     sub: "Order Bills",
@@ -66,7 +57,9 @@ const items = [
     match: (pathname: string) =>
       pathname === "/bills" ||
       pathname.startsWith("/bills/") ||
-      pathname.startsWith("/invoices/"),
+      pathname.startsWith("/invoices/") ||
+      pathname === "/days" ||
+      pathname.startsWith("/days/"),
   },
   {
     href: "/products",

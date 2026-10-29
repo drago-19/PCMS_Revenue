@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DatePickerField } from "@/components/DatePickerField";
 import { ClearAllImportsButton } from "@/components/DeleteImportButton";
 import { ExcelFilePreviewDialog } from "@/components/ExcelPreviewDialog";
 import { EmptyState, PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
@@ -23,24 +24,63 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate, formatDateTime, formatFileSize } from "@/lib/format";
-import { getOverallStats, listImportsPaged } from "@/lib/queries";
+import { getOverallStats, listDailyBatches, listImportsPaged } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "ประวัติการนำเข้าไฟล์" };
 
+const THAI_MONTHS_SHORT = [
+  "",
+  "ม.ค.",
+  "ก.พ.",
+  "มี.ค.",
+  "เม.ย.",
+  "พ.ค.",
+  "มิ.ย.",
+  "ก.ค.",
+  "ส.ค.",
+  "ก.ย.",
+  "ต.ค.",
+  "พ.ย.",
+  "ธ.ค.",
+];
+
+function formatYearMonthLabel(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  if (!m) return ym;
+  const monthIdx = Number(m[2]);
+  return `${THAI_MONTHS_SHORT[monthIdx] ?? m[2]} ${m[1]}`;
+}
+
 export default async function ImportHistoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; date?: string }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, Number(params.page ?? "1") || 1);
+  const date = (params.date ?? "").trim();
 
-  const [stats, result] = await Promise.all([
+  const [stats, result, allBatches] = await Promise.all([
     getOverallStats(),
-    listImportsPaged({ page, pageSize: 20 }),
+    listImportsPaged({ page, pageSize: 20, date: date || undefined }),
+    listDailyBatches(1000),
   ]);
+
+  const availableDates = allBatches.map((b) => ({
+    date: b.date,
+    count: b.orderCount,
+  }));
+
+  const isFilteredByDate = Boolean(date);
+  const datePeriodLabel = isFilteredByDate
+    ? /^\d{4}-\d{2}$/.test(date)
+      ? `เดือน ${formatYearMonthLabel(date)}`
+      : /^\d{4}-\d{2}-\d{2}$/.test(date)
+        ? `วันที่ ${formatDate(date)}`
+        : `ช่วง "${date}"`
+    : "";
 
   const warningCount = result.rows.filter((item) => item.status === "warning").length;
 
@@ -64,23 +104,43 @@ export default async function ImportHistoryPage({
 
       <div className="stats">
         <StatCard
-          label="ไฟล์ที่นำเข้าทั้งหมด"
+          label={isFilteredByDate ? "ไฟล์ในช่วงที่เลือก" : "ไฟล์ที่นำเข้าทั้งหมด"}
           value={`${result.total.toLocaleString("th-TH")} ไฟล์`}
-          hint="แสดงหน้าละ 20 ไฟล์"
+          hint={
+            isFilteredByDate
+              ? `เฉพาะ${datePeriodLabel}`
+              : "รวมทั้งหมด (แสดงหน้าละ 20 ไฟล์)"
+          }
           tone="brand"
           icon={<IconHistory size={19} />}
         />
         <StatCard
-          label="บิลคำสั่งซื้อสะสม"
-          value={`${stats.orderCount.toLocaleString("th-TH")} ใบ`}
-          hint="สร้างจากไฟล์ที่นำเข้าทั้งหมด"
+          label={isFilteredByDate ? "บิลจากไฟล์ในช่วงที่เลือก" : "บิลคำสั่งซื้อสะสม"}
+          value={`${(isFilteredByDate ? result.totals.orderCount : stats.orderCount).toLocaleString("th-TH")} ใบ`}
+          hint={
+            isFilteredByDate
+              ? `เฉพาะไฟล์ของ${datePeriodLabel}`
+              : "สร้างจากไฟล์ที่นำเข้าทั้งหมด"
+          }
           tone="positive"
           icon={<IconReceipt size={19} />}
         />
         <StatCard
           label="รอบชำระล่าสุด"
-          value={stats.latestPaidDate ? formatDate(stats.latestPaidDate) : "-"}
-          hint="วันที่ชำระเงินล่าสุดในระบบ"
+          value={
+            isFilteredByDate
+              ? result.totals.latestPaidDate
+                ? formatDate(result.totals.latestPaidDate)
+                : "-"
+              : stats.latestPaidDate
+                ? formatDate(stats.latestPaidDate)
+                : "-"
+          }
+          hint={
+            isFilteredByDate
+              ? `รอบชำระล่าสุดใน${datePeriodLabel}`
+              : "วันที่ชำระเงินล่าสุดในระบบ"
+          }
           tone="default"
           icon={<IconCalendar size={19} />}
         />
@@ -104,9 +164,25 @@ export default async function ImportHistoryPage({
                 คลิกที่ชื่อไฟล์หรือปุ่ม &ldquo;เปิดอ่าน Excel&rdquo; เพื่อดูตารางข้อมูลทุกแถว-คอลัมน์เหมือนเปิดในโปรแกรม Excel
               </p>
             </div>
-            <span className="text-xs text-muted-foreground">
-              ทั้งหมด <strong>{result.total.toLocaleString("th-TH")}</strong> ไฟล์
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <DatePickerField
+                name="date"
+                defaultValue={date}
+                placeholder="ทุกรอบชำระ (เลือกเดือน/วัน)"
+                availableDates={availableDates}
+                basePath="/history"
+              />
+              {date ? (
+                <Button asChild variant="ghost" size="sm">
+                  <Link href="/history" scroll={false}>
+                    ล้างตัวกรอง
+                  </Link>
+                </Button>
+              ) : null}
+              <span className="text-xs text-muted-foreground">
+                ทั้งหมด <strong>{result.total.toLocaleString("th-TH")}</strong> ไฟล์
+              </span>
+            </div>
           </div>
         </div>
 
@@ -229,8 +305,8 @@ export default async function ImportHistoryPage({
                         />
                         {item.periodStart ? (
                           <Button asChild variant="outline" size="xs">
-                            <Link href={`/days/${item.periodStart}`}>
-                              ดูรอบชำระ
+                            <Link href={`/bills?date=${encodeURIComponent(item.periodStart)}`}>
+                              ดูบิลรอบนี้
                             </Link>
                           </Button>
                         ) : null}
@@ -251,6 +327,7 @@ export default async function ImportHistoryPage({
               total={result.total}
               unitLabel="ไฟล์"
               basePath="/history"
+              extraParams={{ date: date || undefined }}
             />
           </>
         )}
