@@ -1,5 +1,6 @@
 import type { InvoiceCustomer, InvoiceItem, InvoiceModel } from "@/lib/invoice";
 import {
+  bahtText,
   formatDate,
   formatDateLong,
   formatDateTime,
@@ -10,6 +11,110 @@ import { formatSellerDisplayName } from "@/lib/seller";
 
 function formatReceiptTHB(value: number): string {
   return formatTHB(value);
+}
+
+export interface AbbreviatedSummaryBreakdown {
+  itemsNetTotal: number;
+  platformSubsidyAmount: number;
+  shippingLineAmount: number;
+  subtotalBeforeFee: number;
+  platformFeeDeduction: number;
+  netAfterDiscount: number;
+  vatRate: number;
+  vatAmount: number;
+  preVatAmount: number;
+  grandTotal: number;
+  grandTotalText: string;
+  specialDiscountAmount: number;
+  paymentTotal: number;
+}
+
+export function computeAbbreviatedSummary(
+  invoice: InvoiceModel,
+): AbbreviatedSummaryBreakdown {
+  const isZero =
+    invoice.salesAmount <= 0 &&
+    invoice.receiptTotal <= 0 &&
+    invoice.payout <= 0;
+
+  if (isZero) {
+    const vatRate =
+      typeof invoice.seller.vatRate === "number" && invoice.seller.vatRate >= 0
+        ? invoice.seller.vatRate
+        : 7;
+    return {
+      itemsNetTotal: 0,
+      platformSubsidyAmount: 0,
+      shippingLineAmount: 0,
+      subtotalBeforeFee: 0,
+      platformFeeDeduction: 0,
+      netAfterDiscount: 0,
+      vatRate,
+      vatAmount: 0,
+      preVatAmount: 0,
+      grandTotal: 0,
+      grandTotalText: bahtText(0),
+      specialDiscountAmount: 0,
+      paymentTotal: 0,
+    };
+  }
+
+  const platformSubsidyAmount = round2(Math.max(0, invoice.platformCoupon ?? 0));
+  const itemsNetTotal = round2(
+    Math.max(0, invoice.salesAmount - platformSubsidyAmount),
+  );
+
+  // ค่าขนส่งที่นำขึ้นไปแสดงในตารางรายละเอียด (ทั้ง TikTok และ Shopee)
+  const shippingLineAmount = round2(
+    Math.abs(invoice.shippingActual) > 0
+      ? Math.abs(invoice.shippingActual)
+      : invoice.shippingGross > 0
+        ? invoice.shippingGross
+        : Math.max(0, invoice.shippingFee),
+  );
+
+  // รวมเป็นเงิน = ราคาขายสินค้า (รวมส่วนลดที่แพลตฟอร์มชดเชยเป็นรายได้ร้าน) + ค่าขนส่ง
+  const subtotalBeforeFee = round2(
+    itemsNetTotal + platformSubsidyAmount + shippingLineAmount,
+  );
+
+  // ค่าธรรมเนียมแพลตฟอร์ม (ดึงจากค่าธรรมเนียมทั้งหมด ทั้ง TikTok และ Shopee)
+  const platformFeeDeduction = round2(Math.abs(invoice.feeTotal ?? 0));
+
+  // จำนวนเงินหลังหักส่วนลด = รวมเป็นเงิน - ค่าธรรมเนียมแพลตฟอร์ม (ยอดที่ยื่นภาษี)
+  const netAfterDiscount = round2(
+    Math.max(0, subtotalBeforeFee - platformFeeDeduction),
+  );
+
+  const vatRate =
+    typeof invoice.seller.vatRate === "number" && invoice.seller.vatRate >= 0
+      ? invoice.seller.vatRate
+      : 7;
+  const preVatAmount = round2(netAfterDiscount / (1 + vatRate / 100));
+  const vatAmount = round2(netAfterDiscount - preVatAmount);
+  const grandTotal = netAfterDiscount;
+
+  // ยอดชำระ = ยอดที่ได้รับจริง (payout) และ ส่วนลดพิเศษ = ส่วนต่างระหว่างยอดที่ยื่นกับยอดที่ได้รับจริง
+  const paymentTotal = round2(
+    typeof invoice.payout === "number" ? invoice.payout : grandTotal,
+  );
+  const specialDiscountAmount = round2(paymentTotal - grandTotal);
+
+  return {
+    itemsNetTotal,
+    platformSubsidyAmount,
+    shippingLineAmount,
+    subtotalBeforeFee,
+    platformFeeDeduction,
+    netAfterDiscount,
+    vatRate,
+    vatAmount,
+    preVatAmount,
+    grandTotal,
+    grandTotalText: bahtText(grandTotal),
+    specialDiscountAmount,
+    paymentTotal,
+  };
 }
 
 export function computeItemNetLineAmounts(
@@ -57,8 +162,9 @@ export function getOrderedInvoiceBreakdownLines(
 ): { key: string; label: string; amount: number }[] {
   const isShopee = invoice.channel === "Shopee";
   const channelLabel = isShopee ? "Shopee" : "TikTok Shop";
-  const actualShippingLabel =
-    invoice.weightCharged !== null && invoice.weightCharged > 0
+  const actualShippingLabel = isShopee
+    ? "ค่าธรรมเนียมและค่าส่งที่ร้านจ่าย (ตามไฟล์ Shipnity)"
+    : invoice.weightCharged !== null && invoice.weightCharged > 0
       ? `การจัดส่ง (น้ำหนักที่เรียกเก็บเงิน: ${invoice.weightCharged} ก.)`
       : "การจัดส่ง";
   const platformShippingDiscountLabel = `ส่วนลดค่าจัดส่งจาก ${channelLabel}`;
@@ -318,9 +424,8 @@ export function InvoiceDocument({
     invoice.items.length === 0
       ? 1
       : invoice.items.reduce((acc, item) => acc + item.qty, 0);
-  const itemsNetTotal = round2(
-    Math.max(0, invoice.salesAmount - Math.max(0, round2(invoice.platformCoupon ?? 0))),
-  );
+  const abbrevSummary = computeAbbreviatedSummary(invoice);
+  const itemsNetTotal = abbrevSummary.itemsNetTotal;
   const itemNetAmounts = computeItemNetLineAmounts(
     invoice.items,
     invoice.salesAmount,
@@ -334,9 +439,12 @@ export function InvoiceDocument({
     if (isSmallPaper) {
       const is80mm = paperSize === "80mm";
       const is4Up = paperSize === "a4-4up";
-      const itemCount = Math.max(1, invoice.items.length);
-      const isDense = itemCount >= 3 || is4Up;
-      const isUltraDense = itemCount >= 5;
+      const detailLineCount =
+        Math.max(1, invoice.items.length) +
+        (abbrevSummary.platformSubsidyAmount > 0 ? 1 : 0) +
+        (abbrevSummary.shippingLineAmount > 0 ? 1 : 0);
+      const isDense = detailLineCount >= 3 || is4Up;
+      const isUltraDense = detailLineCount >= 5;
 
       const baseFontClass = is80mm
         ? "text-[9px] leading-tight"
@@ -353,7 +461,11 @@ export function InvoiceDocument({
           : `invoice invoice-paper-a6 mx-auto w-full max-w-[356px] p-2.5 ${baseFontClass} print:max-w-none print:p-0`;
 
       const printDensity =
-        itemCount <= 2 ? "spacious" : itemCount <= 5 ? "medium" : "compact";
+        detailLineCount <= 2
+          ? "spacious"
+          : detailLineCount <= 5
+            ? "medium"
+            : "compact";
 
       const sectionGapClass = isUltraDense
         ? "mt-1 print:mt-1.5"
@@ -515,27 +627,22 @@ export function InvoiceDocument({
             </div>
           </div>
 
-          {/* ตารางรายการสินค้า */}
+          {/* ตารางรายการสินค้า + ส่วนลดจากแพลตฟอร์ม + ค่าขนส่ง: รายละเอียด | จำนวน | ราคาต่อหน่วย | ยอดรวม */}
           <div className={sectionGapClass}>
-            <div
-              className={`mb-1 flex items-baseline justify-between gap-2 px-0.5 ${is80mm || isUltraDense ? "text-[8.5px]" : "text-[9px]"} font-extrabold text-[#0f172a]`}
-            >
-              <span>รายได้</span>
-              <span className="shrink-0 whitespace-nowrap tabular-nums">
-                {formatReceiptTHB(invoice.salesAmount)} ({totalItemQty} ตัว)
-              </span>
-            </div>
             <table
               className={`w-full border-collapse ${is80mm || isUltraDense ? "text-[8.5px]" : "text-[9px]"}`}
             >
               <thead>
                 <tr className="border-y border-[#334155] bg-[#f1f5f9] text-[#0f172a]">
                   <th className={`${cellPadClass} text-left font-bold`}>รายละเอียด</th>
-                  <th className={`w-9 ${cellPadClass} text-right font-bold whitespace-nowrap`}>
+                  <th className={`w-7 ${cellPadClass} text-right font-bold whitespace-nowrap`}>
                     จำนวน
                   </th>
                   <th className={`w-14 ${cellPadClass} text-right font-bold whitespace-nowrap`}>
-                    ราคา
+                    ราคาต่อหน่วย
+                  </th>
+                  <th className={`w-14 ${cellPadClass} text-right font-bold whitespace-nowrap`}>
+                    ยอดรวม
                   </th>
                 </tr>
               </thead>
@@ -555,6 +662,9 @@ export function InvoiceDocument({
                     <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
                       1
                     </td>
+                    <td className={`${cellPadClass} text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                      {formatReceiptTHB(itemsNetTotal)}
+                    </td>
                     <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
                       {formatReceiptTHB(itemsNetTotal)}
                     </td>
@@ -563,20 +673,15 @@ export function InvoiceDocument({
                   invoice.items.map((item, index) => {
                     const isNumericPlatformSku = /^\d{10,}$/.test(item.sku);
                     const lineNetAmount = itemNetAmounts[index] ?? 0;
-                    const unitNetAmount =
-                      item.qty > 1 ? round2(lineNetAmount / item.qty) : null;
+                    const unitNetAmount = round2(
+                      lineNetAmount / Math.max(1, item.qty),
+                    );
                     return (
                       <tr key={`${item.sku}-${index}`}>
                         <td className={`${cellPadClass} leading-tight text-[#0f172a]`}>
                           <span className="font-semibold text-[#0f172a]">
                             {item.name || `รหัสสินค้า ${item.sku}`}
                           </span>
-                          {unitNetAmount !== null ? (
-                            <span className="font-normal text-[#475569]">
-                              {" "}
-                              (ตัวละ {formatReceiptTHB(unitNetAmount)})
-                            </span>
-                          ) : null}
                           {!item.name && isNumericPlatformSku && invoice.createdDate ? (
                             <span className="ml-1 text-[8px] text-[#64748b]">
                               (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ {formatDate(invoice.createdDate)})
@@ -591,6 +696,9 @@ export function InvoiceDocument({
                         <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
                           {item.qty}
                         </td>
+                        <td className={`${cellPadClass} text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                          {formatReceiptTHB(unitNetAmount)}
+                        </td>
                         <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
                           {formatReceiptTHB(lineNetAmount)}
                         </td>
@@ -598,33 +706,124 @@ export function InvoiceDocument({
                     );
                   })
                 )}
+                {abbrevSummary.platformSubsidyAmount > 0 ? (
+                  <tr>
+                    <td className={`${cellPadClass} leading-tight text-[#0f172a]`}>
+                      <span className="font-semibold text-[#0f172a]">
+                        ส่วนลดจากแพลตฟอร์ม
+                      </span>
+                    </td>
+                    <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
+                      1
+                    </td>
+                    <td className={`${cellPadClass} text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                      {formatReceiptTHB(abbrevSummary.platformSubsidyAmount)}
+                    </td>
+                    <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                      {formatReceiptTHB(abbrevSummary.platformSubsidyAmount)}
+                    </td>
+                  </tr>
+                ) : null}
+                {abbrevSummary.shippingLineAmount > 0 ? (
+                  <tr>
+                    <td className={`${cellPadClass} leading-tight text-[#0f172a]`}>
+                      <span className="font-semibold text-[#0f172a]">
+                        ค่าขนส่ง
+                      </span>
+                    </td>
+                    <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
+                      1
+                    </td>
+                    <td className={`${cellPadClass} text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                      {formatReceiptTHB(abbrevSummary.shippingLineAmount)}
+                    </td>
+                    <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                      {formatReceiptTHB(abbrevSummary.shippingLineAmount)}
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
 
-          {/* สรุปยอด (เรียงค่าที่เป็นบวกขึ้นก่อน แล้วค่อยแจงค่าที่ลบ) */}
+          {/* สรุปยอดตามตัวอย่างบัญชี: รวมเป็นเงิน -> ค่าธรรมเนียมแพลตฟอร์ม -> จำนวนเงินหลังหักส่วนลด -> VAT -> จำนวนเงินรวมทั้งสิ้น */}
           <div
             data-invoice-summary-block
             className={`${sectionGapClass} ${!is80mm && !is4Up ? "print:mt-auto print:pt-2" : ""} ${is80mm || isUltraDense ? "text-[8.5px]" : "text-[9px]"} leading-tight`}
           >
-            {sortedBreakdownLines.map((line) => (
-              <div
-                key={line.key}
-                className={`flex items-baseline justify-between gap-2 ${rowPadClass} text-[#1e293b]`}
-              >
-                <span className="min-w-0">{line.label}</span>
-                <span className="shrink-0 whitespace-nowrap tabular-nums">
-                  {formatReceiptTHB(line.amount)}
-                </span>
-              </div>
-            ))}
+            <div
+              className={`flex items-baseline justify-between gap-2 ${rowPadClass} font-semibold text-[#0f172a]`}
+            >
+              <span className="min-w-0">รวมเป็นเงิน</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.subtotalBeforeFee)}
+              </span>
+            </div>
 
             <div
-              className={`flex items-baseline justify-between gap-2 border-y-[1.5px] border-[#0f172a] bg-[#f8fafc] px-1 py-0.5 ${is80mm || isUltraDense ? "text-[9.5px]" : "text-[10px]"} font-extrabold text-[#0f172a]`}
+              className={`flex items-baseline justify-between gap-2 ${rowPadClass} text-[#1e293b]`}
             >
-              <span className="min-w-0">{totalBarLabel}</span>
+              <span className="min-w-0">ค่าธรรมเนียมแพลตฟอร์ม</span>
               <span className="shrink-0 whitespace-nowrap tabular-nums">
-                {formatReceiptTHB(invoice.receiptTotal)}
+                {formatReceiptTHB(abbrevSummary.platformFeeDeduction)}
+              </span>
+            </div>
+
+            <div
+              className={`flex items-baseline justify-between gap-2 border-t border-[#e2e8f0] ${rowPadClass} font-semibold text-[#0f172a]`}
+            >
+              <span className="min-w-0">จำนวนเงินหลังหักส่วนลด</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.netAfterDiscount)}
+              </span>
+            </div>
+
+            <div
+              className={`flex items-baseline justify-between gap-2 ${rowPadClass} text-[#334155]`}
+            >
+              <span className="min-w-0">
+                ภาษีมูลค่าเพิ่ม {abbrevSummary.vatRate}%
+              </span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.vatAmount)}
+              </span>
+            </div>
+
+            <div
+              className={`flex items-baseline justify-between gap-2 ${rowPadClass} text-[#334155]`}
+            >
+              <span className="min-w-0">ราคาไม่รวมภาษีมูลค่าเพิ่ม</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.preVatAmount)}
+              </span>
+            </div>
+
+            <div
+              className={`mt-0.5 flex items-baseline justify-between gap-2 border-y-[1.5px] border-[#0f172a] bg-[#f8fafc] px-1 py-0.5 ${is80mm || isUltraDense ? "text-[9.5px]" : "text-[10px]"} font-extrabold text-[#0f172a]`}
+            >
+              <span className="min-w-0">จำนวนเงินรวมทั้งสิ้น</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.grandTotal)}
+              </span>
+            </div>
+
+            {abbrevSummary.specialDiscountAmount !== 0 ? (
+              <div
+                className={`mt-0.5 flex items-baseline justify-between gap-2 ${rowPadClass} text-[#1e293b]`}
+              >
+                <span className="min-w-0">ส่วนลดพิเศษ</span>
+                <span className="shrink-0 whitespace-nowrap tabular-nums">
+                  {formatReceiptTHB(abbrevSummary.specialDiscountAmount)}
+                </span>
+              </div>
+            ) : null}
+
+            <div
+              className={`flex items-baseline justify-between gap-2 border-b-[1.5px] border-[#0f172a] bg-[#f8fafc] px-1 py-0.5 ${is80mm || isUltraDense ? "text-[9.5px]" : "text-[10px]"} font-extrabold text-[#0f172a]`}
+            >
+              <span className="min-w-0">ยอดชำระ</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.paymentTotal)}
               </span>
             </div>
           </div>
@@ -634,7 +833,7 @@ export function InvoiceDocument({
           >
             <span className="text-[#475569]">รวมทั้งสิ้น (ตัวอักษร)</span>
             <span className="font-bold text-[#0f172a]">
-              - {invoice.receiptTotalText} -
+              - {abbrevSummary.grandTotalText} -
             </span>
           </div>
 
@@ -814,14 +1013,8 @@ export function InvoiceDocument({
           </div>
         </div>
 
-        {/* ตารางรายการสินค้า: รายละเอียด | จำนวน | ราคา */}
+        {/* ตารางรายการสินค้า + ส่วนลดจากแพลตฟอร์ม + ค่าขนส่ง: รายละเอียด | จำนวน | ราคาต่อหน่วย | ยอดรวม */}
         <div className="mt-3">
-          <div className="mb-1.5 flex items-baseline justify-between gap-2 px-1 text-xs font-extrabold text-[#0f172a] sm:text-[13px]">
-            <span>รายได้</span>
-            <span className="shrink-0 whitespace-nowrap tabular-nums">
-              {formatReceiptTHB(invoice.salesAmount)} ({totalItemQty} ตัว)
-            </span>
-          </div>
           <table className="w-full border-collapse text-xs sm:text-[13px]">
             <thead>
               <tr className="border-y border-[#334155] bg-[#f1f5f9] text-[#0f172a]">
@@ -830,7 +1023,10 @@ export function InvoiceDocument({
                   จำนวน
                 </th>
                 <th className="w-28 px-3 py-2 text-right font-bold whitespace-nowrap">
-                  ราคา
+                  ราคาต่อหน่วย
+                </th>
+                <th className="w-28 px-3 py-2 text-right font-bold whitespace-nowrap">
+                  ยอดรวม
                 </th>
               </tr>
             </thead>
@@ -850,6 +1046,9 @@ export function InvoiceDocument({
                   <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-[#0f172a]">
                     1
                   </td>
+                  <td className="px-3 py-2.5 text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]">
+                    {formatReceiptTHB(itemsNetTotal)}
+                  </td>
                   <td className="px-3 py-2.5 text-right font-semibold tabular-nums whitespace-nowrap text-[#0f172a]">
                     {formatReceiptTHB(itemsNetTotal)}
                   </td>
@@ -858,20 +1057,15 @@ export function InvoiceDocument({
                 invoice.items.map((item, index) => {
                   const isNumericPlatformSku = /^\d{10,}$/.test(item.sku);
                   const lineNetAmount = itemNetAmounts[index] ?? 0;
-                  const unitNetAmount =
-                    item.qty > 1 ? round2(lineNetAmount / item.qty) : null;
+                  const unitNetAmount = round2(
+                    lineNetAmount / Math.max(1, item.qty),
+                  );
                   return (
                     <tr key={`${item.sku}-${index}`}>
                       <td className="px-3 py-2.5 leading-snug text-[#0f172a]">
                         {item.name ? (
                           <span className="font-semibold text-[#0f172a]">
                             {item.name}
-                            {unitNetAmount !== null ? (
-                              <span className="font-normal text-[#475569]">
-                                {" "}
-                                (ตัวละ {formatReceiptTHB(unitNetAmount)})
-                              </span>
-                            ) : null}
                             {showSkuAbbrev && item.sku ? (
                               <span className="mono ml-1.5 text-xs font-normal text-[#64748b]">
                                 [{item.sku}]
@@ -883,12 +1077,6 @@ export function InvoiceDocument({
                             <span className="mono font-semibold text-[#0f172a]">
                               รหัสสินค้า {item.sku}
                             </span>
-                            {unitNetAmount !== null ? (
-                              <span className="font-normal text-[#475569]">
-                                {" "}
-                                (ตัวละ {formatReceiptTHB(unitNetAmount)})
-                              </span>
-                            ) : null}
                             {isNumericPlatformSku && invoice.createdDate ? (
                               <span className="ml-1.5 text-xs text-[#64748b]">
                                 (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ{" "}
@@ -901,6 +1089,9 @@ export function InvoiceDocument({
                       <td className="px-3 py-2.5 text-right font-bold tabular-nums text-[#0f172a]">
                         {item.qty}
                       </td>
+                      <td className="px-3 py-2.5 text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]">
+                        {formatReceiptTHB(unitNetAmount)}
+                      </td>
                       <td className="px-3 py-2.5 text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]">
                         {formatReceiptTHB(lineNetAmount)}
                       </td>
@@ -908,29 +1099,106 @@ export function InvoiceDocument({
                   );
                 })
               )}
+              {abbrevSummary.platformSubsidyAmount > 0 ? (
+                <tr>
+                  <td className="px-3 py-2.5 leading-snug text-[#0f172a]">
+                    <span className="font-semibold text-[#0f172a]">
+                      ส่วนลดจากแพลตฟอร์ม
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-bold tabular-nums text-[#0f172a]">
+                    1
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]">
+                    {formatReceiptTHB(abbrevSummary.platformSubsidyAmount)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]">
+                    {formatReceiptTHB(abbrevSummary.platformSubsidyAmount)}
+                  </td>
+                </tr>
+              ) : null}
+              {abbrevSummary.shippingLineAmount > 0 ? (
+                <tr>
+                  <td className="px-3 py-2.5 leading-snug text-[#0f172a]">
+                    <span className="font-semibold text-[#0f172a]">
+                      ค่าขนส่ง
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-bold tabular-nums text-[#0f172a]">
+                    1
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-medium tabular-nums whitespace-nowrap text-[#0f172a]">
+                    {formatReceiptTHB(abbrevSummary.shippingLineAmount)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]">
+                    {formatReceiptTHB(abbrevSummary.shippingLineAmount)}
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
 
-        {/* ตารางสรุปยอดด้านขวาล่าง แจงค่าต่างๆ ออกมาจากไฟล์ที่ Import จริง (เรียงค่าที่เป็นบวกขึ้นก่อน แล้วค่อยแจงค่าที่ลบ) */}
+        {/* ตารางสรุปยอดด้านขวาล่าง: รวมเป็นเงิน -> ค่าธรรมเนียมแพลตฟอร์ม -> จำนวนเงินหลังหักส่วนลด -> VAT -> จำนวนเงินรวมทั้งสิ้น */}
         <div className="mt-3.5 flex justify-end">
           <div className="w-full max-w-md text-xs sm:text-[13px]">
-            {sortedBreakdownLines.map((line) => (
-              <div
-                key={line.key}
-                className="flex items-baseline justify-between gap-2 py-1 text-[#1e293b]"
-              >
-                <span className="min-w-0">{line.label}</span>
+            <div className="flex items-baseline justify-between gap-2 py-1 font-semibold text-[#0f172a]">
+              <span className="min-w-0">รวมเป็นเงิน</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.subtotalBeforeFee)}
+              </span>
+            </div>
+
+            <div className="flex items-baseline justify-between gap-2 py-1 text-[#1e293b]">
+              <span className="min-w-0">ค่าธรรมเนียมแพลตฟอร์ม</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.platformFeeDeduction)}
+              </span>
+            </div>
+
+            <div className="flex items-baseline justify-between gap-2 border-t border-[#e2e8f0] py-1 font-semibold text-[#0f172a]">
+              <span className="min-w-0">จำนวนเงินหลังหักส่วนลด</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.netAfterDiscount)}
+              </span>
+            </div>
+
+            <div className="flex items-baseline justify-between gap-2 py-1 text-[#334155]">
+              <span className="min-w-0">
+                ภาษีมูลค่าเพิ่ม {abbrevSummary.vatRate}%
+              </span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.vatAmount)}
+              </span>
+            </div>
+
+            <div className="flex items-baseline justify-between gap-2 py-1 text-[#334155]">
+              <span className="min-w-0">ราคาไม่รวมภาษีมูลค่าเพิ่ม</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.preVatAmount)}
+              </span>
+            </div>
+
+            <div className="mt-1 flex items-baseline justify-between gap-2 border-y-2 border-[#0f172a] bg-[#f8fafc] px-3 py-2 text-sm font-extrabold text-[#0f172a]">
+              <span className="min-w-0">จำนวนเงินรวมทั้งสิ้น</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">
+                {formatReceiptTHB(abbrevSummary.grandTotal)}
+              </span>
+            </div>
+
+            {abbrevSummary.specialDiscountAmount !== 0 ? (
+              <div className="mt-1 flex items-baseline justify-between gap-2 py-1 text-[#1e293b]">
+                <span className="min-w-0">ส่วนลดพิเศษ</span>
                 <span className="shrink-0 whitespace-nowrap tabular-nums">
-                  {formatReceiptTHB(line.amount)}
+                  {formatReceiptTHB(abbrevSummary.specialDiscountAmount)}
                 </span>
               </div>
-            ))}
+            ) : null}
 
-            <div className="flex items-baseline justify-between gap-2 border-y-2 border-[#0f172a] bg-[#f8fafc] px-3 py-2 text-sm font-extrabold text-[#0f172a]">
-              <span className="min-w-0">{totalBarLabel}</span>
+            <div className="mt-0.5 flex items-baseline justify-between gap-2 border-b-2 border-[#0f172a] bg-[#f8fafc] px-3 py-2 text-sm font-extrabold text-[#0f172a]">
+              <span className="min-w-0">ยอดชำระ</span>
               <span className="shrink-0 whitespace-nowrap tabular-nums">
-                {formatReceiptTHB(invoice.receiptTotal)}
+                {formatReceiptTHB(abbrevSummary.paymentTotal)}
               </span>
             </div>
           </div>
@@ -941,7 +1209,7 @@ export function InvoiceDocument({
             จำนวนเงินรวมทั้งสิ้น (ตัวอักษร)
           </span>
           <span className="invoice-baht-value text-[#0f172a]">
-            - {invoice.receiptTotalText} -
+            - {abbrevSummary.grandTotalText} -
           </span>
         </div>
 
