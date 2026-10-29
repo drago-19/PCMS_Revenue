@@ -1942,6 +1942,68 @@ test("getDailyUploadCompleteness reports complete days, missing files per day, a
   assert.equal(day28.hasFile2, true);
   assert.equal(day28.hasFile3, true);
   assert.equal(day28.isComplete, true);
+
+  // Verify 0-order days covered by an uploaded settlement period_start..period_end have hasFile3 = true
+  const settlementPeriodMockDb = {
+    async query(sql: string) {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      if (clean.includes("SELECT DISTINCT SUBSTRING")) {
+        return { rows: [{ ym: "2026-01" }, { ym: "2026-06" }] };
+      }
+      if (clean.includes("WITH settled_paid_dates AS")) {
+        return {
+          rows: [
+            {
+              d: "2026-01-02",
+              normal_orders: 1,
+              tiktok_orders: 1,
+              shopee_orders: 0,
+              complete_count: 0,
+              missing_file1_count: 1,
+              missing_file2_count: 0,
+              missing_file3_count: 0,
+              has_paid_settlement: 0,
+            },
+            {
+              d: "2026-06-15",
+              normal_orders: 10,
+              tiktok_orders: 10,
+              shopee_orders: 0,
+              complete_count: 10,
+              missing_file1_count: 0,
+              missing_file2_count: 0,
+              missing_file3_count: 0,
+              has_paid_settlement: 1,
+            },
+          ],
+        };
+      }
+      if (clean.includes("SELECT file_type, period_start, period_end FROM imports")) {
+        return {
+          rows: [
+            { file_type: "settlement", period_start: "2026-01-01", period_end: "2026-01-31" },
+            { file_type: "settlement", period_start: "2026-06-01", period_end: "2026-06-30" },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+  const janReport = await getDailyUploadCompleteness(
+    { month: "2026-01", mode: "created" },
+    settlementPeriodMockDb as never,
+  );
+  const jan1 = janReport.rows.find((r) => r.date === "2026-01-01");
+  assert.ok(jan1);
+  assert.equal(jan1.normalOrders, 0);
+  assert.equal(jan1.hasFile1, false);
+  assert.equal(jan1.hasFile2, false);
+  assert.equal(jan1.hasFile3, true);
+  assert.equal(jan1.isComplete, false);
+
+  const junOverview = janReport.monthsOverview.find((m) => m.month === "2026-06");
+  assert.ok(junOverview);
+  assert.equal(junOverview.status, "complete");
 });
 
 test("listBills supports filtering by createdDate (order creation date)", async () => {
@@ -2021,6 +2083,664 @@ test("listBills supports filtering by createdDate (order creation date)", async 
   );
   assert.equal(hasCreatedDateFilter, true);
 });
+
+test("formatInvoiceNoWithPrefix, formatReceiptNoWithPrefix, and buildInvoice replace YYMM by bill month and reset running sequence to 00001 each month", async () => {
+  const {
+    buildDocumentPatternFromLead,
+    extractDocumentLeadPrefix,
+    formatInvoiceNoWithPrefix,
+    formatReceiptNoWithPrefix,
+    formatRunningDocumentNo,
+  } = await import("../src/lib/seller");
+  const { buildInvoice } = await import("../src/lib/invoice");
+
+  // 0. Lead prefix extraction & pattern builder ("TT" <-> "TT2610/00001", "" <-> "2610/00001")
+  assert.equal(extractDocumentLeadPrefix("TT2610/00001"), "TT");
+  assert.equal(extractDocumentLeadPrefix("RC2610/00001"), "RC");
+  assert.equal(extractDocumentLeadPrefix("2610/00001"), "");
+  assert.equal(extractDocumentLeadPrefix("TT"), "TT");
+  assert.equal(buildDocumentPatternFromLead("TT"), "TT2610/00001");
+  assert.equal(buildDocumentPatternFromLead(""), "2610/00001");
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2611/00001", "TT", "2026-11-01"),
+    "TT2611/00001",
+  );
+
+  // 1. Same month as template (2026-10 -> 2610)
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2610/00001", "TT2610/00001", "2026-10-01"),
+    "TT2610/00001",
+  );
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2610/00002", "TT2610/00001", "2026-10-01"),
+    "TT2610/00002",
+  );
+  assert.equal(
+    formatReceiptNoWithPrefix("SEQ/2610/00001", "RC2610/00001", "2026-10-01"),
+    "RC2610/00001",
+  );
+
+  // 2. Different month (2026-11 -> 2611, 2026-09 -> 2609, 2027-01 -> 2701) resets to 00001 per month
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2611/00001", "TT2610/00001", "2026-11-01"),
+    "TT2611/00001",
+  );
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2611/00002", "TT2610/00001", "2026-11-05"),
+    "TT2611/00002",
+  );
+  assert.equal(
+    formatReceiptNoWithPrefix("SEQ/2611/00001", "RC2610/00001", "2026-11-01"),
+    "RC2611/00001",
+  );
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2609/00001", "2610/00001", "2026-09-15"),
+    "2609/00001",
+  );
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2701/00001", "TT2610/00001", "2027-01-02"),
+    "TT2701/00001",
+  );
+
+  // 3. When custom offset is configured for 2610 (e.g. TT2610/00050), 2610 starts at 00050 while 2611 resets to 00001
+  assert.equal(
+    formatRunningDocumentNo("TT2610/00050", 1, "TT2610/00001", "2026-10-10"),
+    "TT2610/00050",
+  );
+  assert.equal(
+    formatRunningDocumentNo("TT2610/00050", 1, "TT2610/00001", "2026-11-01"),
+    "TT2611/00001",
+  );
+  assert.equal(
+    formatRunningDocumentNo("TT2610/00050", 2, "TT2610/00001", "2026-11-01"),
+    "TT2611/00002",
+  );
+
+  // 4. Fallback to YYMM inside SEQ/YYMM/NNNNN when dateStr is empty
+  assert.equal(
+    formatInvoiceNoWithPrefix("SEQ/2612/00003", "TT2610/00001", ""),
+    "TT2612/00003",
+  );
+
+  // 5. buildInvoice end-to-end check for a November 2026 bill
+  const novInvoice = buildInvoice({
+    id: 1,
+    importId: 1,
+    externalId: "586999000111222333",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-11-01",
+    paidDate: "2026-11-02",
+    currency: "THB",
+    income: 250,
+    feeTotal: -20,
+    adjustment: 0,
+    payout: 230,
+    productDetail: null,
+    weightEstimated: null,
+    weightCharged: null,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      externalId: "586999000111222333",
+      transactionType: "คำสั่งซื้อ",
+      isOrder: true,
+      createdAt: "2026-11-01",
+      paidAt: "2026-11-02",
+      currency: "THB",
+      fields: { productAfterDiscount: 250, payout: 230 },
+      mappedFields: [],
+      feeGroups: {},
+      unknownValues: [],
+      checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+      warnings: [],
+      raw: {},
+      sourceRows: 1,
+      firstRow: 1,
+      rowIndexes: [1],
+    },
+    createdAt: "2026-11-02T00:00:00Z",
+    invoiceNo: "SEQ/2611/00001",
+    channel: "TikTok",
+    orderCode: "NV01",
+  });
+  assert.equal(novInvoice.invoiceNo, "TT2611/00001");
+  assert.equal(novInvoice.receiptNo, "RC2611/00001");
+});
+
+test("listDailyBatchesPaged, listSkuSummariesPaged, and listImportsPaged return month/day-filtered totals when date is selected and all-time totals when date is omitted", async () => {
+  const {
+    listDailyBatchesPaged,
+    listSkuSummariesPaged,
+    listImportsPaged,
+  } = await import("../src/lib/queries");
+
+  const captured: { sql: string; params: unknown[] }[] = [];
+
+  const mockDb = {
+    query: async (sql: string, params: unknown[] = []) => {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      captured.push({ sql: clean, params });
+
+      if (clean === "SELECT COUNT(*) AS c FROM daily_summaries") {
+        return { rows: [{ c: 120 }] };
+      }
+
+      if (clean.includes("FROM daily_summaries") && clean.includes("SUM(order_count)")) {
+        const isJuly = params.includes("2026-07-%");
+        return {
+          rows: [
+            isJuly
+              ? {
+                  c: 30,
+                  order_count: 1850,
+                  order_income: 380000,
+                  order_fees: -68000,
+                  order_payout: 312000,
+                  total_payout: 312000,
+                }
+              : {
+                  c: 120,
+                  order_count: 15031,
+                  order_income: 2900000,
+                  order_fees: -541900,
+                  order_payout: 2358100,
+                  total_payout: 2358100,
+                },
+          ],
+        };
+      }
+
+      if (clean.includes("FROM daily_summaries") && clean.includes("SELECT paid_date")) {
+        return {
+          rows: [
+            {
+              paid_date: "2026-07-30",
+              tx_count: 8,
+              order_count: 8,
+              non_order_count: 0,
+              total_income: 526,
+              total_fees: -334.14,
+              total_adjustments: 0,
+              total_payout: 191.86,
+              order_income: 526,
+              order_fees: -334.14,
+              order_payout: 191.86,
+              reserve_hold: 0,
+              reserve_release: 0,
+              other_adjustments: 0,
+              warning_count: 0,
+            },
+          ],
+        };
+      }
+
+      if (clean.includes("FROM oms_order_items i") && clean.includes("COUNT(*) AS sku_count")) {
+        return {
+          rows: [
+            {
+              sku_count: 12,
+              total_qty: 420,
+              gross_amount: 105000,
+              net_sales_amount: 89500,
+            },
+          ],
+        };
+      }
+
+      if (clean.includes("FROM oms_order_items i") && clean.includes("LEFT JOIN products p ON p.sku_code = s.sku_code")) {
+        return {
+          rows: [
+            {
+              sku_code: "SKU-07",
+              product_name: "สินค้าเดือนกรกฎาคม",
+              default_price: 250,
+              total_qty: 420,
+              order_count: 310,
+              gross_amount: 105000,
+              net_sales_amount: 89500,
+              tiktok_qty: 400,
+              shopee_qty: 20,
+              facebook_qty: 0,
+            },
+          ],
+        };
+      }
+
+      if (clean.includes("FROM imports") && clean.includes("SUM(order_count)")) {
+        return {
+          rows: [
+            {
+              c: 3,
+              order_count: 1850,
+              latest_paid_date: "2026-07-30",
+            },
+          ],
+        };
+      }
+
+      return { rows: [] };
+    },
+  };
+
+  // 1. /days without filter -> all-time totals
+  const allDays = await listDailyBatchesPaged({ page: 1, pageSize: 20 }, mockDb as never);
+  assert.equal(allDays.total, 120);
+  assert.equal(allDays.totals.orderCount, 15031);
+  assert.equal(allDays.totals.orderPayout, 2358100);
+
+  // 2. /days with month filter q="2026-07" -> July 2026 totals
+  const julyDays = await listDailyBatchesPaged(
+    { page: 1, pageSize: 20, q: "2026-07" },
+    mockDb as never,
+  );
+  assert.equal(julyDays.total, 30);
+  assert.equal(julyDays.totals.orderCount, 1850);
+  assert.equal(julyDays.totals.orderIncome, 380000);
+  assert.equal(julyDays.totals.orderFees, -68000);
+  assert.equal(julyDays.totals.orderPayout, 312000);
+
+  // 3. /products with month filter date="2026-07" -> July 2026 SKU summary
+  const julySkus = await listSkuSummariesPaged(
+    { page: 1, pageSize: 20, date: "2026-07" },
+    mockDb as never,
+  );
+  assert.equal(julySkus.totals.skuCount, 12);
+  assert.equal(julySkus.totals.totalQty, 420);
+  assert.equal(julySkus.totals.grossAmount, 105000);
+  assert.equal(julySkus.totals.netSalesAmount, 89500);
+  assert.equal(julySkus.rows[0]?.skuCode, "SKU-07");
+
+  // 4. /history with month filter date="2026-07" -> July 2026 import summary
+  const julyImports = await listImportsPaged(
+    { page: 1, pageSize: 20, date: "2026-07" },
+    mockDb as never,
+  );
+  assert.equal(julyImports.total, 3);
+  assert.equal(julyImports.totals.orderCount, 1850);
+  assert.equal(julyImports.totals.latestPaidDate, "2026-07-30");
+});
+
+test("in-page filter/sort/pagination/tab links and router pushes preserve scroll position (scroll={false})", () => {
+  const billsSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/bills/page.tsx"),
+    "utf8",
+  );
+  const productsSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/products/page.tsx"),
+    "utf8",
+  );
+  const historySource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/history/page.tsx"),
+    "utf8",
+  );
+  const bulkInvoicesSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/days/[date]/invoices/page.tsx"),
+    "utf8",
+  );
+  const singleInvoiceSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/invoices/[orderId]/page.tsx"),
+    "utf8",
+  );
+  const importReportSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/app/import/[id]/page.tsx"),
+    "utf8",
+  );
+  const paginationSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/PaginationBar.tsx"),
+    "utf8",
+  );
+  const datePickerSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/DatePickerField.tsx"),
+    "utf8",
+  );
+  const calendarSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/UploadCompletenessCalendar.tsx"),
+    "utf8",
+  );
+  const filterFormSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/FilterForm.tsx"),
+    "utf8",
+  );
+
+  // FilterForm must use router.push(..., { scroll: false })
+  assert.match(filterFormSource, /router\.push\([^)]*\{\s*scroll:\s*false\s*\}\)/);
+  assert.match(billsSource, /<FilterForm\b/);
+  assert.match(productsSource, /<FilterForm\b/);
+
+  // PaginationBar & DatePickerField must navigate with { scroll: false }
+  assert.match(paginationSource, /router\.push\(buildHref\(target\),\s*\{\s*scroll:\s*false\s*\}\)/);
+  assert.equal((paginationSource.match(/scroll=\{false\}/g) ?? []).length, 4);
+  assert.equal((datePickerSource.match(/\{\s*scroll:\s*false\s*\}/g) ?? []).length, 2);
+
+  // UploadCompletenessCalendar year/month switcher must not jump to #completeness-check anchor and must use scroll={false}
+  assert.doesNotMatch(calendarSource, /#completeness-check/);
+  assert.equal((calendarSource.match(/scroll=\{false\}/g) ?? []).length, 4);
+
+  // In-page filter/sort/tab links in pages must include scroll={false}
+  assert.ok((billsSource.match(/scroll=\{false\}/g) ?? []).length >= 15);
+  assert.ok((productsSource.match(/scroll=\{false\}/g) ?? []).length >= 5);
+  assert.ok((historySource.match(/scroll=\{false\}/g) ?? []).length >= 1);
+  assert.ok((bulkInvoicesSource.match(/scroll=\{false\}/g) ?? []).length >= 9);
+  assert.ok((singleInvoiceSource.match(/scroll=\{false\}/g) ?? []).length >= 3);
+  assert.equal((importReportSource.match(/scroll=\{false\}/g) ?? []).length, 4);
+});
+
+test("buildOmsOrderUid prevents cross-month Shipnity order_code collisions (e.g. July TikTok O67 vs Feb Shopee O67) while matching File 1 and File 2 100%", async () => {
+  const { buildOmsOrderUid } = await import("../src/lib/ingest/oms-parse");
+
+  // July 2026 TikTok order O67 (File 1 & File 2)
+  const julyOrderUid = buildOmsOrderUid("O67", "2026-07-23", "2026-07-23", "JTTH201401136355");
+  const julyItemUid = buildOmsOrderUid("O67", "2026-07-23", "2026-07-23", "JTTH201401136355");
+  assert.equal(julyOrderUid, "O67|2026-07|JTTH201401136355");
+  assert.equal(julyOrderUid, julyItemUid);
+
+  // February 2026 Shopee order O67 (File 1 & File 2)
+  const febOrderUid = buildOmsOrderUid("O67", "2026-02-02", "2026-02-02", "TH269666114422Z");
+  const febItemUid = buildOmsOrderUid("O67", "2026-02-02", "2026-02-02", "TH269666114422Z");
+  assert.equal(febOrderUid, "O67|2026-02|TH269666114422Z");
+  assert.equal(febOrderUid, febItemUid);
+
+  // Must NEVER collide despite identical order_code "O67"
+  assert.notEqual(julyOrderUid, febOrderUid);
+
+  // Verify import-service.ts and queries.ts enforce order_uid and protect TikTok settlement channel
+  const importServiceSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/lib/ingest/import-service.ts"),
+    "utf8",
+  );
+  const queriesSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/lib/queries.ts"),
+    "utf8",
+  );
+
+  assert.match(importServiceSource, /ON CONFLICT \(order_uid\) DO UPDATE/);
+  assert.match(importServiceSource, /ON CONFLICT \(order_uid, line_no\) DO UPDATE/);
+  assert.match(
+    importServiceSource,
+    /WHEN t\.transaction_type <> 'คำสั่งซื้อ \(OMS\)' THEN 'TikTok'/,
+  );
+  assert.match(queriesSource, /oms_order_uid/);
+
+  // Verify Shopee OMS orders populate shippingActual and shippingCustomerFee for Bill & Invoice breakdown
+  const { buildBill } = await import("../src/lib/bill");
+  const { buildInvoice } = await import("../src/lib/invoice");
+  const { getOrderedInvoiceBreakdownLines } = await import("../src/components/InvoiceDocument");
+
+  const shopeeNormalized = {
+    externalId: "261023CG7W6J6D",
+    transactionType: "คำสั่งซื้อ (OMS)",
+    isOrder: true,
+    createdAt: "2026-10-23",
+    paidAt: "2026-10-23",
+    currency: "THB",
+    fields: {
+      orderId: "261023CG7W6J6D",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      createdAt: "2026-10-23",
+      paidAt: "2026-10-23",
+      currency: "THB",
+      incomeTotal: 425,
+      customerPayment: 425,
+      productAfterDiscount: 390,
+      productBeforeDiscount: 390,
+      storeDiscount: 0,
+      shippingCustomerFee: 35,
+      feeTotal: -154,
+      shippingTotal: -154,
+      shippingSellerTotal: -154,
+      shippingActual: -154,
+      shippingActualFee: -154,
+      adjustment: 0,
+      payout: 121,
+    },
+    mappedFields: [
+      "orderId",
+      "transactionType",
+      "createdAt",
+      "paidAt",
+      "currency",
+      "incomeTotal",
+      "customerPayment",
+      "productAfterDiscount",
+      "productBeforeDiscount",
+      "storeDiscount",
+      "shippingCustomerFee",
+      "feeTotal",
+      "shippingTotal",
+      "shippingSellerTotal",
+      "shippingActual",
+      "payout",
+    ],
+    feeGroups: {
+      shipping: {
+        total: -154,
+        children: {
+          shippingActual: -154,
+          shippingCustomerFee: 35,
+        },
+      },
+    },
+    unknownValues: [],
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    raw: {},
+    sourceRows: 1,
+    firstRow: 1,
+    rowIndexes: [1],
+  };
+
+  const shopeeBill = buildBill(shopeeNormalized);
+  assert.equal(shopeeBill.customerPaymentBreakdown.total, 425);
+  assert.equal(shopeeBill.customerPaymentBreakdown.productSubtotalAfterDiscount, 390);
+  assert.equal(shopeeBill.customerPaymentBreakdown.shippingAfterDiscount, 35);
+  assert.equal(shopeeBill.feeGroups.length, 1);
+  assert.equal(shopeeBill.feeGroups[0]?.key, "shipping");
+  assert.equal(shopeeBill.feeGroups[0]?.amount, -154);
+  assert.deepEqual(
+    shopeeBill.feeGroups[0]?.children.map((c) => ({ key: c.key, amount: c.amount })),
+    [
+      { key: "shippingActual", amount: -154 },
+      { key: "shippingCustomerFee", amount: 35 },
+    ],
+  );
+
+  const shopeeInvoice = buildInvoice({
+    id: 1,
+    importId: 1,
+    externalId: "261023CG7W6J6D",
+    transactionType: "คำสั่งซื้อ (OMS)",
+    isOrder: true,
+    createdDate: "2026-10-23",
+    paidDate: "2026-10-23",
+    currency: "THB",
+    income: 425,
+    feeTotal: -154,
+    adjustment: 0,
+    payout: 121,
+    productDetail: "J07-04-160 · ชุดเซทแขนยาว × 1",
+    weightEstimated: null,
+    weightCharged: null,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: shopeeNormalized,
+    createdAt: "2026-10-23T00:00:00Z",
+    invoiceNo: "SEQ/2610/00001",
+    channel: "Shopee",
+    orderCode: "YN72",
+    shippingFeeCustomer: 35,
+    shippingFeeSeller: 154,
+  });
+  const breakdownLines = getOrderedInvoiceBreakdownLines(shopeeInvoice);
+  assert.deepEqual(
+    breakdownLines.map((l) => ({ key: l.key, label: l.label, amount: l.amount })),
+    [
+      { key: "shippingCustomerFee", label: "ค่าธรรมเนียมการจัดส่งของลูกค้า", amount: 35 },
+      { key: "shippingActual", label: "ค่าธรรมเนียมและค่าส่งที่ร้านจ่าย (ตามไฟล์ Shipnity)", amount: -154 },
+    ],
+  );
+
+  // Guard against empty feeGroups entry without children
+  const emptyGroupBill = buildBill({
+    ...shopeeNormalized,
+    feeGroups: { shipping: {} as never },
+  });
+  assert.equal(emptyGroupBill.feeGroups.length, 0);
+
+  // Verify computeAbbreviatedSummary for both TikTok (with platform discount + shipping + fee deduction) and Shopee
+  const { computeAbbreviatedSummary } = await import("../src/components/InvoiceDocument");
+
+  // 1. TikTok order #585751221094614820 (Mickey 3 items: 63.48 * 3 = 190.44 + platformDiscount 16.56 = 207.00 + shipping 48.00 = 255.00 - feeTotal 29.86 = 225.14)
+  const mickeyInvoice = buildInvoice({
+    id: 2,
+    importId: 1,
+    externalId: "585751221094614820",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-08-27",
+    paidDate: "2026-08-31",
+    currency: "THB",
+    income: 207,
+    feeTotal: -29.86,
+    adjustment: 0,
+    payout: 177.14,
+    productDetail: null,
+    weightEstimated: 1500,
+    weightCharged: 1500,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      externalId: "585751221094614820",
+      transactionType: "คำสั่งซื้อ",
+      isOrder: true,
+      createdAt: "2026-08-27",
+      paidAt: "2026-08-31",
+      currency: "THB",
+      fields: {
+        incomeTotal: 207,
+        productBeforeDiscount: 1470,
+        storeDiscount: -1263,
+        productAfterDiscount: 207,
+        platformDiscount: 16.56,
+        customerPayment: 190.44,
+        shippingActual: -48,
+        shippingPlatformDiscount: 48,
+        shippingCustomerFee: 0,
+        feeTotal: -29.86,
+        payout: 177.14,
+      },
+      mappedFields: [],
+      feeGroups: {},
+      unknownValues: [],
+      checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+      warnings: [],
+      raw: {},
+      sourceRows: 1,
+      firstRow: 1,
+      rowIndexes: [1],
+    },
+    createdAt: "2026-08-31T00:00:00Z",
+    invoiceNo: "SEQ/2608/02560",
+    channel: "TikTok",
+    orderCode: "AB55",
+    omsItems: [
+      { skuCode: "K-6TS-4-M", productName: "มิกกี้ เทา-ดำ (M)", unitPrice: 490, quantity: 1 },
+      { skuCode: "K-6TS-3-M", productName: "มิกกี้ ชมพู-แดง (M)", unitPrice: 490, quantity: 1 },
+      { skuCode: "K-6TS-2-M", productName: "มิกกี้ น้ำตาล-ชมพู (M)", unitPrice: 490, quantity: 1 },
+    ],
+  });
+  const mickeySummary = computeAbbreviatedSummary(mickeyInvoice);
+  assert.equal(mickeySummary.itemsNetTotal, 190.44);
+  assert.equal(mickeySummary.platformSubsidyAmount, 16.56);
+  assert.equal(mickeySummary.shippingLineAmount, 48);
+  assert.equal(mickeySummary.subtotalBeforeFee, 255);
+  assert.equal(mickeySummary.platformFeeDeduction, 29.86);
+  assert.equal(mickeySummary.netAfterDiscount, 225.14);
+  assert.equal(mickeySummary.vatAmount, 14.73);
+  assert.equal(mickeySummary.preVatAmount, 210.41);
+  assert.equal(mickeySummary.grandTotal, 225.14);
+  assert.equal(mickeySummary.grandTotalText, "สองร้อยยี่สิบห้าบาทสิบสี่สตางค์");
+  assert.equal(mickeySummary.specialDiscountAmount, -48);
+  assert.equal(mickeySummary.paymentTotal, 177.14);
+
+  // 2. Shopee order (salesAmount = 390, shippingActual = -154, feeTotal = -154, payout = 121 -> subtotalBeforeFee = 544, platformFeeDeduction = 154, netAfterDiscount = 390, specialDiscountAmount = 121 - 390 = -269, paymentTotal = 121)
+  const shopeeSummary = computeAbbreviatedSummary(shopeeInvoice);
+  assert.equal(shopeeSummary.itemsNetTotal, 390);
+  assert.equal(shopeeSummary.platformSubsidyAmount, 0);
+  assert.equal(shopeeSummary.shippingLineAmount, 154);
+  assert.equal(shopeeSummary.subtotalBeforeFee, 544);
+  assert.equal(shopeeSummary.platformFeeDeduction, 154);
+  assert.equal(shopeeSummary.netAfterDiscount, 390);
+  assert.equal(shopeeSummary.grandTotal, 390);
+  assert.equal(shopeeSummary.specialDiscountAmount, -269);
+  assert.equal(shopeeSummary.paymentTotal, 121);
+
+  // 3. TikTok order #586779774611391839 (salesAmount = 100, shippingActual = -35, feeTotal = -27.08, payout = 72.92 -> grandTotal = 107.92, specialDiscountAmount = -35, paymentTotal = 72.92)
+  const order58677Invoice = buildInvoice({
+    id: 3,
+    importId: 1,
+    externalId: "586779774611391839",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-10-25",
+    paidDate: "2026-10-29",
+    currency: "THB",
+    income: 100,
+    feeTotal: -27.08,
+    adjustment: 0,
+    payout: 72.92,
+    productDetail: null,
+    weightEstimated: 500,
+    weightCharged: 500,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      externalId: "586779774611391839",
+      transactionType: "คำสั่งซื้อ",
+      isOrder: true,
+      createdAt: "2026-10-25",
+      paidAt: "2026-10-29",
+      currency: "THB",
+      fields: {
+        incomeTotal: 100,
+        productBeforeDiscount: 690,
+        storeDiscount: -590,
+        productAfterDiscount: 100,
+        platformDiscount: 0,
+        customerPayment: 100,
+        shippingActual: -35,
+        shippingPlatformDiscount: 35,
+        shippingCustomerFee: 0,
+        feeTotal: -27.08,
+        payout: 72.92,
+      },
+      mappedFields: [],
+      feeGroups: {},
+      unknownValues: [],
+      checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+      warnings: [],
+      raw: {},
+      sourceRows: 1,
+      firstRow: 1,
+      rowIndexes: [1],
+    },
+    createdAt: "2026-10-29T00:00:00Z",
+    invoiceNo: "SEQ/2610/05250",
+    channel: "TikTok",
+    orderCode: "TT99",
+  });
+  const order58677Summary = computeAbbreviatedSummary(order58677Invoice);
+  assert.equal(order58677Summary.subtotalBeforeFee, 135);
+  assert.equal(order58677Summary.platformFeeDeduction, 27.08);
+  assert.equal(order58677Summary.netAfterDiscount, 107.92);
+  assert.equal(order58677Summary.grandTotal, 107.92);
+  assert.equal(order58677Summary.specialDiscountAmount, -35);
+  assert.equal(order58677Summary.paymentTotal, 72.92);
+});
+
+
+
+
 
 
 
