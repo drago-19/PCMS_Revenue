@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["revenue.goldpulse-ai.com", "*.goldpulse-ai.com"],
   experimental: {
     reactDebugChannel: false,
+    proxyClientMaxBodySize: "105mb",
   },
   serverExternalPackages: ["exceljs", "pg", "bcryptjs"],
   async headers() {

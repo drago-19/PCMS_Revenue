@@ -71,31 +71,76 @@ export async function POST(request: Request) {
   const streamMode = url.searchParams.get("stream") === "1";
 
   try {
-    const form = await request.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) {
-      return Response.json({ error: "ไม่พบไฟล์ที่ส่งมา" }, { status: 400 });
-    }
-    const safeFilename = file.name.replace(/[\r\n\0]/g, "").slice(0, 255);
-    if (!/\.(xlsx|csv)$/i.test(safeFilename)) {
-      return Response.json(
-        { error: "รองรับเฉพาะไฟล์ .xlsx หรือ .csv เท่านั้น" },
-        { status: 400 },
-      );
-    }
-    if (file.size <= 0) {
-      return Response.json({ error: "ไฟล์ว่างหรืออ่านไม่ได้" }, { status: 400 });
-    }
-    if (file.size > MAX_BYTES) {
-      return Response.json(
-        { error: "ไฟล์มีขนาดเกิน 100 MB กรุณาแยกไฟล์ก่อนนำเข้า" },
-        { status: 400 },
-      );
+    const contentType = request.headers.get("content-type") ?? "";
+    const headerFilename = request.headers.get("x-file-name");
+    let safeFilename = "";
+    let buffer: Buffer;
+    let fileSize = 0;
+    let rawCustomMapping: FormDataEntryValue | string | null = null;
+    let rawSaveMapping: FormDataEntryValue | string | null = null;
+
+    if (headerFilename !== null || !contentType.includes("multipart/form-data")) {
+      let decodedName = headerFilename ?? "upload.xlsx";
+      try {
+        decodedName = decodeURIComponent(decodedName);
+      } catch {
+        // use raw header if not URI-encoded
+      }
+      safeFilename = decodedName.replace(/[\r\n\0]/g, "").slice(0, 255);
+      if (!/\.(xlsx|csv)$/i.test(safeFilename)) {
+        return Response.json(
+          { error: "รองรับเฉพาะไฟล์ .xlsx หรือ .csv เท่านั้น" },
+          { status: 400 },
+        );
+      }
+      buffer = Buffer.from(await request.arrayBuffer());
+      fileSize = buffer.length;
+      if (fileSize <= 0) {
+        return Response.json({ error: "ไฟล์ว่างหรืออ่านไม่ได้" }, { status: 400 });
+      }
+      if (fileSize > MAX_BYTES) {
+        return Response.json(
+          { error: "ไฟล์มีขนาดเกิน 100 MB กรุณาแยกไฟล์ก่อนนำเข้า" },
+          { status: 400 },
+        );
+      }
+      const headerCustomMap = request.headers.get("x-custom-mapping");
+      if (headerCustomMap) {
+        try {
+          rawCustomMapping = decodeURIComponent(headerCustomMap);
+        } catch {
+          rawCustomMapping = headerCustomMap;
+        }
+      }
+      rawSaveMapping = request.headers.get("x-save-mapping");
+    } else {
+      const form = await request.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) {
+        return Response.json({ error: "ไม่พบไฟล์ที่ส่งมา" }, { status: 400 });
+      }
+      safeFilename = file.name.replace(/[\r\n\0]/g, "").slice(0, 255);
+      if (!/\.(xlsx|csv)$/i.test(safeFilename)) {
+        return Response.json(
+          { error: "รองรับเฉพาะไฟล์ .xlsx หรือ .csv เท่านั้น" },
+          { status: 400 },
+        );
+      }
+      if (file.size <= 0) {
+        return Response.json({ error: "ไฟล์ว่างหรืออ่านไม่ได้" }, { status: 400 });
+      }
+      if (file.size > MAX_BYTES) {
+        return Response.json(
+          { error: "ไฟล์มีขนาดเกิน 100 MB กรุณาแยกไฟล์ก่อนนำเข้า" },
+          { status: 400 },
+        );
+      }
+      buffer = Buffer.from(await file.arrayBuffer());
+      fileSize = file.size;
+      rawCustomMapping = form.get("customMapping");
+      rawSaveMapping = form.get("saveMapping");
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const rawCustomMapping = form.get("customMapping");
-    const rawSaveMapping = form.get("saveMapping");
     const shouldSaveMapping =
       rawSaveMapping === null ||
       rawSaveMapping === "1" ||
@@ -158,7 +203,7 @@ export async function POST(request: Request) {
         details: {
           importId: result.importId,
           filename: safeFilename,
-          fileSize: file.size,
+          fileSize,
           orderCount: result.orderCount,
           duplicate: result.duplicate,
         },
@@ -199,7 +244,7 @@ export async function POST(request: Request) {
             details: {
               importId: result.importId,
               filename: safeFilename,
-              fileSize: file.size,
+              fileSize,
               orderCount: result.orderCount,
               duplicate: result.duplicate,
             },
@@ -214,8 +259,9 @@ export async function POST(request: Request) {
             outcome: "failure",
             details: {
               filename: safeFilename,
-              fileSize: file.size,
+              fileSize,
               code: error instanceof IngestError ? error.code : "internal_error",
+              reason: error instanceof Error ? error.message.slice(0, 240) : "unknown",
             },
             requestId: auth.requestId,
           });
@@ -254,6 +300,17 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    await recordAuditLog({
+      actor: auth.session.sub,
+      action: "imports.upload",
+      ipAddress: auth.ip,
+      outcome: "failure",
+      details: {
+        code: error instanceof IngestError ? error.code : "request_parse_error",
+        reason: error instanceof Error ? error.message.slice(0, 240) : "unknown",
+      },
+      requestId: auth.requestId,
+    }).catch(() => {});
     if (error instanceof IngestError) {
       return Response.json(
         { error: error.message, code: error.code, details: error.details ?? [] },

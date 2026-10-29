@@ -128,8 +128,8 @@ export default async function ImportReportPage({
             />
             {importRow.periodStart ? (
               <Button asChild variant="secondary">
-                <Link href={`/days/${importRow.periodStart}`}>
-                  <IconCalendar size={16} /> เปิดรอบชำระ
+                <Link href={`/bills?date=${encodeURIComponent(importRow.periodStart)}`}>
+                  <IconCalendar size={16} /> เปิดดูบิลรอบนี้
                 </Link>
               </Button>
             ) : null}
@@ -192,7 +192,7 @@ export default async function ImportReportPage({
                     : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
-                <Link href={`/import/${importRow.id}?tab=spreadsheet`}>
+                <Link href={`/import/${importRow.id}?tab=spreadsheet`} scroll={false}>
                   ตารางข้อมูลไฟล์ (Excel)
                 </Link>
               </Button>
@@ -206,7 +206,7 @@ export default async function ImportReportPage({
                     : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
-                <Link href={`/import/${importRow.id}?tab=reconcile`}>
+                <Link href={`/import/${importRow.id}?tab=reconcile`} scroll={false}>
                   ตรวจยอดกับชีตสรุป
                 </Link>
               </Button>
@@ -220,7 +220,7 @@ export default async function ImportReportPage({
                     : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
-                <Link href={`/import/${importRow.id}?tab=mapping`}>
+                <Link href={`/import/${importRow.id}?tab=mapping`} scroll={false}>
                   การจับคู่หัวคอลัมน์ ({mappedCount}/{totalHeaders})
                 </Link>
               </Button>
@@ -234,7 +234,7 @@ export default async function ImportReportPage({
                     : "w-full justify-center text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                 }
               >
-                <Link href={`/import/${importRow.id}?tab=details`}>
+                <Link href={`/import/${importRow.id}?tab=details`} scroll={false}>
                   คำเตือน & ข้อมูลไฟล์ ({warnings.length})
                 </Link>
               </Button>
@@ -333,8 +333,8 @@ export default async function ImportReportPage({
               </span>
               {importRow.periodStart ? (
                 <Button asChild variant="ghost" size="xs" className="card-link">
-                  <Link href={`/days/${importRow.periodStart}`}>
-                    ดูรอบชำระ {formatDate(importRow.periodStart)}
+                  <Link href={`/bills?date=${encodeURIComponent(importRow.periodStart)}`}>
+                    ดูบิลรอบ {formatDate(importRow.periodStart)}
                   </Link>
                 </Button>
               ) : null}

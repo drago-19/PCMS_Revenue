@@ -43,6 +43,7 @@ interface UploadResult {
   rowCount: number;
   orderCount: number;
   transactionCount: number;
+  systemOrderCount?: number;
   periodStart: string | null;
   periodEnd: string | null;
   warnings: UploadWarning[];
@@ -390,13 +391,19 @@ export function UploadForm() {
         reject(new Error("NETWORK_ERROR"));
       };
 
-      const body = new FormData();
-      body.append("file", targetFile);
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.setRequestHeader("x-file-name", encodeURIComponent(targetFile.name));
       if (customMap && Object.keys(customMap).length > 0) {
-        body.append("customMapping", JSON.stringify(customMap));
-        body.append("saveMapping", saveMappingForFuture ? "1" : "0");
+        xhr.setRequestHeader(
+          "x-custom-mapping",
+          encodeURIComponent(JSON.stringify(customMap)),
+        );
+        xhr.setRequestHeader(
+          "x-save-mapping",
+          saveMappingForFuture ? "1" : "0",
+        );
       }
-      xhr.send(body);
+      xhr.send(targetFile);
     });
   }
 
@@ -535,6 +542,86 @@ export function UploadForm() {
     progress.stage === "parsing" ||
     progress.stage === "reconciling" ||
     progress.stage === "saving";
+
+  const isBatch = batchResults.length > 1;
+  const batchTotalOrders = batchResults.reduce((acc, r) => acc + r.orderCount, 0);
+  const batchTotalTransactions = batchResults.reduce(
+    (acc, r) => acc + r.transactionCount,
+    0,
+  );
+  const batchTotalRows = batchResults.reduce((acc, r) => acc + r.rowCount, 0);
+  const batchSettlementCount = batchResults.filter(
+    (r) => !r.fileType || r.fileType === "settlement",
+  ).length;
+  const batchOmsOrdersCount = batchResults.filter(
+    (r) => r.fileType === "oms_orders",
+  ).length;
+  const batchOmsItemsCount = batchResults.filter(
+    (r) => r.fileType === "oms_items",
+  ).length;
+  const batchStartDates = batchResults
+    .map((r) => r.periodStart)
+    .filter((d): d is string => Boolean(d))
+    .sort();
+  const batchEndDates = batchResults
+    .map((r) => r.periodEnd ?? r.periodStart)
+    .filter((d): d is string => Boolean(d))
+    .sort();
+  const batchMinStart = batchStartDates[0] ?? null;
+  const batchMaxEnd = batchEndDates[batchEndDates.length - 1] ?? null;
+  const batchCheckedFiles = batchResults.filter(
+    (r) => r.reconciliation.matched !== null,
+  );
+  const batchMatchedFiles = batchCheckedFiles.filter(
+    (r) => r.reconciliation.matched === true,
+  );
+  const batchFailedFiles = batchCheckedFiles.filter(
+    (r) => r.reconciliation.matched === false,
+  );
+  const batchWarnings = isBatch
+    ? batchResults.flatMap((r) =>
+        r.warnings.map((w) => ({
+          ...w,
+          message: `[${r.filename}] ${w.message}`,
+        })),
+      )
+    : (result?.warnings ?? []);
+
+  const displayOrderLabel = isBatch
+    ? result?.systemOrderCount
+      ? "บิลสุทธิในระบบ"
+      : "ออเดอร์รวมทุกไฟล์"
+    : "บิล";
+  const displayOrderCount = isBatch
+    ? (result?.systemOrderCount ?? batchTotalOrders)
+    : (result?.orderCount ?? 0);
+  const displayTransactionLabel = isBatch
+    ? `รายการรวม (${batchResults.length} ไฟล์)`
+    : "รายการทั้งหมด";
+  const displayTransactionCount = isBatch
+    ? batchTotalTransactions
+    : (result?.transactionCount ?? 0);
+  const displayPeriodLabel = isBatch ? "ช่วงวันที่ข้อมูล" : "รอบชำระ";
+  const displayPeriodText = isBatch
+    ? batchMinStart && batchMaxEnd
+      ? batchMinStart === batchMaxEnd
+        ? formatDate(batchMinStart)
+        : `${formatDate(batchMinStart)} – ${formatDate(batchMaxEnd)}`
+      : "-"
+    : result?.periodStart
+      ? formatDate(result.periodStart)
+      : "-";
+  const displayReconciliationText = isBatch
+    ? batchCheckedFiles.length > 0
+      ? batchFailedFiles.length === 0
+        ? `ตรง (${batchMatchedFiles.length}/${batchCheckedFiles.length} ไฟล์รายได้)`
+        : `ไม่ตรง ${batchFailedFiles.length}/${batchCheckedFiles.length} ไฟล์`
+      : `ไฟล์ OMS (${batchResults.length} ไฟล์)`
+    : result?.reconciliation.matched === true
+      ? "ตรง"
+      : result?.reconciliation.matched === false
+        ? "ไม่ตรง"
+        : "ไม่มีชีตสรุป";
 
   return (
     <div className="upload-card">
@@ -788,25 +875,25 @@ export function UploadForm() {
             {progress.stage === "done" && result ? (
               <div className="grid grid-cols-3 gap-2 rounded-xl border border-[#bfe8d2] bg-[#f3fdf7] p-3 text-center">
                 <div>
-                  <span className="block text-[11px] text-muted-foreground">จำนวนบิล</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {displayOrderLabel}
+                  </span>
                   <strong className="font-mono text-sm font-bold text-foreground tabular-nums">
-                    {result.orderCount.toLocaleString("th-TH")}
+                    {displayOrderCount.toLocaleString("th-TH")}
                   </strong>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-muted-foreground">รายการทั้งหมด</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {displayTransactionLabel}
+                  </span>
                   <strong className="font-mono text-sm font-bold text-foreground tabular-nums">
-                    {result.transactionCount.toLocaleString("th-TH")}
+                    {displayTransactionCount.toLocaleString("th-TH")}
                   </strong>
                 </div>
                 <div>
                   <span className="block text-[11px] text-muted-foreground">ตรวจยอด</span>
                   <strong className="text-sm font-bold text-foreground">
-                    {result.reconciliation.matched === true
-                      ? "ตรง"
-                      : result.reconciliation.matched === false
-                        ? "ไม่ตรง"
-                        : "ไม่มีชีตสรุป"}
+                    {displayReconciliationText}
                   </strong>
                 </div>
               </div>
@@ -998,9 +1085,9 @@ export function UploadForm() {
 
       {result ? (
         <Card
-          variant={result.duplicate ? "info" : "success"}
+          variant={!isBatch && result.duplicate ? "info" : "success"}
           padding="compact"
-          className={cn("result-card", result.duplicate ? "info" : "success")}
+          className={cn("result-card", !isBatch && result.duplicate ? "info" : "success")}
         >
           <div className="result-head">
             <span className="result-icon">
@@ -1008,54 +1095,51 @@ export function UploadForm() {
             </span>
             <div>
               <strong>
-                {batchResults.length > 1
+                {isBatch
                   ? `นำเข้าและเชื่อมข้อมูล ${batchResults.length} ไฟล์สำเร็จ`
                   : result.duplicate
                     ? "ไฟล์นี้เคยนำเข้าแล้ว"
                     : "นำเข้าสำเร็จ"}
               </strong>
               <p>
-                {batchResults.length > 1
-                  ? `ไฟล์ที่นำเข้า: ${batchResults.map((r) => r.filename).join(" · ")}`
+                {isBatch
+                  ? `แยกเป็น: ไฟล์รายได้ TikTok ${batchSettlementCount} ไฟล์ · ออเดอร์ Shipnity ${batchOmsOrdersCount} ไฟล์ · สินค้า Shipnity ${batchOmsItemsCount} ไฟล์ (รวม ${batchTotalRows.toLocaleString("th-TH")} แถวข้อมูล)`
                   : result.duplicate
                     ? "ระบบตรวจพบไฟล์เดิมจาก hash จึงไม่บันทึกซ้ำ"
-                    : `ประมวลผล ${result.orderCount} ออเดอร์ จาก ${result.rowCount} แถวข้อมูล`}
+                    : `ประมวลผล ${result.orderCount.toLocaleString("th-TH")} ออเดอร์ จาก ${result.rowCount.toLocaleString("th-TH")} แถวข้อมูล`}
               </p>
+              {isBatch ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ไฟล์ที่นำเข้า: {batchResults.map((r) => r.filename).join(" · ")}
+                </p>
+              ) : null}
             </div>
           </div>
 
           <div className="result-stats">
             <span>
-              <small>บิล</small>
-              <strong>{result.orderCount}</strong>
+              <small>{displayOrderLabel}</small>
+              <strong>{displayOrderCount.toLocaleString("th-TH")}</strong>
             </span>
             <span>
-              <small>รายการทั้งหมด</small>
-              <strong>{result.transactionCount}</strong>
+              <small>{displayTransactionLabel}</small>
+              <strong>{displayTransactionCount.toLocaleString("th-TH")}</strong>
             </span>
             <span>
-              <small>รอบชำระ</small>
-              <strong>
-                {result.periodStart ? formatDate(result.periodStart) : "-"}
-              </strong>
+              <small>{displayPeriodLabel}</small>
+              <strong>{displayPeriodText}</strong>
             </span>
             <span>
               <small>ตรวจยอด</small>
-              <strong>
-                {result.reconciliation.matched === true
-                  ? "ตรง"
-                  : result.reconciliation.matched === false
-                    ? "ไม่ตรง"
-                    : "ไม่มีชีตสรุป"}
-              </strong>
+              <strong>{displayReconciliationText}</strong>
             </span>
           </div>
 
-          {result.warnings.length > 0 ? (
+          {batchWarnings.length > 0 ? (
             <details className="result-warnings">
-              <summary>คำเตือน {result.warnings.length} รายการ</summary>
+              <summary>คำเตือน {batchWarnings.length} รายการ</summary>
               <ul>
-                {result.warnings.map((warning, index) => (
+                {batchWarnings.map((warning, index) => (
                   <li key={`${warning.code}-${index}`}>{warning.message}</li>
                 ))}
               </ul>
@@ -1068,15 +1152,21 @@ export function UploadForm() {
               filename={result.filename}
               fileType={result.fileType}
               rowCount={result.rowCount}
-              triggerLabel="เปิดอ่านตาราง Excel"
+              triggerLabel={isBatch ? "เปิดอ่านตาราง Excel (ไฟล์ล่าสุด)" : "เปิดอ่านตาราง Excel"}
             />
-            <Button asChild variant="default">
-              <Link href={`/import/${result.importId}`}>ดูรายงานการนำเข้า</Link>
-            </Button>
-            {result.periodStart ? (
+            {isBatch ? (
+              <Button asChild variant="default">
+                <Link href="/history">ดูประวัติทั้ง {batchResults.length} ไฟล์</Link>
+              </Button>
+            ) : (
+              <Button asChild variant="default">
+                <Link href={`/import/${result.importId}`}>ดูรายงานการนำเข้า</Link>
+              </Button>
+            )}
+            {!isBatch && result.periodStart ? (
               <Button asChild variant="secondary">
-                <Link href={`/days/${result.periodStart}`}>
-                  ดูรอบชำระ {formatDate(result.periodStart)}
+                <Link href={`/bills?date=${encodeURIComponent(result.periodStart)}`}>
+                  ดูบิลรอบ {formatDate(result.periodStart)}
                 </Link>
               </Button>
             ) : null}
