@@ -36,11 +36,15 @@ export default async function InvoicePage({
 }) {
   const { orderId } = await params;
   const resolvedSearchParams = await searchParams;
-  const mode: InvoiceMode =
-    resolvedSearchParams.mode === "full" ? "full" : "abbreviated";
 
   const row = await getBill(decodeURIComponent(orderId));
   if (!row) notFound();
+  const enableFullTaxInvoice =
+    row.sellerSettings?.enableFullTaxInvoice === true;
+  const mode: InvoiceMode =
+    enableFullTaxInvoice && resolvedSearchParams.mode === "full"
+      ? "full"
+      : "abbreviated";
   const defaultAbbrevPaper: InvoicePaperSize =
     row.sellerSettings?.defaultPaperSize ?? "a6";
   const paper = parsePaperSize(
@@ -119,36 +123,38 @@ export default async function InvoicePage({
               </div>
 
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
-                <div className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto sm:items-center">
-                  <Button
-                    asChild
-                    variant={mode === "abbreviated" ? "default" : "ghost"}
-                    size="xs"
-                    className={
-                      mode === "abbreviated"
-                        ? "w-full shadow-xs sm:w-auto"
-                        : "w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                    }
-                  >
-                    <Link href={buildHref("abbreviated", "a6")}>
-                      ใบกำกับฯ (อย่างย่อ)
-                    </Link>
-                  </Button>
-                  <Button
-                    asChild
-                    variant={mode === "full" ? "default" : "ghost"}
-                    size="xs"
-                    className={
-                      mode === "full"
-                        ? "w-full shadow-xs sm:w-auto"
-                        : "w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                    }
-                  >
-                    <Link href={buildHref("full", "a4")}>
-                      ใบกำกับฯ (แบบเต็มรูป)
-                    </Link>
-                  </Button>
-                </div>
+                {enableFullTaxInvoice ? (
+                  <div className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto sm:items-center">
+                    <Button
+                      asChild
+                      variant={mode === "abbreviated" ? "default" : "ghost"}
+                      size="xs"
+                      className={
+                        mode === "abbreviated"
+                          ? "w-full shadow-xs sm:w-auto"
+                          : "w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
+                      }
+                    >
+                      <Link href={buildHref("abbreviated", "a6")} scroll={false}>
+                        ใบกำกับฯ (อย่างย่อ)
+                      </Link>
+                    </Button>
+                    <Button
+                      asChild
+                      variant={mode === "full" ? "default" : "ghost"}
+                      size="xs"
+                      className={
+                        mode === "full"
+                          ? "w-full shadow-xs sm:w-auto"
+                          : "w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
+                      }
+                    >
+                      <Link href={buildHref("full", "a4")} scroll={false}>
+                        ใบกำกับฯ (แบบเต็มรูป)
+                      </Link>
+                    </Button>
+                  </div>
+                ) : null}
                 <PrintButton className="w-full sm:w-auto" />
               </div>
             </div>
@@ -187,7 +193,10 @@ export default async function InvoicePage({
                               : "flex-1 justify-center px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:flex-initial"
                           }
                         >
-                          <Link href={buildHref("abbreviated", opt.key)}>
+                          <Link
+                            href={buildHref("abbreviated", opt.key)}
+                            scroll={false}
+                          >
                             {opt.label}
                           </Link>
                         </Button>

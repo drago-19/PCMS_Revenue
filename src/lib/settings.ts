@@ -106,6 +106,11 @@ export function normalizeSellerSettings(
       ? src.showReceiptNo
       : DEFAULT_SELLER.showReceiptNo;
 
+  const enableFullTaxInvoice =
+    typeof src.enableFullTaxInvoice === "boolean"
+      ? src.enableFullTaxInvoice
+      : DEFAULT_SELLER.enableFullTaxInvoice;
+
   const showSkuInAbbreviated =
     typeof src.showSkuInAbbreviated === "boolean"
       ? src.showSkuInAbbreviated
@@ -147,6 +152,7 @@ export function normalizeSellerSettings(
     defaultPaperSize,
     showInvoiceNo,
     showReceiptNo,
+    enableFullTaxInvoice,
     showSkuInAbbreviated,
     showSkuInFull,
     showFeeBreakdown,
@@ -253,10 +259,10 @@ export async function saveDocumentSettings(
       client,
     );
 
-    // Only normalize invoice_registry if legacy non-'SEQ/%' rows exist (prevents rewriting billion-row tables on every settings save)
+    // Only normalize invoice_registry if legacy non-'SEQ/YYMM/%' rows exist (prevents rewriting billion-row tables on every settings save)
     const hasLegacyInvoiceNo = await queryOne<{ exists: boolean }>(
       `SELECT EXISTS (
-         SELECT 1 FROM invoice_registry WHERE invoice_no NOT LIKE 'SEQ/%'
+         SELECT 1 FROM invoice_registry WHERE invoice_no NOT LIKE 'SEQ/____/%'
        ) AS exists`,
       [],
       client,
@@ -266,7 +272,20 @@ export async function saveDocumentSettings(
       await query(
         `WITH ordered AS (
            SELECT r.order_id,
+                  CASE
+                    WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
+                    THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
+                         || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
+                    ELSE '0000'
+                  END AS yymm,
                   ROW_NUMBER() OVER (
+                    PARTITION BY
+                      CASE
+                        WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
+                        THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
+                             || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
+                        ELSE '0000'
+                      END
                     ORDER BY COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') ASC,
                              r.created_at ASC,
                              r.order_id ASC
@@ -275,7 +294,7 @@ export async function saveDocumentSettings(
            LEFT JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
          )
          UPDATE invoice_registry r
-         SET invoice_no = '__TMP_SEQ__/' || o.rn::text
+         SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0')
          FROM ordered o
          WHERE r.order_id = o.order_id`,
         [],
@@ -284,7 +303,7 @@ export async function saveDocumentSettings(
 
       await query(
         `UPDATE invoice_registry
-         SET invoice_no = 'SEQ/' || LPAD(SUBSTRING(invoice_no FROM 13), 5, '0')
+         SET invoice_no = 'SEQ/' || SUBSTRING(invoice_no FROM 13)
          WHERE invoice_no LIKE '__TMP_SEQ__/%'`,
         [],
         client,

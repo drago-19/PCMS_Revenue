@@ -23,7 +23,9 @@ import { Input } from "@/components/ui/input";
 import { buildInvoice } from "@/lib/invoice";
 import type { TransactionRow } from "@/lib/queries";
 import {
+  buildDocumentPatternFromLead,
   DEFAULT_SELLER,
+  extractDocumentLeadPrefix,
   formatRunningDocumentNo,
   type DefaultInvoicePaperSize,
   type SellerInfo,
@@ -173,6 +175,20 @@ export function DocumentSettingsClient({
     };
     const rawVatStr = getInputVal("vatRate", String(base.vatRate));
     const rawVat = rawVatStr.trim() !== "" ? Number(rawVatStr) : Number.NaN;
+    const rawInvLead = formEl.elements.namedItem(
+      "invoiceLeadPrefix",
+    ) as HTMLInputElement | null;
+    const rawRecLead = formEl.elements.namedItem(
+      "receiptLeadPrefix",
+    ) as HTMLInputElement | null;
+    const nextInvoicePrefix =
+      rawInvLead && typeof rawInvLead.value === "string"
+        ? buildDocumentPatternFromLead(rawInvLead.value)
+        : getInputVal("invoicePrefix", base.invoicePrefix).toUpperCase();
+    const nextReceiptPrefix =
+      rawRecLead && typeof rawRecLead.value === "string"
+        ? buildDocumentPatternFromLead(rawRecLead.value)
+        : getInputVal("receiptPrefix", base.receiptPrefix).toUpperCase();
     return {
       ...base,
       name: getInputVal("name", base.name),
@@ -182,11 +198,15 @@ export function DocumentSettingsClient({
       phone: getInputVal("phone", base.phone),
       email: getInputVal("email", base.email),
       vatRate: Number.isFinite(rawVat) ? rawVat : base.vatRate,
-      invoicePrefix: getInputVal("invoicePrefix", base.invoicePrefix).toUpperCase(),
-      receiptPrefix: getInputVal("receiptPrefix", base.receiptPrefix).toUpperCase(),
+      invoicePrefix: nextInvoicePrefix,
+      receiptPrefix: nextReceiptPrefix,
       footerNote: getInputVal("footerNote", base.footerNote),
       showInvoiceNo: getCheckVal("showInvoiceNo", base.showInvoiceNo),
       showReceiptNo: getCheckVal("showReceiptNo", base.showReceiptNo),
+      enableFullTaxInvoice: getCheckVal(
+        "enableFullTaxInvoice",
+        base.enableFullTaxInvoice,
+      ),
       showFeeBreakdown: getCheckVal("showFeeBreakdown", base.showFeeBreakdown),
       showShippingTracking: getCheckVal(
         "showShippingTracking",
@@ -235,7 +255,19 @@ export function DocumentSettingsClient({
   }
 
   const previewInvoice = useMemo(() => {
-    return buildInvoice(SAMPLE_TRANSACTION, form);
+    const prefixYmMatch = /(\d{2})(0[1-9]|1[0-2])(?=\D*\d+\D*$)/.exec(
+      form.invoicePrefix || form.receiptPrefix || "",
+    );
+    const previewPaidDate = prefixYmMatch
+      ? `20${prefixYmMatch[1]}-${prefixYmMatch[2]}-26`
+      : SAMPLE_TRANSACTION.paidDate;
+    return buildInvoice(
+      {
+        ...SAMPLE_TRANSACTION,
+        paidDate: previewPaidDate,
+      },
+      form,
+    );
   }, [form]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -429,78 +461,165 @@ export function DocumentSettingsClient({
               2. การคำนวณภาษีและรหัสเอกสาร (Tax & Numbering)
             </CardTitle>
             <CardDescription>
-              กำหนดอัตราภาษีมูลค่าเพิ่ม เลขที่ใบกำกับฯ เริ่มต้น และเลขที่ใบเสร็จเริ่มต้นด้วยตัวเอง ระบบจะบวกเลขท้ายรันต่อไปทีละใบอัตโนมัติ (+1, +2, ...)
+              กำหนดเฉพาะอักษรนำหน้า (เช่น TT, RC หรือเว้นว่าง) ส่วนปี-เดือน (YYMM) จะดึงตามวันที่ของบิลจริง และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
+          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-12">
+            <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground sm:col-span-12">
               <span>อัตราภาษีมูลค่าเพิ่ม (VAT %)</span>
-              <Input
-                name="vatRate"
-                type="number"
-                step="0.01"
-                min="0"
-                max="30"
-                value={vatRateInput}
-                onWheel={(e) => e.currentTarget.blur()}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setVatRateInput(val);
-                  const num = Number(val);
-                  if (val.trim() !== "" && Number.isFinite(num)) {
-                    updateForm((prev) => ({
-                      ...prev,
-                      vatRate: num,
-                    }));
-                  }
-                }}
-                className="mono"
-              />
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Input
+                  name="vatRate"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="30"
+                  value={vatRateInput}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setVatRateInput(val);
+                    const num = Number(val);
+                    if (val.trim() !== "" && Number.isFinite(num)) {
+                      updateForm((prev) => ({
+                        ...prev,
+                        vatRate: num,
+                      }));
+                    }
+                  }}
+                  className="mono max-w-[160px]"
+                />
+                <span className="text-xs font-normal text-muted-foreground">
+                  % (ใช้คำนวณมูลค่าก่อนภาษีและภาษีมูลค่าเพิ่มบนใบกำกับภาษี)
+                </span>
+              </div>
             </label>
 
-            <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
-              <span>เลขที่ใบกำกับฯ เริ่มต้น (กำหนดเองแล้วรันต่อ)</span>
-              <Input
-                name="invoicePrefix"
-                value={form.invoicePrefix}
-                onChange={(e) =>
-                  updateForm((prev) => ({
-                    ...prev,
-                    invoicePrefix: e.target.value,
-                  }))
-                }
-                placeholder="เช่น TT2610/00001 หรือ INV-0001"
-                className="mono"
-                maxLength={32}
-              />
-              <span className="mono text-[11px] font-normal text-muted-foreground break-all">
-                รันต่อเนื่อง: {formatRunningDocumentNo(form.invoicePrefix, 1, DEFAULT_SELLER.invoicePrefix)} →{" "}
-                {formatRunningDocumentNo(form.invoicePrefix, 2, DEFAULT_SELLER.invoicePrefix)} →{" "}
-                {formatRunningDocumentNo(form.invoicePrefix, 3, DEFAULT_SELLER.invoicePrefix)}
-              </span>
-            </label>
+            <div className="flex flex-col gap-2 sm:col-span-6">
+              <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
+                <span>อักษรนำหน้าใบกำกับภาษี (Prefix)</span>
+                <div className="flex items-stretch gap-1.5">
+                  <Input
+                    name="invoiceLeadPrefix"
+                    value={extractDocumentLeadPrefix(form.invoicePrefix)}
+                    onChange={(e) =>
+                      updateForm((prev) => ({
+                        ...prev,
+                        invoicePrefix: buildDocumentPatternFromLead(
+                          e.target.value,
+                        ),
+                      }))
+                    }
+                    placeholder="เช่น TT (หรือเว้นว่าง)"
+                    className="mono w-28 shrink-0 font-bold uppercase"
+                    maxLength={12}
+                    aria-label="อักษรนำหน้าใบกำกับภาษี"
+                  />
+                  <div
+                    className="mono flex flex-1 items-center justify-center rounded-[10px] border border-dashed border-border bg-muted/50 px-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap"
+                    title="ระบบเติมรหัสปี-เดือน (YYMM) ตามวันที่บิล และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ"
+                  >
+                    + YYMM/00001
+                  </div>
+                </div>
+              </label>
+              <div className="flex flex-col gap-1 rounded-lg border border-border/80 bg-muted/25 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span>รันในเดือน (เช่น ต.ค.):</span>
+                  <span className="mono font-semibold text-foreground whitespace-nowrap">
+                    {formatRunningDocumentNo(
+                      form.invoicePrefix,
+                      1,
+                      DEFAULT_SELLER.invoicePrefix,
+                      "2026-10-01",
+                    )}{" "}
+                    →{" "}
+                    {formatRunningDocumentNo(
+                      form.invoicePrefix,
+                      2,
+                      DEFAULT_SELLER.invoicePrefix,
+                      "2026-10-01",
+                    )}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span>เปลี่ยนเดือน (เช่น พ.ย.):</span>
+                  <span className="mono font-semibold text-emerald-700 whitespace-nowrap">
+                    เริ่ม{" "}
+                    {formatRunningDocumentNo(
+                      form.invoicePrefix,
+                      1,
+                      DEFAULT_SELLER.invoicePrefix,
+                      "2026-11-01",
+                    )}{" "}
+                    ใหม่
+                  </span>
+                </div>
+              </div>
+            </div>
 
-            <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
-              <span>เลขที่ใบเสร็จ เริ่มต้น (กำหนดเองแล้วรันต่อ)</span>
-              <Input
-                name="receiptPrefix"
-                value={form.receiptPrefix}
-                onChange={(e) =>
-                  updateForm((prev) => ({
-                    ...prev,
-                    receiptPrefix: e.target.value,
-                  }))
-                }
-                placeholder="เช่น RC2610/00001 หรือ RC-0001"
-                className="mono"
-                maxLength={32}
-              />
-              <span className="mono text-[11px] font-normal text-muted-foreground break-all">
-                รันต่อเนื่อง: {formatRunningDocumentNo(form.receiptPrefix, 1, DEFAULT_SELLER.receiptPrefix)} →{" "}
-                {formatRunningDocumentNo(form.receiptPrefix, 2, DEFAULT_SELLER.receiptPrefix)} →{" "}
-                {formatRunningDocumentNo(form.receiptPrefix, 3, DEFAULT_SELLER.receiptPrefix)}
-              </span>
-            </label>
+            <div className="flex flex-col gap-2 sm:col-span-6">
+              <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
+                <span>อักษรนำหน้าใบเสร็จรับเงิน (Prefix)</span>
+                <div className="flex items-stretch gap-1.5">
+                  <Input
+                    name="receiptLeadPrefix"
+                    value={extractDocumentLeadPrefix(form.receiptPrefix)}
+                    onChange={(e) =>
+                      updateForm((prev) => ({
+                        ...prev,
+                        receiptPrefix: buildDocumentPatternFromLead(
+                          e.target.value,
+                        ),
+                      }))
+                    }
+                    placeholder="เช่น RC (หรือเว้นว่าง)"
+                    className="mono w-28 shrink-0 font-bold uppercase"
+                    maxLength={12}
+                    aria-label="อักษรนำหน้าใบเสร็จรับเงิน"
+                  />
+                  <div
+                    className="mono flex flex-1 items-center justify-center rounded-[10px] border border-dashed border-border bg-muted/50 px-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap"
+                    title="ระบบเติมรหัสปี-เดือน (YYMM) ตามวันที่บิล และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ"
+                  >
+                    + YYMM/00001
+                  </div>
+                </div>
+              </label>
+              <div className="flex flex-col gap-1 rounded-lg border border-border/80 bg-muted/25 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span>รันในเดือน (เช่น ต.ค.):</span>
+                  <span className="mono font-semibold text-foreground whitespace-nowrap">
+                    {formatRunningDocumentNo(
+                      form.receiptPrefix,
+                      1,
+                      DEFAULT_SELLER.receiptPrefix,
+                      "2026-10-01",
+                    )}{" "}
+                    →{" "}
+                    {formatRunningDocumentNo(
+                      form.receiptPrefix,
+                      2,
+                      DEFAULT_SELLER.receiptPrefix,
+                      "2026-10-01",
+                    )}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span>เปลี่ยนเดือน (เช่น พ.ย.):</span>
+                  <span className="mono font-semibold text-emerald-700 whitespace-nowrap">
+                    เริ่ม{" "}
+                    {formatRunningDocumentNo(
+                      form.receiptPrefix,
+                      1,
+                      DEFAULT_SELLER.receiptPrefix,
+                      "2026-11-01",
+                    )}{" "}
+                    ใหม่
+                  </span>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -564,10 +683,6 @@ export function DocumentSettingsClient({
                     label: "แสดงหมายเลขใบเสร็จ (ใบเสร็จ:)",
                   },
                   {
-                    key: "showFeeBreakdown",
-                    label: "แสดงบรรทัดส่วนลดชดเชย & หักค่าธรรมเนียมแพลตฟอร์ม",
-                  },
-                  {
                     key: "showShippingTracking",
                     label: "แสดงชื่อขนส่งและเลขพัสดุ (J&T / เลขพัสดุ)",
                   },
@@ -576,17 +691,27 @@ export function DocumentSettingsClient({
                     label: "แสดงรหัส SKU ในใบกำกับภาษีอย่างย่อ",
                   },
                   {
-                    key: "showSkuInFull",
-                    label: "แสดงคอลัมน์รหัส SKU ในใบกำกับภาษีแบบเต็มรูป",
+                    key: "enableFullTaxInvoice",
+                    label:
+                      "เปิดใช้งานใบกำกับภาษีแบบเต็มรูป (แสดงปุ่ม 'ใบกำกับฯ แบบเต็มรูป' ในหน้าบิลและหน้าพิมพ์)",
                   },
-                  {
-                    key: "showSignatureBlock",
-                    label: "แสดงช่องลายเซ็นท้ายใบกำกับภาษีแบบเต็มรูป",
-                  },
+                  ...(form.enableFullTaxInvoice
+                    ? [
+                        {
+                          key: "showSkuInFull" as const,
+                          label: "แสดงคอลัมน์รหัส SKU ในใบกำกับภาษีแบบเต็มรูป",
+                        },
+                        {
+                          key: "showSignatureBlock" as const,
+                          label: "แสดงช่องลายเซ็นท้ายใบกำกับภาษีแบบเต็มรูป",
+                        },
+                      ]
+                    : []),
                 ] as {
                   key:
                     | "showInvoiceNo"
                     | "showReceiptNo"
+                    | "enableFullTaxInvoice"
                     | "showFeeBreakdown"
                     | "showShippingTracking"
                     | "showSkuInAbbreviated"
@@ -599,7 +724,11 @@ export function DocumentSettingsClient({
                 return (
                   <label
                     key={toggle.key}
-                    className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs font-medium hover:bg-muted/50"
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-muted/20 px-3 py-2.5 text-xs font-medium hover:bg-muted/50 ${
+                      toggle.key === "enableFullTaxInvoice"
+                        ? "sm:col-span-2 border-primary/30 bg-primary/[0.04]"
+                        : ""
+                    }`}
                   >
                     <input
                       name={toggle.key}
@@ -611,7 +740,12 @@ export function DocumentSettingsClient({
                           ...prev,
                           [toggle.key]: nextChecked,
                         }));
-                        if (
+                        if (toggle.key === "enableFullTaxInvoice") {
+                          if (!nextChecked) {
+                            setPreviewMode("abbreviated");
+                            setPreviewPaper(form.defaultPaperSize || "a6");
+                          }
+                        } else if (
                           toggle.key === "showSkuInFull" ||
                           toggle.key === "showSignatureBlock"
                         ) {
@@ -681,40 +815,46 @@ export function DocumentSettingsClient({
                   ทดสอบสลับขนาดกระดาษเพื่อดูการย่อขนาดตัวอักษรอัตโนมัติ (ไม่มีการตัดคำเป็น ...)
                 </CardDescription>
               </div>
-              <div className="grid w-full grid-cols-2 items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant={previewMode === "abbreviated" ? "default" : "ghost"}
-                  className={
-                    previewMode === "abbreviated"
-                      ? "w-full justify-center shadow-xs sm:w-auto"
-                      : "w-full justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                  }
-                  onClick={() => {
-                    setPreviewMode("abbreviated");
-                    setPreviewPaper(form.defaultPaperSize || "a6");
-                  }}
-                >
+              {form.enableFullTaxInvoice ? (
+                <div className="grid w-full grid-cols-2 items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={previewMode === "abbreviated" ? "default" : "ghost"}
+                    className={
+                      previewMode === "abbreviated"
+                        ? "w-full justify-center shadow-xs sm:w-auto"
+                        : "w-full justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
+                    }
+                    onClick={() => {
+                      setPreviewMode("abbreviated");
+                      setPreviewPaper(form.defaultPaperSize || "a6");
+                    }}
+                  >
+                    ใบกำกับฯ (อย่างย่อ)
+                  </Button>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={previewMode === "full" ? "default" : "ghost"}
+                    className={
+                      previewMode === "full"
+                        ? "w-full justify-center shadow-xs sm:w-auto"
+                        : "w-full justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
+                    }
+                    onClick={() => {
+                      setPreviewMode("full");
+                      setPreviewPaper("a4");
+                    }}
+                  >
+                    ใบกำกับฯ (เต็มรูป)
+                  </Button>
+                </div>
+              ) : (
+                <Badge variant="default" size="sm" className="px-3 py-1 font-bold">
                   ใบกำกับฯ (อย่างย่อ)
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant={previewMode === "full" ? "default" : "ghost"}
-                  className={
-                    previewMode === "full"
-                      ? "w-full justify-center shadow-xs sm:w-auto"
-                      : "w-full justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                  }
-                  onClick={() => {
-                    setPreviewMode("full");
-                    setPreviewPaper("a4");
-                  }}
-                >
-                  ใบกำกับฯ (เต็มรูป)
-                </Button>
-              </div>
+                </Badge>
+              )}
             </div>
 
             {previewMode === "abbreviated" ? (

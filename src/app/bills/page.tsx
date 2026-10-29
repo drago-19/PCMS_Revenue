@@ -3,6 +3,7 @@ import { BillPreviewTrigger } from "@/components/BillPreviewDialog";
 import { CompactValueToggle } from "@/components/CompactValueToggle";
 import { CopyButton } from "@/components/CopyButton";
 import { DatePickerField } from "@/components/DatePickerField";
+import { FilterForm } from "@/components/FilterForm";
 import { EmptyState, PageHeader, StatCard } from "@/components/PageHeader";
 import { PaginationBar } from "@/components/PaginationBar";
 import {
@@ -79,6 +80,7 @@ export default async function BillsPage({
   searchParams: Promise<{
     q?: string;
     date?: string;
+    createdDate?: string;
     channel?: string;
     status?: string;
     link?: string;
@@ -90,6 +92,7 @@ export default async function BillsPage({
   const params = await searchParams;
   const q = (params.q ?? "").trim();
   const date = (params.date ?? "").trim();
+  const createdDate = (params.createdDate ?? "").trim();
   const rawChannel = (params.channel ?? "all").trim();
   const channel: "all" | "TikTok" | "Shopee" =
     rawChannel === "TikTok" || rawChannel === "Shopee" ? rawChannel : "all";
@@ -116,6 +119,7 @@ export default async function BillsPage({
     listBills({
       q,
       date,
+      createdDate,
       channel,
       status,
       linkStatus,
@@ -140,12 +144,18 @@ export default async function BillsPage({
     nextCategory?: BillCategoryKey;
     nextSort?: BillSortKey;
     nextDate?: string;
+    nextCreatedDate?: string;
   }) {
     const search = new URLSearchParams();
     if (q) search.set("q", q);
     const targetDate =
       overrides.nextDate !== undefined ? overrides.nextDate : date;
     if (targetDate) search.set("date", targetDate);
+    const targetCreatedDate =
+      overrides.nextCreatedDate !== undefined
+        ? overrides.nextCreatedDate
+        : createdDate;
+    if (targetCreatedDate) search.set("createdDate", targetCreatedDate);
     const targetChannel = overrides.nextChannel ?? channel;
     if (targetChannel !== "all") search.set("channel", targetChannel);
     const targetStatus = overrides.nextStatus ?? status;
@@ -165,6 +175,7 @@ export default async function BillsPage({
   const hasFilters = Boolean(
     q ||
       date ||
+      createdDate ||
       channel !== "all" ||
       status !== "all" ||
       linkStatus !== "all" ||
@@ -175,17 +186,19 @@ export default async function BillsPage({
   const { minPaidDate, maxPaidDate, distinctDates } = result.dateScope;
   const isMonthSelected = /^\d{4}-\d{2}$/.test(date);
   const isYearSelected = /^\d{4}$/.test(date);
-  const dateScopeText = date
-    ? isMonthSelected
-      ? `เฉพาะเดือน ${formatYearMonthLabel(date)} (${distinctDates} วันชำระ)`
-      : isYearSelected
-        ? `เฉพาะปี ${date} (${distinctDates} วันชำระ)`
-        : `เฉพาะรอบชำระวันที่ ${formatDateLong(date)} (${formatDate(date)})`
-    : distinctDates === 1 && maxPaidDate
-      ? `รอบชำระวันที่ ${formatDateLong(maxPaidDate)} (${formatDate(maxPaidDate)})`
-      : distinctDates > 1 && minPaidDate && maxPaidDate
-        ? `รวมทุกวันชำระ (${distinctDates} วัน: ${formatDateLong(minPaidDate)} – ${formatDateLong(maxPaidDate)})`
-        : "ยังไม่มีข้อมูลรอบชำระ";
+  const dateScopeText = createdDate
+    ? `เฉพาะวันสั่งซื้อวันที่ ${formatDateLong(createdDate)} (${formatDate(createdDate)})`
+    : date
+      ? isMonthSelected
+        ? `เฉพาะเดือน ${formatYearMonthLabel(date)} (${distinctDates} วันชำระ)`
+        : isYearSelected
+          ? `เฉพาะปี ${date} (${distinctDates} วันชำระ)`
+          : `เฉพาะรอบชำระวันที่ ${formatDateLong(date)} (${formatDate(date)})`
+      : distinctDates === 1 && maxPaidDate
+        ? `รอบชำระวันที่ ${formatDateLong(maxPaidDate)} (${formatDate(maxPaidDate)})`
+        : distinctDates > 1 && minPaidDate && maxPaidDate
+          ? `รวมทุกวันชำระ (${distinctDates} วัน: ${formatDateLong(minPaidDate)} – ${formatDateLong(maxPaidDate)})`
+          : "ยังไม่มีข้อมูลรอบชำระ";
 
   const printTargetPeriod = /^\d{4}-\d{2}(-\d{2})?$/.test(date)
     ? date
@@ -236,7 +249,15 @@ export default async function BillsPage({
           hint={
             category === "refund_fee"
               ? "ค่าส่งขาไป-ขากลับและค่าธรรมเนียมที่ถูกหัก"
-              : "ค่าธรรมเนียมแพลตฟอร์มทั้งหมด"
+              : category === "normal" &&
+                  !q &&
+                  !createdDate &&
+                  channel === "all" &&
+                  status === "all" &&
+                  linkStatus === "all" &&
+                  result.categoryCounts.refundFee > 0
+                ? `รวมค่าส่งตีกลับ (${result.categoryCounts.refundFee} ใบ) = ${formatTHB(result.periodNetSummary.orderFees)}`
+                : "ค่าธรรมเนียมแพลตฟอร์มทั้งหมด"
           }
           tone="negative"
           icon={<IconAlert size={19} />}
@@ -248,7 +269,22 @@ export default async function BillsPage({
               : "ยอดชำระสุทธิ (รับจริง)"
           }
           value={formatTHB(result.summary.payout)}
-          hint={date ? `รอบชำระ ${formatDateLong(date)}` : dateScopeText}
+          hint={
+            category === "normal" &&
+            !q &&
+            !createdDate &&
+            channel === "all" &&
+            status === "all" &&
+            linkStatus === "all" &&
+            (result.categoryCounts.refundFeePayout !== 0 ||
+              result.periodNetSummary.otherPayout !== 0)
+              ? `สุทธิหลังหักตีกลับ ${formatTHB(result.periodNetSummary.orderPayout)}${
+                  result.periodNetSummary.otherPayout !== 0
+                    ? ` · รวมชดเชย ${formatTHB(result.periodNetSummary.totalPayout)}`
+                    : ""
+                }`
+              : dateScopeText
+          }
           tone={result.summary.payout < 0 ? "negative" : "positive"}
           icon={<IconWallet size={19} />}
         />
@@ -256,11 +292,17 @@ export default async function BillsPage({
           label="จำนวนรายการที่แสดง"
           value={`${result.total.toLocaleString("th-TH")} รายการ`}
           hint={
-            date
-              ? `ของวันที่ ${formatDate(date)}`
-              : distinctDates > 0
-                ? `จากทั้งหมด ${distinctDates} วันชำระ (หน้าละ 20 รายการ)`
-                : "แสดงหน้าละ 20 รายการ"
+            isMonthSelected
+              ? `ของเดือน ${formatYearMonthLabel(date)} (${distinctDates} วัน · รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+              : isYearSelected
+                ? `ของปี ${date} (${distinctDates} วัน · รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+                : date
+                  ? `ของวันที่ ${formatDate(date)} (รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+                  : createdDate
+                    ? `ของวันสั่งซื้อ ${formatDate(createdDate)}`
+                    : distinctDates > 0
+                      ? `รวมทั้งหมดจาก ${distinctDates} วันชำระ (รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+                      : "แสดงหน้าละ 20 รายการ"
           }
           tone="default"
           icon={<IconReceipt size={19} />}
@@ -313,6 +355,7 @@ export default async function BillsPage({
                   key={tab.key}
                   role="tab"
                   aria-selected={active}
+                  scroll={false}
                   href={buildHref({
                     nextCategory: tab.key,
                     nextLink: "all",
@@ -361,10 +404,7 @@ export default async function BillsPage({
           </div>
 
           {/* แถวที่ 1: ค้นหา + เลือกเดือน/วันจากปฏิทิน + พิมพ์ใบกำกับฯ */}
-          <form
-            className="flex flex-wrap items-center gap-2"
-            method="get"
-          >
+          <FilterForm className="flex flex-wrap items-center gap-2">
             {channel !== "all" ? (
               <input type="hidden" name="channel" value={channel} />
             ) : null}
@@ -379,6 +419,9 @@ export default async function BillsPage({
             ) : null}
             {sort !== "latest" ? (
               <input type="hidden" name="sort" value={sort} />
+            ) : null}
+            {createdDate ? (
+              <input type="hidden" name="createdDate" value={createdDate} />
             ) : null}
             <div className="field h-10 w-full bg-white sm:min-w-[220px] sm:w-auto sm:flex-1">
               <IconSearch size={16} className="shrink-0" />
@@ -401,6 +444,7 @@ export default async function BillsPage({
               className="w-full sm:w-auto"
               extraParams={{
                 q: q || undefined,
+                createdDate: createdDate || undefined,
                 channel: channel !== "all" ? channel : undefined,
                 status: status !== "all" ? status : undefined,
                 link: linkStatus !== "all" ? linkStatus : undefined,
@@ -424,7 +468,9 @@ export default async function BillsPage({
                 size="sm"
                 className="h-10 min-h-[40px] flex-1 shrink-0 sm:flex-initial"
               >
-                <Link href="/bills">ล้างตัวกรอง</Link>
+                <Link href="/bills" scroll={false}>
+                  ล้างตัวกรอง
+                </Link>
               </Button>
             ) : null}
             {printTargetPeriod ? (
@@ -448,7 +494,26 @@ export default async function BillsPage({
                 </Link>
               </Button>
             ) : null}
-          </form>
+          </FilterForm>
+
+          {createdDate ? (
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs">
+              <span className="font-bold text-foreground">
+                กำลังกรองเฉพาะบิลที่สั่งซื้อวันที่{" "}
+                <strong className="font-extrabold text-primary">
+                  {formatDateLong(createdDate)} ({formatDate(createdDate)})
+                </strong>{" "}
+                จำนวน {result.total.toLocaleString("th-TH")} รายการ
+              </span>
+              <Link
+                href={buildHref({ nextCreatedDate: "", nextPage: 1 })}
+                scroll={false}
+                className="font-extrabold text-primary underline underline-offset-2 hover:opacity-80"
+              >
+                ยกเลิกตัวกรองวันสั่งซื้อ ×
+              </Link>
+            </div>
+          ) : null}
 
           {/* แถวที่ 2: แท็บสถานะการผูกไฟล์ 4 ช่องเต็มความกว้างอย่างสมดุล */}
           <div
@@ -497,6 +562,7 @@ export default async function BillsPage({
                 <Link
                   key={item.key}
                   href={buildHref({ nextLink: item.key, nextPage: 1 })}
+                  scroll={false}
                   className={
                     active
                       ? "flex min-h-[42px] items-center justify-between gap-2 rounded-xl border border-primary bg-primary px-3 py-1.5 text-white shadow-xs transition-colors"
@@ -585,7 +651,10 @@ export default async function BillsPage({
                           : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
                       }
                     >
-                      <Link href={buildHref({ nextChannel: ch.key, nextPage: 1 })}>
+                      <Link
+                        href={buildHref({ nextChannel: ch.key, nextPage: 1 })}
+                        scroll={false}
+                      >
                         {ch.dotColor ? (
                           <span
                             className={`size-2 shrink-0 rounded-full ${active ? "bg-white" : ch.dotColor}`}
@@ -626,7 +695,10 @@ export default async function BillsPage({
                       : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
                   }
                 >
-                  <Link href={buildHref({ nextStatus: "all", nextPage: 1 })}>
+                  <Link
+                    href={buildHref({ nextStatus: "all", nextPage: 1 })}
+                    scroll={false}
+                  >
                     ทุกสถานะยอด
                   </Link>
                 </Button>
@@ -640,7 +712,10 @@ export default async function BillsPage({
                       : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
                   }
                 >
-                  <Link href={buildHref({ nextStatus: "ok", nextPage: 1 })}>
+                  <Link
+                    href={buildHref({ nextStatus: "ok", nextPage: 1 })}
+                    scroll={false}
+                  >
                     <IconCheckCircle size={13} /> ยอดตรง
                   </Link>
                 </Button>
@@ -654,7 +729,10 @@ export default async function BillsPage({
                       : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
                   }
                 >
-                  <Link href={buildHref({ nextStatus: "mismatch", nextPage: 1 })}>
+                  <Link
+                    href={buildHref({ nextStatus: "mismatch", nextPage: 1 })}
+                    scroll={false}
+                  >
                     <IconAlert size={13} /> ต้องตรวจสอบ
                   </Link>
                 </Button>
@@ -696,6 +774,7 @@ export default async function BillsPage({
                           nextLink: "all",
                           nextPage: 1,
                         })}
+                        scroll={false}
                       >
                         ดูหมวดคืนเงิน / ตีกลับ ({result.categoryCounts.refundFee})
                       </Link>
@@ -709,6 +788,7 @@ export default async function BillsPage({
                           nextLink: "all",
                           nextPage: 1,
                         })}
+                        scroll={false}
                       >
                         ดูหมวดยกเลิก / ยอด 0 บาท ({result.categoryCounts.zero})
                       </Link>
@@ -716,7 +796,9 @@ export default async function BillsPage({
                   ) : null}
                   {hasFilters ? (
                     <Button asChild variant="secondary">
-                      <Link href="/bills">ล้างตัวกรองทั้งหมด</Link>
+                      <Link href="/bills" scroll={false}>
+                        ล้างตัวกรองทั้งหมด
+                      </Link>
                     </Button>
                   ) : (
                     <Button asChild variant="default">
@@ -740,6 +822,7 @@ export default async function BillsPage({
                         nextSort: sort === "latest" ? "oldest" : "latest",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>หมายเลขคำสั่งซื้อ / ช่องทาง</span>
@@ -760,6 +843,7 @@ export default async function BillsPage({
                           sort === "income_asc" ? "income_desc" : "income_asc",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>รายได้</span>
@@ -778,6 +862,7 @@ export default async function BillsPage({
                         nextSort: sort === "fee_asc" ? "fee_desc" : "fee_asc",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>ค่าธรรมเนียม</span>
@@ -797,6 +882,7 @@ export default async function BillsPage({
                           sort === "payout_asc" ? "payout_desc" : "payout_asc",
                         nextPage: 1,
                       })}
+                      scroll={false}
                       className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                     >
                       <span>ยอดชำระสุทธิ</span>
@@ -1045,17 +1131,22 @@ export default async function BillsPage({
                                 label="ใบกำกับฯ"
                                 className="min-[768px]:h-7 min-[768px]:min-h-[28px] rounded-[6px] border-0 bg-transparent px-2 text-xs font-semibold text-[#334155] shadow-none hover:bg-white hover:text-[#0f172a] hover:shadow-2xs"
                               />
-                              <span
-                                aria-hidden="true"
-                                className="mx-0.5 h-4 w-px shrink-0 bg-[#cbd5e1]/80"
-                              />
-                              <BillPreviewTrigger
-                                row={row}
-                                defaultTab="invoice_full"
-                                triggerVariant="ghost"
-                                label="ใบเต็ม"
-                                className="min-[768px]:h-7 min-[768px]:min-h-[28px] rounded-[6px] border-0 bg-transparent px-2 text-xs font-semibold text-[#334155] shadow-none hover:bg-white hover:text-[#0f172a] hover:shadow-2xs"
-                              />
+                              {row.sellerSettings?.enableFullTaxInvoice ===
+                              true ? (
+                                <>
+                                  <span
+                                    aria-hidden="true"
+                                    className="mx-0.5 h-4 w-px shrink-0 bg-[#cbd5e1]/80"
+                                  />
+                                  <BillPreviewTrigger
+                                    row={row}
+                                    defaultTab="invoice_full"
+                                    triggerVariant="ghost"
+                                    label="ใบเต็ม"
+                                    className="min-[768px]:h-7 min-[768px]:min-h-[28px] rounded-[6px] border-0 bg-transparent px-2 text-xs font-semibold text-[#334155] shadow-none hover:bg-white hover:text-[#0f172a] hover:shadow-2xs"
+                                  />
+                                </>
+                              ) : null}
                             </>
                           ) : null}
                         </div>
@@ -1071,7 +1162,13 @@ export default async function BillsPage({
                     data-label="สรุปยอดรวม (ตามตัวกรอง)"
                     className="font-bold text-[#0f172a]"
                   >
-                    รวมทั้งหมดตามตัวกรอง ({result.total.toLocaleString("th-TH")} รายการ)
+                    {isMonthSelected
+                      ? `รวมเดือน ${formatYearMonthLabel(date)} (${result.total.toLocaleString("th-TH")} รายการ)`
+                      : isYearSelected
+                        ? `รวมปี ${date} (${result.total.toLocaleString("th-TH")} รายการ)`
+                        : date
+                          ? `รวมวันที่ ${formatDateLong(date)} (${result.total.toLocaleString("th-TH")} รายการ)`
+                          : `รวมทั้งหมด (${result.total.toLocaleString("th-TH")} รายการ)`}
                   </TableCell>
                   <TableCell
                     data-label="รวมรายได้"
@@ -1118,6 +1215,7 @@ export default async function BillsPage({
               extraParams={{
                 q: q || undefined,
                 date: date || undefined,
+                createdDate: createdDate || undefined,
                 channel: channel !== "all" ? channel : undefined,
                 status: status !== "all" ? status : undefined,
                 link: linkStatus !== "all" ? linkStatus : undefined,

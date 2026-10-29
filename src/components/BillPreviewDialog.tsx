@@ -130,13 +130,19 @@ export function BillPreviewTrigger({
 
   const bill = useMemo(() => buildBill(row.normalized), [row.normalized]);
   const invoice = useMemo(() => buildInvoice(row), [row]);
+  const enableFullTaxInvoice =
+    row.sellerSettings?.enableFullTaxInvoice === true;
   const isZeroRevenueOrder =
     row.transactionType !== "คำสั่งซื้อ (OMS)" &&
     row.income <= 0 &&
     row.payout <= 0;
 
   function handleOpen() {
-    setTab(isZeroRevenueOrder ? "bill" : defaultTab);
+    const resolvedDefault =
+      defaultTab === "invoice_full" && !enableFullTaxInvoice
+        ? "invoice"
+        : defaultTab;
+    setTab(isZeroRevenueOrder ? "bill" : resolvedDefault);
     setBuyerName(persistedBuyer.name);
     setBuyerTaxId(persistedBuyer.taxId);
     setBuyerAddress(persistedBuyer.address);
@@ -144,20 +150,22 @@ export function BillPreviewTrigger({
     setOpen(true);
   }
 
+  const effectiveTab: PreviewTab =
+    tab === "invoice_full" && !enableFullTaxInvoice ? "invoice" : tab;
   const invoiceMode: InvoiceMode =
-    tab === "invoice_full" ? "full" : "abbreviated";
+    effectiveTab === "invoice_full" ? "full" : "abbreviated";
 
   const fullPageHref =
-    tab === "invoice"
+    effectiveTab === "invoice"
       ? paperSize === "a6"
         ? `/invoices/${row.externalId}`
         : `/invoices/${row.externalId}?paper=${paperSize}`
-      : tab === "invoice_full"
+      : effectiveTab === "invoice_full"
         ? `/invoices/${row.externalId}?mode=full`
         : `/bills/${row.externalId}`;
 
   async function handleOpenFullPage(e: React.MouseEvent<HTMLAnchorElement>) {
-    if (tab === "invoice_full") {
+    if (effectiveTab === "invoice_full") {
       e.preventDefault();
       setNavigatingPrint(true);
       await saveBuyerToDb({
@@ -175,9 +183,9 @@ export function BillPreviewTrigger({
   }
 
   const dialogPrintCss =
-    tab === "invoice" && paperSize === "a6"
+    effectiveTab === "invoice" && paperSize === "a6"
       ? "@page { size: A6 portrait; margin: 3.5mm; }"
-      : tab === "invoice" && paperSize === "80mm"
+      : effectiveTab === "invoice" && paperSize === "80mm"
         ? "@page { size: 80mm auto; margin: 2.5mm; }"
         : "@page { size: A4 portrait; margin: 8mm; }";
 
@@ -241,7 +249,9 @@ export function BillPreviewTrigger({
                 </Badge>
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
-                สลับดูรายละเอียดบิล ใบกำกับภาษีอย่างย่อ หรือใบกำกับภาษีแบบเต็มรูป พร้อมรายการสินค้าที่แมปได้
+                {enableFullTaxInvoice
+                  ? "สลับดูรายละเอียดบิล ใบกำกับภาษีอย่างย่อ หรือใบกำกับภาษีแบบเต็มรูป พร้อมรายการสินค้าที่แมปได้"
+                  : "สลับดูรายละเอียดบิล หรือใบกำกับภาษีอย่างย่อ พร้อมรายการสินค้าที่แมปได้"}
               </DialogDescription>
             </div>
           </DialogHeader>
@@ -255,12 +265,12 @@ export function BillPreviewTrigger({
               <Button
                 type="button"
                 role="tab"
-                aria-selected={tab === "bill"}
-                variant={tab === "bill" ? "default" : "ghost"}
+                aria-selected={effectiveTab === "bill"}
+                variant={effectiveTab === "bill" ? "default" : "ghost"}
                 size="xs"
                 onClick={() => setTab("bill")}
                 className={
-                  tab === "bill"
+                  effectiveTab === "bill"
                     ? "flex-1 justify-center shadow-xs sm:flex-initial"
                     : "flex-1 justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:flex-initial"
                 }
@@ -272,33 +282,37 @@ export function BillPreviewTrigger({
                   <Button
                     type="button"
                     role="tab"
-                    aria-selected={tab === "invoice"}
-                    variant={tab === "invoice" ? "default" : "ghost"}
+                    aria-selected={effectiveTab === "invoice"}
+                    variant={effectiveTab === "invoice" ? "default" : "ghost"}
                     size="xs"
                     onClick={() => setTab("invoice")}
                     className={
-                      tab === "invoice"
+                      effectiveTab === "invoice"
                         ? "flex-1 justify-center shadow-xs sm:flex-initial"
                         : "flex-1 justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:flex-initial"
                     }
                   >
                     <IconReceipt size={15} /> ใบกำกับฯ (อย่างย่อ)
                   </Button>
-                  <Button
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === "invoice_full"}
-                    variant={tab === "invoice_full" ? "default" : "ghost"}
-                    size="xs"
-                    onClick={() => setTab("invoice_full")}
-                    className={
-                      tab === "invoice_full"
-                        ? "flex-1 justify-center shadow-xs sm:flex-initial"
-                        : "flex-1 justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:flex-initial"
-                    }
-                  >
-                    <IconReceipt size={15} /> ใบกำกับฯ (แบบเต็มรูป)
-                  </Button>
+                  {enableFullTaxInvoice ? (
+                    <Button
+                      type="button"
+                      role="tab"
+                      aria-selected={effectiveTab === "invoice_full"}
+                      variant={
+                        effectiveTab === "invoice_full" ? "default" : "ghost"
+                      }
+                      size="xs"
+                      onClick={() => setTab("invoice_full")}
+                      className={
+                        effectiveTab === "invoice_full"
+                          ? "flex-1 justify-center shadow-xs sm:flex-initial"
+                          : "flex-1 justify-center text-[#334155] hover:bg-white hover:text-[#0f172a] sm:flex-initial"
+                      }
+                    >
+                      <IconReceipt size={15} /> ใบกำกับฯ (แบบเต็มรูป)
+                    </Button>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -307,10 +321,10 @@ export function BillPreviewTrigger({
               {row.paidDate ? (
                 <Button asChild variant="outline" size="xs" className="flex-1 sm:flex-initial">
                   <Link
-                    href={`/days/${row.paidDate}`}
+                    href={`/bills?date=${encodeURIComponent(row.paidDate)}`}
                     onClick={() => setOpen(false)}
                   >
-                    <IconCalendar size={14} /> ดูรอบชำระ
+                    <IconCalendar size={14} /> ดูบิลรอบนี้
                   </Link>
                 </Button>
               ) : null}
@@ -333,7 +347,7 @@ export function BillPreviewTrigger({
             </div>
           </div>
 
-          {tab === "invoice" ? (
+          {effectiveTab === "invoice" ? (
             <div className="no-print flex flex-wrap items-center justify-between gap-2 border-b border-border bg-[#f8fafc] px-4 py-2 sm:px-6">
               <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
                 <span className="text-xs font-bold text-[#334155]">
@@ -375,7 +389,7 @@ export function BillPreviewTrigger({
             </div>
           ) : null}
 
-          {tab === "invoice_full" ? (
+          {effectiveTab === "invoice_full" ? (
             <div className="no-print border-b border-border bg-[#f8fafc] px-4 py-2.5 sm:px-6">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <div>
@@ -469,7 +483,7 @@ export function BillPreviewTrigger({
             data-invoice-scroll-container
             className="min-h-0 flex-1 overflow-y-auto bg-[#f1f5f9] p-3 sm:p-5"
           >
-            {tab === "bill" ? (
+            {effectiveTab === "bill" ? (
               <BillDocument
                 bill={bill}
                 invoiceNo={row.invoiceNo}
@@ -495,9 +509,9 @@ export function BillPreviewTrigger({
               <InvoiceDocument
                 invoice={invoice}
                 mode={invoiceMode}
-                paperSize={tab === "invoice" ? paperSize : "a4"}
+                paperSize={effectiveTab === "invoice" ? paperSize : "a4"}
                 buyerOverride={
-                  tab === "invoice_full"
+                  effectiveTab === "invoice_full"
                     ? {
                         name: buyerName || row.customerName || null,
                         taxId: buyerTaxId || null,

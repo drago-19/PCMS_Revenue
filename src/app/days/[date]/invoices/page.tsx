@@ -74,8 +74,6 @@ export default async function BulkInvoicesPage({
 }) {
   const { date } = await params;
   const resolvedSearchParams = await searchParams;
-  const mode: InvoiceMode =
-    resolvedSearchParams.mode === "full" ? "full" : "abbreviated";
   const rawLink = (resolvedSearchParams.link ?? "linked").trim();
   const rawChannel = (resolvedSearchParams.channel ?? "all").trim();
   const channelFilter: "all" | "TikTok" | "Shopee" =
@@ -102,6 +100,12 @@ export default async function BulkInvoicesPage({
     getDocumentSettings(),
   ]);
   if (!bulkBatch) notFound();
+
+  const enableFullTaxInvoice = settings.enableFullTaxInvoice === true;
+  const mode: InvoiceMode =
+    enableFullTaxInvoice && resolvedSearchParams.mode === "full"
+      ? "full"
+      : "abbreviated";
 
   const paper = parsePaperSize(
     resolvedSearchParams.paper,
@@ -227,15 +231,8 @@ export default async function BulkInvoicesPage({
         <div className="flex flex-col gap-2.5 border-b border-border/80 px-3.5 py-3 sm:px-5 min-[960px]:flex-row min-[960px]:flex-wrap min-[960px]:items-center min-[960px]:justify-between">
           <div className="flex w-full items-center justify-between gap-2 min-[960px]:w-auto">
             <Button asChild variant="outline" size="xs" className="h-9 px-3">
-              <Link
-                href={
-                  isDay
-                    ? `/days/${date}`
-                    : `/bills?date=${encodeURIComponent(date)}`
-                }
-              >
-                <IconArrowLeft size={15} />{" "}
-                {isDay ? "กลับหน้ารอบชำระ" : "กลับหน้าบิล"}
+              <Link href={`/bills?date=${encodeURIComponent(date)}`}>
+                <IconArrowLeft size={15} /> กลับหน้าบิล
               </Link>
             </Button>
             <Badge
@@ -299,7 +296,7 @@ export default async function BulkInvoicesPage({
                         : "h-8 min-h-[32px] flex-1 justify-center px-2 text-[#334155] hover:bg-white hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
                     }
                   >
-                    <Link href={buildPrintHref({ nextChannel: ch.key })}>
+                    <Link href={buildPrintHref({ nextChannel: ch.key })} scroll={false}>
                       {ch.label} ({ch.count.toLocaleString("th-TH")})
                     </Link>
                   </Button>
@@ -318,47 +315,51 @@ export default async function BulkInvoicesPage({
           </div>
 
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
-            <div
-              role="group"
-              aria-label="รูปแบบใบกำกับภาษี"
-              className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto sm:items-center"
-            >
-              <Button
-                asChild
-                variant={mode === "abbreviated" ? "default" : "ghost"}
-                size="xs"
-                className={
-                  mode === "abbreviated"
-                    ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
-                    : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                }
+            {enableFullTaxInvoice ? (
+              <div
+                role="group"
+                aria-label="รูปแบบใบกำกับภาษี"
+                className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto sm:items-center"
               >
-                <Link
-                  href={buildPrintHref({
-                    nextMode: "abbreviated",
-                    nextPaper: settings.defaultPaperSize ?? "a6",
-                  })}
+                <Button
+                  asChild
+                  variant={mode === "abbreviated" ? "default" : "ghost"}
+                  size="xs"
+                  className={
+                    mode === "abbreviated"
+                      ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
+                      : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
+                  }
                 >
-                  ใบกำกับฯ อย่างย่อ
-                </Link>
-              </Button>
-              <Button
-                asChild
-                variant={mode === "full" ? "default" : "ghost"}
-                size="xs"
-                className={
-                  mode === "full"
-                    ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
-                    : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                }
-              >
-                <Link
-                  href={buildPrintHref({ nextMode: "full", nextPaper: "a4" })}
+                  <Link
+                    href={buildPrintHref({
+                      nextMode: "abbreviated",
+                      nextPaper: settings.defaultPaperSize ?? "a6",
+                    })}
+                    scroll={false}
+                  >
+                    ใบกำกับฯ อย่างย่อ
+                  </Link>
+                </Button>
+                <Button
+                  asChild
+                  variant={mode === "full" ? "default" : "ghost"}
+                  size="xs"
+                  className={
+                    mode === "full"
+                      ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
+                      : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
+                  }
                 >
-                  แบบเต็มรูป (A4)
-                </Link>
-              </Button>
-            </div>
+                  <Link
+                    href={buildPrintHref({ nextMode: "full", nextPaper: "a4" })}
+                    scroll={false}
+                  >
+                    แบบเต็มรูป (A4)
+                  </Link>
+                </Button>
+              </div>
+            ) : null}
             <PrintButton className="w-full sm:w-auto" />
           </div>
         </div>
@@ -386,7 +387,7 @@ export default async function BulkInvoicesPage({
                         : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                     }
                   >
-                    <Link href={buildPrintHref({ nextLink: "linked" })}>
+                    <Link href={buildPrintHref({ nextLink: "linked" })} scroll={false}>
                       <span
                         className={`size-2 shrink-0 rounded-full ${effectiveLinkFilter === "linked"
                             ? "bg-white"
@@ -406,7 +407,7 @@ export default async function BulkInvoicesPage({
                         : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                     }
                   >
-                    <Link href={buildPrintHref({ nextLink: "all" })}>
+                    <Link href={buildPrintHref({ nextLink: "all" })} scroll={false}>
                       ทั้งหมด ({channelFilteredCount.toLocaleString("th-TH")})
                     </Link>
                   </Button>
@@ -420,7 +421,7 @@ export default async function BulkInvoicesPage({
                         : "col-span-2 h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:col-span-1 sm:w-auto"
                     }
                   >
-                    <Link href={buildPrintHref({ nextLink: "unlinked" })}>
+                    <Link href={buildPrintHref({ nextLink: "unlinked" })} scroll={false}>
                       <span
                         className={`size-2 shrink-0 rounded-full ${effectiveLinkFilter === "unlinked"
                             ? "bg-white"
@@ -478,7 +479,7 @@ export default async function BulkInvoicesPage({
                               : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                           }
                         >
-                          <Link href={buildPrintHref({ nextPaper: opt.key })}>
+                          <Link href={buildPrintHref({ nextPaper: opt.key })} scroll={false}>
                             {opt.label}
                           </Link>
                         </Button>
@@ -534,7 +535,7 @@ export default async function BulkInvoicesPage({
                             : "h-8 min-h-[32px] w-full justify-center bg-white px-2.5 text-xs text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
                         }
                       >
-                        <Link href={buildPrintHref({ nextBatch: bNum })}>
+                        <Link href={buildPrintHref({ nextBatch: bNum })} scroll={false}>
                           ชุด {bNum} ({sIdx.toLocaleString("th-TH")}–{eIdx.toLocaleString("th-TH")})
                         </Link>
                       </Button>
@@ -572,6 +573,7 @@ export default async function BulkInvoicesPage({
                           nextBatchSize: sz,
                           nextBatch: 1,
                         })}
+                        scroll={false}
                       >
                         {sz} ใบ/ชุด
                       </Link>
