@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-10-29-v13";
+const SCHEMA_VERSION = "2026-10-30-v18";
 
 export type { CompanyId };
 
@@ -170,6 +170,54 @@ export async function withTransaction<T>(
   }
 }
 
+export function buildOrderShippingPositiveSql(alias = "t"): string {
+  const p = alias ? `${alias}.` : "";
+  return `(
+    CASE
+      WHEN ${p}is_order <> 1 THEN 0
+      WHEN ${p}channel IN ('Shopee', 'Facebook') THEN
+        GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingCustomerFee')::numeric, 0))
+      ELSE
+        GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingCustomerFee')::numeric, 0))
+        + GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingPlatformDiscount')::numeric, 0))
+        + GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingSubsidy')::numeric, 0))
+        + GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'guaranteeReimbursement')::numeric, 0))
+        + GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'exchangeShipping')::numeric, 0))
+        + GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'replacementShipping')::numeric, 0))
+        + GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingRefund')::numeric, 0))
+        + CASE
+            WHEN ${p}transaction_type <> 'คำสั่งซื้อ (OMS)' THEN
+              GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingActual')::numeric, 0))
+              + GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'returnShippingActual')::numeric, 0))
+            ELSE 0
+          END
+    END
+  )`;
+}
+
+export function buildOrderShippingNegativeSql(alias = "t"): string {
+  const p = alias ? `${alias}.` : "";
+  return `(
+    CASE
+      WHEN ${p}is_order <> 1 OR ${p}channel IN ('Shopee', 'Facebook') THEN 0
+      ELSE
+        LEAST(0, COALESCE((${p}normalized_json->'fields'->>'shippingCustomerFee')::numeric, 0))
+        + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'shippingPlatformDiscount')::numeric, 0))
+        + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'shippingSubsidy')::numeric, 0))
+        + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'guaranteeReimbursement')::numeric, 0))
+        + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'exchangeShipping')::numeric, 0))
+        + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'replacementShipping')::numeric, 0))
+        + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'shippingRefund')::numeric, 0))
+        + CASE
+            WHEN ${p}transaction_type <> 'คำสั่งซื้อ (OMS)' THEN
+              LEAST(0, COALESCE((${p}normalized_json->'fields'->>'shippingActual')::numeric, 0))
+              + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'returnShippingActual')::numeric, 0))
+            ELSE 0
+          END
+    END
+  )`;
+}
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS imports (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -242,6 +290,47 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS oms_order_uid TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_name TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_tax_id TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_address TEXT;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM transactions
+    WHERE is_order = 1
+      AND channel = 'Facebook'
+      AND COALESCE((normalized_json->'fields'->>'productAfterDiscount')::numeric, 0) <= 0
+      AND COALESCE((normalized_json->'fields'->>'productBeforeDiscount')::numeric, 0) <= 0
+      AND link_priority = 0
+    LIMIT 1
+  ) THEN
+    ALTER TABLE transactions DROP COLUMN link_priority;
+  END IF;
+EXCEPTION WHEN undefined_column THEN
+  NULL;
+END $$;
+
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS link_priority SMALLINT GENERATED ALWAYS AS (
+  CASE
+    WHEN (
+      channel = 'Facebook'
+      AND COALESCE((normalized_json->'fields'->>'productAfterDiscount')::numeric, 0) <= 0
+      AND COALESCE((normalized_json->'fields'->>'productBeforeDiscount')::numeric, 0) <= 0
+    ) THEN 3
+    WHEN (
+      order_code IS NOT NULL AND order_code <> ''
+      AND (
+        transaction_type <> 'คำสั่งซื้อ (OMS)'
+        OR (channel IN ('Shopee', 'Facebook') AND NULLIF(product_detail, '') IS NOT NULL)
+      )
+    ) THEN 0
+    WHEN (order_code IS NOT NULL AND order_code <> '') THEN 1
+    ELSE 2
+  END
+) STORED;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS shipping_positive DOUBLE PRECISION GENERATED ALWAYS AS (
+  ${buildOrderShippingPositiveSql("")}
+) STORED;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS shipping_negative DOUBLE PRECISION GENERATED ALWAYS AS (
+  ${buildOrderShippingNegativeSql("")}
+) STORED;
 
 CREATE INDEX IF NOT EXISTS ix_transactions_channel ON transactions(channel);
 CREATE INDEX IF NOT EXISTS ix_transactions_order_code ON transactions(order_code);
@@ -352,6 +441,8 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
   oms_only_count INTEGER NOT NULL DEFAULT 0,
   unlinked_count INTEGER NOT NULL DEFAULT 0,
   mismatch_count INTEGER NOT NULL DEFAULT 0,
+  shipping_positive DOUBLE PRECISION NOT NULL DEFAULT 0,
+  shipping_negative DOUBLE PRECISION NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -359,6 +450,8 @@ ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS linked_count INTEGER NOT NU
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS oms_only_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS unlinked_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS mismatch_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS shipping_positive DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS shipping_negative DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS sku_summaries (
   sku_code TEXT PRIMARY KEY,
@@ -379,19 +472,27 @@ CREATE INDEX IF NOT EXISTS ix_transactions_order_paid_ext
   ON transactions(paid_date DESC, external_id DESC)
   WHERE is_order = 1;
 
-CREATE INDEX IF NOT EXISTS ix_transactions_order_paid_priority_ext
-  ON transactions(
-    paid_date DESC,
-    (
-      CASE
-        WHEN (order_code IS NOT NULL AND order_code <> '' AND transaction_type <> 'คำสั่งซื้อ (OMS)') THEN 0
-        WHEN (order_code IS NOT NULL AND order_code <> '') THEN 1
-        ELSE 2
-      END
-    ) ASC,
-    external_id DESC
-  )
+DROP INDEX IF EXISTS ix_transactions_order_paid_priority_ext;
+CREATE INDEX IF NOT EXISTS ix_transactions_order_paid_priority_ext_v2
+  ON transactions(paid_date DESC, link_priority ASC, external_id DESC)
   WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_channel_paid_priority_ext
+  ON transactions(channel, paid_date DESC, link_priority ASC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_link_paid_priority_ext
+  ON transactions(link_priority, paid_date DESC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_channel_link_paid_ext
+  ON transactions(channel, link_priority, paid_date DESC, external_id DESC)
+  WHERE is_order = 1;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_orders_summary_cover
+  ON transactions(channel, link_priority, paid_date)
+  INCLUDE (income, fee_total, payout, shipping_positive, shipping_negative)
+  WHERE is_order = 1 AND income > 0;
 
 CREATE INDEX IF NOT EXISTS ix_transactions_channel_paid_ext
   ON transactions(channel, paid_date DESC, external_id DESC)
@@ -399,6 +500,13 @@ CREATE INDEX IF NOT EXISTS ix_transactions_channel_paid_ext
 
 CREATE INDEX IF NOT EXISTS ix_transactions_unlinked_created_date
   ON transactions(paid_date, created_date DESC)
+  WHERE is_order = 1
+    AND (order_code IS NULL OR order_code = '')
+    AND created_date <> ''
+    AND created_date <> 'unknown';
+
+CREATE INDEX IF NOT EXISTS ix_transactions_unlinked_created_date_v2
+  ON transactions(created_date DESC, channel, paid_date)
   WHERE is_order = 1
     AND (order_code IS NULL OR order_code = '')
     AND created_date <> ''
@@ -414,6 +522,11 @@ CREATE INDEX IF NOT EXISTS ix_transactions_order_income
 
 CREATE INDEX IF NOT EXISTS ix_transactions_non_positive_income
   ON transactions(paid_date, channel, income, fee_total, payout)
+  WHERE is_order = 1 AND income <= 0;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_non_positive_cover
+  ON transactions(paid_date, channel, link_priority)
+  INCLUDE (income, fee_total, payout, shipping_positive, shipping_negative)
   WHERE is_order = 1 AND income <= 0;
 
 CREATE INDEX IF NOT EXISTS ix_transactions_order_fee
@@ -551,15 +664,13 @@ BEGIN
 
   -- Fast check on pre-aggregated summary tables only (never full-scan billion-row tables on startup)
   IF EXISTS (
-    SELECT 1 FROM daily_summaries WHERE facebook_count > 0
-  ) OR EXISTS (
     SELECT 1 FROM daily_summaries WHERE order_count > 0 AND linked_count = 0 AND oms_only_count = 0 AND unlinked_count = 0
   ) OR EXISTS (
-    SELECT 1 FROM sku_summaries WHERE facebook_qty > 0
+    SELECT 1 FROM daily_summaries WHERE order_count > 0 AND shipping_positive = 0 AND shipping_negative = 0
   ) THEN
-    DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee');
-    DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee');
-    DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee');
+    DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook');
+    DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook');
+    DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook');
 
     DELETE FROM products p
     WHERE NOT EXISTS (
@@ -576,7 +687,8 @@ BEGIN
       paid_date, transaction_count, order_count, order_payout, order_income,
       order_fees, other_count, other_payout, total_payout, adjustment,
       tiktok_count, shopee_count, facebook_count,
-      linked_count, oms_only_count, unlinked_count, mismatch_count, updated_at
+      linked_count, oms_only_count, unlinked_count, mismatch_count,
+      shipping_positive, shipping_negative, updated_at
     )
     SELECT
       paid_date,
@@ -591,19 +703,21 @@ BEGIN
       ROUND(SUM(adjustment)::numeric, 2),
       SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
-      0,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND transaction_type = 'คำสั่งซื้อ (OMS)' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND (
         ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
         OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
         OR ABS(COALESCE((checks_json->>'payoutDiff')::numeric, 0)) >= 0.01
       ) THEN 1 ELSE 0 END)::int,
+      ROUND(COALESCE(SUM(${buildOrderShippingPositiveSql("")}), 0)::numeric, 2),
+      ROUND(COALESCE(SUM(${buildOrderShippingNegativeSql("")}), 0)::numeric, 2),
       now()
     FROM transactions
     WHERE paid_date <> '' AND paid_date <> 'unknown'
-      AND COALESCE(NULLIF(channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+      AND COALESCE(NULLIF(channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
     GROUP BY paid_date;
 
     DELETE FROM sku_summaries;
@@ -620,22 +734,40 @@ BEGIN
       ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
       COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
-      0,
+      COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
       now()
     FROM oms_order_items i
-    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
     GROUP BY i.sku_code;
   END IF;
 
   -- Migrate invoice_registry to monthly running sequence ('SEQ/YYMM/00001') partitioned by bill month
+  -- and remove non-billable zero-product-price exchange orders (link_priority = 3)
   IF EXISTS (
     SELECT 1 FROM invoice_registry WHERE invoice_no NOT LIKE 'SEQ/____/%'
+  ) OR EXISTS (
+    SELECT 1 FROM invoice_registry r
+    JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
+    WHERE t.link_priority = 3
   ) THEN
     DELETE FROM invoice_registry r
     WHERE NOT EXISTS (
       SELECT 1 FROM transactions t
-      WHERE t.external_id = r.order_id AND t.is_order = 1
+      WHERE t.external_id = r.order_id AND t.is_order = 1 AND t.link_priority <> 3
     );
+
+    UPDATE daily_summaries d
+    SET linked_count = s.linked_count
+    FROM (
+      SELECT paid_date,
+             SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int AS linked_count
+      FROM transactions
+      WHERE paid_date <> '' AND paid_date <> 'unknown'
+        AND channel IN ('TikTok', 'Shopee', 'Facebook')
+      GROUP BY paid_date
+    ) s
+    WHERE d.paid_date = s.paid_date
+      AND d.linked_count IS DISTINCT FROM s.linked_count;
 
     WITH ordered AS (
       SELECT r.order_id,
@@ -661,7 +793,7 @@ BEGIN
       LEFT JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
     )
     UPDATE invoice_registry r
-    SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0')
+    SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, GREATEST(5, LENGTH(o.rn::text)), '0')
     FROM ordered o
     WHERE r.order_id = o.order_id;
 
@@ -669,5 +801,91 @@ BEGIN
     SET invoice_no = 'SEQ/' || SUBSTRING(invoice_no FROM 13)
     WHERE invoice_no LIKE '__TMP_SEQ__/%';
   END IF;
+
+  -- Platform Financial Isolation (AGENTS.md Rule 3 & 4):
+  -- 1. TikTok OMS placeholder rows (before Settlement): payout = income + fee_total (sales_amount - shipping_fee_seller), cogs = 0
+  -- 2. Shopee & Facebook (Shipnity 2-file channels): payout = o.profit_amount directly from Shipnity file, cogs = GREATEST(0, income + fee_total - o.profit_amount)
+  -- 3. Remove invoice_registry entries for non-billable orders (link_priority = 3 or Shopee/Facebook orders with payout <= 0)
+  IF EXISTS (
+    SELECT 1 FROM transactions t
+    WHERE t.is_order = 1
+      AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+      AND t.channel = 'TikTok'
+      AND ABS(t.payout - ROUND((t.income + t.fee_total)::numeric, 2)) >= 0.01
+    LIMIT 1
+  ) OR EXISTS (
+    SELECT 1 FROM transactions t
+    JOIN oms_orders o ON o.order_uid = t.oms_order_uid
+    WHERE t.is_order = 1
+      AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+      AND t.channel IN ('Shopee', 'Facebook')
+      AND ABS(t.payout - ROUND(o.profit_amount::numeric, 2)) >= 0.01
+    LIMIT 1
+  ) THEN
+    UPDATE transactions t
+    SET payout = ROUND((t.income + t.fee_total)::numeric, 2),
+        normalized_json = jsonb_set(
+          jsonb_set(
+            t.normalized_json,
+            '{fields,payout}',
+            to_jsonb(ROUND((t.income + t.fee_total)::numeric, 2))
+          ),
+          '{fields,cogs}',
+          to_jsonb(0)
+        )
+    WHERE t.is_order = 1
+      AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+      AND t.channel = 'TikTok'
+      AND ABS(t.payout - ROUND((t.income + t.fee_total)::numeric, 2)) >= 0.01;
+
+    UPDATE transactions t
+    SET payout = ROUND(o.profit_amount::numeric, 2),
+        normalized_json = jsonb_set(
+          jsonb_set(
+            t.normalized_json,
+            '{fields,payout}',
+            to_jsonb(ROUND(o.profit_amount::numeric, 2))
+          ),
+          '{fields,cogs}',
+          to_jsonb(GREATEST(0, ROUND((t.income + t.fee_total - o.profit_amount)::numeric, 2)))
+        )
+    FROM oms_orders o
+    WHERE t.oms_order_uid = o.order_uid
+      AND t.is_order = 1
+      AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+      AND t.channel IN ('Shopee', 'Facebook')
+      AND (
+        ABS(t.payout - ROUND(o.profit_amount::numeric, 2)) >= 0.01
+        OR COALESCE((t.normalized_json->'fields'->>'cogs')::numeric, -1) IS DISTINCT FROM GREATEST(0, ROUND((t.income + t.fee_total - o.profit_amount)::numeric, 2))
+      );
+
+    DELETE FROM invoice_registry r
+    WHERE EXISTS (
+      SELECT 1 FROM transactions t
+      WHERE t.external_id = r.order_id
+        AND t.is_order = 1
+        AND (
+          t.link_priority = 3
+          OR (t.channel IN ('Shopee', 'Facebook') AND (t.income <= 0 OR t.payout <= 0))
+        )
+    );
+
+    UPDATE daily_summaries d
+    SET order_payout = s.order_payout,
+        total_payout = s.total_payout
+    FROM (
+      SELECT paid_date,
+             ROUND(SUM(CASE WHEN is_order = 1 THEN payout ELSE 0 END)::numeric, 2) AS order_payout,
+             ROUND(SUM(payout)::numeric, 2) AS total_payout
+      FROM transactions
+      WHERE paid_date <> '' AND paid_date <> 'unknown'
+        AND channel IN ('TikTok', 'Shopee', 'Facebook')
+      GROUP BY paid_date
+    ) s
+    WHERE d.paid_date = s.paid_date
+      AND (d.order_payout IS DISTINCT FROM s.order_payout OR d.total_payout IS DISTINCT FROM s.total_payout);
+  END IF;
 END $$;
+
+ANALYZE transactions;
 `;

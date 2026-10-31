@@ -547,13 +547,23 @@ export async function detectAndParseOmsInput(
         if (!orderCode) continue;
 
         const channel = normalizeChannel(get("channel"));
-        if (channel !== "TikTok" && channel !== "Shopee") continue;
+        if (channel !== "TikTok" && channel !== "Shopee" && channel !== "Facebook") continue;
 
         totalDataRows++;
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";
-        const paidDate = parseDateValue(get("paidDate")).iso ?? createdDate;
+        const parsedPaidDate = parseDateValue(get("paidDate")).iso ?? "";
+        const paidDate = parsedPaidDate || createdDate;
         const printedDate = parseDateValue(get("printedDate")).iso ?? "";
         const trackingNo = cleanText(get("trackingNo"));
+
+        // กฎการกรองบิล Shopee & Facebook:
+        // ตัดบิลที่ยังไม่ได้ชำระเงิน (วันที่โอนเงิน = '-') หรือยังไม่ได้ส่งของ/ไม่มียอดขาย (ไม่มีเลขพัสดุและไม่ได้พิมพ์ใบปะหน้า) ทิ้ง ไม่นำมาคำนวณรายได้หรือยื่นภาษี
+        if (channel === "Shopee" || channel === "Facebook") {
+          const salesVal = round2(toNumber(get("salesAmount")));
+          if (!parsedPaidDate || (!trackingNo && !printedDate) || salesVal <= 0) {
+            continue;
+          }
+        }
         const mp = normalizeMarketplaceId(get("marketplaceOrderId"));
         const orderUid = buildOmsOrderUid(
           orderCode,
@@ -604,7 +614,7 @@ export async function detectAndParseOmsInput(
         if (!skuCode || !orderCode) continue;
 
         const channel = normalizeChannel(get("channel"));
-        if (channel !== "TikTok" && channel !== "Shopee") continue;
+        if (channel !== "TikTok" && channel !== "Shopee" && channel !== "Facebook") continue;
 
         totalDataRows++;
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";

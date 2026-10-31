@@ -330,13 +330,15 @@ test("detects and parses OMS orders, OMS items, and CSV settlement with 15-digit
   const parsedOrders = await detectAndParseOmsInput(Buffer.from(omsOrdersCsv, "utf8"));
   assert.ok(parsedOrders);
   assert.equal(parsedOrders.fileType, "oms_orders");
-  assert.equal(parsedOrders.orders.length, 2);
+  assert.equal(parsedOrders.orders.length, 3);
   assert.equal(parsedOrders.orders[0].orderCode, "OF37");
   assert.equal(parsedOrders.orders[0].channel, "TikTok");
   assert.equal(parsedOrders.orders[0].marketplaceOrderPrefix, "586356565637268");
   assert.equal(parsedOrders.orders[1].orderCode, "OF33");
   assert.equal(parsedOrders.orders[1].channel, "Shopee");
   assert.equal(parsedOrders.orders[1].marketplaceOrderNorm, "261001GH52V0JW");
+  assert.equal(parsedOrders.orders[2].orderCode, "OF39");
+  assert.equal(parsedOrders.orders[2].channel, "Facebook");
 
   const omsItemsCsv = [
     "รหัสสินค้า,สินค้า,ราคา,จำนวน,เลขที่ออเดอร์,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,ที่อยู่,รหัสไปรษณีย์,เบอร์โทร,วันที่โอนเงิน,สร้างโดย,ขนส่ง,ช่องทางติดต่อ,ธนาคารที่โอนเงิน,หมายเหตุ,เลขพัสดุ,วันที่สร้าง",
@@ -605,6 +607,7 @@ test("listBills uses pre-aggregated daily_summaries fast path without scanning t
   assert.equal(result.summary.income, 250000000000);
   assert.equal(result.channelCounts.TikTok, 700000000);
   assert.equal(result.channelCounts.Shopee, 250000000);
+  assert.equal(result.channelCounts.Facebook, 50000000);
   assert.equal(result.channelCounts.all, 1000000000);
   assert.ok(
     !executedSql.some((s) => s.includes("SELECT COUNT(*) AS count") && s.includes("FROM transactions")),
@@ -1651,6 +1654,8 @@ test("listBills and getDailyBatchPaged partition orders into normal (income > 0)
               order_payout: 481398.78,
               order_income: 565995,
               order_fees: -63709.22,
+              shipping_positive: 120000,
+              shipping_negative: -125500,
               other_count: 0,
               other_payout: 0,
               total_payout: 481398.78,
@@ -1664,7 +1669,7 @@ test("listBills and getDailyBatchPaged partition orders into normal (income > 0)
           ],
         };
       }
-      if (clean.includes("AND t.income <= 0")) {
+      if (clean.includes("t.income <= 0 OR t.payout <= 0")) {
         return {
           rows: [
             {
@@ -1673,6 +1678,8 @@ test("listBills and getDailyBatchPaged partition orders into normal (income > 0)
               non_pos_income: -377,
               non_pos_fees: -741.24,
               non_pos_payout: -1118.24,
+              non_pos_shipping_positive: 0,
+              non_pos_shipping_negative: -500,
               non_pos_tiktok: 170,
               non_pos_shopee: 0,
               non_pos_fb: 0,
@@ -1705,33 +1712,7 @@ test("listBills and getDailyBatchPaged partition orders into normal (income > 0)
       }
       if (
         clean.includes(
-          "(t.income <= 0 AND (t.income < 0 OR t.fee_total < 0 OR t.payout < 0))",
-        ) &&
-        !clean.includes("WITH page_ids")
-      ) {
-        return {
-          rows: [
-            {
-              all_count: 16,
-              count: 16,
-              linked_count: 16,
-              oms_only_count: 0,
-              unlinked_count: 0,
-              income: -377,
-              fees: -741.24,
-              payout: -1118.24,
-              tiktok_count: 16,
-              shopee_count: 0,
-              min_paid_date: "2026-10-08",
-              max_paid_date: "2026-10-27",
-              distinct_dates: 10,
-            },
-          ],
-        };
-      }
-      if (
-        clean.includes(
-          "(t.income <= 0 AND NOT (t.income < 0 OR t.fee_total < 0 OR t.payout < 0))",
+          "NOT (t.income > 0 AND t.payout > 0) AND NOT (t.income < 0",
         ) &&
         !clean.includes("WITH page_ids")
       ) {
@@ -1755,6 +1736,32 @@ test("listBills and getDailyBatchPaged partition orders into normal (income > 0)
           ],
         };
       }
+      if (
+        clean.includes(
+          "(t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0))",
+        ) &&
+        !clean.includes("WITH page_ids")
+      ) {
+        return {
+          rows: [
+            {
+              all_count: 16,
+              count: 16,
+              linked_count: 16,
+              oms_only_count: 0,
+              unlinked_count: 0,
+              income: -377,
+              fees: -741.24,
+              payout: -1118.24,
+              tiktok_count: 16,
+              shopee_count: 0,
+              min_paid_date: "2026-10-08",
+              max_paid_date: "2026-10-27",
+              distinct_dates: 10,
+            },
+          ],
+        };
+      }
       return { rows: [] };
     },
   };
@@ -1766,6 +1773,9 @@ test("listBills and getDailyBatchPaged partition orders into normal (income > 0)
   assert.equal(normalRes.summary.income, 566372);
   assert.equal(Number(normalRes.summary.fees.toFixed(2)), -62967.98);
   assert.equal(Number(normalRes.summary.payout.toFixed(2)), 482517.02);
+  assert.equal(normalRes.summary.shippingPositive, 120000);
+  assert.equal(normalRes.summary.shippingNegative, -125000);
+  assert.equal(normalRes.summary.shippingNet, -5000);
   assert.equal(normalRes.linkCounts.linked, 1559);
   assert.equal(normalRes.linkCounts.omsOnly, 2039);
   assert.equal(normalRes.linkCounts.unlinked, 0);
@@ -2402,9 +2412,14 @@ test("in-page filter/sort/pagination/tab links and router pushes preserve scroll
     path.resolve(process.cwd(), "src/components/FilterForm.tsx"),
     "utf8",
   );
+  const billsFilterSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/BillsFilterInteractive.tsx"),
+    "utf8",
+  );
 
-  // FilterForm must use router.push(..., { scroll: false })
+  // FilterForm & BillsFilterInteractive must use router.push(..., { scroll: false })
   assert.match(filterFormSource, /router\.push\([^)]*\{\s*scroll:\s*false\s*\}\)/);
+  assert.match(billsFilterSource, /router\.push\([^)]*\{\s*scroll:\s*false\s*\}\)/);
   assert.match(billsSource, /<FilterForm\b/);
   assert.match(productsSource, /<FilterForm\b/);
 
@@ -2418,7 +2433,7 @@ test("in-page filter/sort/pagination/tab links and router pushes preserve scroll
   assert.equal((calendarSource.match(/scroll=\{false\}/g) ?? []).length, 4);
 
   // In-page filter/sort/tab links in pages must include scroll={false}
-  assert.ok((billsSource.match(/scroll=\{false\}/g) ?? []).length >= 15);
+  assert.ok(((billsSource + billsFilterSource).match(/scroll=\{false\}/g) ?? []).length >= 15);
   assert.ok((productsSource.match(/scroll=\{false\}/g) ?? []).length >= 5);
   assert.ok((historySource.match(/scroll=\{false\}/g) ?? []).length >= 1);
   assert.ok((bulkInvoicesSource.match(/scroll=\{false\}/g) ?? []).length >= 9);
@@ -2576,9 +2591,62 @@ test("buildOmsOrderUid prevents cross-month Shipnity order_code collisions (e.g.
     breakdownLines.map((l) => ({ key: l.key, label: l.label, amount: l.amount })),
     [
       { key: "shippingCustomerFee", label: "ค่าธรรมเนียมการจัดส่งของลูกค้า", amount: 35 },
-      { key: "shippingActual", label: "ค่าธรรมเนียมและค่าส่งที่ร้านจ่าย (ตามไฟล์ Shipnity)", amount: -154 },
     ],
   );
+  assert.equal(shopeeInvoice.receiptTotal, 425);
+
+  const shopeeZeroShipInvoice = buildInvoice({
+    id: 10,
+    importId: 1,
+    externalId: "2610193EK6TM6V",
+    transactionType: "คำสั่งซื้อ (OMS)",
+    isOrder: true,
+    createdDate: "2026-10-19",
+    paidDate: "2026-10-19",
+    currency: "THB",
+    income: 390,
+    feeTotal: -118,
+    adjustment: 0,
+    payout: 272,
+    productDetail: "J07-02-140 · ชุดเซทแขนยาวขายาวแวมไพร์นักเรียน (140) × 1",
+    weightEstimated: null,
+    weightCharged: null,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      ...shopeeNormalized,
+      externalId: "2610193EK6TM6V",
+      fields: {
+        ...shopeeNormalized.fields,
+        orderId: "2610193EK6TM6V",
+        incomeTotal: 390,
+        customerPayment: 390,
+        productAfterDiscount: 390,
+        productBeforeDiscount: 390,
+        shippingCustomerFee: 0,
+        feeTotal: -118,
+        shippingTotal: -118,
+        shippingSellerTotal: -118,
+        shippingActual: -118,
+        shippingActualFee: -118,
+        payout: 272,
+      },
+    },
+    createdAt: "2026-10-19T00:00:00Z",
+    invoiceNo: "SEQ/2610/02714",
+    channel: "Shopee",
+    orderCode: "YL62",
+    shippingFeeCustomer: 0,
+    shippingFeeSeller: 118,
+  });
+  const zeroShipBreakdownLines = getOrderedInvoiceBreakdownLines(shopeeZeroShipInvoice);
+  assert.deepEqual(
+    zeroShipBreakdownLines.map((l) => ({ key: l.key, label: l.label, amount: l.amount })),
+    [
+      { key: "shippingCustomerFee", label: "ค่าธรรมเนียมการจัดส่งของลูกค้า", amount: 0 },
+    ],
+  );
+  assert.equal(shopeeZeroShipInvoice.receiptTotal, 390);
 
   // Guard against empty feeGroups entry without children
   const emptyGroupBill = buildBill({
@@ -2663,17 +2731,17 @@ test("buildOmsOrderUid prevents cross-month Shipnity order_code collisions (e.g.
   assert.equal(mickeySummary.specialDiscountAmount, -48);
   assert.equal(mickeySummary.paymentTotal, 177.14);
 
-  // 2. Shopee order (salesAmount = 390, shippingActual = -154, feeTotal = -154, payout = 121 -> subtotalBeforeFee = 544, platformFeeDeduction = 154, netAfterDiscount = 390, specialDiscountAmount = 121 - 390 = -269, paymentTotal = 121)
+  // 2. Shopee order (salesAmount = 390, shippingCustomerFee = 35, shippingActual = -154, feeTotal = -154 -> shippingLineAmount = 35, subtotalBeforeFee = 425, platformFeeDeduction = 154, netAfterDiscount = 271, specialDiscountAmount = 0, paymentTotal = 271)
   const shopeeSummary = computeAbbreviatedSummary(shopeeInvoice);
   assert.equal(shopeeSummary.itemsNetTotal, 390);
   assert.equal(shopeeSummary.platformSubsidyAmount, 0);
-  assert.equal(shopeeSummary.shippingLineAmount, 154);
-  assert.equal(shopeeSummary.subtotalBeforeFee, 544);
+  assert.equal(shopeeSummary.shippingLineAmount, 35);
+  assert.equal(shopeeSummary.subtotalBeforeFee, 425);
   assert.equal(shopeeSummary.platformFeeDeduction, 154);
-  assert.equal(shopeeSummary.netAfterDiscount, 390);
-  assert.equal(shopeeSummary.grandTotal, 390);
-  assert.equal(shopeeSummary.specialDiscountAmount, -269);
-  assert.equal(shopeeSummary.paymentTotal, 121);
+  assert.equal(shopeeSummary.netAfterDiscount, 271);
+  assert.equal(shopeeSummary.grandTotal, 271);
+  assert.equal(shopeeSummary.specialDiscountAmount, 0);
+  assert.equal(shopeeSummary.paymentTotal, 271);
 
   // 3. TikTok order #586779774611391839 (salesAmount = 100, shippingActual = -35, feeTotal = -27.08, payout = 72.92 -> grandTotal = 107.92, specialDiscountAmount = -35, paymentTotal = 72.92)
   const order58677Invoice = buildInvoice({
@@ -2736,7 +2804,930 @@ test("buildOmsOrderUid prevents cross-month Shipnity order_code collisions (e.g.
   assert.equal(order58677Summary.grandTotal, 107.92);
   assert.equal(order58677Summary.specialDiscountAmount, -35);
   assert.equal(order58677Summary.paymentTotal, 72.92);
+
+  // 4. Verify getRowShippingSummary for /bills table column (positive green vs negative red)
+  const { getRowShippingSummary } = await import("../src/lib/bill");
+  assert.deepEqual(
+    getRowShippingSummary({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ",
+      normalized: {
+        ...shopeeNormalized,
+        fields: {
+          shippingPlatformDiscount: 35,
+          shippingActual: -35,
+          shippingCustomerFee: 0,
+        },
+      },
+    }),
+    { positiveAmount: 35, negativeAmount: -35, netAmount: 0 },
+  );
+  assert.deepEqual(
+    getRowShippingSummary({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ",
+      normalized: {
+        ...shopeeNormalized,
+        fields: {
+          shippingPlatformDiscount: 0,
+          shippingActual: -88,
+          shippingDiscountStore: -88,
+          shippingCustomerFee: 0,
+        },
+      },
+    }),
+    { positiveAmount: 0, negativeAmount: -88, netAmount: -88 },
+  );
+  assert.deepEqual(
+    getRowShippingSummary({
+      channel: "Shopee",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      shippingFeeCustomer: 35,
+      normalized: shopeeNormalized,
+    }),
+    { positiveAmount: 35, negativeAmount: 0, netAmount: 35 },
+  );
+  assert.deepEqual(
+    getRowShippingSummary({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ",
+      normalized: {
+        ...shopeeNormalized,
+        fields: {
+          shippingPlatformDiscount: 0,
+          shippingActual: -88,
+          shippingDiscountStore: -88,
+          shippingCustomerFee: 0,
+        },
+      },
+    }),
+    { positiveAmount: 0, negativeAmount: -88, netAmount: -88 },
+  );
+  assert.deepEqual(
+    getRowShippingSummary({
+      channel: "Shopee",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      shippingFeeCustomer: 0,
+      normalized: {
+        ...shopeeNormalized,
+        fields: { ...shopeeNormalized.fields, shippingCustomerFee: 0 },
+      },
+    }),
+    { positiveAmount: 0, negativeAmount: 0, netAmount: 0 },
+  );
+
+  // 5. Verify TikTok orders where store pays carrier shipping without platform subsidy (#585160344991335959 and #586028225258948034)
+  // Case A: #585160344991335959 (salesAmount = 1980, shippingCustomerFee = 0, shippingPlatformDiscount = 0, shippingActual = -137)
+  const storePaidShipOnlyInvoice = buildInvoice({
+    id: 20,
+    importId: 1,
+    externalId: "585160344991335959",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-07-23",
+    paidDate: "2026-07-27",
+    currency: "THB",
+    income: 1980,
+    feeTotal: -299.16,
+    adjustment: 0,
+    payout: 1680.84,
+    productDetail: "ขาสั้นสก็อตตารางเล็ก แดง × 20",
+    weightEstimated: 10000,
+    weightCharged: 10000,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      ...shopeeNormalized,
+      externalId: "585160344991335959",
+      fields: {
+        incomeTotal: 1980,
+        productBeforeDiscount: 1980,
+        storeDiscount: 0,
+        productAfterDiscount: 1980,
+        platformDiscount: 0,
+        customerPayment: 1980,
+        shippingActual: -137,
+        shippingPlatformDiscount: 0,
+        shippingCustomerFee: 0,
+        feeTotal: -299.16,
+        payout: 1680.84,
+      },
+    },
+    createdAt: "2026-07-27T00:00:00Z",
+    invoiceNo: "SEQ/2607/03355",
+    channel: "TikTok",
+    orderCode: "O67",
+  });
+  assert.equal(storePaidShipOnlyInvoice.receiptTotal, 1980);
+  assert.deepEqual(getOrderedInvoiceBreakdownLines(storePaidShipOnlyInvoice), []);
+
+  // Case B: #586028225258948034 (salesAmount = 2000, shippingCustomerFee = 98, shippingPlatformDiscount = 0, shippingActual = -101, customerPayment = 2098)
+  const customerPaidShipTiktokInvoice = buildInvoice({
+    id: 21,
+    importId: 1,
+    externalId: "586028225258948034",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-09-12",
+    paidDate: "2026-09-17",
+    currency: "THB",
+    income: 2000,
+    feeTotal: -195.8,
+    adjustment: 0,
+    payout: 1804.2,
+    productDetail: "ขาสั้นสก็อตตารางเล็ก ดำขาว × 10 | ขาสั้นสก็อตตารางใหญ่ ดำขาว × 10",
+    weightEstimated: 6000,
+    weightCharged: 6000,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      ...shopeeNormalized,
+      externalId: "586028225258948034",
+      fields: {
+        incomeTotal: 2000,
+        productBeforeDiscount: 2000,
+        storeDiscount: 0,
+        productAfterDiscount: 2000,
+        platformDiscount: 0,
+        customerPayment: 2098,
+        shippingActual: -101,
+        shippingPlatformDiscount: 0,
+        shippingCustomerFee: 98,
+        feeTotal: -195.8,
+        payout: 1804.2,
+      },
+    },
+    createdAt: "2026-09-17T00:00:00Z",
+    invoiceNo: "SEQ/2609/03200",
+    channel: "TikTok",
+    orderCode: "Q99",
+  });
+  assert.equal(customerPaidShipTiktokInvoice.receiptTotal, 2000);
+  assert.deepEqual(
+    getOrderedInvoiceBreakdownLines(customerPaidShipTiktokInvoice).map((l) => ({
+      key: l.key,
+      label: l.label,
+      amount: l.amount,
+    })),
+    [
+      {
+        key: "shippingCustomerFee",
+        label: "ค่าธรรมเนียมการจัดส่งของลูกค้า",
+        amount: 98,
+      },
+      {
+        key: "shippingActual",
+        label: "การจัดส่ง (น้ำหนักที่เรียกเก็บเงิน: 6000 ก.)",
+        amount: -98,
+      },
+    ],
+  );
+
+  // Case C: #586551484422981058 (salesAmount = 3225, shippingCustomerFee = 0, shippingPlatformDiscount = 124, shippingActual = -127, weightCharged = 7500)
+  // ส่วนต่าง 3 บาท TikTok นำไปหักใน "ค่าธรรมเนียมทั้งหมด" แล้ว ในใบกำกับภาษีการจัดส่งต้องลบเท่ากับส่วนลดค่าจัดส่งจาก TikTok Shop พอ (-124)
+  const diffShippingTiktokInvoice = buildInvoice({
+    id: 22,
+    importId: 1,
+    externalId: "586551484422981058",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-10-12",
+    paidDate: "2026-10-18",
+    currency: "THB",
+    income: 3225,
+    feeTotal: -884.16,
+    adjustment: 0,
+    payout: 2340.84,
+    productDetail: "เลดี้ เหลืองเทา × 15 | เลดี้แทรมป์หัวใจ น้ำเงินกรม × 10",
+    weightEstimated: 7500,
+    weightCharged: 7500,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      ...shopeeNormalized,
+      externalId: "586551484422981058",
+      fields: {
+        incomeTotal: 3225,
+        productBeforeDiscount: 7250,
+        storeDiscount: -4025,
+        productAfterDiscount: 3225,
+        platformDiscount: 645,
+        customerPayment: 2580,
+        shippingActual: -127,
+        shippingPlatformDiscount: 124,
+        shippingCustomerFee: 0,
+        shippingTotal: -3,
+        feeTotal: -884.16,
+        payout: 2340.84,
+      },
+      feeGroups: {
+        shipping: {
+          total: -3,
+          children: {
+            shippingActual: -127,
+            shippingPlatformDiscount: 124,
+          },
+        },
+      },
+    },
+    createdAt: "2026-10-18T00:00:00Z",
+    invoiceNo: "RF2610/02217",
+    channel: "TikTok",
+    orderCode: "CK61",
+  });
+  assert.equal(diffShippingTiktokInvoice.receiptTotal, 3225);
+  const diffLines = getOrderedInvoiceBreakdownLines(diffShippingTiktokInvoice);
+  assert.deepEqual(
+    diffLines.map((l) => ({
+      key: l.key,
+      label: l.label,
+      amount: l.amount,
+    })),
+    [
+      {
+        key: "shippingPlatformDiscount",
+        label: "ส่วนลดค่าจัดส่งจาก TikTok Shop",
+        amount: 124,
+      },
+      {
+        key: "platformDiscount",
+        label: "ส่วนลดจากแพลตฟอร์ม",
+        amount: 645,
+      },
+      {
+        key: "shippingActual",
+        label: "การจัดส่ง (น้ำหนักที่เรียกเก็บเงิน: 7500 ก.)",
+        amount: -124,
+      },
+    ],
+  );
+  // ตรวจสอบว่าผลรวมค่าสินค้าสุทธิ (2,580) + breakdown ทั้งหมด (645) = receiptTotal (3,225) พอดีเป๊ะ
+  const breakdownSum = diffLines.reduce((acc, l) => acc + l.amount, 0);
+  assert.equal(2580 + breakdownSum, diffShippingTiktokInvoice.receiptTotal);
+
+  // 6. Verify Facebook OMS orders behave identically to Shopee OMS orders (both "facebook" and "Facebook Live" normalize to "Facebook")
+  //    AND unpaid/unshipped/zero-sales orders (e.g. CZ79 with paidDate='-' or BO15 with trackingNo='-' & printedDate='-') are filtered out.
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const { getOrderLinkStatus } = await import("../src/lib/queries");
+  const fbOrdersCsv = [
+    "เลขที่ออเดอร์,ชื่อ,เบอร์โทร,ช่องทางติดต่อ,ชื่อตามช่องทางติดต่อ,ขนส่ง,ค่าส่งที่เก็บลูกค้า,จังหวัด,ธนาคาร,เลขพัสดุ,ค่าส่งที่ร้านจ่าย,หมายเหตุ,สร้างโดย,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,เลขที่บน Marketplace,รหัสส่วนลด,ส่วนลดรวม,จำนวนรวม,ยอดขาย,กำไร",
+    "FB101,สมหญิง ใจดี,0891234567,facebook,สมหญิง,Flash Express,50.0,นนทบุรี,กสิกรไทย,THFB001,35.0,,P&C,05/10/2026 14:20,05/10/2026 14:25,05/10/2026 15:00,-,,20.0,2,530.0,495.0",
+    "FB102,วิภาวรรณ,0819876543,Facebook Live,วิภาวรรณ,J&T,0.0,ปทุมธานี,ไทยพาณิชย์,THFB002,25.0,,P&C,05/10/2026 16:00,05/10/2026 16:05,05/10/2026 16:30,-,,0.0,1,290.0,265.0",
+    "CZ79,นาง โสภา อุทัยศรี,0930526620,facebook,,J&T COD,60.0,Rayong,-,-,0.0,เพจ kissi,kissi,17/10/2026 16:11,-,-,-,-,0.0,1,259.0,-",
+    "BO15,จองไว้แก้,,facebook,,J&T Express,0.0,Unknown,กสิกร,-,0.0,,kissi,26/09/2026 18:00,26/09/2026 18:00,-,-,-,0.0,1,6370.0,-",
+    "SX16,คุณธัญณภัสส์,0914783425,facebook,,J&T Express,0.0,Nan,กสิกร,829345979814,0.0,ส่งเพิ่ม,kissi,30/05/2026 09:30,30/05/2026 09:30,30/05/2026 09:32,-,-,0.0,1,0.0,-70.0",
+  ].join("\n");
+  const parsedFbOrders = await detectAndParseOmsInput(Buffer.from(fbOrdersCsv, "utf8"));
+  assert.ok(parsedFbOrders);
+  assert.equal(parsedFbOrders.fileType, "oms_orders");
+  assert.equal(parsedFbOrders.orders.length, 2);
+  assert.equal(parsedFbOrders.orders[0].orderCode, "FB101");
+  assert.equal(parsedFbOrders.orders[0].channel, "Facebook");
+  assert.equal(parsedFbOrders.orders[1].orderCode, "FB102");
+  assert.equal(parsedFbOrders.orders[1].channel, "Facebook");
+
+  assert.equal(
+    getOrderLinkStatus({
+      transactionType: "คำสั่งซื้อ (OMS)",
+      channel: "Facebook",
+      orderCode: "FB101",
+      omsItems: [
+        { skuCode: "SET01", productName: "กางเกงขาสั้น", unitPrice: 250, quantity: 2 },
+      ],
+    } as never),
+    "linked",
+  );
+
+  const fbNormalized = {
+    ...shopeeNormalized,
+    externalId: "FB101",
+    fields: {
+      incomeTotal: 530,
+      productBeforeDiscount: 500,
+      storeDiscount: -20,
+      productAfterDiscount: 480,
+      shippingCustomerFee: 50,
+      customerPayment: 530,
+      shippingActual: -35,
+      feeTotal: -35,
+      payout: 495,
+    },
+    feeGroups: {
+      shipping: {
+        total: -35,
+        children: { shippingActual: -35 },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    getRowShippingSummary({
+      channel: "Facebook",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      shippingFeeCustomer: 50,
+      normalized: fbNormalized,
+    }),
+    { positiveAmount: 50, negativeAmount: 0, netAmount: 50 },
+  );
+
+  const fbInvoice = buildInvoice({
+    id: 30,
+    importId: 1,
+    externalId: "FB101",
+    transactionType: "คำสั่งซื้อ (OMS)",
+    isOrder: true,
+    createdDate: "2026-10-05",
+    paidDate: "2026-10-05",
+    currency: "THB",
+    income: 530,
+    feeTotal: -35,
+    adjustment: 0,
+    payout: 495,
+    productDetail: "SET01 · กางเกงขาสั้น × 2",
+    weightEstimated: null,
+    weightCharged: null,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: fbNormalized,
+    createdAt: "2026-10-05T00:00:00Z",
+    invoiceNo: "SEQ/2610/00999",
+    channel: "Facebook",
+    orderCode: "FB101",
+    customerName: "สมหญิง ใจดี",
+    customerPhone: "0891234567",
+    customerAddress: "99/9 อ.เมือง จ.นนทบุรี 11000",
+    postalCode: "11000",
+    province: "นนทบุรี",
+    trackingNo: "THFB001",
+    courier: "Flash Express",
+    discountTotal: 20,
+    shippingFeeCustomer: 50,
+    omsItems: [
+      {
+        skuCode: "SET01",
+        productName: "กางเกงขาสั้น",
+        unitPrice: 250,
+        quantity: 2,
+      },
+    ],
+  });
+
+  assert.equal(fbInvoice.channel, "Facebook");
+  assert.equal(fbInvoice.salesAmount, 480);
+  assert.equal(fbInvoice.shippingCustomerFee, 50);
+  assert.equal(fbInvoice.receiptTotal, 530);
+  assert.equal(fbInvoice.total, 530);
+  assert.deepEqual(getOrderedInvoiceBreakdownLines(fbInvoice), [
+    {
+      key: "shippingCustomerFee",
+      label: "ค่าธรรมเนียมการจัดส่งของลูกค้า",
+      amount: 50,
+    },
+  ]);
+  const fbAbbrev = computeAbbreviatedSummary(fbInvoice);
+  assert.equal(fbAbbrev.itemsNetTotal, 480);
+  assert.equal(fbAbbrev.shippingLineAmount, 50);
+  assert.equal(fbAbbrev.subtotalBeforeFee, 530);
+  assert.equal(fbAbbrev.platformFeeDeduction, 35);
+  assert.equal(fbAbbrev.grandTotal, 495);
+  assert.equal(fbAbbrev.paymentTotal, 495);
+  assert.equal(fbAbbrev.specialDiscountAmount, 0);
+
+  // 7. Verify TikTok partial refund + return shipping orders (#586102858813835175 and #582419607340549163)
+  // - Uses net incomeTotal (200) instead of pre-refund productAfterDiscount (269)
+  // - Uses net platformDiscount (58.64 + (-15.04) = 43.60)
+  // - Never shows negative returnShippingActual (-29 or -38) or platformDiscountRefund (-15.04) on tax invoice
+  const partialRefundInvoice = buildInvoice({
+    id: 31,
+    importId: 1,
+    externalId: "586102858813835175",
+    transactionType: "คำสั่งซื้อ",
+    isOrder: true,
+    createdDate: "2026-09-16",
+    paidDate: "2026-09-23",
+    currency: "THB",
+    income: 200,
+    feeTotal: -95.51,
+    adjustment: 0,
+    payout: 104.49,
+    productDetail: "กางเกงขาสั้น × 2",
+    weightEstimated: 1500,
+    weightCharged: 1500,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      ...shopeeNormalized,
+      externalId: "586102858813835175",
+      fields: {
+        incomeTotal: 200,
+        productBeforeDiscount: 1270,
+        storeDiscount: -1001,
+        productAfterDiscount: 269,
+        refundBeforeDiscount: -690,
+        refundStoreDiscount: 621,
+        refundAfterDiscount: -69,
+        platformDiscount: 58.64,
+        platformDiscountRefund: -15.04,
+        customerPayment: 210.36,
+        customerRefund: -53.96,
+        shippingPlatformDiscount: 23.33,
+        shippingActual: -35,
+        returnShippingActual: -29,
+        shippingCustomerFee: 0,
+        feeTotal: -95.51,
+        payout: 104.49,
+      },
+    },
+    createdAt: "2026-09-23T00:00:00Z",
+    invoiceNo: "SEQ/2609/03500",
+    channel: "TikTok",
+    orderCode: "R88",
+  });
+  assert.equal(partialRefundInvoice.salesAmount, 200);
+  assert.equal(partialRefundInvoice.receiptTotal, 200);
+  assert.equal(partialRefundInvoice.platformDiscount, 43.6);
+  assert.equal(partialRefundInvoice.platformCoupon, 43.6);
+  assert.deepEqual(
+    getOrderedInvoiceBreakdownLines(partialRefundInvoice).map((l) => ({
+      key: l.key,
+      label: l.label,
+      amount: l.amount,
+    })),
+    [
+      {
+        key: "shippingPlatformDiscount",
+        label: "ส่วนลดค่าจัดส่งจาก TikTok Shop",
+        amount: 23.33,
+      },
+      {
+        key: "platformDiscount",
+        label: "ส่วนลดจากแพลตฟอร์ม",
+        amount: 43.6,
+      },
+      {
+        key: "shippingActual",
+        label: "การจัดส่ง (น้ำหนักที่เรียกเก็บเงิน: 1500 ก.)",
+        amount: -23.33,
+      },
+    ],
+  );
 });
+
+test("listBills keeps channelCounts identical across all/TikTok/Shopee/Facebook tabs and uses SARGable queries", async () => {
+  const { listBills } = await import("../src/lib/queries");
+
+  const executedSqls: string[] = [];
+  const mockDb = {
+    async query(sql: string) {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      executedSqls.push(clean);
+      if (clean.includes("FROM daily_summaries")) {
+        return {
+          rows: [
+            {
+              order_count: 70314,
+              all_count: 70314,
+              linked_count: 28951,
+              oms_only_count: 36942,
+              unlinked_count: 4421,
+              order_income: 12000000,
+              order_fees: -1500000,
+              order_payout: 10500000,
+              shipping_positive: 500000,
+              shipping_negative: -600000,
+              other_count: 0,
+              other_payout: 0,
+              total_payout: 10500000,
+              tiktok_count: 49535,
+              shopee_count: 6710,
+              facebook_count: 14069,
+              min_paid_date: "2026-06-20",
+              max_paid_date: "2026-10-29",
+              distinct_dates: 126,
+            },
+          ],
+        };
+      }
+      if (clean.includes("t.income <= 0 OR t.payout <= 0")) {
+        // Verify nonPosRow queries across all channels (no t.channel = $1 in WHERE)
+        assert.ok(
+          !clean.includes("WHERE t.is_order = 1 AND t.channel IN ('TikTok', 'Shopee', 'Facebook') AND t.channel ="),
+          "nonPosRow must not filter out other channels in WHERE so channelCounts stay consistent",
+        );
+        return {
+          rows: [
+            {
+              non_pos_all_channels: 1758,
+              non_pos_all: clean.includes("WHEN t.channel = 'TikTok'") ? 1621 : clean.includes("WHEN t.channel = 'Facebook'") ? 137 : 1758,
+              non_pos_income: -10272.81,
+              non_pos_fees: 0,
+              non_pos_payout: -10272.81,
+              non_pos_shipping_positive: 0,
+              non_pos_shipping_negative: 0,
+              non_pos_tiktok: 1621,
+              non_pos_shopee: 0,
+              non_pos_fb: 137,
+              non_pos_linked: 218,
+              non_pos_oms_only: 1,
+              non_pos_unlinked: 1539,
+              refund_fee_count: clean.includes("WHEN (t.channel = 'TikTok')") ? 98 : clean.includes("WHEN (t.channel = 'Shopee')") ? 0 : clean.includes("WHEN (t.channel = 'Facebook')") ? 44 : 142,
+              refund_fee_payout: clean.includes("WHEN (t.channel = 'TikTok')") ? -5227.81 : clean.includes("WHEN (t.channel = 'Shopee')") ? 0 : clean.includes("WHEN (t.channel = 'Facebook')") ? -5045 : -10272.81,
+              zero_count: clean.includes("WHEN (t.channel = 'TikTok')") ? 1523 : clean.includes("WHEN (t.channel = 'Shopee')") ? 0 : clean.includes("WHEN (t.channel = 'Facebook')") ? 93 : 1616,
+              refund_fee_all_channels: 142,
+              refund_fee_tiktok: 98,
+              refund_fee_shopee: 0,
+              refund_fee_fb: 44,
+              zero_all_channels: 1616,
+              zero_tiktok: 1523,
+              zero_shopee: 0,
+              zero_fb: 93,
+            },
+          ],
+        };
+      }
+      if (clean.includes("SELECT COUNT(*) AS count") && clean.includes("FROM transactions t")) {
+        return {
+          rows: [
+            {
+              count: 8091,
+              all_count: 47914,
+              linked_count: 8091,
+              oms_only_count: 36941,
+              unlinked_count: 2882,
+              income: 8000000,
+              fees: -1000000,
+              payout: 7000000,
+              shipping_positive: 300000,
+              shipping_negative: -350000,
+              tiktok_count: 47914,
+              shopee_count: 0,
+              facebook_count: 0,
+              min_paid_date: "2026-06-20",
+              max_paid_date: "2026-10-29",
+              distinct_dates: 126,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const resAll = await listBills({ channel: "all", linkStatus: "all", category: "normal" }, mockDb as never);
+  const resTikTok = await listBills({ channel: "TikTok", linkStatus: "all", category: "normal" }, mockDb as never);
+  const resShopee = await listBills({ channel: "Shopee", linkStatus: "all", category: "normal" }, mockDb as never);
+  const resFacebook = await listBills({ channel: "Facebook", linkStatus: "all", category: "normal" }, mockDb as never);
+  const resTikTokLinked = await listBills({ channel: "TikTok", linkStatus: "linked", category: "normal" }, mockDb as never);
+  const resShopeeLinked = await listBills({ channel: "Shopee", linkStatus: "linked", category: "normal" }, mockDb as never);
+
+  const expectedChannelCounts = {
+    all: 68556,
+    TikTok: 47914,
+    Shopee: 6710,
+    Facebook: 13932,
+  };
+
+  // Channel counts must never change when switching channels OR when selecting a child linkStatus (e.g. linked)
+  assert.deepEqual(resAll.channelCounts, expectedChannelCounts);
+  assert.deepEqual(resTikTok.channelCounts, expectedChannelCounts);
+  assert.deepEqual(resShopee.channelCounts, expectedChannelCounts);
+  assert.deepEqual(resFacebook.channelCounts, expectedChannelCounts);
+  assert.deepEqual(resTikTokLinked.channelCounts, expectedChannelCounts);
+  assert.deepEqual(resShopeeLinked.channelCounts, expectedChannelCounts);
+
+  // Category counts and periodNetSummary.orderCount must reflect each selected channel without being truncated by linkStatus
+  assert.equal(resAll.periodNetSummary.orderCount, 70314);
+  assert.equal(resTikTok.periodNetSummary.orderCount, 49535);
+  assert.equal(resTikTokLinked.periodNetSummary.orderCount, 49535);
+  assert.equal(resShopee.periodNetSummary.orderCount, 6710);
+  assert.equal(resFacebook.periodNetSummary.orderCount, 14069);
+
+  // Verify UI hierarchy in BillsFilterInteractive: Channel filter must appear ABOVE file-link status filter
+  const billsFilterSource = fs.readFileSync(
+    path.resolve(process.cwd(), "src/components/BillsFilterInteractive.tsx"),
+    "utf8",
+  );
+  const channelIdx = billsFilterSource.indexOf('aria-label="กรองตามช่องทางจำหน่าย"');
+  const linkStatusIdx = billsFilterSource.indexOf('aria-label="กรองตามสถานะการผูกไฟล์"');
+  assert.ok(channelIdx > 0 && linkStatusIdx > channelIdx, "Channel filter must be rendered above file-link status filter");
+
+  // Verify SARGable channel predicate and stored columns (no COALESCE(NULLIF(t.channel...)) or JSONB extraction in listBills)
+  for (const sql of executedSqls) {
+    assert.ok(
+      !sql.includes("COALESCE(NULLIF(t.channel"),
+      `listBills SQL must use SARGable t.channel predicate: ${sql}`,
+    );
+    assert.ok(
+      !sql.includes("normalized_json->'fields'"),
+      `listBills SQL must use stored shipping_positive/shipping_negative columns: ${sql}`,
+    );
+  }
+});
+
+test("TikTok OMS placeholder uses netOmsPayout (salesAmount - shippingSeller) instead of Shipnity profit_amount", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+
+  // Simulate an order like YQ77 where flash sale price is 100/pc (total 1400) but Shipnity stock cost is 150/pc resulting in -700 profit
+  const omsOrdersCsv = [
+    "เลขที่ออเดอร์,ชื่อ,เบอร์โทร,ช่องทางติดต่อ,ชื่อตามช่องทางติดต่อ,ขนส่ง,ค่าส่งที่เก็บลูกค้า,จังหวัด,ธนาคาร,เลขพัสดุ,ค่าส่งที่ร้านจ่าย,หมายเหตุ,สร้างโดย,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,เลขที่บน Marketplace,รหัสส่วนลด,ส่วนลดรวม,จำนวนรวม,ยอดขาย,กำไร",
+    "YQ77,ศ***นัน,0812345678,TikTok,7494055677184215034,J&T COD,0.0,เชียงใหม่,จ่ายทีหลัง / COD,JTTH207846564236,0,,P&C,25/10/2026 10:00,25/10/2026 00:00,25/10/2026 10:00,586780432141486074,,4060.0,14,1400.0,-700.0",
+  ].join("\n");
+
+  const parsedOrders = await detectAndParseOmsInput(Buffer.from(omsOrdersCsv, "utf8"));
+  assert.ok(parsedOrders);
+  assert.equal(parsedOrders.orders.length, 1);
+  const order = parsedOrders.orders[0];
+  assert.equal(order.salesAmount, 1400);
+  assert.equal(order.profitAmount, -700);
+
+  // In import-service logic, netOmsPayout must be salesAmount - shippingSeller = 1400 - 0 = 1400, never -700
+  const shippingSeller = Math.abs(order.shippingFeeSeller ?? 0);
+  const netOmsPayout = (order.salesAmount ?? 0) - shippingSeller;
+  assert.equal(netOmsPayout, 1400, "Payout must equal salesAmount - shippingSeller, not negative Shipnity stock profit");
+});
+
+test("Facebook order (e.g. CW26 size exchange) calculates COGS and uses Shipnity profit (-365) directly", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+
+  // CW26: Size exchange with 9 items (0 baht), customer paid 50 shipping, profit in Shipnity is -365 because of COGS
+  const fbCsv = [
+    "เลขที่ออเดอร์,ชื่อ,เบอร์โทร,ช่องทางติดต่อ,ชื่อตามช่องทางติดต่อ,ขนส่ง,ค่าส่งที่เก็บลูกค้า,จังหวัด,ธนาคาร,เลขพัสดุ,ค่าส่งที่ร้านจ่าย,หมายเหตุ,สร้างโดย,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,เลขที่บน Marketplace,รหัสส่วนลด,ส่วนลดรวม,จำนวนรวม,ยอดขาย,กำไร",
+    "CW26,วิชุตา ห้องเข้า,0811824866,Facebook,Wichuta Hongkhao,Flash Express,50.0,Uttaradit,กสิกร,TH50088E4J8H2B,0,เปลี่ยน Size,bam46450@gmail.com,26/02/2026 10:00,27/02/2026 00:00,28/02/2026 10:00,,,0.0,9,50.0,-365.0",
+  ].join("\n");
+
+  const parsedOrders = await detectAndParseOmsInput(Buffer.from(fbCsv, "utf8"));
+  assert.ok(parsedOrders);
+  assert.equal(parsedOrders.orders.length, 1);
+  const order = parsedOrders.orders[0];
+  assert.equal(order.channel, "Facebook");
+  assert.equal(order.salesAmount, 50);
+  assert.equal(order.shippingFeeCustomer, 50);
+  assert.equal(order.shippingFeeSeller, 0);
+  assert.equal(order.profitAmount, -365);
+
+  const shippingSeller = Math.abs(order.shippingFeeSeller ?? 0);
+  const netOmsPayout = (order.salesAmount ?? 0) - shippingSeller;
+  const cogs = Math.max(0, netOmsPayout - (order.profitAmount ?? 0));
+  assert.equal(order.profitAmount, -365, "Facebook payout must match Shipnity profit_amount (-365) directly");
+  assert.equal(cogs, 415, "COGS must be 415 (clothing stock cost in Shipnity)");
+});
+
+test("Shopee order (e.g. FV43) uses Shipnity profit (-544) directly and explains COGS = 640 and net cash before COGS = 96", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+
+  const shopeeCsv = [
+    "เลขที่ออเดอร์,ชื่อ,เบอร์โทร,ช่องทางติดต่อ,ชื่อตามช่องทางติดต่อ,ขนส่ง,ค่าส่งที่เก็บลูกค้า,จังหวัด,ธนาคาร,เลขพัสดุ,ค่าส่งที่ร้านจ่าย,หมายเหตุ,สร้างโดย,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,เลขที่บน Marketplace,รหัสส่วนลด,ส่วนลดรวม,จำนวนรวม,ยอดขาย,กำไร",
+    "FV43,ม***,0812345678,Shopee,user123,SPX,0.0,กรุงเทพฯ,จ่ายทีหลัง / COD,TH0123456789,1336,,system,13/03/2026 10:00,13/03/2026 00:00,13/03/2026 10:00,260313321TN1YJ,,0.0,8,1432.0,-544.0",
+  ].join("\n");
+
+  const parsedOrders = await detectAndParseOmsInput(Buffer.from(shopeeCsv, "utf8"));
+  assert.ok(parsedOrders);
+  assert.equal(parsedOrders.orders.length, 1);
+  const order = parsedOrders.orders[0];
+  assert.equal(order.channel, "Shopee");
+  assert.equal(order.profitAmount, -544);
+
+  const shippingSeller = Math.abs(order.shippingFeeSeller ?? 0);
+  const netOmsPayout = (order.salesAmount ?? 0) - shippingSeller;
+  const cogs = Math.max(0, netOmsPayout - (order.profitAmount ?? 0));
+  assert.equal(order.profitAmount, -544, "Shopee payout must match Shipnity profit_amount (-544) directly");
+  assert.equal(netOmsPayout, 96, "Net cash before COGS is 96 (1432 - 1336)");
+  assert.equal(cogs, 640, "COGS must be 640 (640 baht clothing cost for 8 items)");
+});
+
+test("Facebook zero-product-price exchange orders (link_priority = 3) are excluded from default normal bills and have dedicated filter", async () => {
+  const { listBills, mapTransaction } = await import("../src/lib/queries");
+
+  // 1. Verify mapTransaction flags Facebook orders with productAfterDiscount = 0 and productBeforeDiscount = 0 as isNoProductPriceOrder and nulls out invoiceNo
+  const exchangeRow = mapTransaction({
+    id: 999,
+    import_id: 1,
+    external_id: "DH96",
+    transaction_type: "คำสั่งซื้อ (OMS)",
+    is_order: 1,
+    created_date: "2026-10-20",
+    paid_date: "2026-10-27",
+    currency: "THB",
+    income: 50,
+    fee_total: 0,
+    adjustment: 0,
+    payout: 50,
+    channel: "Facebook",
+    order_code: "DH96",
+    link_priority: 3,
+    invoice_no: "RF2610/04994",
+    checks_json: JSON.stringify({ incomeDiff: 0, feeDiff: 0, payoutDiff: 0 }),
+    warnings_json: "[]",
+    normalized_json: JSON.stringify({
+      externalId: "DH96",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      isOrder: true,
+      createdAt: "2026-10-20",
+      paidAt: "2026-10-27",
+      currency: "THB",
+      fields: {
+        productBeforeDiscount: 0,
+        productAfterDiscount: 0,
+        shippingCustomerFee: 50,
+        incomeTotal: 50,
+        feeTotal: 0,
+        payout: 50,
+      },
+      mappedFields: [],
+    }),
+  });
+  assert.equal(exchangeRow.isNoProductPriceOrder, true);
+  assert.equal(exchangeRow.invoiceNo, null, "Exchange order must not expose a tax invoice number");
+
+  // 2. Verify listBills excludes link_priority = 3 from default normal bills and returns noPrice count = 38
+  const mockDb = {
+    async query(sql: string) {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      if (clean.includes("FROM daily_summaries")) {
+        return {
+          rows: [
+            {
+              order_count: 70289,
+              all_count: 70289,
+              linked_count: 28913,
+              oms_only_count: 36942,
+              unlinked_count: 4396,
+              order_income: 12000000,
+              order_fees: -1500000,
+              order_payout: 10500000,
+              shipping_positive: 500000,
+              shipping_negative: -600000,
+              other_count: 0,
+              other_payout: 0,
+              total_payout: 10500000,
+              tiktok_count: 49535,
+              shopee_count: 6710,
+              facebook_count: 14044,
+              min_paid_date: "2026-06-20",
+              max_paid_date: "2026-10-29",
+              distinct_dates: 126,
+            },
+          ],
+        };
+      }
+      if (clean.includes("t.income <= 0 OR t.payout <= 0")) {
+        return {
+          rows: [
+            {
+              non_pos_all_channels: 1758,
+              non_pos_all: 1758,
+              non_pos_income: -10272.81,
+              non_pos_fees: 0,
+              non_pos_payout: -10272.81,
+              non_pos_shipping_positive: 0,
+              non_pos_shipping_negative: 0,
+              non_pos_tiktok: 1621,
+              non_pos_shopee: 0,
+              non_pos_fb: 137,
+              non_pos_linked: 218,
+              non_pos_oms_only: 1,
+              non_pos_unlinked: 1539,
+              refund_fee_count: 142,
+              refund_fee_payout: -10272.81,
+              zero_count: 1616,
+              refund_fee_all_channels: 142,
+              refund_fee_tiktok: 98,
+              refund_fee_shopee: 0,
+              refund_fee_fb: 44,
+              zero_all_channels: 1616,
+              zero_tiktok: 1523,
+              zero_shopee: 0,
+              zero_fb: 93,
+            },
+          ],
+        };
+      }
+      if (clean.includes("AND t.link_priority = 3")) {
+        return {
+          rows: [
+            {
+              no_price_all_channels: 38,
+              no_price_all: 38,
+              no_price_income: 1940,
+              no_price_fees: 0,
+              no_price_payout: 1940,
+              no_price_shipping_positive: 1940,
+              no_price_shipping_negative: 0,
+              no_price_fb: 38,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const resAll = await listBills({ channel: "all", linkStatus: "all", category: "normal" }, mockDb as never);
+  // 70289 - 1758 (nonPos) - 38 (noPrice) = 68493
+  assert.equal(resAll.total, 68493);
+  assert.equal(resAll.channelCounts.all, 68493);
+  // Facebook: 14044 - 137 (nonPos) - 38 (noPrice) = 13869
+  assert.equal(resAll.channelCounts.Facebook, 13869);
+  assert.equal(resAll.linkCounts.noPrice, 38);
+});
+
+test("isOrderEligibleForInvoice restricts tax invoice printing strictly to complete data and normal sales bills", async () => {
+  const { isOrderEligibleForInvoice } = await import("../src/lib/invoice");
+
+  // 1. Normal linked TikTok order with settlement: eligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ",
+      income: 1432,
+      payout: 1300,
+      orderCode: "TT101",
+      productDetail: "ชุดนอนเด็ก",
+    }),
+    true,
+  );
+
+  // 2. TikTok OMS placeholder (no settlement yet): ineligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      income: 1432,
+      payout: 1300,
+      orderCode: "TT101",
+      productDetail: "ชุดนอนเด็ก",
+    }),
+    false,
+  );
+
+  // 3. Shopee order with negative profit (e.g. FV43, payout = -544): ineligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "Shopee",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      income: 1432,
+      payout: -544,
+      orderCode: "FV43",
+      productDetail: "ชุดนอนเด็ก",
+    }),
+    false,
+  );
+
+  // 4. Shopee order with 0 profit / return: ineligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "Shopee",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      income: 0,
+      payout: 0,
+      orderCode: "FV44",
+      productDetail: "ชุดนอนเด็ก",
+    }),
+    false,
+  );
+
+  // 5. Facebook size exchange 0 THB order (isNoProductPriceOrder = true): ineligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "Facebook",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      income: 50,
+      payout: 50,
+      orderCode: "FB99",
+      productDetail: "เปลี่ยนไซส์",
+      isNoProductPriceOrder: true,
+    }),
+    false,
+  );
+
+  // 6. Unlinked order (missing orderCode): ineligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ",
+      income: 500,
+      payout: 450,
+      orderCode: null,
+      productDetail: "ชุดนอนเด็ก",
+    }),
+    false,
+  );
+
+  // 7. Normal linked Shopee order: eligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "Shopee",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      income: 1200,
+      payout: 1100,
+      orderCode: "SP88",
+      omsItems: [{ sku: "SKU1", quantity: 1 }],
+    }),
+    true,
+  );
+});
+
+
 
 
 

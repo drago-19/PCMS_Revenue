@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { query, queryOne, withTransaction, type Queryable } from "../db";
+import {
+  query,
+  queryOne,
+  withTransaction,
+  type Queryable,
+} from "../db";
 import { compressFileBlob } from "../file-blob";
 import { SELLER } from "../seller";
 import { round2 } from "../format";
@@ -297,7 +302,7 @@ export async function saveOmsOrdersBatch(
         sales_amount = EXCLUDED.sales_amount,
         profit_amount = EXCLUDED.profit_amount,
         matched_external_id = CASE
-          WHEN EXCLUDED.channel = 'Shopee' THEN NULL
+          WHEN EXCLUDED.channel IN ('Shopee', 'Facebook') THEN NULL
           WHEN oms_orders.marketplace_order_norm IS DISTINCT FROM EXCLUDED.marketplace_order_norm THEN NULL
           ELSE oms_orders.matched_external_id
         END,
@@ -480,30 +485,30 @@ export async function reconcileAndSyncThreeFiles(
   fallbackImportId: number,
   nowIso: string,
 ): Promise<{ matchedOrders: number; syncedOmsBills: number }> {
-  // 0. Enforce TikTok & Shopee policy on newly imported rows (scoped by import_id to avoid full-table scans)
+  // 0. Enforce TikTok, Shopee & Facebook policy on newly imported rows (scoped by import_id to avoid full-table scans)
   await query(
-    `DELETE FROM oms_order_items WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee')`,
+    `DELETE FROM oms_order_items WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook')`,
     [fallbackImportId],
     client,
   );
   await query(
-    `DELETE FROM oms_orders WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee')`,
+    `DELETE FROM oms_orders WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook')`,
     [fallbackImportId],
     client,
   );
   await query(
-    `DELETE FROM transactions WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee')`,
+    `DELETE FROM transactions WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook')`,
     [fallbackImportId],
     client,
   );
 
-  // 0b. Never allow Shopee OMS orders to hold a TikTok Settlement matched_external_id,
-  //     and never allow TikTok Settlement rows to have channel = 'Shopee'
+  // 0b. Never allow Shopee or Facebook OMS orders to hold a TikTok Settlement matched_external_id,
+  //     and never allow TikTok Settlement rows to have channel <> 'TikTok'
   await query(
     `UPDATE oms_orders
      SET matched_external_id = NULL,
-         updated_at = now()
-     WHERE channel = 'Shopee'
+          updated_at = now()
+     WHERE channel IN ('Shopee', 'Facebook')
        AND matched_external_id IS NOT NULL`,
     [],
     client,
@@ -571,14 +576,35 @@ export async function reconcileAndSyncThreeFiles(
   );
 
   // 3. If an OMS order now matched a real Settlement row, remove any temporary 'คำสั่งซื้อ (OMS)' row for that exact order_uid
+  //    AND remove any unpaid/unshipped/zero-sales Shopee & Facebook OMS bills so they are never taxed.
   const deletedTempRows = await query<{ paid_date: string }>(
     `DELETE FROM transactions t
-     USING oms_orders o
      WHERE t.transaction_type = 'คำสั่งซื้อ (OMS)'
-       AND o.matched_external_id IS NOT NULL
        AND (
-         t.oms_order_uid = o.order_uid
-         OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
+         EXISTS (
+           SELECT 1
+           FROM oms_orders o
+           WHERE o.matched_external_id IS NOT NULL
+             AND (
+               t.oms_order_uid = o.order_uid
+               OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
+             )
+         )
+         OR (
+           t.channel IN ('Shopee', 'Facebook')
+           AND (
+             t.income <= 0
+             OR EXISTS (
+               SELECT 1
+               FROM oms_orders o
+               WHERE t.oms_order_uid = o.order_uid
+                 AND (
+                   o.sales_amount <= 0
+                   OR ((o.tracking_no IS NULL OR o.tracking_no = '') AND (o.printed_date IS NULL OR o.printed_date = ''))
+                 )
+             )
+           )
+         )
        )
      RETURNING t.paid_date`,
     [],
@@ -588,13 +614,22 @@ export async function reconcileAndSyncThreeFiles(
     .map((r) => String(r.paid_date ?? ""))
     .filter((d) => d && d !== "unknown");
 
-  // 4. For TikTok & Shopee OMS orders that do NOT have a Settlement row (newly imported or not yet in transactions),
+  // 4. For TikTok, Shopee & Facebook OMS orders that do NOT have a Settlement row (newly imported or not yet in transactions),
   //    create/upsert a bill row in transactions so they appear in /bills and can be tracked.
+  //    For Shopee & Facebook, filter out unpaid/unshipped/zero-sales orders so they are never taxed.
   const unmatchedRows = await query<Record<string, unknown>>(
     `SELECT o.*
      FROM oms_orders o
      WHERE o.matched_external_id IS NULL
-       AND COALESCE(NULLIF(o.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+       AND COALESCE(NULLIF(o.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+       AND (
+         COALESCE(NULLIF(o.channel, ''), 'TikTok') = 'TikTok'
+         OR (
+           o.sales_amount > 0
+           AND o.paid_date IS NOT NULL AND o.paid_date <> ''
+           AND ((o.tracking_no IS NOT NULL AND o.tracking_no <> '') OR (o.printed_date IS NOT NULL AND o.printed_date <> ''))
+         )
+       )
        AND (
          o.import_id = $1
          OR NOT EXISTS (
@@ -636,13 +671,19 @@ export async function reconcileAndSyncThreeFiles(
       const discountTotal = round2(Math.abs(Number(r.discount_total ?? 0)));
       const shippingCustomer = round2(Number(r.shipping_fee_customer ?? 0));
       const shippingSeller = round2(Math.abs(Number(r.shipping_fee_seller ?? 0)));
-      const profitAmount = round2(Number(r.profit_amount ?? salesAmount - shippingSeller));
+      const netOmsPayout = round2(salesAmount - shippingSeller);
+      const profitAmount = round2(Number(r.profit_amount ?? netOmsPayout));
+      const cogsAmount = round2(Math.max(0, salesAmount - shippingSeller - profitAmount));
 
       const productAfterDiscount = round2(Math.max(0, salesAmount - shippingCustomer));
       const productBeforeDiscount = round2(productAfterDiscount + discountTotal);
       const incomeTotal = salesAmount;
       const feeTotal = round2(-shippingSeller);
-      const payout = profitAmount;
+      // AGENTS.md Rule 3 & 4:
+      // - TikTok Settlement: uses Settlement file directly. For OMS temp row: salesAmount - shippingSeller
+      // - Shopee & Facebook: uses profit_amount from Shipnity directly 100% as payout
+      const payout = channel === "TikTok" ? netOmsPayout : profitAmount;
+      const cogs = channel === "TikTok" ? 0 : cogsAmount;
 
       const normalized: NormalizedTransaction = {
         externalId,
@@ -670,6 +711,7 @@ export async function reconcileAndSyncThreeFiles(
           shippingActualFee: feeTotal,
           adjustment: 0,
           payout,
+          cogs,
         },
         mappedFields: [
           "orderId",
@@ -776,11 +818,14 @@ export async function reconcileAndSyncThreeFiles(
     await query(
       `INSERT INTO invoice_registry (order_id, invoice_no)
        SELECT u.order_id,
-              'SEQ/' || LPAD(nextval('invoice_seq')::text, 5, '0')
+              'SEQ/INIT/' || nextval('invoice_seq')::text
        FROM unnest($1::text[]) AS u(order_id)
-       WHERE NOT EXISTS (
-         SELECT 1 FROM invoice_registry r WHERE r.order_id = u.order_id
-       )
+       JOIN transactions t ON t.external_id = u.order_id AND t.is_order = 1
+       WHERE t.link_priority <> 3
+         AND NOT (t.channel IN ('Shopee', 'Facebook') AND (t.income <= 0 OR t.payout <= 0))
+         AND NOT EXISTS (
+           SELECT 1 FROM invoice_registry r WHERE r.order_id = u.order_id
+         )
        ON CONFLICT (order_id) DO NOTHING`,
       [extIds],
       client,
@@ -832,7 +877,7 @@ export async function reconcileAndSyncThreeFiles(
      FROM oms_orders o
      WHERE i.order_uid = o.order_uid
        AND (i.import_id = $1 OR o.import_id = $1)
-       AND o.channel IN ('TikTok', 'Shopee')
+       AND o.channel IN ('TikTok', 'Shopee', 'Facebook')
        AND i.channel IS DISTINCT FROM o.channel`,
     [fallbackImportId],
     client,
@@ -893,7 +938,10 @@ export async function syncMonthlyInvoiceRegistry(
     `DELETE FROM invoice_registry r
      WHERE NOT EXISTS (
        SELECT 1 FROM transactions t
-       WHERE t.external_id = r.order_id AND t.is_order = 1
+       WHERE t.external_id = r.order_id
+         AND t.is_order = 1
+         AND t.link_priority <> 3
+         AND NOT (t.channel IN ('Shopee', 'Facebook') AND (t.income <= 0 OR t.payout <= 0))
      )`,
     [],
     client,
@@ -936,10 +984,10 @@ export async function syncMonthlyInvoiceRegistry(
        JOIN dirty_months dm ON dm.yymm = tx_ym.yymm
      )
      UPDATE invoice_registry r
-     SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0')
+     SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, GREATEST(5, LENGTH(o.rn::text)), '0')
      FROM ordered o
      WHERE r.order_id = o.order_id
-       AND r.invoice_no IS DISTINCT FROM ('SEQ/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0'))`,
+       AND r.invoice_no IS DISTINCT FROM ('SEQ/' || o.yymm || '/' || LPAD(o.rn::text, GREATEST(5, LENGTH(o.rn::text)), '0'))`,
     [importId ?? null],
     client,
   );
@@ -1003,7 +1051,8 @@ export async function refreshSummaryTables(
          paid_date, transaction_count, order_count, order_payout, order_income,
          order_fees, other_count, other_payout, total_payout, adjustment,
          tiktok_count, shopee_count, facebook_count,
-         linked_count, oms_only_count, unlinked_count, mismatch_count, updated_at
+         linked_count, oms_only_count, unlinked_count, mismatch_count,
+         shipping_positive, shipping_negative, updated_at
        )
        SELECT
          paid_date,
@@ -1016,21 +1065,23 @@ export async function refreshSummaryTables(
          ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
          ROUND(SUM(payout)::numeric, 2),
          ROUND(SUM(adjustment)::numeric, 2),
-         SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'TikTok' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
-         0,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND (
            ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
            OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
            OR ABS(COALESCE((checks_json->>'payoutDiff')::numeric, 0)) >= 0.01
          ) THEN 1 ELSE 0 END)::int,
+         ROUND(COALESCE(SUM(shipping_positive), 0)::numeric, 2),
+         ROUND(COALESCE(SUM(shipping_negative), 0)::numeric, 2),
          now()
        FROM transactions
        WHERE paid_date = ANY($1::text[])
-         AND COALESCE(NULLIF(channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+         AND channel IN ('TikTok', 'Shopee', 'Facebook')
        GROUP BY paid_date`,
       [targetDates],
       client,
@@ -1042,7 +1093,8 @@ export async function refreshSummaryTables(
          paid_date, transaction_count, order_count, order_payout, order_income,
          order_fees, other_count, other_payout, total_payout, adjustment,
          tiktok_count, shopee_count, facebook_count,
-         linked_count, oms_only_count, unlinked_count, mismatch_count, updated_at
+         linked_count, oms_only_count, unlinked_count, mismatch_count,
+         shipping_positive, shipping_negative, updated_at
        )
        SELECT
          paid_date,
@@ -1055,21 +1107,23 @@ export async function refreshSummaryTables(
          ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
          ROUND(SUM(payout)::numeric, 2),
          ROUND(SUM(adjustment)::numeric, 2),
-         SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'TikTok' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
-         0,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel = 'Shopee' AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
-         SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND (
            ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
            OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
            OR ABS(COALESCE((checks_json->>'payoutDiff')::numeric, 0)) >= 0.01
          ) THEN 1 ELSE 0 END)::int,
+         ROUND(COALESCE(SUM(shipping_positive), 0)::numeric, 2),
+         ROUND(COALESCE(SUM(shipping_negative), 0)::numeric, 2),
          now()
        FROM transactions
        WHERE paid_date <> '' AND paid_date <> 'unknown'
-         AND COALESCE(NULLIF(channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+         AND channel IN ('TikTok', 'Shopee', 'Facebook')
        GROUP BY paid_date`,
       [],
       client,
@@ -1096,11 +1150,11 @@ export async function refreshSummaryTables(
          ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
          COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
          COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
-         0,
+         COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
          now()
        FROM oms_order_items i
        WHERE i.sku_code = ANY($1::text[])
-         AND COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+         AND COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
        GROUP BY i.sku_code`,
       [targetSkus],
       client,
@@ -1121,10 +1175,10 @@ export async function refreshSummaryTables(
          ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
          COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
          COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
-         0,
+         COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
          now()
        FROM oms_order_items i
-       WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee')
+       WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
        GROUP BY i.sku_code`,
       [],
       client,
@@ -1576,7 +1630,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
           await query(
             `INSERT INTO invoice_registry (order_id, invoice_no)
              SELECT u.order_id,
-                    'SEQ/' || LPAD(nextval('invoice_seq')::text, 5, '0')
+                    'SEQ/INIT/' || nextval('invoice_seq')::text
              FROM unnest($1::text[]) AS u(order_id)
              WHERE NOT EXISTS (
                SELECT 1 FROM invoice_registry r WHERE r.order_id = u.order_id
