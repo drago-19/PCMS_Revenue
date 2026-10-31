@@ -2,6 +2,7 @@
 
 import type { ComponentProps } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { notifyNavigationStart } from "@/lib/navigation-progress";
 
 type FormSubmitEvent = Parameters<
   NonNullable<ComponentProps<"form">["onSubmit"]>
@@ -32,6 +33,7 @@ export function FilterForm({
     }
     const targetPath = typeof action === "string" && action ? action : pathname;
     const qs = search.toString();
+    notifyNavigationStart();
     router.push(qs ? `${targetPath}?${qs}` : targetPath, { scroll: false });
   }
 

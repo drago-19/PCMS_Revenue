@@ -10,6 +10,7 @@ const badgeVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
         shopee: "bg-[#ee4d2d] text-white border-transparent [a&]:hover:bg-[#d73211]",
+        facebook: "bg-[#1877F2] text-white border-transparent [a&]:hover:bg-[#166fe5]",
         secondary:
           "bg-[#e6fbf9] text-[#007a76] border-[#b2f2ec] [a&]:hover:bg-[#d5f8f5]",
         destructive:

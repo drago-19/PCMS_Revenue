@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { notifyNavigationStart } from "@/lib/navigation-progress";
 
 export function PaginationBar({
   page,
@@ -42,6 +43,7 @@ export function PaginationBar({
     const parsed = Number(jumpValue);
     if (!Number.isFinite(parsed)) return;
     const target = Math.max(1, Math.min(pageCount, Math.round(parsed)));
+    notifyNavigationStart();
     router.push(buildHref(target), { scroll: false });
   }
 

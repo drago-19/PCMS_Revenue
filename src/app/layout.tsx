@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono, Noto_Sans_Thai } from "next/font/google";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
+import { NavigationProgress } from "@/components/NavigationProgress";
 import { Sidebar } from "@/components/Sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -53,6 +54,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     >
       <body>
         <TooltipProvider delayDuration={150}>
+          <Suspense fallback={null}>
+            <NavigationProgress />
+          </Suspense>
           <div className="app-shell has-[[data-login-page]]:!grid-cols-1">
             <Sidebar companyId={companyId} companyName={settings.name} />
             <div className="app-main">
