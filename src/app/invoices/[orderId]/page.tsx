@@ -8,9 +8,19 @@ import { InvoiceInteractiveView } from "@/components/InvoiceInteractiveView";
 import { InvoiceZoomControl } from "@/components/InvoiceZoomControl";
 import { PrintButton } from "@/components/PrintButton";
 import { IconArrowLeft, IconReceipt } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { buildInvoice } from "@/lib/invoice";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { buildInvoice, isOrderEligibleForInvoice } from "@/lib/invoice";
 import { getBill } from "@/lib/queries";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +49,117 @@ export default async function InvoicePage({
 
   const row = await getBill(decodeURIComponent(orderId));
   if (!row) notFound();
+
+  if (!isOrderEligibleForInvoice(row)) {
+    const isNoPrice = row.isNoProductPriceOrder === true;
+    const isNegativeOrZero = row.income <= 0 || row.payout <= 0;
+    const isMissingOms = !row.orderCode || row.orderCode.trim() === "";
+    const isTiktokOmsPlaceholder =
+      row.channel === "TikTok" && row.transactionType === "คำสั่งซื้อ (OMS)";
+
+    const title = isNoPrice
+      ? "ไม่ออกใบกำกับภาษี (บิลเปลี่ยนสินค้า)"
+      : isNegativeOrZero
+        ? "ไม่ออกใบกำกับภาษี (คืนเงิน / ตีกลับ / ขาดทุน)"
+        : isTiktokOmsPlaceholder
+          ? "ไม่ออกใบกำกับภาษี (รอไฟล์ Settlement จาก TikTok)"
+          : isMissingOms
+            ? "ไม่ออกใบกำกับภาษี (ยังไม่ผูกออเดอร์ Shipnity)"
+            : "ไม่ออกใบกำกับภาษี (ข้อมูลไม่ครบถ้วน)";
+
+    const reason = isNoPrice
+      ? "รายการนี้เป็นออเดอร์เปลี่ยนสินค้า / ไม่มีราคาสินค้า (ยอดขาย ฿0.00) ตามหลักเกณฑ์จะไม่นำมายื่นภาษีขายและไม่ออกใบกำกับภาษี"
+      : isNegativeOrZero
+        ? "รายการนี้เป็นออเดอร์คืนเงิน ตีกลับ หรือขาดทุน (ยอดขายหรือยอดชำระสุทธิติดลบหรือ ฿0.00) ตามหลักเกณฑ์จะไม่นำมายื่นภาษีขาย เพื่อป้องกันการยื่นภาษีเกินจริง"
+        : isTiktokOmsPlaceholder
+          ? "รายการนี้เป็นออเดอร์ TikTok ที่ยังไม่มีไฟล์ Settlement รายได้รอบโอนเงินจริง (มีเฉพาะข้อมูลเบื้องต้นจาก Shipnity) กรุณานำเข้าไฟล์ Settlement จาก TikTok เพื่อให้ข้อมูลครบถ้วนก่อนออกใบกำกับภาษี"
+          : isMissingOms
+            ? "รายการนี้ยังไม่ได้ผูกกับเลขออเดอร์ใน Shipnity กรุณาผูกข้อมูลหรือนำเข้าไฟล์ให้เรียบร้อยก่อนออกใบกำกับภาษี"
+            : "รายการนี้มีข้อมูลสินค้าหรือรายการคำสั่งซื้อไม่ครบถ้วน จึงไม่อนุญาตให้ออกหรือพิมพ์ใบกำกับภาษี";
+
+    return (
+      <div className="flex min-h-[75dvh] w-full items-center justify-center p-4">
+        <Card className="w-full max-w-[600px] border-amber-200 bg-white shadow-md">
+          <CardHeader className="space-y-2 border-b border-amber-100 bg-amber-50/60 pb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Badge
+                variant={
+                  row.channel === "Shopee"
+                    ? "shopee"
+                    : row.channel === "Facebook"
+                      ? "facebook"
+                      : "default"
+                }
+                size="sm"
+              >
+                {row.channel || "TikTok"}
+              </Badge>
+              {row.orderCode ? (
+                <span className="mono text-xs font-semibold text-slate-600">
+                  #{row.orderCode}
+                </span>
+              ) : null}
+            </div>
+            <CardTitle className="text-lg font-bold text-amber-950 sm:text-xl">
+              {title}
+            </CardTitle>
+            <CardDescription className="text-xs text-amber-900/80 sm:text-sm">
+              ระบบอนุญาตให้ออกและพิมพ์ใบกำกับภาษีเฉพาะบิลขายปกติที่มีข้อมูลครบถ้วนเท่านั้น
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-5 text-sm text-slate-700">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 space-y-2">
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                เหตุผลที่ไม่ออกใบกำกับภาษี
+              </div>
+              <p className="text-sm font-medium leading-relaxed text-slate-800">
+                {reason}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs sm:text-sm">
+              <div className="rounded-md border border-slate-100 bg-slate-50/50 p-2.5">
+                <span className="text-slate-500 block text-xs">เลขคำสั่งซื้อ:</span>
+                <span className="mono font-semibold text-slate-800 break-all">
+                  {row.externalId}
+                </span>
+              </div>
+              <div className="rounded-md border border-slate-100 bg-slate-50/50 p-2.5">
+                <span className="text-slate-500 block text-xs">
+                  ยอดชำระสุทธิ (Payout):
+                </span>
+                <span
+                  className={cn(
+                    "mono font-bold text-sm",
+                    row.payout <= 0 ? "text-rose-600" : "text-emerald-700",
+                  )}
+                >
+                  {row.payout < 0
+                    ? `-฿${Math.abs(row.payout).toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                      })}`
+                    : `฿${row.payout.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                      })}`}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 border-t border-slate-100 bg-slate-50/50 pt-3">
+            <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
+              <Link href="/bills">ดูรายการบิลทั้งหมด</Link>
+            </Button>
+            <Button asChild variant="default" size="sm" className="w-full sm:w-auto">
+              <Link href={`/bills/${encodeURIComponent(row.externalId)}`}>
+                <IconArrowLeft size={16} className="mr-1.5" /> ดูรายละเอียดบิลคำสั่งซื้อ
+              </Link>
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
   const enableFullTaxInvoice =
     row.sellerSettings?.enableFullTaxInvoice === true;
   const mode: InvoiceMode =

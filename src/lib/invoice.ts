@@ -108,6 +108,41 @@ export function parseProductItems(detail: string | null): InvoiceItem[] {
   return items;
 }
 
+export function isOrderEligibleForInvoice(row: {
+  channel?: string | null;
+  transactionType?: string | null;
+  income: number;
+  payout: number;
+  orderCode?: string | null;
+  productDetail?: string | null;
+  omsItems?: unknown[] | null;
+  isNoProductPriceOrder?: boolean;
+}): boolean {
+  // 1. ต้องเป็นบิลขายปกติ: มียอดขาย > 0 และยอดรับสุทธิ > 0 และไม่ใช่บิลเปลี่ยนสินค้า 0 บาท
+  if (row.isNoProductPriceOrder) return false;
+  if (row.income <= 0) return false;
+  if (row.payout <= 0) return false;
+
+  // 2. ต้องเป็นข้อมูลที่ครบ (Link Status = "linked"):
+  const hasOmsCode = Boolean(row.orderCode && row.orderCode.trim() !== "");
+  if (!hasOmsCode) return false;
+
+  const ch = row.channel || "TikTok";
+  // สำหรับ TikTok: ต้องมีไฟล์ Settlement รายได้รอบโอนแล้วเท่านั้น (ไม่ใช่แถวชั่วคราว OMS)
+  if (ch === "TikTok") {
+    if (row.transactionType === "คำสั่งซื้อ (OMS)") return false;
+  } else {
+    // สำหรับ Shopee / Facebook: ต้องมีชื่อสินค้าหรือรายการสินค้าในออเดอร์
+    const hasItems = Boolean(
+      (row.productDetail && row.productDetail.trim() !== "") ||
+        (row.omsItems && row.omsItems.length > 0),
+    );
+    if (!hasItems) return false;
+  }
+
+  return true;
+}
+
 export function buildInvoice(
   row: TransactionRow,
   sellerOverride?: SellerInfo,
@@ -127,12 +162,30 @@ export function buildInvoice(
     rawPayout <= 0 &&
     (rawRefundAfter < 0 || Number(fields.productAfterDiscount ?? 0) <= 0);
 
-  const salesAmount = isZeroRefundedOrder
-    ? 0
-    : round2(Number(fields.productAfterDiscount ?? row.income ?? 0));
-  const shippingFee = round2(
+  const ch = row.channel || "TikTok";
+  const isOmsChannel = ch === "Shopee" || ch === "Facebook";
+  const rawProductAfter = Number(fields.productAfterDiscount ?? 0);
+  const rawRefundAfterVal = Number(fields.refundAfterDiscount ?? 0);
+  const productAfterWithRefund = round2(rawProductAfter + rawRefundAfterVal);
+  const custShippingFee = round2(
     Number(row.shippingFeeCustomer ?? fields.shippingCustomerFee ?? 0),
   );
+
+  // สำหรับ TikTok:
+  // productAfterDiscount คือยอดรวมค่าสินค้าหลังหักส่วนลดร้านค้า (ไม่รวมค่าขนส่ง)
+  // หากมี productAfterDiscount > 0 ให้บวก refundAfterDiscount (ถ้ามีคืนเงินบางส่วน) เป็นยอดขายสินค้า (salesAmount)
+  // หากไม่มี ให้ใช้ rawIncome - Math.max(0, custShippingFee)
+  const productSalesAmount =
+    productAfterWithRefund > 0
+      ? productAfterWithRefund
+      : rawIncome > 0
+        ? round2(Math.max(0, rawIncome - Math.max(0, custShippingFee)))
+        : 0;
+
+  const salesAmount = isZeroRefundedOrder
+    ? 0
+    : productSalesAmount;
+  const shippingFee = custShippingFee;
 
   let items: InvoiceItem[] = [];
   if (row.omsItems && row.omsItems.length > 0) {
@@ -173,17 +226,11 @@ export function buildInvoice(
       ? round2(grossItemsTotal - salesAmount)
       : explicitDiscount;
 
-  const platformCoupon = round2(
-    Math.abs(Number(fields.platformDiscount ?? 0)) +
-      Math.abs(Number(fields.platformCofundCoupon ?? 0)),
-  );
-
-  // ดึงค่าจริงและเครื่องหมายจริงจากไฟล์ที่นำเข้าโดยตรง (ห้ามใช้ Math.abs กลับเครื่องหมายหรือคำนวณยอดใหม่เอง)
-  const platformDiscount = round2(Number(fields.platformDiscount ?? 0));
-  const platformCofundCoupon = round2(
+  const rawPlatformDiscount = round2(Number(fields.platformDiscount ?? 0));
+  const rawPlatformCofundCoupon = round2(
     Number(fields.platformCofundCoupon ?? 0),
   );
-  const sellerCofundCoupon = round2(Number(fields.sellerCofundCoupon ?? 0));
+  const rawSellerCofundCoupon = round2(Number(fields.sellerCofundCoupon ?? 0));
   const platformDiscountRefund = round2(
     Number(fields.platformDiscountRefund ?? 0),
   );
@@ -192,6 +239,27 @@ export function buildInvoice(
   );
   const sellerCofundCouponRefund = round2(
     Number(fields.sellerCofundCouponRefund ?? 0),
+  );
+
+  // หากมีการคืนสินค้าบางส่วน (platformDiscountRefund < 0 / platformCofundCouponRefund < 0)
+  // ให้ใช้ยอดส่วนลดแพลตฟอร์มสุทธิหลังหักส่วนที่คืนแล้ว เพื่อให้รายการสินค้า + ส่วนลดแพลตฟอร์ม ตรงกับยอดรายได้ (salesAmount) 100%
+  const platformDiscount =
+    platformDiscountRefund < 0 && rawPlatformDiscount > 0
+      ? round2(Math.max(0, rawPlatformDiscount + platformDiscountRefund))
+      : rawPlatformDiscount;
+  const platformCofundCoupon =
+    platformCofundCouponRefund < 0 && rawPlatformCofundCoupon > 0
+      ? round2(
+          Math.max(0, rawPlatformCofundCoupon + platformCofundCouponRefund),
+        )
+      : rawPlatformCofundCoupon;
+  const sellerCofundCoupon =
+    sellerCofundCouponRefund !== 0 && rawSellerCofundCoupon !== 0
+      ? round2(rawSellerCofundCoupon + sellerCofundCouponRefund)
+      : rawSellerCofundCoupon;
+
+  const platformCoupon = round2(
+    Math.abs(platformDiscount) + Math.abs(platformCofundCoupon),
   );
 
   const shippingCustomerFee = round2(Number(fields.shippingCustomerFee ?? 0));
@@ -279,14 +347,47 @@ export function buildInvoice(
       ? customerTotal
       : round2(salesAmount + shippingFee);
 
-  // หน้าใบกำกับภาษีไม่นำค่าธรรมเนียมแพลตฟอร์มมาหัก แสดงยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย (salesAmount) โดยตรง
+  const omsReceiptTotal = round2(
+    rawIncome > 0 ? rawIncome : salesAmount + Math.max(0, shippingFee),
+  );
+
+  const shipPlatformDiscount = Math.max(0, shippingPlatformDiscount);
+  const custFee = Math.max(0, shippingCustomerFee);
+  const subsidy = Math.max(0, shippingSubsidy);
+  const maxPositiveShippingOffset = round2(shipPlatformDiscount + custFee + subsidy);
+
+  // การจัดส่งที่นำมาหักล้างในใบกำกับภาษี:
+  // กรณีมีส่วนต่าง (เช่น รับ 98 จ่าย 101): แสดงเท่าทุนมาคิด (-98)
+  let effectiveShippingActual = 0;
+  if (shippingActual !== 0 && (shippingActual > 0 || maxPositiveShippingOffset > 0)) {
+    if (shippingActual < 0) {
+      effectiveShippingActual = -Math.min(Math.abs(shippingActual), maxPositiveShippingOffset);
+    } else {
+      effectiveShippingActual = shippingActual;
+    }
+  }
+
+  // ค่าขนส่งสุทธิที่นำมารวมเป็นรายได้ในใบกำกับภาษี
+  // 1. กรณีเท่าทุน หรือร้านออกส่วนต่างเกิน: หักล้างกันเป็น 0 พอดี
+  // 2. กรณีเราได้ค่าขนส่งบวกเพิ่ม (เช่น ลูกค้าจ่าย 18 แล้วไม่มีค่าส่งหักล้าง): บวกเพิ่มเข้าไปในใบกำกับภาษีเป็นรายได้
+  const netShippingForInvoice = round2(
+    custFee + effectiveShippingActual
+  );
+
+  const tiktokReceiptTotal = round2(
+    salesAmount + Math.max(0, netShippingForInvoice)
+  );
+
+  // หน้าใบกำกับภาษีไม่นำค่าธรรมเนียมแพลตฟอร์มหรือค่าขนส่งที่ร้านค้าจ่ายเองมาหัก
+  // - Shopee / Facebook: แสดงค่าสินค้า + ค่าขนส่งลูกค้า (ตรงกับยอดรายได้ในไฟล์ Shipnity)
+  // - TikTok: แสดงยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย + ค่าขนส่งบวกเพิ่มที่เก็บจากลูกค้า
   const receiptTotal = isZeroRefundedOrder
     ? 0
-    : useCustomerPaidBase
-      ? customerFallbackTotal
-      : salesAmount > 0
-        ? salesAmount
-        : customerFallbackTotal;
+    : isOmsChannel
+      ? omsReceiptTotal
+      : useCustomerPaidBase
+        ? customerFallbackTotal
+        : tiktokReceiptTotal;
 
   const vatRate =
     typeof activeSeller.vatRate === "number" && activeSeller.vatRate >= 0
@@ -311,10 +412,14 @@ export function buildInvoice(
     effectiveDate,
   );
 
+  const displayOrderId = row.externalId.includes("|")
+    ? row.orderCode || row.externalId.split("|")[0] || row.externalId
+    : row.externalId;
+
   return {
     invoiceNo: formattedInvoiceNo,
     receiptNo,
-    orderId: row.externalId,
+    orderId: displayOrderId,
     orderCode: row.orderCode ?? null,
     channel: row.channel || "TikTok",
     trackingNo: row.trackingNo ?? null,

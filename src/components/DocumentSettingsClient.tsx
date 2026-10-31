@@ -793,10 +793,10 @@ export function DocumentSettingsClient({
           <Button
             type="submit"
             variant="default"
-            disabled={saving}
+            loading={saving}
             className="flex-1 sm:flex-initial"
           >
-            <SaveIcon className="size-4" />
+            {saving ? null : <SaveIcon className="size-4" />}
             {saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่าทั้งหมด"}
           </Button>
         </div>

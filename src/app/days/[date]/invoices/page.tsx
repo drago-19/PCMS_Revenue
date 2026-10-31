@@ -76,8 +76,12 @@ export default async function BulkInvoicesPage({
   const resolvedSearchParams = await searchParams;
   const rawLink = (resolvedSearchParams.link ?? "linked").trim();
   const rawChannel = (resolvedSearchParams.channel ?? "all").trim();
-  const channelFilter: "all" | "TikTok" | "Shopee" =
-    rawChannel === "TikTok" || rawChannel === "Shopee" ? rawChannel : "all";
+  const channelFilter: "all" | "TikTok" | "Shopee" | "Facebook" =
+    rawChannel === "TikTok" ||
+    rawChannel === "Shopee" ||
+    rawChannel === "Facebook"
+      ? rawChannel
+      : "all";
   const rawBatchSize = Number(resolvedSearchParams.batchSize);
   const batchSize: 100 | 200 | 500 =
     rawBatchSize === 100 || rawBatchSize === 500 ? rawBatchSize : 200;
@@ -122,6 +126,7 @@ export default async function BulkInvoicesPage({
     billableTotalCount,
     tiktokOrdersCount,
     shopeeOrdersCount,
+    facebookOrdersCount,
     channelFilteredCount,
     linkedOrdersCount,
     unlinkedOrdersCount,
@@ -142,7 +147,7 @@ export default async function BulkInvoicesPage({
     nextMode?: InvoiceMode;
     nextPaper?: InvoicePaperSize;
     nextLink?: "linked" | "all" | "unlinked";
-    nextChannel?: "all" | "TikTok" | "Shopee";
+    nextChannel?: "all" | "TikTok" | "Shopee" | "Facebook";
     nextBatch?: number;
     nextBatchSize?: 100 | 200 | 500;
   }) {
@@ -280,6 +285,7 @@ export default async function BulkInvoicesPage({
                 { key: "all" as const, label: "ทุกช่องทาง", count: billableTotalCount },
                 { key: "TikTok" as const, label: "TikTok", count: tiktokOrdersCount },
                 { key: "Shopee" as const, label: "Shopee", count: shopeeOrdersCount },
+                { key: "Facebook" as const, label: "Facebook", count: facebookOrdersCount },
               ].map((ch) => {
                 const active = channelFilter === ch.key;
                 return (
@@ -292,7 +298,9 @@ export default async function BulkInvoicesPage({
                       active
                         ? ch.key === "Shopee"
                           ? "h-8 min-h-[32px] flex-1 justify-center bg-[#ee4d2d] px-2 text-white shadow-xs hover:bg-[#d73211] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
-                          : "h-8 min-h-[32px] flex-1 justify-center px-2 shadow-xs sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
+                          : ch.key === "Facebook"
+                            ? "h-8 min-h-[32px] flex-1 justify-center bg-[#1877F2] px-2 text-white shadow-xs hover:bg-[#166fe5] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
+                            : "h-8 min-h-[32px] flex-1 justify-center px-2 shadow-xs sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
                         : "h-8 min-h-[32px] flex-1 justify-center px-2 text-[#334155] hover:bg-white hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
                     }
                   >

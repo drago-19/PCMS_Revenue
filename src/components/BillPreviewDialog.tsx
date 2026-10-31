@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CheckIcon, Loader2Icon, SaveIcon } from "lucide-react";
@@ -27,12 +35,97 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { TableRow } from "@/components/ui/table";
 import { buildBill } from "@/lib/bill";
-import { buildInvoice } from "@/lib/invoice";
+import { buildInvoice, isOrderEligibleForInvoice } from "@/lib/invoice";
 import type { TransactionRow } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 type PreviewTab = "bill" | "invoice" | "invoice_full";
+
+interface BillPreviewContextType {
+  openPreview: (row: TransactionRow, defaultTab?: PreviewTab) => void;
+}
+
+const BillPreviewContext = createContext<BillPreviewContextType | null>(null);
+
+export function useBillPreview() {
+  return useContext(BillPreviewContext);
+}
+
+export function BillPreviewProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [activeRow, setActiveRow] = useState<TransactionRow | null>(null);
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<PreviewTab>("bill");
+
+  const openPreview = useCallback(
+    (row: TransactionRow, defaultTab: PreviewTab = "bill") => {
+      setActiveRow(row);
+      setTab(defaultTab);
+      setOpen(true);
+    },
+    [],
+  );
+
+  return (
+    <BillPreviewContext.Provider value={{ openPreview }}>
+      {children}
+      {activeRow ? (
+        <BillPreviewModal
+          key={`${activeRow.id}-${tab}`}
+          row={activeRow}
+          open={open}
+          onOpenChange={setOpen}
+          initialTab={tab}
+        />
+      ) : null}
+    </BillPreviewContext.Provider>
+  );
+}
+
+export function BillTableRow({
+  row,
+  className,
+  children,
+}: {
+  row: TransactionRow;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const previewCtx = useBillPreview();
+
+  const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest("button") ||
+      target?.closest("a") ||
+      target?.closest("input") ||
+      target?.closest(".copy-btn") ||
+      target?.closest(".no-row-click")
+    ) {
+      return;
+    }
+    if (previewCtx) {
+      previewCtx.openPreview(row, "bill");
+    }
+  };
+
+  return (
+    <TableRow
+      onClick={handleRowClick}
+      className={cn(
+        "cursor-pointer transition-none hover:bg-transparent min-[768px]:[&>td]:align-top",
+        className,
+      )}
+    >
+      {children}
+    </TableRow>
+  );
+}
 
 export function BillPreviewTrigger({
   row,
@@ -40,16 +133,107 @@ export function BillPreviewTrigger({
   triggerVariant = "button",
   label,
   className,
+  children,
 }: {
   row: TransactionRow;
   defaultTab?: PreviewTab;
   triggerVariant?: "button" | "ghost" | "outline" | "link";
   label?: string;
   className?: string;
+  children?: React.ReactNode;
+}) {
+  const previewCtx = useBillPreview();
+  const [localOpen, setLocalOpen] = useState(false);
+
+  function handleOpen(e?: React.MouseEvent) {
+    e?.stopPropagation();
+    if (previewCtx) {
+      previewCtx.openPreview(row, defaultTab);
+      return;
+    }
+    setLocalOpen(true);
+  }
+
+  const displayOrderId = row.externalId.includes("|")
+    ? row.orderCode || row.externalId.split("|")[0] || row.externalId
+    : row.externalId;
+
+  return (
+    <>
+      {children ? (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleOpen}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleOpen();
+            }
+          }}
+          className={className}
+        >
+          {children}
+        </div>
+      ) : triggerVariant === "link" ? (
+        <button
+          type="button"
+          onClick={handleOpen}
+          className={cn(
+            "mono link inline-flex min-h-[40px] min-[768px]:min-h-[26px] cursor-pointer items-center text-left max-[767px]:break-all min-[768px]:whitespace-nowrap text-[12.5px] min-[1280px]:text-[13px] tracking-tight bg-transparent border-0 p-0",
+            className,
+          )}
+        >
+          {label ?? displayOrderId}
+        </button>
+      ) : (
+        <Button
+          type="button"
+          variant={
+            triggerVariant === "ghost"
+              ? "ghost"
+              : triggerVariant === "outline"
+                ? "outline"
+                : "secondary"
+          }
+          size="xs"
+          onClick={handleOpen}
+          className={className}
+        >
+          {label ??
+            (defaultTab === "invoice"
+              ? "ใบกำกับฯ"
+              : defaultTab === "invoice_full"
+                ? "ใบกำกับฯ เต็ม"
+                : "ดูบิล")}
+        </Button>
+      )}
+
+      {!previewCtx ? (
+        <BillPreviewModal
+          row={row}
+          open={localOpen}
+          onOpenChange={setLocalOpen}
+          initialTab={defaultTab}
+        />
+      ) : null}
+    </>
+  );
+}
+
+export function BillPreviewModal({
+  row,
+  open,
+  onOpenChange,
+  initialTab = "bill",
+}: {
+  row: TransactionRow;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialTab?: PreviewTab;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<PreviewTab>(defaultTab);
+  const [tab, setTab] = useState<PreviewTab>(initialTab);
   const [paperSize, setPaperSize] = useState<InvoicePaperSize>(
     row.sellerSettings?.defaultPaperSize ?? "a6",
   );
@@ -132,37 +316,44 @@ export function BillPreviewTrigger({
   const invoice = useMemo(() => buildInvoice(row), [row]);
   const enableFullTaxInvoice =
     row.sellerSettings?.enableFullTaxInvoice === true;
-  const isZeroRevenueOrder =
-    row.transactionType !== "คำสั่งซื้อ (OMS)" &&
-    row.income <= 0 &&
-    row.payout <= 0;
+  const isInvoiceEligible = isOrderEligibleForInvoice(row);
 
-  function handleOpen() {
-    const resolvedDefault =
-      defaultTab === "invoice_full" && !enableFullTaxInvoice
-        ? "invoice"
-        : defaultTab;
-    setTab(isZeroRevenueOrder ? "bill" : resolvedDefault);
-    setBuyerName(persistedBuyer.name);
-    setBuyerTaxId(persistedBuyer.taxId);
-    setBuyerAddress(persistedBuyer.address);
-    setSaveState("idle");
-    setOpen(true);
-  }
+  useEffect(() => {
+    if (open) {
+      const resolvedDefault =
+        initialTab === "invoice_full" && !enableFullTaxInvoice
+          ? "invoice"
+          : initialTab;
+      setTab(!isInvoiceEligible ? "bill" : resolvedDefault);
+      setBuyerName(persistedBuyer.name);
+      setBuyerTaxId(persistedBuyer.taxId);
+      setBuyerAddress(persistedBuyer.address);
+      setSaveState("idle");
+    }
+  }, [open, initialTab, isInvoiceEligible, enableFullTaxInvoice, persistedBuyer]);
 
   const effectiveTab: PreviewTab =
-    tab === "invoice_full" && !enableFullTaxInvoice ? "invoice" : tab;
+    !isInvoiceEligible
+      ? "bill"
+      : tab === "invoice_full" && !enableFullTaxInvoice
+        ? "invoice"
+        : tab;
   const invoiceMode: InvoiceMode =
     effectiveTab === "invoice_full" ? "full" : "abbreviated";
 
+  const encodedExtId = encodeURIComponent(row.externalId);
+  const displayOrderId = row.externalId.includes("|")
+    ? row.orderCode || row.externalId.split("|")[0] || row.externalId
+    : row.externalId;
+
   const fullPageHref =
-    effectiveTab === "invoice"
+    isInvoiceEligible && effectiveTab === "invoice"
       ? paperSize === "a6"
-        ? `/invoices/${row.externalId}`
-        : `/invoices/${row.externalId}?paper=${paperSize}`
-      : effectiveTab === "invoice_full"
-        ? `/invoices/${row.externalId}?mode=full`
-        : `/bills/${row.externalId}`;
+        ? `/invoices/${encodedExtId}`
+        : `/invoices/${encodedExtId}?paper=${paperSize}`
+      : isInvoiceEligible && effectiveTab === "invoice_full"
+        ? `/invoices/${encodedExtId}?mode=full`
+        : `/bills/${encodedExtId}`;
 
   async function handleOpenFullPage(e: React.MouseEvent<HTMLAnchorElement>) {
     if (effectiveTab === "invoice_full") {
@@ -174,12 +365,12 @@ export function BillPreviewTrigger({
         address: latestInputsRef.current.address,
       });
       setNavigatingPrint(false);
-      setOpen(false);
+      onOpenChange(false);
       router.push(fullPageHref);
       router.refresh();
       return;
     }
-    setOpen(false);
+    onOpenChange(false);
   }
 
   const dialogPrintCss =
@@ -192,60 +383,36 @@ export function BillPreviewTrigger({
   return (
     <>
       {open ? <style media="print">{dialogPrintCss}</style> : null}
-      {triggerVariant === "link" ? (
-        <button
-          type="button"
-          onClick={handleOpen}
-          className={cn(
-            "mono link inline-flex min-h-[40px] min-[768px]:min-h-[26px] cursor-pointer items-center text-left max-[767px]:break-all min-[768px]:whitespace-nowrap text-[12.5px] min-[1280px]:text-[13px] tracking-tight bg-transparent border-0 p-0",
-            className,
-          )}
-        >
-          {label ?? row.externalId}
-        </button>
-      ) : (
-        <Button
-          type="button"
-          variant={
-            triggerVariant === "ghost"
-              ? "ghost"
-              : triggerVariant === "outline"
-                ? "outline"
-                : "secondary"
-          }
-          size="xs"
-          onClick={handleOpen}
-          className={className}
-        >
-          {label ??
-            (defaultTab === "invoice"
-              ? "ใบกำกับฯ"
-              : defaultTab === "invoice_full"
-                ? "ใบกำกับฯ เต็ม"
-                : "ดูบิล")}
-        </Button>
-      )}
-
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="flex max-h-[90dvh] w-[calc(100%-1.25rem)] max-w-[min(95vw,1160px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(95vw,1160px)]">
           <DialogHeader className="no-print border-b border-border bg-[#f8fafc] px-4 py-3.5 pr-14 text-left sm:px-6 sm:py-4 sm:pr-14">
             <div className="flex flex-col gap-1">
               <DialogTitle className="flex flex-wrap items-center gap-2 text-base font-extrabold text-foreground sm:text-lg">
-                <span>คำสั่งซื้อ #{row.externalId}</span>
-                {row.orderCode && row.orderCode !== row.externalId ? (
+                <span>คำสั่งซื้อ #{displayOrderId}</span>
+                {row.orderCode && row.orderCode !== displayOrderId ? (
                   <Badge variant="neutral" size="sm" className="mono">
                     ผูกออเดอร์ #{row.orderCode}
                   </Badge>
-                ) : (
+                ) : !row.orderCode ? (
                   <span className="text-xs font-normal text-muted-foreground">
                     (ยังไม่ผูก #ออเดอร์ใน shipnity)
                   </span>
-                )}
+                ) : null}
                 <Badge
-                  variant={row.channel === "Shopee" ? "shopee" : "default"}
+                  variant={
+                    row.channel === "Shopee"
+                      ? "shopee"
+                      : row.channel === "Facebook"
+                        ? "facebook"
+                        : "default"
+                  }
                   size="sm"
                 >
-                  {row.channel === "Shopee" ? "Shopee" : "TikTok"}
+                  {row.channel === "Shopee"
+                    ? "Shopee"
+                    : row.channel === "Facebook"
+                      ? "Facebook"
+                      : "TikTok"}
                 </Badge>
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
@@ -277,7 +444,7 @@ export function BillPreviewTrigger({
               >
                 <IconFile size={15} /> รายละเอียดบิล
               </Button>
-              {!isZeroRevenueOrder ? (
+              {isInvoiceEligible ? (
                 <>
                   <Button
                     type="button"
@@ -322,7 +489,7 @@ export function BillPreviewTrigger({
                 <Button asChild variant="outline" size="xs" className="flex-1 sm:flex-initial">
                   <Link
                     href={`/bills?date=${encodeURIComponent(row.paidDate)}`}
-                    onClick={() => setOpen(false)}
+                    onClick={() => onOpenChange(false)}
                   >
                     <IconCalendar size={14} /> ดูบิลรอบนี้
                   </Link>
@@ -333,6 +500,7 @@ export function BillPreviewTrigger({
                 variant="default"
                 size="xs"
                 disabled={navigatingPrint}
+                aria-busy={navigatingPrint || undefined}
                 className="flex-1 sm:flex-initial"
               >
                 <Link href={fullPageHref} onClick={handleOpenFullPage}>
@@ -341,7 +509,7 @@ export function BillPreviewTrigger({
                   ) : (
                     <IconPrinter size={14} />
                   )}
-                  เปิดหน้าพิมพ์ / PDF
+                  {effectiveTab === "bill" ? "พิมพ์บิลคำสั่งซื้อ / PDF" : "เปิดหน้าพิมพ์ / PDF"}
                 </Link>
               </Button>
             </div>
@@ -465,12 +633,10 @@ export function BillPreviewTrigger({
                   type="button"
                   variant={isDirty ? "default" : "outline"}
                   size="xs"
-                  disabled={saveState === "saving"}
+                  loading={saveState === "saving"}
                   onClick={() => void saveBuyerToDb()}
                 >
-                  {saveState === "saving" ? (
-                    <Loader2Icon className="size-3.5 animate-spin" />
-                  ) : (
+                  {saveState === "saving" ? null : (
                     <SaveIcon className="size-3.5" />
                   )}
                   บันทึกข้อมูลผู้ซื้อ
@@ -499,6 +665,8 @@ export function BillPreviewTrigger({
                 marketplaceOrderRaw={row.marketplaceOrderRaw}
                 productDetail={row.productDetail}
                 omsItems={row.omsItems}
+                omsNote={row.omsNote}
+                isNoProductPriceOrder={row.isNoProductPriceOrder}
                 source={{
                   filename: row.importFilename ?? "ไฟล์นำเข้าระบบ",
                   importedAt: row.importImportedAt ?? row.createdAt,

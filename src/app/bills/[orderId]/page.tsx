@@ -5,6 +5,7 @@ import { PrintButton } from "@/components/PrintButton";
 import { IconArrowLeft, IconCalendar, IconReceipt } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { buildBill } from "@/lib/bill";
+import { isOrderEligibleForInvoice } from "@/lib/invoice";
 import { getBill, getImport } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +34,9 @@ export default async function BillDetailPage({
           </Link>
         </Button>
         <div className="bill-toolbar-actions">
-          {row.transactionType === "คำสั่งซื้อ (OMS)" ||
-          row.income > 0 ||
-          row.payout > 0 ? (
+          {isOrderEligibleForInvoice(row) ? (
             <Button asChild variant="secondary" className="no-print">
-              <Link href={`/invoices/${row.externalId}`}>
+              <Link href={`/invoices/${encodeURIComponent(row.externalId)}`}>
                 <IconReceipt size={16} /> ใบกำกับภาษี
               </Link>
             </Button>
@@ -68,6 +67,8 @@ export default async function BillDetailPage({
         marketplaceOrderRaw={row.marketplaceOrderRaw}
         productDetail={row.productDetail}
         omsItems={row.omsItems}
+        omsNote={row.omsNote}
+        isNoProductPriceOrder={row.isNoProductPriceOrder}
         source={{
           filename: importRow?.filename ?? "ไม่ทราบไฟล์",
           importedAt: importRow?.importedAt ?? row.createdAt,

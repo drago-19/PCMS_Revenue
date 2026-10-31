@@ -197,12 +197,10 @@ export function InvoiceInteractiveView({
                 type="button"
                 variant={isDirty ? "default" : "outline"}
                 size="xs"
-                disabled={saveState === "saving"}
+                loading={saveState === "saving"}
                 onClick={() => void saveBuyerToDb()}
               >
-                {saveState === "saving" ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : (
+                {saveState === "saving" ? null : (
                   <SaveIcon className="size-3.5" />
                 )}
                 บันทึกข้อมูลผู้ซื้อ

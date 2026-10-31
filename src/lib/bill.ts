@@ -60,6 +60,7 @@ export interface BillModel {
   customerPayment: number;
   shippingCustomerFee: number;
   customerPaymentBreakdown: CustomerPaymentBreakdown;
+  cogsTotal: number;
 }
 
 function n(value: string | number | undefined): number {
@@ -81,6 +82,7 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
   const feeTotal = n(fields.feeTotal);
   const payout = n(fields.payout);
   const adjustment = n(fields.adjustment);
+  const cogsTotal = n(fields.cogs);
 
   const incomeLines: BillLine[] = [];
   const productAfter = n(fields.productAfterDiscount);
@@ -360,10 +362,27 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     );
   }
 
+  const isOmsChannel =
+    normalized.transactionType === "คำสั่งซื้อ (OMS)" ||
+    normalized.raw["ช่องทางติดต่อ"] === "Shopee" ||
+    normalized.raw["ช่องทางติดต่อ"] === "Facebook";
+
+  const directCashDiff = round2(incomeTotal + feeTotal + adjustment - payout);
+  const cogsAdjustedDiff = round2(
+    incomeTotal + feeTotal - cogsTotal + adjustment - payout,
+  );
+  const effectivePayoutDiff = isOmsChannel
+    ? Math.abs(directCashDiff) < 0.01
+      ? directCashDiff
+      : cogsTotal > 0 && Math.abs(cogsAdjustedDiff) < 0.01
+        ? cogsAdjustedDiff
+        : directCashDiff
+    : normalized.checks.payoutDiff;
+
   const checksOk =
     Math.abs(normalized.checks.incomeDiff) < 0.01 &&
     Math.abs(normalized.checks.feeDiff) < 0.01 &&
-    Math.abs(normalized.checks.payoutDiff) < 0.01;
+    Math.abs(effectivePayoutDiff) < 0.01;
 
   const discountBreakdown: BillLine[] = [];
   if (sellerProductDiscount !== 0) {
@@ -439,10 +458,11 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     feeExtraLines,
     adjustment,
     payout,
+    cogsTotal,
     checks: {
       incomeDiff: normalized.checks.incomeDiff,
       feeDiff: normalized.checks.feeDiff,
-      payoutDiff: normalized.checks.payoutDiff,
+      payoutDiff: effectivePayoutDiff,
       ok: checksOk,
     },
     unknownMoneyColumns,
@@ -459,3 +479,72 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
     customerPaymentBreakdown,
   };
 }
+
+export interface RowShippingSummary {
+  positiveAmount: number;
+  negativeAmount: number;
+  netAmount: number;
+}
+
+export function getRowShippingSummary(row: {
+  channel?: string | null;
+  transactionType?: string | null;
+  shippingFeeCustomer?: number;
+  normalized: NormalizedTransaction;
+}): RowShippingSummary {
+  const ch = row.channel || "TikTok";
+  const isOmsChannel = ch === "Shopee" || ch === "Facebook";
+  const fields = row.normalized?.fields ?? {};
+
+  if (isOmsChannel) {
+    const custShip = round2(
+      Math.max(
+        0,
+        Number(row.shippingFeeCustomer ?? fields.shippingCustomerFee ?? 0),
+      ),
+    );
+    return {
+      positiveAmount: custShip,
+      negativeAmount: 0,
+      netAmount: custShip,
+    };
+  }
+
+  const isOmsOnly = row.transactionType === "คำสั่งซื้อ (OMS)";
+  let positiveAmount = 0;
+  let negativeAmount = 0;
+
+  const custShip = Number(
+    fields.shippingCustomerFee ?? row.shippingFeeCustomer ?? 0,
+  );
+  if (custShip > 0) positiveAmount = round2(positiveAmount + custShip);
+  else if (custShip < 0) negativeAmount = round2(negativeAmount + custShip);
+
+  for (const key of [
+    "shippingPlatformDiscount",
+    "shippingSubsidy",
+    "guaranteeReimbursement",
+    "exchangeShipping",
+    "replacementShipping",
+    "shippingRefund",
+  ]) {
+    const val = n(fields[key]);
+    if (val > 0) positiveAmount = round2(positiveAmount + val);
+    else if (val < 0) negativeAmount = round2(negativeAmount + val);
+  }
+
+  if (!isOmsOnly) {
+    for (const key of ["shippingActual", "returnShippingActual"]) {
+      const val = n(fields[key]);
+      if (val > 0) positiveAmount = round2(positiveAmount + val);
+      else if (val < 0) negativeAmount = round2(negativeAmount + val);
+    }
+  }
+
+  return {
+    positiveAmount: round2(positiveAmount),
+    negativeAmount: round2(negativeAmount),
+    netAmount: round2(positiveAmount + negativeAmount),
+  };
+}
+
