@@ -24,7 +24,17 @@ const globalForSettings = globalThis as unknown as {
   >;
 };
 
-const CACHE_TTL_MS = 2_000;
+const CACHE_TTL_MS = 300_000; // 5 minutes cache เพื่อลด query ซ้ำซ้อนใน layout/prefetch (เคลียร์ทันทีเมื่อเซฟ)
+
+export function clearSettingsCache(companyId?: CompanyId): void {
+  if (companyId) {
+    if (globalForSettings.__pcmsSettingsCacheByCompany) {
+      delete globalForSettings.__pcmsSettingsCacheByCompany[companyId];
+    }
+  } else {
+    globalForSettings.__pcmsSettingsCacheByCompany = {};
+  }
+}
 
 export function getCompanyDefaultSeller(
   companyId: CompanyId = "dragon19",
@@ -259,66 +269,7 @@ export async function saveDocumentSettings(
       client,
     );
 
-    // Only normalize invoice_registry if legacy non-'SEQ/YYMM/%' rows exist (prevents rewriting billion-row tables on every settings save)
-    const hasLegacyInvoiceNo = await queryOne<{ exists: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM invoice_registry WHERE invoice_no NOT LIKE 'SEQ/____/%'
-       ) AS exists`,
-      [],
-      client,
-    );
-
-    if (hasLegacyInvoiceNo?.exists) {
-      await query(
-        `WITH ordered AS (
-           SELECT r.order_id,
-                  CASE
-                    WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
-                    THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
-                         || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
-                    ELSE '0000'
-                  END AS yymm,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY
-                      CASE
-                        WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
-                        THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
-                             || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
-                        ELSE '0000'
-                      END
-                    ORDER BY COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') ASC,
-                             r.created_at ASC,
-                             r.order_id ASC
-                  ) AS rn
-           FROM invoice_registry r
-           LEFT JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
-         )
-         UPDATE invoice_registry r
-         SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, 5, '0')
-         FROM ordered o
-         WHERE r.order_id = o.order_id`,
-        [],
-        client,
-      );
-
-      await query(
-        `UPDATE invoice_registry
-         SET invoice_no = 'SEQ/' || SUBSTRING(invoice_no FROM 13)
-         WHERE invoice_no LIKE '__TMP_SEQ__/%'`,
-        [],
-        client,
-      );
-
-      await query(
-        `SELECT setval(
-           'invoice_seq',
-           GREATEST(1, (SELECT COUNT(*) FROM invoice_registry)),
-           (SELECT COUNT(*) > 0 FROM invoice_registry)
-         )`,
-        [],
-        client,
-      );
-    }
+    // เลขที่ใบกำกับฯ ถูกล็อกแล้ว — ห้ามเรียงเลขใหม่ตอนบันทึกการตั้งค่า (ดู syncMonthlyInvoiceRegistry)
 
     await query(
       `INSERT INTO audit_logs (actor, action, ip_address, outcome, details_json, request_id)

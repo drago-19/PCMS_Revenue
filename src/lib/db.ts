@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-10-30-v18";
+const SCHEMA_VERSION = "2026-10-31-v20";
 
 export type { CompanyId };
 
@@ -91,11 +91,45 @@ export function ensureSchema(): Promise<void> {
       const pool = getPool();
       const client = await pool.connect();
       try {
+        // Fast-path: ตรวจสอบ version ในฐานข้อมูลเพื่อหลีกเลี่ยงการรัน DDL 1,200 บรรทัดซ้ำทุกครั้งที่สตาร์ท
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS app_schema_version (
+            schema_name TEXT PRIMARY KEY,
+            version TEXT NOT NULL,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )
+        `);
+        const { rows } = await client.query<{
+          schema_name: string;
+          version: string;
+        }>(
+          `SELECT schema_name, version FROM app_schema_version WHERE schema_name IN ('public', 'seeheng')`,
+        );
+        const publicVer = rows.find((r) => r.schema_name === "public")?.version;
+        const seehengVer = rows.find((r) => r.schema_name === "seeheng")?.version;
+        if (publicVer === SCHEMA_VERSION && seehengVer === SCHEMA_VERSION) {
+          return;
+        }
+
         await client.query("SET search_path TO public");
         await client.query(SCHEMA_SQL);
+        await client.query(
+          `INSERT INTO app_schema_version (schema_name, version, applied_at)
+           VALUES ('public', $1, now())
+           ON CONFLICT (schema_name) DO UPDATE SET version = EXCLUDED.version, applied_at = now()`,
+          [SCHEMA_VERSION],
+        );
+
         await client.query("CREATE SCHEMA IF NOT EXISTS seeheng");
         await client.query("SET search_path TO seeheng, public");
         await client.query(SCHEMA_SQL);
+        await client.query(
+          `INSERT INTO public.app_schema_version (schema_name, version, applied_at)
+           VALUES ('seeheng', $1, now())
+           ON CONFLICT (schema_name) DO UPDATE SET version = EXCLUDED.version, applied_at = now()`,
+          [SCHEMA_VERSION],
+        );
+
         await client.query("SET search_path TO public");
       } finally {
         client.release();
@@ -281,6 +315,33 @@ CREATE TABLE IF NOT EXISTS invoice_registry (
   invoice_no TEXT NOT NULL UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ล็อกเลขที่ใบกำกับฯ (ออกแล้วห้ามเปลี่ยน): เก็บ yymm/seq เป็นคอลัมน์จริง + สถานะ void แทนการลบ (Backward Compatible: nullable ก่อน)
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS yymm TEXT;
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS seq BIGINT;
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS channel TEXT;
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ;
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS void_reason TEXT;
+UPDATE invoice_registry
+SET yymm = SUBSTRING(invoice_no FROM 5 FOR 4),
+    seq = SUBSTRING(invoice_no FROM 10)::bigint
+WHERE seq IS NULL AND invoice_no ~ '^SEQ/[0-9]{4}/[0-9]{1,15}$';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_registry_yymm_seq ON invoice_registry (yymm, seq);
+CREATE INDEX IF NOT EXISTS ix_invoice_registry_print
+  ON invoice_registry (yymm, status, channel, seq) INCLUDE (order_id);
+CREATE INDEX IF NOT EXISTS ix_invoice_registry_print_all
+  ON invoice_registry (yymm, status, seq) INCLUDE (order_id, channel);
+CREATE TABLE IF NOT EXISTS invoice_registry_audit (
+  id BIGSERIAL PRIMARY KEY,
+  order_id TEXT NOT NULL,
+  invoice_no TEXT NOT NULL,
+  action TEXT NOT NULL,
+  reason TEXT,
+  import_id INTEGER,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_invoice_registry_audit_order ON invoice_registry_audit (order_id);
 
 ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_type TEXT NOT NULL DEFAULT 'settlement';
 ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_blob BYTEA;
@@ -607,6 +668,42 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_audit_logs_action ON audit_logs(action);
 
+CREATE TABLE IF NOT EXISTS expense_categories (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  color TEXT NOT NULL DEFAULT 'slate',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_expense_categories_sort ON expense_categories(sort_order ASC, id ASC);
+
+CREATE TABLE IF NOT EXISTS monthly_expenses (
+  year_month TEXT NOT NULL,
+  category_id BIGINT NOT NULL REFERENCES expense_categories(id) ON DELETE CASCADE,
+  amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (year_month, category_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_monthly_expenses_ym ON monthly_expenses(year_month);
+
+CREATE TABLE IF NOT EXISTS expense_records (
+  id BIGSERIAL PRIMARY KEY,
+  entry_date TEXT NOT NULL,
+  year_month TEXT NOT NULL,
+  category_id BIGINT NOT NULL REFERENCES expense_categories(id) ON DELETE CASCADE,
+  amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  title TEXT NOT NULL DEFAULT '',
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_expense_records_ym ON expense_records(year_month);
+CREATE INDEX IF NOT EXISTS ix_expense_records_date ON expense_records(entry_date DESC);
+CREATE INDEX IF NOT EXISTS ix_expense_records_cat ON expense_records(category_id);
+
 CREATE OR REPLACE FUNCTION prevent_audit_log_mutation()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -677,10 +774,13 @@ BEGIN
       SELECT 1 FROM oms_order_items i WHERE i.sku_code = p.sku_code
     );
 
-    DELETE FROM invoice_registry r
-    WHERE NOT EXISTS (
-      SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND t.is_order = 1
-    );
+    -- เลขที่ใบกำกับฯ ล็อกแล้ว: ไม่ลบ → void แทน
+    UPDATE invoice_registry r
+    SET status = 'void', voided_at = now(), void_reason = 'ไม่พบออเดอร์ในระบบ'
+    WHERE r.status = 'active'
+      AND NOT EXISTS (
+        SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND t.is_order = 1
+      );
 
     DELETE FROM daily_summaries;
     INSERT INTO daily_summaries (
@@ -741,66 +841,10 @@ BEGIN
     GROUP BY i.sku_code;
   END IF;
 
-  -- Migrate invoice_registry to monthly running sequence ('SEQ/YYMM/00001') partitioned by bill month
-  -- and remove non-billable zero-product-price exchange orders (link_priority = 3)
-  IF EXISTS (
-    SELECT 1 FROM invoice_registry WHERE invoice_no NOT LIKE 'SEQ/____/%'
-  ) OR EXISTS (
-    SELECT 1 FROM invoice_registry r
-    JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
-    WHERE t.link_priority = 3
-  ) THEN
-    DELETE FROM invoice_registry r
-    WHERE NOT EXISTS (
-      SELECT 1 FROM transactions t
-      WHERE t.external_id = r.order_id AND t.is_order = 1 AND t.link_priority <> 3
-    );
-
-    UPDATE daily_summaries d
-    SET linked_count = s.linked_count
-    FROM (
-      SELECT paid_date,
-             SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int AS linked_count
-      FROM transactions
-      WHERE paid_date <> '' AND paid_date <> 'unknown'
-        AND channel IN ('TikTok', 'Shopee', 'Facebook')
-      GROUP BY paid_date
-    ) s
-    WHERE d.paid_date = s.paid_date
-      AND d.linked_count IS DISTINCT FROM s.linked_count;
-
-    WITH ordered AS (
-      SELECT r.order_id,
-             CASE
-               WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
-               THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
-                    || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
-               ELSE '0000'
-             END AS yymm,
-             ROW_NUMBER() OVER (
-               PARTITION BY
-                 CASE
-                   WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
-                   THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
-                        || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
-                   ELSE '0000'
-                 END
-               ORDER BY COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') ASC,
-                        r.created_at ASC,
-                        r.order_id ASC
-             ) AS rn
-      FROM invoice_registry r
-      LEFT JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
-    )
-    UPDATE invoice_registry r
-    SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, GREATEST(5, LENGTH(o.rn::text)), '0')
-    FROM ordered o
-    WHERE r.order_id = o.order_id;
-
-    UPDATE invoice_registry
-    SET invoice_no = 'SEQ/' || SUBSTRING(invoice_no FROM 13)
-    WHERE invoice_no LIKE '__TMP_SEQ__/%';
-  END IF;
+  -- invoice_registry: เลขที่ใบกำกับฯ ถูกล็อกแล้ว (ห้ามลบ/เรียงใหม่) — การ void/ออกเลขใหม่ทำใน syncMonthlyInvoiceRegistry เท่านั้น
+  -- และเติม channel ให้แถวเก่าที่ยังไม่มี (ทำครั้งเดียว)
+  UPDATE invoice_registry r SET channel = t.channel FROM transactions t
+  WHERE r.channel IS NULL AND t.external_id = r.order_id AND t.is_order = 1;
 
   -- Platform Financial Isolation (AGENTS.md Rule 3 & 4):
   -- 1. TikTok OMS placeholder rows (before Settlement): payout = income + fee_total (sales_amount - shipping_fee_seller), cogs = 0
@@ -859,14 +903,18 @@ BEGIN
         OR COALESCE((t.normalized_json->'fields'->>'cogs')::numeric, -1) IS DISTINCT FROM GREATEST(0, ROUND((t.income + t.fee_total - o.profit_amount)::numeric, 2))
       );
 
-    DELETE FROM invoice_registry r
-    WHERE EXISTS (
+    -- เลขที่ใบกำกับฯ ล็อกแล้ว: ไม่ลบ → void แทน
+    UPDATE invoice_registry r
+    SET status = 'void', voided_at = now(), void_reason = 'ไม่เข้าเงื่อนไขบิลขายปกติ'
+    WHERE r.status = 'active'
+      AND EXISTS (
       SELECT 1 FROM transactions t
       WHERE t.external_id = r.order_id
         AND t.is_order = 1
         AND (
           t.link_priority = 3
-          OR (t.channel IN ('Shopee', 'Facebook') AND (t.income <= 0 OR t.payout <= 0))
+          OR (t.channel = 'Shopee' AND (t.income <= 0 OR t.payout <= 0))
+          OR (t.channel = 'Facebook' AND (t.income <= 0 OR t.payout <= 0))
         )
     );
 

@@ -11,14 +11,14 @@ import "./globals.css";
 
 const notoSansThai = Noto_Sans_Thai({
   subsets: ["thai", "latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-thai",
   display: "swap",
 });
 
 const inter = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-latin",
   display: "swap",
 });
