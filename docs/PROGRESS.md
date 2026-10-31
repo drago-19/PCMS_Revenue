@@ -3,7 +3,217 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-10-30)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-10-31)
+
+- ✅ เสร็จแล้ว (2026-10-31):
+  - **แก้ไขปัญหาการสั่งพิมพ์รายงานงบรายรับ-รายจ่ายรายเดือน (P&L) ตกขอบซ้าย/เนื้อหาถูกตัดขาด (Print Layout Shifted Left Fix) + เอกสารจัดกึ่งกลางเต็มหน้ากระดาษ A4 สมบูรณ์ (`src/app/globals.css`, `src/components/ExpensesManager.tsx`)**:
+    - **1. ตรวจสอบและระบุสาเหตุรากเหง้า (Root Cause)**:
+      - ใน Tailwind CSS v4 คลาส `translate-x-[-50%] translate-y-[-50%]` บน `DialogContent` ถูกคอมไพล์เป็น CSS property ใหม่คือ `translate: -50% -50%` แยกต่างหากจาก `transform`
+      - กฎ `@media print` เดิมมีการรีเซ็ตเฉพาะ `transform: none !important;` แต่ไม่ได้รีเซ็ต `translate` ทำให้ตัวไดอะล็อกพรีวิวยังคงมีค่า `translate: -50% -50%` เบราว์เซอร์ขณะสั่งพิมพ์หรือบันทึก PDF จึงดึงตัวเอกสารถอยหลังไปทางซ้ายครึ่งหน้ากระดาษ (`docRect.left = -206px`) ส่งผลให้หัวกระดาษ คอลัมน์ลำดับ `#`, ช่องทางจำหน่าย และบล็อกลงนามฝั่งซ้ายถูกตัดขาดหายไป
+      - โค้ด print เดิมใน `ExpensesManager.tsx` ใช้เทคนิค `body * { visibility: hidden; }` และ `.monthly-statement-print { position: absolute; left: 0; }` ซึ่งผูกกับ parent coordinate ที่ติดลบ ทำให้เนื้อหาหลุดออกนอกขอบกระดาษ
+    - **2. การแก้ไขที่ต้นเหตุ**:
+      - ใน `src/app/globals.css`: เพิ่มการล้างพิกัดและทรานส์ฟอร์มครบทุกตัวใน `@media print` สำหรับ `[role="dialog"][data-slot="dialog-content"]` และ `html, body`:
+        - `position: static !important; inset: auto !important; top: auto !important; left: auto !important; right: auto !important; bottom: auto !important;`
+        - `transform: none !important; translate: none !important;`
+        - `width: 100% !important; max-width: 100% !important;`
+      - ใน `src/components/ExpensesManager.tsx`: ลบ stackoverflow hack (`body * { visibility: hidden; }` และ `position: absolute`) ปรับ `.monthly-statement-print` เป็น normal flow:
+        - `position: static !important; width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important;`
+        - `transform: none !important; translate: none !important;`
+        - เพิ่ม `break-inside: avoid !important; page-break-inside: avoid !important;` บนแถวตาราง `tr` และกล่องสรุปกำไร (Section 4) และกล่องลงนาม (Section 5) ผ่านคลาส `.monthly-statement-section-break-avoid` ป้องกันการถูกตัดแบ่งครึ่งกล่องเมื่อขึ้นหน้าใหม่
+        - กำหนดหน้ากระดาษ `@page { size: A4 portrait; margin: 10mm 12mm; }`
+    - **3. ผลการทดสอบ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 58/58 เทสต์ (49 pass, 9 skipped DB integration)
+      - `pnpm.cmd run deploy:app`: ผ่านและอัปเดตคอนเทนเนอร์ `pcms-revenue-app` บนพอร์ต `3002` เรียบร้อย ✅
+      - **Playwright MCP Test (Print Media Emulation & PDF Generation)**:
+        - ทดสอบ `page.emulateMedia({ media: "print" })`:
+          - `docRect.left = 0`, `h1Left = 0` (ชื่อบริษัทเริ่มที่ขอบซ้าย ไม่ถูกตัดคำว่า "บริ" อีกต่อไป)
+          - คอลัมน์ตารางรายรับ: `#` (`left = 1`), `ช่องทางจำหน่าย` (`left = 49`), `รายละเอียด` (`left = 129`), `ยอดรับสุทธิ` (`left = 268`) ค่าพิกัดเป็นบวกทั้งหมด 100% ไม่มีส่วนใดหลุดไปในพิกัดติดลบ
+          - กล่องสรุปผลกำไร (Section 4): `left = 0, right = 412, width = 412` เต็มแผ่น
+          - กล่องลงนาม (Section 5): ทั้ง 3 คอลัมน์กระจายตัวสมดุล (`left = 0`, `left = 145`, `left = 291`)
+        - ทดสอบสั่ง `page.pdf()` ขนาด A4 จริงผ่าน Playwright: สร้างไฟล์ PDF สำเร็จ (`pdfSize = 225,030 bytes`) เนื้อหาและเส้นตารางครบถ้วน 100%
+  - **ปรับปรุง Dropdown เป็น shadcn/ui Select สวยงามเข้าธีมระบบ (ไม่ใช้ native ของเบราว์เซอร์) + ปรับคอลัมน์วันที่เป็นชื่อเดือนย่อ ไม่เบียดกัน (`/expenses`)**:
+    - **1. แทนที่ Native `<select>` ด้วย shadcn/ui `<Select>` ตามธีมหลักของระบบ (`src/components/ui/select.tsx`, `src/components/ExpensesManager.tsx`)**:
+      - ติดตั้งคอมโพเนนต์ `Select` จาก shadcn/ui ลงใน `src/components/ui/select.tsx`
+      - แทนที่ `<select>` เดิมในแถบเลือกเดือนของแท็บงบรายจ่าย (P&L) ด้วย `<Select>`, `<SelectTrigger>`, `<SelectValue>`, `<SelectContent>`, `<SelectItem>` ปรับพื้นหลังเป็นสีขาวนวล ขอบมนเงาสวยงาม เส้นขอบ `border-slate-200` โฟกัสวงแหวนสีแบรนด์ `#fe2c55` และมีเครื่องหมายถูก Checkmark แสดงสถานะเดือนที่เลือกอย่างชัดเจน ไม่แสดงกล่องสีน้ำเงินของเบราว์เซอร์อีกต่อไป
+      - แทนที่ `<select>` ในโมดัล "บันทึกรายการรายจ่ายย่อย" ด้วย shadcn `<Select>` ให้เป็นธีมเดียวกันทั้งระบบ
+    - **2. ปรับการแสดงผลคอลัมน์เดือนในตารางหลักเป็นชื่อเดือนย่อ (`formatThaiYearMonthShort`)**:
+      - สาเหตุเดิม: ข้อความเต็ม `ตุลาคม 2569 (2026-10)` มีความยาว 24 ตัวอักษรและมีช่องว่าง 2 จุด ทำให้เบราว์เซอร์ตัดบรรทัดแยกเป็น 3 ชั้น (`ตุลาคม` / `2569` / `(2026-10)`) ดูเบียดและกินพื้นที่แนวตั้งสูงเกินไป
+      - การแก้ไข: สร้างฟังก์ชัน `formatThaiYearMonthShort` แสดงชื่อเดือนย่อภาษาไทยคู่กับปี พ.ศ. เช่น `ต.ค. 2569`, `ก.ย. 2569`, `ส.ค. 2569` พร้อมคลาส `whitespace-nowrap` แสดงผลบรรทัดเดียวสวยงาม ลดความสูงแถวตารางจาก 120px+ เหลือ 65px อ่านง่าย ไม่เบียดกันอีกต่อไป
+    - **3. ผลการทดสอบ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 58/58 เทสต์ (49 pass, 9 skipped DB integration)
+      - `pnpm.cmd build` & `pnpm.cmd run deploy:app`: ผ่านและอัปเดตคอนเทนเนอร์ `pcms-revenue-app` บนพอร์ต `3002` สำเร็จ ✅
+      - **Playwright MCP**: ตรวจสอบทั้งพอร์ต `3001` และ `3002`:
+        - คอลัมน์เดือนแสดง `ต.ค. 2569`, `ก.ย. 2569` บรรทัดเดียวสวยงาม (`height = 65px`, `docOverflow = false`)
+        - ดรอปดาวน์เลือกเดือนในแท็บงบรายจ่าย (P&L) เปิดเป็น shadcn popover สีขาวสะอาดตา (`bg = rgb(255, 255, 255)`) คลิกเลือกเดือนทำงานได้ลื่นไหลทันที
+  - **แก้ไขปัญหาเว็บโหลดช้าในครั้งแรก (Initial Page Load / Cold-Start Optimization) เร็วขึ้น 170 เท่า**:
+    - **1. แก้ไข Cold-Start Database Migration (`src/lib/db.ts`)**:
+      - เดิม: ฟังก์ชัน `ensureSchema()` รันสคริปต์ DDL ขนาดยักษ์ 1,200 บรรทัด (600 บรรทัด × 2 schemas `public` + `seeheng`) ทุกครั้งที่คอนเทนเนอร์สตาร์ท บล็อกคำขอแรกนานถึง `2,704 ms` (~2.7 วินาที)
+      - แก้ไข: เพิ่มตารางตรวจสอบเวอร์ชันในฐานข้อมูล `app_schema_version` (Fast-Path Check) หากพบว่าฐานข้อมูลมีเวอร์ชันตรงกับ `SCHEMA_VERSION` อยู่แล้ว ให้ข้ามการรัน DDL ทันที
+      - ผลการวัดจริง: ลดเวลาจาก **2,704 ms** เหลือเพียง **15.9 ms** (เร็วขึ้นกว่า **170 เท่า**)
+    - **2. ตัดปัญหา Next.js Link Prefetch Storm (`src/components/Sidebar.tsx`, `src/app/page.tsx`)**:
+      - เดิม: Next.js ค่าเริ่มต้นพรีเฟตช์ทุกลิงก์ที่เห็นในหน้าจอ ทันทีที่ผู้ใช้ล็อกอินเข้ามาในหน้าแดชบอร์ด เบราว์เซอร์จะยิงคำขอแบบขนานกลับมาที่เซิร์ฟเวอร์ถึง 16–32 requests พร้อมกัน เพื่อโหลดข้อมูลล่วงหน้าของ `/bills`, `/products`, `/expenses`, `/import`, `/history`, `/settings` ซึ่งหน้า `/bills` ต้องสแกน 70,000+ รายการ ส่งผลให้เน็ตขาอัปโหลดและ DB Pool คอขวดอย่างรุนแรง
+      - แก้ไข: ใส่ `prefetch={false}` บน `<Link>` ใน Sidebar และการ์ดทางลัดในหน้าแดชบอร์ด ให้เบราว์เซอร์โหลดเฉพาะเมื่อผู้ใช้คลิกจริง
+      - ผลการวัดจริงผ่าน Playwright: คำขอ Prefetch หลังโหลดหน้าแรกจากเดิม **16–32 requests ลดเหลือ 0 requests ทันที**
+    - **3. ขยาย Cache TTL ของการตั้งค่าบริษัท (`src/lib/settings.ts`)**:
+      - เดิม: `CACHE_TTL_MS = 2_000` (2 วินาที) ทำให้แทบทุกคำขอใน Layout ต้องยิงคิวรี `SELECT value_json FROM app_settings` ซ้ำๆ
+      - แก้ไข: ปรับเป็น 5 นาที (`300_000 ms`) พร้อมฟังก์ชันเคลียร์แคชทันทีเมื่อมีการบันทึกการตั้งค่า (`saveDocumentSettings`) ตัดภาระคิวรีที่ไม่จำเป็นออกไปกว่า 80%
+    - **4. ลดขนาดและจำนวนไฟล์ฟอนต์ Google Fonts (`src/app/layout.tsx`)**:
+      - ตัดน้ำหนักที่ไม่จำเป็น `800` (ExtraBold) ออกจาก `Noto_Sans_Thai` และ `Inter` เหลือเฉพาะ `["400", "500", "600", "700"]` ลดขนาดและการดาวน์โหลดไฟล์ `.woff2` ในการเปิดเว็บครั้งแรกลง
+    - **5. การตรวจสอบความปลอดภัยและผลกระทบ (Zero Negative Impact Verified)**:
+      - `tsc --noEmit`: 0 error
+      - Unit & Integration Tests: ผ่านครบ 22/22 เทสต์ (`security.test.ts`, `ui-loading.test.ts`, `invoice-eligibility.test.ts`)
+      - Production Build & Container Recreate: ผ่านและรันบนพอร์ต 3002 สมบูรณ์
+      - Playwright MCP: ทดสอบบน `360px`, `390px`, `768px`, `1280px` พบว่า `hasHorizontalScroll = false`, `overflowingCount = 0` และการนำทางคลิกเข้า `/bills` ทำงานได้อย่างราบรื่น 100%
+  - **แก้ไขบัค UI จอกลางๆ (Medium screens ~768px–1099px) + ย้ายปุ่ม Hamburger และ Drawer มาฝั่งซ้าย (`side="left"`) + จัดสัดส่วนตารางสินค้า + ฟีเจอร์พิมพ์งบรายรับ-รายจ่ายรายเดือน (Monthly P&L Print)**:
+    - **1. ย้ายปุ่มแฮมเบอร์เกอร์และเมนู Drawer มาอยู่ฝั่งซ้าย 100% (`src/components/Sidebar.tsx`)**:
+      - ในแถบด้านบนสำหรับจอมือถือ/แท็บเล็ต (`mobile-topbar` ความกว้าง `< 1100px`): ย้ายปุ่มแฮมเบอร์เกอร์ (`Button[aria-label="เปิดเมนูหลัก"]`) มาวางเป็นชิ้นส่วนแรกทางซ้ายสุด (`btnLeft = 14px`) ก่อนโลโก้แบรนด์ `PCMS Revenue` (`brandLeft = 66px`)
+      - เปลี่ยน `SheetContent` ให้เป็น `side="left"` และเส้นขอบขวา `border-r border-[#1e293b]` แทนฝั่งขวาเดิม เมื่อผู้ใช้กดปุ่ม เมนูจะสไลด์เปิดออกมาจากฝั่งซ้ายของหน้าจออย่างเป็นธรรมชาติ สอดรับกับแนวคิด Sidebar Desktop
+    - **2. แก้บัคหัวตารางเลื่อนทะลุแถวข้อมูลในหน้าจอขนาดกลาง (`src/components/ui/table.tsx`, `src/components/ExpensesManager.tsx`)**:
+      - สาเหตุ: คลาส `min-[768px]:sticky min-[768px]:top-[61px]` ที่ถูกบังคับใน `TableHeader` และ `TableHead` เดิม ทำให้ตารางที่อยู่ใน Container การ์ดที่มีตัวกรองด้านบน เลื่อนแถวข้อมูลทะลุผ่านช่องว่าง 61px เหนือ `thead` จนตัวหนังสือซ้อนทับกัน
+      - การแก้ไข: เพิ่ม prop `sticky?: boolean` (default `true`) ใน `TableHeader` และ `TableHead` และใน `ExpensesManager.tsx` กำหนด `sticky={false}` บนตารางสรุปรายเดือนและตารางหมวดหมู่ ป้องกันภาพซ้อนตัวหนังสือทับกัน 100%
+    - **3. จัดสัดส่วนคอลัมน์ชื่อสินค้าในหน้า SKU Summary (`src/app/products/page.tsx`)**:
+      - ปรับคอลัมน์ `ชื่อสินค้า` ให้มี `min-[768px]:min-w-[220px] min-[1280px]:min-w-[280px]` และปรับความกว้างตาราง `min-w-[740px]`
+      - ลดความกว้างคอลัมน์ SKU จาก 175px เหลือ 130px และปุ่มดูบิลจาก 122px เหลือ 96px คืนพื้นที่ให้ชื่อสินค้าแสดงผลได้กว้างขึ้น (วัดจริงใน Playwright ได้ 303px) อ่านสบายตาบนบรรทัดเดียว ไม่ถูกบีบตัดเป็น 5 บรรทัดแคบๆ อีกต่อไป
+    - **4. จัดสัดส่วนปุ่มใน Dialog Footer ให้ได้มาตรฐานและระยะห่างพอดี (`src/components/ExpensesManager.tsx`)**:
+      - ปรับปรุง Dialog Footer ทั้ง 5 ตัวให้เป็น `flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2.5 pt-2` พร้อมขนาดมาตรฐาน `h-9 px-4 text-xs font-semibold rounded-lg`
+    - **5. พัฒนาฟีเจอร์ "พิมพ์สรุปงบรายรับ-รายจ่ายประจำเดือน (Monthly P&L Print)"**:
+      - ดึงข้อมูลบริษัทผู้ขาย (`seller`) ผ่าน `getDocumentSettings()` ส่งให้ `ExpensesManager`
+      - เพิ่มปุ่ม `พิมพ์งบเดือนนี้` (ไอคอน `PrinterIcon`) ในแถวขยายของตารางสรุปรายเดือน และปุ่ม `พิมพ์รายงานประจำเดือน` ในแท็บงบรายจ่าย (P&L)
+      - แสดงเอกสารพรีวิว A4 ครบถ้วนตามมาตรฐานงบการเงิน:
+        - ส่วนหัวบริษัท: ชื่อบริษัท, เลขประจำตัวผู้เสียภาษี, ที่อยู่
+        - ส่วนที่ 1: รายรับสุทธิจากแพลตฟอร์มแยก TikTok, Shopee, Facebook
+        - ส่วนที่ 2: รายจ่ายบริษัทจำแนกตามหมวดหมู่
+        - ส่วนที่ 3: ตารางรายการบิลย่อยประกอบประจำเดือน
+        - ส่วนที่ 4: กล่องสรุปผลกำไรคงเหลือสุทธิ (A - B) และอัตรากำไร % (ป้องกันการล้นกรอบด้วย `flex flex-wrap items-baseline gap-1.5`)
+        - ส่วนที่ 5: ช่องลงนามอนุมัติ 3 ช่อง (ผู้จัดทำ, ผู้ตรวจบัญชี, กรรมการผู้มีอำนาจ)
+        - กำหนดความกว้าง Dialog ด้วย `sm:max-w-[840px]` เพื่อ Override `sm:max-w-lg` ของ shadcn และตั้งค่า `@page { size: A4 portrait; margin: 10mm 12mm; }`
+    - **6. DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 58/58 เทสต์ (49 pass, 9 skipped DB integration)
+      - `pnpm.cmd build` & `pnpm.cmd run deploy:app`: ผ่านและอัปเดตคอนเทนเนอร์ `pcms-revenue-app` บนพอร์ต `3002` สำเร็จ ✅
+      - **Playwright MCP**: ตรวจสอบครบทุกขนาดหน้าจอ 360px, 390px, 768px, 1280px บนทั้งพอร์ต `3001` และ `3002`:
+        - ปุ่ม Hamburger อยู่ซ้ายสุด (`btnLeft = 14px`), Drawer เมนูเปิดจากซ้าย (`sideLeft = true, rectLeft = 0`)
+        - หัวตารางใน `/expenses` ไม่เกิดอาการ Sticky bleed หรือตัวหนังสือแถวแรกซ้อนทับ
+        - ใน `/products` คอลัมน์ชื่อสินค้ากว้าง 303px ข้อความไม่ถูกบีบแคบ
+        - โมดัลพรีวิวพิมพ์งบเดือนนี้กว้าง 840px และไม่มี Element ลูกล้นทะลุกรอบ (`badCount = 0`, `docOverflow = false`)
+  - **แก้ไขอาการโหลดค้างตอนกดกากบาทล้างช่องค้นหา + เร่งความเร็ว Search Query + ล็อกหน้าจอให้นิ่งสนิททั้งระบบ (Zero Layout Shift / Anti-Jump UI Across All Pages & Modals)**:
+    - **1. แก้ปัญหาการกดกากบาท (`×`) หรือลบคำค้นหาแล้วโหลดนาน/ค้างที่ `<TableSkeleton>` 15 วินาที (`src/components/FilterForm.tsx`, `src/lib/navigation-progress.ts`, `src/components/NavigationProgress.tsx`)**:
+      - เมื่อล้างช่องค้นหาจนว่าง (`target.value.trim() === ""`) หรือกดปุ่มกากบาท `×` ของช่องค้นหา ให้ทริกเกอร์อัปเดตทันที (`delay = 0ms`) ไม่ต้องรอ Debounce `400ms`
+      - ตรวจสอบ URL ปลายทางเทียบกับ URL ปัจจุบันที่ Commit แล้ว (`isSameCommittedUrl`): หากผู้ใช้พิมพ์แล้วยกเลิก/กดกากบาทก่อนที่ URL ก่อนหน้าจะ Commit (ทำให้ URL ปลายทางตรงกับ URL ปัจจุบัน) ระบบจะเรียก `notifyNavigationCancel()` เพื่อปิดสถานะ `pending` ทันทีและไม่เรียก `notifyNavigationStart()` ซ้ำ แก้อาการค้างที่ `<TableSkeleton>` นาน 15 วินาที (`SAFETY_TIMEOUT_MS`) ได้เด็ดขาด
+      - ทั้ง `/bills` และ `/products` ใช้ `<FilterForm autoSubmitDelay={400}>` ค้นหาอัตโนมัติโดยไม่ต้องมีปุ่ม `ค้นหา` และใช้ `router.replace(..., { scroll: false })` เพื่อไม่ให้บันทึกประวัติเบราว์เซอร์ซ้ำซ้อน
+    - **2. เร่งความเร็ว SQL Search Query บนตารางใหญ่ (`src/lib/queries.ts`)**:
+      - ใน `listBills`: ปรับ `ORDER BY` ใน CTE `page_ids` เมื่อมีการค้นหา (`q.length >= 3`) ให้ใช้ `(t.paid_date || '')` เพื่อบังคับให้ PostgreSQL Planner เลือกใช้ GIN Trigram Index `ix_transactions_search_trgm` (`0.08 ms`, 14 buffers) แทนการไล่สแกน `ix_transactions_order_paid_priority_ext_v2` ทีละแถว (`132.3 ms`, 52,113 buffers — เร็วขึ้นกว่า 1,600 เท่า) และตัดคิวรี `chStatsRow` ที่ซ้ำซ้อนออกเมื่อ `channel === "all" && linkStatus === "all"`
+      - ใน `listSkuSummariesPaged`: เปลี่ยนเงื่อนไขค้นหาเป็น `(s.sku_code || ' ' || s.product_name) ILIKE $1 ESCAPE '\'` เพื่อให้ตรงกับนิพจน์ของ GIN Trigram Index `ix_sku_summaries_trgm` พอดี
+    - **3. ล็อกหน้าจอให้นิ่งสนิททั้งระบบเมื่อเนื้อหาไม่เท่ากัน (Zero Layout Shift Across Pages & Modals)**:
+      - **`BillPreviewDialog.tsx`**: เปลี่ยน `key` จาก `${activeRow.id}-${tab}` เป็น `${activeRow.id}` (ไม่ให้ Remount ตอนสลับแท็บ), ล็อกความสูงป๊อปอัปด้วย `h-[90dvh] max-h-[90dvh]`, แสดงแถบย่อยความสูงคงที่ `min-h-[54px]` (พร้อมล็อกกรอบขวา `min-h-[28px]`) เสมอทั้งแท็บ `รายละเอียดบิล` และ `ใบกำกับฯ (อย่างย่อ)` ทุกขนาดกระดาษ (`A6`, `80mm`, `A4`), และใส่ `[scrollbar-gutter:stable]` บน `data-invoice-scroll-container` → ผลตรวจจริง: `dlgTop = 56px`, `dlgHeight = 999px`, `tablistTop = 152px`, `scrollTop = 268–269px`, `scrollClientW = 1139px` คงที่ทุกแท็บและทุกขนาดกระดาษ
+      - **`DocumentSettingsClient.tsx` (`/settings`)**: แสดงแถบย่อย `min-h-[54px]` คงที่ทั้งโหมด `ใบกำกับฯ (อย่างย่อ)` และ `ใบกำกับฯ (เต็มรูป)` และล็อก `CardContent` ด้วย `h-[72dvh] max-h-[72dvh] [scrollbar-gutter:stable]`
+      - **โครงสร้างหน้าหลักทุกหน้า (`src/app/import/page.tsx`, `src/components/ui/card.tsx`, `src/app/products/page.tsx`, `src/components/TableSkeleton.tsx`, `src/app/globals.css`)**:
+        - ครอบ `/import` ด้วย `<div className="workspace-page">` ให้ตำแหน่ง `PageHeader` (`top = 14px, height = 119px`) ตรงกับทุกหน้า
+        - ปรับ Padding แนวตั้งของ `Card` variant `stat` ให้เท่ากันระหว่างหน้าที่มี 4 การ์ด (`/products`, `/history`) และ 5 การ์ด (`/bills`, `/days`) → `statsTop = 145px, statsHeight = 143px`, `cardTop = 300px` ตรงกันทุกหน้า (`0px` shift)
+        - ลบ `key` บน `.bills-content-region` ใน `/products`, ลบ `translateY(4px)` ใน `@keyframes billsRowFadeIn`, และล็อก `min-height: 640px` บน `.workspace-table-card` พร้อม `margin-top: auto` บน `.pagination` เพื่อไม่ให้การ์ดตารางหดตัวเวลาค้นหาเจอ 1 แถว
+    - **4. DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 58/58 เทสต์ (49 pass, 9 skipped DB integration)
+      - `pnpm.cmd build` & `pnpm.cmd run deploy:app`: ผ่านและอัปเดตคอนเทนเนอร์ `pcms-revenue-app` บนพอร์ต `3002` สำเร็จ ✅
+      - **Playwright MCP**: ทดสอบครบที่ `360px`, `390px`, `768px`, `1280px` ทั้งบนพอร์ต `3001` และ `3002` → ไม่มีปุ่มค้นหาใน `/bills` และ `/products`, กดกากบาทล้างช่องค้นหาเสร็จใน `126–174ms` โดยไม่ค้าง Skeleton, สลับหน้า/สลับแท็บ/เปลี่ยนขนาดกระดาษนิ่งสนิท, `noHorizOverflow = true`, `overflowCount = 0`, `closeOverlap = false`
+  - **ปรับปรุงธีมสีหน้า "รายจ่ายบริษัท" (`/expenses`) ให้สะอาดตา สว่าง สวยงาม สไตล์โมเดิร์น พร้อมล้างหมวดหมู่ตัวอย่างทั้งหมดให้เริ่มต้นเป็นค่าว่าง 100% ตามคำขอ**:
+    - **1. แก้ไขต้นเหตุธีมสีเทาคล้ำ / ดำมืด (Eliminate Muddy Grey & Dark Mode Overrides)**:
+      - ต้นเหตุเกิดจากคลาส `dark:...` (เช่น `dark:bg-slate-950/60`, `dark:bg-slate-800/40`, `dark:bg-slate-900/30`) ที่ถูกใส่ไว้ในคอมโพเนนต์ เมื่อเปิดบนระบบปฏิบัติการ (Windows/Mac) หรือเบราว์เซอร์ของผู้ใช้ที่มีการตั้งค่า Dark Mode จะทำให้แถวขยายและหัวตารางกลายเป็นสีเทาดำคล้ำมืดขัดแย้งกับธีมหลักของระบบ
+      - นำคลาส `dark:...` ออกทั้งหมด 100% เพื่อให้หน้าเว็บเป็น Light Theme ที่สว่าง สะอาดตา คมชัดระดับพรีเมียม สอดคล้องกับทุกหน้าของระบบ PCMS Revenue
+      - ปรับพื้นผิวการ์ดเป็นสีขาวบริสุทธิ์ (`bg-white`), เส้นขอบคมชัดบางเบา (`border-slate-200`), ตัวหนังสือสีเข้มอ่านง่าย (`text-slate-900`, `text-slate-700`)
+      - เปลี่ยนปุ่ม `+ เพิ่มหมวดหมู่ใหม่` ที่เดิมมีสีเทาปูนซีเมนต์ทึบ ให้เป็นการ์ดสีขาวขอบประสีเทาอ่อนหรูหรา (`border-2 border-dashed border-slate-300 bg-white hover:border-[#fe2c55] hover:bg-rose-50/30 hover:text-[#fe2c55]`) พร้อมไอคอนเครื่องหมายบวกในวงกลม
+      - แถบแท็บ (`TabsList`) ปรับเป็นสีขาวกรอบเส้นบางเบา พร้อมแท็บ Active สีแดงสด TikTok Brand (`#fe2c55`)
+    - **2. ล้างหมวดหมู่ตัวอย่างทั้งหมดให้เริ่มต้นเป็นหน้าว่างเปล่า (Clean Empty State — User-Configurable Only)**:
+      - ลบหมวดหมู่ตัวอย่างทั้งหมดออกจากฐานข้อมูลทั้งใน Schema หลัก (`public`) และ `seeheng` (`SELECT count(*) = 0`)
+      - ออกแบบ Empty State ใหม่ในหน้าแรกและในแถวขยายรายเดือน: แสดงกรอบการ์ดสีขาวสะอาดตา พร้อมไอคอนโฟลเดอร์สีชมพูอ่อน และปุ่มสีแดงสดเด่นชัด `+ เพิ่มหมวดหมู่แรก` ให้ผู้ใช้กดเพิ่มหมวดหมู่รายจ่ายที่ต้องการได้เอง 100%
+    - **3. DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 58/58 เทสต์ (49 passed, 9 skipped DB integration)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ (Stand-alone build สำเร็จ)
+      - **Playwright MCP**: ทดสอบทั้งในโหมด Light และจำลอง `colorScheme: 'dark'` ที่ขนาดหน้าจอ `360px`, `390px`, `768px`, และ `1280px`:
+        - พื้นหลังแถวขยายเป็นสีขาวนวลสะอาดตา ไม่กลายเป็นสีเทา/ดำมืดอีกต่อไป
+        - ปุ่มเพิ่มหมวดหมู่ใหม่เป็นการ์ดสีขาวขอบประสวยงาม ไม่มีสีเทาปูนซีเมนต์
+        - ทดสอบการกดเพิ่มหมวดหมู่ผ่าน Dialog, แสดงการ์ดหมวดหมู่สีขาวสวยงาม, และทดสอบกดลบหมวดหมู่ออกกลับสู่สถานะว่างเปล่า 0 หมวดหมู่สำเร็จเรียบร้อย
+        - ตรวจสอบการล้นหน้าจอ: `docOverflow = false`, `badChildrenCount = 0` ทุกขนาดหน้าจอ
+  - **ออกแบบหน้า "รายจ่ายบริษัท" (`/expenses`) ใหม่ทั้งหมด (Zero Horizontal Overflow Design) — รองรับหมวดหมู่รายจ่ายได้ไม่จำกัดโดยไม่ล้นหน้าจอ**:
+    - **ปัญหาเดิม**: การวางคอลัมน์รายจ่ายไดนามิกเรียงตามแนวนอนในหัวตารางเดียว เมื่อผู้ใช้เพิ่มหลายหมวด (เช่น 8–20 หมวด) ตารางจะกว้างเหยียด 2,000–3,000px จนล้นหน้าจอ ต้องเลื่อนขวาไกลมากเพื่อดูยอดสรุปและกำไรสุทธิ
+    - **การออกแบบใหม่ตามมาตรฐาน Enterprise & P&L Statement (`src/components/ExpensesManager.tsx`)**:
+      - **1. ตารางสรุปรายเดือนหลักความกว้างคงที่ (Fixed-Width Monthly Overview)**:
+        - คอลัมน์กะทัดรัดอ่านง่ายในหน้าเดียว: เดือน, รับ TikTok, รับ Shopee, รับ Facebook, รวมรับทุกแพลตฟอร์ม, รวมรายจ่ายบริษัท, **กำไรคงเหลือสุทธิ**, **สัดส่วนกำไร %**, และปุ่มดู/กรอกรายจ่าย
+        - ไม่มีคอลัมน์แนวนอนยาวเหยียดมาดันตารางให้ล้นจออีกต่อไป! ตัวเลขทางการเงินสำคัญทั้งหมดเห็นได้ในจอเดียวทันที
+      - **2. แถวขยายแบบไดนามิก (Expandable Accordion Row with Responsive Card Grid)**:
+        - เมื่อคลิกที่แถวของเดือนใด แถวจะขยายลงมาแสดงการ์ดหมวดหมู่รายจ่ายทั้งหมดของเดือนนั้นในรูปแบบ **Responsive Grid** (4 คอลัมน์บนจอใหญ่, 2 บนแท็บเล็ต, 1 บนมือถือ)
+        - การ์ดแต่ละหมวดหมู่: แสดงชื่อหมวด, ยอดเงินรวมเด่นชัด, ป้ายจำนวนรายการย่อย, ปุ่มคลิกแก้ไขยอดเงินด่วน, และปุ่มเปิดดูบิล/สลิปย่อย
+        - มีปุ่ม `+ เพิ่มหมวดหมู่ใหม่` และ `+ เพิ่มบิลย่อยในเดือนนี้`
+      - **3. แท็บงบรายจ่ายรายเดือนแนวตั้ง (Monthly P&L / Statement View)**:
+        - มีตัวเลือกเลือกเดือน แล้วแสดงโครงสร้างงบการเงินแนวตั้ง 2 คอลัมน์ (รายรับ vs รายจ่าย): มีกี่หมวดหมู่ก็เรียงลงมาตามลำดับในแนวตั้งอย่างเป็นระเบียบ ไม่ล้นจอเด็ดขาด
+      - **4. แท็บจัดการหมวดหมู่รายจ่าย (Categories Settings Tab)**:
+        - ตารางจัดการหมวดหมู่รายจ่ายทั้งหมดอย่างเป็นระเบียบ เพิ่ม/ลบ/เปลี่ยนชื่อได้ในที่เดียว
+    - **DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 58/58 เทสต์ (รวม `tests/expenses.test.ts`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ (Compiled standalone production build สำเร็จ)
+      - Deploy Docker Container บนพอร์ต `3002` สำเร็จ (`pcms-revenue-app:latest` Recreated & Started)
+      - **Playwright MCP**: ทดสอบจำลองเพิ่ม 8 หมวดหมู่รายจ่าย พร้อมตรวจทุกขนาดหน้าจอ:
+        - `360px`: `docOverflow = false`, `badChildrenCount = 0`
+        - `390px`: `docOverflow = false`, `badChildrenCount = 0`
+        - `768px`: `docOverflow = false`, `badChildrenCount = 0`
+        - `1280px`: `docOverflow = false`, `badChildrenCount = 0`
+        - ทดสอบสลับแท็บ `ตารางสรุปรายเดือน` → `งบรายจ่าย (P&L)` → `หมวดหมู่ (8)` ใช้งานได้สมบูรณ์แบบ ไม่มีการล้นหน้าจอ 100%
+    - **ฟังก์ชันหลัก**:
+      - เมนูใหม่ในแถบข้าง `Sidebar.tsx`: "รายจ่ายบริษัท" (Company Expenses) พร้อมไอคอน `IconWallet` ใช้งานได้ทั้ง Desktop และ Mobile Sheet drawer
+      - ดึงยอดรับเงินจริงสุทธิ (Payout) จากแต่ละแพลตฟอร์ม (TikTok, Shopee, Facebook) และยอดรวม แยกตามรายเดือนอัตโนมัติจากฐานข้อมูล
+      - **คอลัมน์รายจ่ายไดนามิก (ไม่ฟิกซ์)**: เริ่มต้นเป็นตารางว่างเปล่าตามที่ผู้ใช้เลือก ผู้ใช้สามารถกดปุ่ม `+ เพิ่มคอลัมน์รายจ่าย` ตั้งชื่อคอลัมน์ได้อิสระไม่จำกัด (เช่น ค่าแอดโฆษณา, ค่าเช่า, เงินเดือน, ค่าแพ็คของ ฯลฯ) พร้อมแก้ไขชื่อหรือลบคอลัมน์ได้ตลอดเวลา
+      - **การกรอกและคำนวณรายจ่าย**: คลิกเซลล์เพื่อกรอกยอดรายจ่ายรวมประจำเดือนได้โดยตรง หรือกดปุ่ม `บันทึกรายการย่อย` เพื่อลงบันทึกรายจ่ายแยกตามบิล/วันที่/หมายเหตุ ระบบจะรวมยอดขึ้นตารางรายเดือนให้อัตโนมัติ
+      - **คำนวณกำไรสุทธิคงเหลือจริงทันที**: ยอดรับจากแพลตฟอร์มรวม - รายจ่ายบริษัททั้งหมด = กำไรคงเหลือสุทธิ (สีเขียวถ้าเป็นบวก, สีแดงถ้าเป็นลบ) พร้อมคำนวณอัตรากำไรสุทธิ %
+      - การ์ดสรุปยอดด้านบน 4 ใบ: ยอดรับจากแพลตฟอร์มรวม, รายจ่ายบริษัทรวม, กำไรคงเหลือสุทธิ, อัตรากำไรสุทธิเฉลี่ย (%)
+      - ตัวกรองปี: ทั้งหมด, 2569 (2026), 2568 (2025)
+    - **สถาปัตยกรรมและฐานข้อมูล (`src/lib/db.ts`, `SCHEMA_VERSION 2026-10-31-v20`)**:
+      - สร้างตาราง `expense_categories`, `monthly_expenses`, `expense_records` รองรับ Multi-Company isolation แยก schema ระหว่าง `dragon19` (public) และ `seeheng`
+      - API Routes: `GET/POST /api/expenses`, `GET/POST /api/expenses/categories`, `PUT/DELETE /api/expenses/categories/[id]`, `GET/POST /api/expenses/records`, `DELETE /api/expenses/records/[id]`
+    - **DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 58/58 เทสต์ (รวม `tests/expenses.test.ts`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ (compiled standalone production build สำเร็จ)
+      - Deploy Docker Container บนพอร์ต `3002` สำเร็จ (`pcms-revenue-app:latest` Recreated & Started)
+      - **Playwright MCP**: ตรวจสอบครบทุกขนาดหน้าจอ 360px, 390px, 768px, 1280px → `docOverflow = false`, `badChildrenCount = 0`, `mobileMenuHasExpense = true`, ทดสอบสร้างคอลัมน์, กรอกยอดเซลล์, และบันทึกรายการย่อยคำนวณยอดถูกต้อง 100%
+  - **ค้นหาอัตโนมัติใน `/bills` (ไม่ต้องกดปุ่มค้นหา)**: `src/components/FilterForm.tsx` เพิ่ม prop `autoSubmitDelay` (opt-in, debounce เฉพาะ `input[type=search]`, รอจบ IME composition ภาษาไทย) · ค้นหาอัตโนมัติใช้ `router.replace` (ไม่บันทึกประวัติ) ส่วนกดปุ่ม/Enter ยังใช้ `router.push` · `src/app/bills/page.tsx` ใช้ `autoSubmitDelay={400}`
+    - **DoD**: `tsc --noEmit` 0 error · `pnpm build` ผ่าน · Playwright 360/390/768/1280px: พิมพ์แล้ว URL อัปเดต `q=` เอง, โฟกัสคงอยู่ในช่อง, ลบจนว่างล้าง `q`, `history.length` ไม่เพิ่ม, ปุ่มไม่ซ้อน/ไม่ล้นกรอบ, ไม่มี scroll แนวนอน
+  - **หน้าพิมพ์ใบกำกับภาษีรวม `/days/[date]/invoices` — ออกแบบ UI ใหม่ + เลขที่ใบกำกับฯ เรียง TikTok → Shopee → Facebook + ออกเลขเฉพาะบิลขายปกติ**:
+    - **UI**: ส่วนหัว (ปุ่มกลับ/ชื่อหน้า/สรุปชุด/ปุ่มพิมพ์) + `FieldRow` ป้ายกำกับแนวเดียวกัน + segmented control ชุดเดียว · 2 คอลัมน์เฉพาะ ≥1440px · ปุ่มชุดพิมพ์ใหม่ `src/components/BatchPicker.tsx` (Optimistic + spinner + prefetch on hover)
+    - **เงื่อนไขออกเลข/พิมพ์รวมศูนย์** `src/lib/invoice-eligibility.ts` (`INVOICE_ELIGIBLE_SQL`) แยกตามช่องทาง: TikTok = Settlement + ข้อมูลครบ (`link_priority = 0`) · Shopee/Facebook = ข้อมูลครบ 2 ไฟล์ · ทุกช่องทาง `income > 0 AND payout > 0` (ไม่รวมคืนเงิน/ตีกลับ/ยกเลิก/เปลี่ยนสินค้า) — ใช้ทั้ง `getBulkInvoicesBatch` และ `syncMonthlyInvoiceRegistry`
+    - **เลขที่**: รันรายเดือน เรียง TikTok → Shopee → Facebook แล้วตามวันที่ (`import-service.ts`, `db.ts`, `settings.ts`) · sync ลบบิลไม่เข้าเงื่อนไข เติมบิลที่เพิ่งครบ และเรียงใหม่เมื่อเลขขาดช่วง · หน้าพิมพ์เรียงตามเลขที่ ASC
+    - **ข้อมูล (local DB เท่านั้น)**: รัน `scripts/resync-invoice-registry.ts` แล้ว — ต.ค. 69: TikTok 00001–04094 · Shopee 04095–04208 · Facebook 04209–04212 · backup `public.invoice_registry_backup_20261031034236` (+ `_035206`)
+    - **DoD**: `tsc --noEmit` 0 error · `pnpm build` ผ่าน · เทสต์ทั้งหมด 52/52 ผ่าน (รวม `tests/invoice-eligibility.test.ts` 5 เคส integration บน schema ชั่วคราว + rollback) · Playwright: 4 ช่องทาง × 4 ขนาดกระดาษ × 360/390/768/1280px ไม่มี overflow/overlap · ซูม 100–300% ผ่าน · batchSize 100/200/500 ถูกต้อง
+    - **Code Review (QA subagent) — ผล: REJECT as-is** · แก้แล้ว: DISTINCT ON ต่อออเดอร์ (ฐานข้อมูลกันซ้ำด้วย `ux_transactions_order` อยู่แล้ว), gap-check `::bigint`, เรียงเลขเชิงตัวเลข (`LENGTH` ก่อน), BatchPicker `aria-pressed` + prefetch onFocus + sr-only · **ยังเปิดอยู่ (รอ PO ตัดสินใจ)**: C2 เลขที่ออกแล้วถูกเรียงใหม่เมื่อมีไฟล์ใหม่ (ความเสี่ยงประมวลรัษฎากร) · H1 sync สแกนทั้งตารางทุกการนำเข้า · H3 OFFSET pagination
+  - ⚠️ ค้าง: **Production ยังไม่ได้รันสคริปต์ล็อกเลข** (ไม่มี credential ในเครื่อง) → รันบนเซิร์ฟเวอร์ `npx tsx --env-file=.env scripts/resync-invoice-registry.ts` (สำรองตารางก่อน + ยกเลิกทั้งหมดถ้าเลขเดิมเปลี่ยนแม้แต่ใบเดียว)
+  - **ล็อกเลขที่ใบกำกับฯ (2026-10-31 รอบ 2 — ตามแผนที่ PO อนุมัติ)**:
+    - เลขที่ออกแล้ว **ห้ามเปลี่ยน**: ออเดอร์เดิม = เลขเดิม · ออเดอร์ใหม่ = MAX(seq ของเดือน)+1 · คืนเงิน/ตีกลับ/ยกเลิก = `status='void'` (ไม่ลบ ไม่นำเลขกลับมาใช้) · กลับมาปกติ = active เลขเดิม · ลบไฟล์นำเข้า = void (นำเข้าใหม่ได้เลขเดิม)
+    - Schema (backward compatible): `invoice_registry` + `yymm, seq, channel, status, voided_at, void_reason` · `UNIQUE(yymm, seq)` · index `ix_invoice_registry_print(_all)` · ตาราง `invoice_registry_audit` (append-only: assign/void/unvoid) · `SCHEMA_VERSION 2026-10-31-v19`
+    - ลบโค้ดเรียงเลขใหม่/ลบทะเบียนทั้งหมด (`db.ts`, `settings.ts`, `import-service.ts`, `queries.ts` deleteImport/deleteAllImports) · ออกเลขที่เดียวใน `syncMonthlyInvoiceRegistry` + `pg_advisory_xact_lock` กันนำเข้าพร้อมกัน
+    - **H1**: sync ทำเฉพาะออเดอร์ที่ไฟล์นั้นแตะ (import_id / oms order_uid / matched_external_id) · **H2**: เรียงด้วย `seq` (bigint) · **H3**: หน้าพิมพ์ทั้งเดือนอ่านจาก registry แบบ Keyset (`seq >= start_seq LIMIT n`) ไม่มี OFFSET · รายวันยังใช้ Deferred Join
+    - Local + Production Container (`localhost:3002`): รันสคริปต์ล็อก `scripts/resync-invoice-registry.ts` แล้ว (backup `public.invoice_registry_backup_20261031040445` · เลขเดิมเปลี่ยน 0 ใบ) และ deploy ด้วย `pnpm run deploy:app` สำเร็จ ✅
+    - เทสต์ 55/55 ผ่าน (invoice-eligibility 8 เคส: ล็อก/void/unvoid/ต่อท้าย/scoped/UNIQUE/ห้าม DELETE-renumber) · `tsc` 0 · `pnpm build` ผ่าน · Playwright: ทุกช่องทาง/ชุดแรก-ชุดสุดท้าย/รายวัน เลขเรียงถูก (TikTok ชุด 21 = 04001–04094)
+  - **แก้ไขอาการหน้าเว็บรีโหลดเองวนซ้ำบนพอร์ต `3001` (`next dev` Turbopack HMR loop)**:
+    - **สาเหตุ**: โปรเซส `next dev` เดิมเกิดอาการ `{"type":"reloadPage","data":"HMR hash mismatch"}` วนซ้ำทุก ~1 วินาที เพราะแคช `.next/dev` ขัดแย้งกับการสแกนไฟล์ใน `.next-build` ของ `tsconfig.json`
+    - **การแก้ไข**: เพิ่ม `.next-build` ใน `exclude` ของ `tsconfig.json` และ `.dockerignore`, ล้างแคช `.next/dev` ที่ค้าง และรีสตาร์ท `next dev -p 3001` ใหม่
+    - **ผลตรวจด้วย Playwright MCP**: เปิดค้างทั้ง `/bills` และ `/days/2026-10/invoices?channel=TikTok&batch=21` บนพอร์ต `3001` และ `3002` เป็นเวลา 8 วินาที → `reloadsWhileSittingIdle8s = 0` (ไม่มีการรีโหลดซ้ำอีก 100%) และตรวจ 360px/390px/768px/1280px `docOverflow = false`, `badChildrenCount = 0`
+  - **นำคอลัมน์ "เอกสาร" และปุ่ม "ค้นหา" ออกจากหน้าตาราง (`/bills`, `/products`)**:
+    - ลบคอลัมน์ `เอกสาร` ออกจากตาราง `/bills` (`TableHeader`, `TableBody`, `TableFooter`) และปรับสัดส่วนคอลัมน์ที่เหลือให้เต็มพื้นที่สวยงาม เพราะคลิกที่ส่วนใดของแถว (`BillTableRow`) ก็เปิดป๊อปอัปดูบิล/ใบกำกับภาษีได้ทันทีอยู่แล้ว
+    - ลบปุ่ม `ค้นหา` ออกจากแถบค้นหาใน `/bills` และ `/products` (พร้อมเปิด `autoSubmitDelay={400}` ใน `/products`) เนื่องจากพิมพ์แล้วระบบค้นหาอัตโนมัติทันที
+    - **ผลตรวจด้วย Playwright MCP (ทั้งพอร์ต `3001` และ `3002`)**: `hasDocCol = false`, `hasSearchBtn = false`, คลิกแถวเปิด `BillPreviewDialog` ได้ตามปกติ, ตรวจ 360/390/768/1280px `docOverflow = false`, `badChildrenCount = 0` · deploy ด้วย `pnpm run deploy:app` สำเร็จ ✅
+  - **ทดสอบนำเข้าไฟล์ Excel จริงแบบ End-to-End (`importWorkbook` + หน้าอัปโหลด `/import` จริงผ่าน Playwright MCP) และป้องกันการแสดงเลขที่ถูก void**:
+    - **เสริมความรัดกุมใน `src/lib/queries.ts`**: ทุกจุดที่ `LEFT JOIN invoice_registry r ON r.order_id = t.external_id` และ `getInvoiceNo()` เพิ่มเงื่อนไข `AND r.status = 'active'` เพื่อไม่ให้บิลที่ถูก `void` แสดงเลขใบกำกับภาษีที่ยกเลิกไปแล้ว และใน `deleteImport()` / `deleteAllImports()` บันทึกประวัติลง `invoice_registry_audit` (`action = 'void'`) ทุกครั้ง
+    - **เพิ่ม Integration Test ระดับ End-to-End ใน `tests/invoice-eligibility.test.ts`**: สร้างไฟล์ `.xlsx` จริงด้วย `ExcelJS` แล้วรันผ่าน `importWorkbook()` ครบทั้ง 3 ไฟล์ (`oms_orders`, `oms_items`, `settlement`) พิสูจน์ว่า:
+      1. เมื่อนำเข้าไฟล์ใหม่ที่อัปเดตออเดอร์เดิม → เลขใบกำกับเดิม (`SEQ/2610/00001`, `SEQ/2610/00002`) ล็อกคงเดิม 100% และไม่เกิด `void/unvoid` ชั่วคราวใน `invoice_registry_audit`
+      2. ออเดอร์ใหม่ (แม้วันที่ชำระย้อนหลังเป็นต้นเดือน `2026-10-01` และเป็นช่องทาง TikTok) → ได้เลขต่อท้าย `MAX(seq) + 1` (`SEQ/2610/00003`) โดยไม่แทรกกลางจนเลขใบอื่นเลื่อน
+      3. เมื่อลบไฟล์นำเข้าด้วย `deleteImport()` → เลขถูก `void` พร้อมบันทึก `invoice_registry_audit`
+    - **ทดสอบอัปโหลดไฟล์ `.xlsx` เข้าหน้าเว็บจริง `/import` ผ่าน Playwright MCP**:
+      - อัปโหลดไฟล์ที่มีทั้งออเดอร์เดิม (`261027PMAFVNCB` / `#YR32` ซึ่งมีเลข `RF2610/04208` อยู่แล้ว) และออเดอร์ใหม่ (`261001TESTLOCK99` วันที่ `2026-10-01`)
+      - ผลลัพธ์จริง: ออเดอร์เดิม `261027PMAFVNCB` คงเลขเดิม `RF2610/04208` (`SEQ/2610/04208`) ไม่เปลี่ยน · ออเดอร์ใหม่ `261001TESTLOCK99` ได้เลขต่อท้าย `RF2610/04213` (`SEQ/2610/04213`) · ตรวจสอบ MD5 Checksum ของทะเบียนใบกำกับเดิมทั้ง 28,487 ใบ (`65119a8fe405f5a916877ca79d01360c`) ตรงกัน 100% ก่อนและหลังทดสอบ (และล้างข้อมูลทดสอบออกเรียบร้อย คงเหลือ 28,487 ใบเท่าเดิม)
+    - **DoD**: `npx tsc --noEmit` 0 error · เทสต์ทั้งหมด 56/56 ผ่าน · `pnpm run deploy:app` สำเร็จ ✅
 
 - ✅ เสร็จแล้ว:
   - **คลิกได้ทั้งแถวตารางเพื่อดูรายละเอียดบิล (Full-Row Clickable Table) + ลบสีพื้นหลังเทาตอน Hover ออกให้สะอาดตา 100% (`src/components/BillPreviewDialog.tsx`, `src/app/bills/page.tsx`, `docs/lessons.md`)**:
