@@ -781,7 +781,7 @@ export function DocumentSettingsClient({
         </Card>
 
         <div className="sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-border bg-card/95 p-3 shadow-lg backdrop-blur sm:gap-3 sm:p-3.5">
-          <Button
+          {/* <Button
             type="button"
             variant="outline"
             onClick={handleResetDefault}
@@ -789,7 +789,7 @@ export function DocumentSettingsClient({
             className="flex-1 sm:flex-initial"
           >
             <RotateCcwIcon className="size-4" /> คืนค่าเริ่มต้น
-          </Button>
+          </Button> */}
           <Button
             type="submit"
             variant="default"
@@ -857,51 +857,72 @@ export function DocumentSettingsClient({
               )}
             </div>
 
-            {previewMode === "abbreviated" ? (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5">
-                <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
-                  <span className="text-xs font-semibold text-muted-foreground">
-                    ทดสอบขนาดกระดาษ:
-                  </span>
-                  <div className="grid w-full grid-cols-2 gap-1.5 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center">
-                    {(
-                      [
-                        { id: "a6", label: "100×150 มม. (A6)" },
-                        { id: "a4-4up", label: "A4 แบ่ง 4 ใบ" },
-                        { id: "80mm", label: "สลิป 80 มม." },
-                        { id: "a4", label: "A4 เต็มแผ่น" },
-                      ] as { id: InvoicePaperSize; label: string }[]
-                    ).map((opt) => (
-                      <Button
-                        key={opt.id}
-                        type="button"
-                        size="xs"
-                        variant={previewPaper === opt.id ? "default" : "outline"}
-                        className="w-full justify-center sm:w-auto"
-                        onClick={() => {
-                          setPreviewPaper(opt.id);
-                          updateForm((prev) => ({
-                            ...prev,
-                            defaultPaperSize: opt.id,
-                          }));
-                        }}
-                      >
-                        {opt.label}
-                      </Button>
-                    ))}
+            <div className="mt-2 flex min-h-[54px] flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5">
+              {previewMode === "abbreviated" ? (
+                <>
+                  <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      ทดสอบขนาดกระดาษ:
+                    </span>
+                    <div className="grid w-full grid-cols-2 gap-1.5 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center">
+                      {(
+                        [
+                          { id: "a6", label: "100×150 มม. (A6)" },
+                          { id: "a4-4up", label: "A4 แบ่ง 4 ใบ" },
+                          { id: "80mm", label: "สลิป 80 มม." },
+                          { id: "a4", label: "A4 เต็มแผ่น" },
+                        ] as { id: InvoicePaperSize; label: string }[]
+                      ).map((opt) => (
+                        <Button
+                          key={opt.id}
+                          type="button"
+                          size="xs"
+                          variant={previewPaper === opt.id ? "default" : "outline"}
+                          className="w-full justify-center sm:w-auto"
+                          onClick={() => {
+                            setPreviewPaper(opt.id);
+                            updateForm((prev) => ({
+                              ...prev,
+                              defaultPaperSize: opt.id,
+                            }));
+                          }}
+                        >
+                          {opt.label}
+                        </Button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-                {previewPaper === "a6" ||
-                previewPaper === "a4-4up" ||
-                previewPaper === "80mm" ? (
-                  <InvoiceZoomControl compact />
-                ) : null}
-              </div>
-            ) : null}
+                  <div className="flex min-h-[28px] items-center">
+                    {previewPaper === "a6" ||
+                    previewPaper === "a4-4up" ||
+                    previewPaper === "80mm" ? (
+                      <InvoiceZoomControl compact />
+                    ) : (
+                      <span className="text-xs font-medium text-muted-foreground">
+                        ขนาดมาตรฐาน A4 เต็มแผ่น (100%)
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex min-h-[28px] items-center">
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      ขนาดกระดาษ: มาตรฐาน A4 เต็มแผ่น (ใบกำกับภาษีแบบเต็มรูป)
+                    </span>
+                  </div>
+                  <div className="flex min-h-[28px] items-center">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      แสดงข้อมูลผู้ซื้อและตารางภาษีมูลค่าเพิ่มครบถ้วน
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
           </CardHeader>
           <CardContent
             data-invoice-scroll-container
-            className="settings-preview-pane max-h-[78dvh] overflow-y-auto overflow-x-hidden bg-slate-100/80 p-4 rounded-b-xl"
+            className="settings-preview-pane h-[72dvh] max-h-[72dvh] overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] bg-slate-100/80 p-4 rounded-b-xl"
           >
             <InvoiceDocument
               invoice={previewInvoice}

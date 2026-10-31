@@ -33,7 +33,7 @@ export default async function ImportPage({
   });
 
   return (
-    <>
+    <div className="workspace-page">
       <PageHeader
         eyebrow="TikTok Shop, Shopee & Facebook · นำเข้าและแมปข้อมูล 3 ไฟล์"
         title="หมวดอัปโหลดไฟล์รายได้ & รายการสินค้า"
@@ -69,6 +69,6 @@ export default async function ImportPage({
       </div>
 
       <UploadCompletenessCalendar report={report} />
-    </>
+    </div>
   );
 }

@@ -76,7 +76,7 @@ export function BillPreviewProvider({
       {children}
       {activeRow ? (
         <BillPreviewModal
-          key={`${activeRow.id}-${tab}`}
+          key={activeRow.id}
           row={activeRow}
           open={open}
           onOpenChange={setOpen}
@@ -384,8 +384,8 @@ export function BillPreviewModal({
     <>
       {open ? <style media="print">{dialogPrintCss}</style> : null}
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[90dvh] w-[calc(100%-1.25rem)] max-w-[min(95vw,1160px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(95vw,1160px)]">
-          <DialogHeader className="no-print border-b border-border bg-[#f8fafc] px-4 py-3.5 pr-14 text-left sm:px-6 sm:py-4 sm:pr-14">
+        <DialogContent className="flex h-[90dvh] max-h-[90dvh] w-[calc(100%-1.25rem)] max-w-[min(95vw,1160px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(95vw,1160px)]">
+          <DialogHeader className="no-print shrink-0 border-b border-border bg-[#f8fafc] px-4 py-3.5 pr-14 text-left sm:px-6 sm:py-4 sm:pr-14">
             <div className="flex flex-col gap-1">
               <DialogTitle className="flex flex-wrap items-center gap-2 text-base font-extrabold text-foreground sm:text-lg">
                 <span>คำสั่งซื้อ #{displayOrderId}</span>
@@ -423,7 +423,7 @@ export function BillPreviewModal({
             </div>
           </DialogHeader>
 
-          <div className="no-print flex flex-wrap items-center justify-between gap-2 border-b border-border bg-white px-4 py-2 sm:px-6 sm:py-2.5">
+          <div className="no-print shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-white px-4 py-2 sm:px-6 sm:py-2.5">
             <div
               role="tablist"
               aria-label="เลือกประเภทเอกสาร"
@@ -515,45 +515,75 @@ export function BillPreviewModal({
             </div>
           </div>
 
-          {effectiveTab === "invoice" ? (
-            <div className="no-print flex flex-wrap items-center justify-between gap-2 border-b border-border bg-[#f8fafc] px-4 py-2 sm:px-6">
-              <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
-                <span className="text-xs font-bold text-[#334155]">
-                  ขนาดกระดาษพิมพ์:
-                </span>
-                <div className="flex w-full flex-wrap items-center gap-1 sm:inline-flex sm:w-auto sm:gap-1.5">
-                  {[
-                    {
-                      key: "a6" as InvoicePaperSize,
-                      label: "100×150 มม. (A6)",
-                    },
-                    {
-                      key: "80mm" as InvoicePaperSize,
-                      label: "สลิป 80 มม.",
-                    },
-                    {
-                      key: "a4" as InvoicePaperSize,
-                      label: "A4 เต็มแผ่น",
-                    },
-                  ].map((opt) => (
-                    <Button
-                      key={opt.key}
-                      type="button"
-                      variant={paperSize === opt.key ? "default" : "outline"}
-                      size="xs"
-                      onClick={() => setPaperSize(opt.key)}
-                      className="flex-1 justify-center px-2 sm:flex-initial sm:px-2.5"
-                    >
-                      {opt.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              {paperSize === "a6" ||
-              paperSize === "a4-4up" ||
-              paperSize === "80mm" ? (
-                <InvoiceZoomControl compact />
-              ) : null}
+          {effectiveTab === "bill" || effectiveTab === "invoice" ? (
+            <div className="no-print shrink-0 flex min-h-[54px] flex-wrap items-center justify-between gap-2 border-b border-border bg-[#f8fafc] px-4 py-1.5 sm:px-6">
+              {effectiveTab === "invoice" ? (
+                <>
+                  <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+                    <span className="text-xs font-bold text-[#334155]">
+                      ขนาดกระดาษพิมพ์:
+                    </span>
+                    <div className="flex w-full flex-wrap items-center gap-1 sm:inline-flex sm:w-auto sm:gap-1.5">
+                      {[
+                        {
+                          key: "a6" as InvoicePaperSize,
+                          label: "100×150 มม. (A6)",
+                        },
+                        {
+                          key: "80mm" as InvoicePaperSize,
+                          label: "สลิป 80 มม.",
+                        },
+                        {
+                          key: "a4" as InvoicePaperSize,
+                          label: "A4 เต็มแผ่น",
+                        },
+                      ].map((opt) => (
+                        <Button
+                          key={opt.key}
+                          type="button"
+                          variant={paperSize === opt.key ? "default" : "outline"}
+                          size="xs"
+                          onClick={() => setPaperSize(opt.key)}
+                          className="flex-1 justify-center px-2 sm:flex-initial sm:px-2.5"
+                        >
+                          {opt.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex min-h-[28px] items-center">
+                    {paperSize === "a6" ||
+                    paperSize === "a4-4up" ||
+                    paperSize === "80mm" ? (
+                      <InvoiceZoomControl compact />
+                    ) : (
+                      <span className="hidden text-xs font-medium text-[#64748b] sm:inline">
+                        ขนาดมาตรฐาน A4 (210×297 มม.)
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex min-h-[28px] flex-wrap items-center gap-2 text-xs text-[#475569]">
+                    <span className="font-bold text-[#334155]">
+                      เอกสารสรุปรายละเอียดบิลคำสั่งซื้อ
+                    </span>
+                    {row.importFilename ? (
+                      <span className="truncate max-w-[260px] sm:max-w-[420px] text-[#64748b]">
+                        · ไฟล์ต้นทาง: {row.importFilename}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex min-h-[28px] items-center">
+                    {row.invoiceNo ? (
+                      <span className="mono text-xs font-bold text-[#0f172a]">
+                        เลขที่ใบกำกับฯ: {row.invoiceNo}
+                      </span>
+                    ) : null}
+                  </div>
+                </>
+              )}
             </div>
           ) : null}
 
@@ -647,7 +677,7 @@ export function BillPreviewModal({
 
           <div
             data-invoice-scroll-container
-            className="min-h-0 flex-1 overflow-y-auto bg-[#f1f5f9] p-3 sm:p-5"
+            className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] bg-[#f1f5f9] p-3 sm:p-5"
           >
             {effectiveTab === "bill" ? (
               <BillDocument

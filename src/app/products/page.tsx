@@ -220,7 +220,7 @@ export default async function ProductsPage({
               </div>
             </div>
 
-            <FilterForm className="flex flex-1 flex-wrap items-center gap-2 min-[980px]:justify-end">
+            <FilterForm autoSubmitDelay={400} className="flex flex-1 flex-wrap items-center gap-2 min-[980px]:justify-end">
               {sort !== "qty_desc" ? (
                 <input type="hidden" name="sort" value={sort} />
               ) : null}
@@ -247,14 +247,6 @@ export default async function ProductsPage({
                   sort: sort !== "qty_desc" ? sort : undefined,
                 }}
               />
-              <Button
-                type="submit"
-                variant="default"
-                size="sm"
-                className="h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial"
-              >
-                <IconSearch size={15} /> ค้นหา
-              </Button>
               {hasFilters ? (
                 <Button
                   asChild
@@ -303,22 +295,21 @@ export default async function ProductsPage({
             />
           </div>
         ) : (
-          <div
-            key={`${sort}-${page}-${date}-${q}`}
-            className="bills-content-region"
-          >
+          <div className="bills-content-region">
             <Table
               variant="stack"
-              className="bills-table-animated min-[768px]:table-fixed"
+              className="bills-table-animated min-[768px]:table-fixed min-w-[740px]"
             >
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-12 text-center">#</TableHead>
-                  <TableHead className="min-[768px]:w-[175px] min-[1280px]:w-[195px]">
+                  <TableHead className="min-[768px]:w-[130px] min-[1280px]:w-[150px]">
                     รหัสสินค้า (SKU)
                   </TableHead>
-                  <TableHead className="min-[768px]:w-auto">ชื่อสินค้า</TableHead>
-                  <TableHead className="num min-[768px]:max-[959px]:hidden min-[960px]:w-[115px] min-[1280px]:w-[130px]">
+                  <TableHead className="min-[768px]:min-w-[220px] min-[1280px]:min-w-[280px]">
+                    ชื่อสินค้า
+                  </TableHead>
+                  <TableHead className="num min-[768px]:max-[959px]:hidden min-[960px]:w-[105px] min-[1280px]:w-[120px]">
                     <Link
                       href={buildProductsHref({
                         nextSort:
@@ -338,7 +329,7 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num min-[768px]:w-[118px] min-[1280px]:w-[130px]">
+                  <TableHead className="num min-[768px]:w-[105px] min-[1280px]:w-[118px]">
                     <Link
                       href={buildProductsHref({
                         nextSort: sort === "qty_asc" ? "qty_desc" : "qty_asc",
@@ -357,7 +348,7 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num min-[768px]:max-[1099px]:hidden min-[1100px]:w-[118px] min-[1280px]:w-[130px]">
+                  <TableHead className="num min-[768px]:max-[1099px]:hidden min-[1100px]:w-[110px] min-[1280px]:w-[120px]">
                     <Link
                       href={buildProductsHref({
                         nextSort:
@@ -377,7 +368,7 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num min-[768px]:w-[132px] min-[1280px]:w-[148px]">
+                  <TableHead className="num min-[768px]:w-[120px] min-[1280px]:w-[136px]">
                     <Link
                       href={buildProductsHref({
                         nextSort:
@@ -397,7 +388,7 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num min-[768px]:w-[122px] min-[1280px]:w-[132px]">
+                  <TableHead className="num min-[768px]:w-[96px] min-[1280px]:w-[104px]">
                     ดูบิล
                   </TableHead>
                 </TableRow>

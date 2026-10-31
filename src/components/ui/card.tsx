@@ -17,7 +17,7 @@ const cardVariants = cva(
       padding: {
         none: "",
         padded: "p-4 min-[640px]:p-[22px]",
-        stat: "p-[13px] min-[640px]:px-[18px] min-[640px]:py-[17px]",
+        stat: "p-[13px] min-[640px]:px-[16px] min-[640px]:py-[14px]",
         compact: "p-3.5 min-[640px]:p-4",
       },
     },

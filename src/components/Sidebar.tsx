@@ -40,6 +40,7 @@ import {
   IconHome,
   IconReceipt,
   IconUpload,
+  IconWallet,
 } from "./icons";
 
 const items = [
@@ -69,6 +70,14 @@ const items = [
     icon: IconFile,
     match: (pathname: string) =>
       pathname === "/products" || pathname.startsWith("/products/"),
+  },
+  {
+    href: "/expenses",
+    label: "รายจ่ายบริษัท",
+    sub: "Company Expenses",
+    icon: IconWallet,
+    match: (pathname: string) =>
+      pathname === "/expenses" || pathname.startsWith("/expenses/"),
   },
   {
     href: "/import",
@@ -144,6 +153,7 @@ function NavLinks({
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               onClick={onNavigate}
               className={cn(
                 "inline-flex min-h-[46px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14px] font-semibold transition-all",
@@ -405,20 +415,7 @@ export function Sidebar({
 
   return (
     <>
-      <div className="mobile-topbar no-print sticky top-0 z-40 flex h-[61px] min-[1100px]:hidden items-center justify-between gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
-        <Link
-          href="/"
-          className="brand inline-flex min-h-[40px] min-w-0 items-center gap-2.5 px-1"
-        >
-          <span className="brand-mark">
-            <AppMark size={36} />
-          </span>
-          <span className="brand-text min-w-0">
-            <strong className="truncate">PCMS Revenue</strong>
-            <small className="truncate">{companySubLabel}</small>
-          </span>
-        </Link>
-
+      <div className="mobile-topbar no-print sticky top-0 z-40 flex h-[61px] min-[1100px]:hidden items-center gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
             <Button
@@ -426,14 +423,14 @@ export function Sidebar({
               variant="outline-light"
               size="icon"
               aria-label="เปิดเมนูหลัก"
-              className="no-print"
+              className="no-print shrink-0"
             >
               <MenuIcon className="size-5" />
             </Button>
           </SheetTrigger>
           <SheetContent
-            side="right"
-            className="no-print flex w-[276px] max-w-[85vw] flex-col gap-6 border-l border-[#1e293b] bg-[#0f1117] p-5 text-white"
+            side="left"
+            className="no-print flex w-[276px] max-w-[85vw] flex-col gap-6 border-r border-[#1e293b] bg-[#0f1117] p-5 text-white"
           >
             <SheetHeader className="p-0 pr-12 text-left">
               <SheetTitle asChild>
@@ -465,6 +462,19 @@ export function Sidebar({
             />
           </SheetContent>
         </Sheet>
+
+        <Link
+          href="/"
+          className="brand inline-flex min-h-[40px] min-w-0 items-center gap-2.5 px-1"
+        >
+          <span className="brand-mark">
+            <AppMark size={36} />
+          </span>
+          <span className="brand-text min-w-0">
+            <strong className="truncate">PCMS Revenue</strong>
+            <small className="truncate">{companySubLabel}</small>
+          </span>
+        </Link>
       </div>
 
       <aside className="sidebar no-print hidden min-[1100px]:flex">

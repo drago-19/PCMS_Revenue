@@ -4,10 +4,16 @@
  * (เช่น router.push หลังกดปุ่มค้นหา / แบ่งหน้า / เลือกวันที่)
  */
 export const NAVIGATION_START_EVENT = "pcms:navigation-start";
+export const NAVIGATION_CANCEL_EVENT = "pcms:navigation-cancel";
 
 export function notifyNavigationStart(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(NAVIGATION_START_EVENT));
+}
+
+export function notifyNavigationCancel(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(NAVIGATION_CANCEL_EVENT));
 }
 
 type PendingListener = () => void;

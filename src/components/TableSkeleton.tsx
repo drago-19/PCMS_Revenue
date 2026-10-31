@@ -21,8 +21,8 @@ const tableSkeletonVariants = cva("flex w-full min-w-0 flex-col", {
 });
 
 export function recordTableRegionHeight(height: number): void {
-  if (Number.isFinite(height) && height >= 420) {
-    lastMeasuredTableHeight = Math.round(height);
+  if (Number.isFinite(height) && height >= 240) {
+    lastMeasuredTableHeight = Math.max(560, Math.round(height));
   }
 }
 

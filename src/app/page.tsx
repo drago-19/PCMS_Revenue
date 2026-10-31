@@ -37,12 +37,12 @@ export default async function DashboardPage() {
         actions={
           <>
             <Button asChild variant="secondary">
-              <Link href="/bills">
+              <Link href="/bills" prefetch={false}>
                 <IconReceipt size={16} /> ดูบิลคำสั่งซื้อทั้งหมด
               </Link>
             </Button>
             <Button asChild variant="default">
-              <Link href="/import">
+              <Link href="/import" prefetch={false}>
                 <IconUpload size={17} /> อัปโหลดไฟล์รายได้
               </Link>
             </Button>
@@ -61,7 +61,7 @@ export default async function DashboardPage() {
             ระบบจะสร้างบิลสรุปยอดชำระให้ทุกหมายเลขคำสั่งซื้อโดยอัตโนมัติ
           </p>
           <Button asChild variant="default">
-            <Link href="/import">
+            <Link href="/import" prefetch={false}>
               <IconUpload size={17} /> เลือกไฟล์ .xlsx
             </Link>
           </Button>
@@ -150,13 +150,13 @@ export default async function DashboardPage() {
               </div>
               <div className="hero-actions">
                 <Button asChild variant="default">
-                  <Link href={`/bills?date=${latest.date}`}>
+                  <Link href={`/bills?date=${latest.date}`} prefetch={false}>
                     เปิดดูบิลรอบนี้ ({latest.orderCount.toLocaleString("th-TH")} บิล){" "}
                     <IconChevronRight size={16} />
                   </Link>
                 </Button>
                 <Button asChild variant="outline">
-                  <Link href={`/days/${latest.date}/invoices`}>
+                  <Link href={`/days/${latest.date}/invoices`} prefetch={false}>
                     <IconReceipt size={16} /> พิมพ์ใบกำกับภาษีทั้งรอบ
                   </Link>
                 </Button>
@@ -195,7 +195,7 @@ export default async function DashboardPage() {
               </div>
               <div className="mt-4 pt-3 border-t border-border">
                 <Button asChild variant="secondary" size="sm" className="w-full justify-between">
-                  <Link href="/bills">
+                  <Link href="/bills" prefetch={false}>
                     ค้นหาบิลทั้งหมด ({stats.orderCount.toLocaleString("th-TH")}){" "}
                     <IconChevronRight size={15} />
                   </Link>
@@ -217,7 +217,7 @@ export default async function DashboardPage() {
               </div>
               <div className="mt-4 pt-3 border-t border-border">
                 <Button asChild variant="secondary" size="sm" className="w-full justify-between">
-                  <Link href="/products">
+                  <Link href="/products" prefetch={false}>
                     เปิดสรุปยอด SKU <IconChevronRight size={15} />
                   </Link>
                 </Button>
@@ -238,7 +238,7 @@ export default async function DashboardPage() {
               </div>
               <div className="mt-4 pt-3 border-t border-border">
                 <Button asChild variant="default" size="sm" className="w-full justify-between">
-                  <Link href="/import">
+                  <Link href="/import" prefetch={false}>
                     ไปหน้าอัปโหลดไฟล์ <IconChevronRight size={15} />
                   </Link>
                 </Button>
@@ -262,7 +262,7 @@ export default async function DashboardPage() {
               </div>
               <div className="mt-4 pt-3 border-t border-border">
                 <Button asChild variant="secondary" size="sm" className="w-full justify-between">
-                  <Link href="/history">
+                  <Link href="/history" prefetch={false}>
                     ดูประวัติการนำเข้า ({stats.importCount.toLocaleString("th-TH")}){" "}
                     <IconChevronRight size={15} />
                   </Link>

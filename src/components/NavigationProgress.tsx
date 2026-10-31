@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
+  NAVIGATION_CANCEL_EVENT,
   NAVIGATION_START_EVENT,
   setNavigationPending,
 } from "@/lib/navigation-progress";
@@ -52,25 +53,26 @@ export function NavigationProgress() {
   }, [clearTimers]);
 
   const start = useCallback(() => {
-    if (pendingRef.current) return;
-    pendingRef.current = true;
-    // บันทึกความสูงของโซนตารางรวมแถบแบ่งหน้าก่อนสลับเป็น skeleton เพื่อกันความสูงหน้าหดกระตุก
-    const tableWrap = document.querySelector<HTMLElement>(
-      '[data-slot="table-container"]',
-    );
-    const paginationEl = document.querySelector<HTMLElement>(".pagination");
-    const emptyWrap = document.querySelector<HTMLElement>(".empty-state");
-    if (tableWrap) {
-      recordTableRegionHeight(
-        tableWrap.offsetHeight + (paginationEl?.offsetHeight ?? 0),
+    if (!pendingRef.current) {
+      pendingRef.current = true;
+      // บันทึกความสูงของโซนตารางรวมแถบแบ่งหน้าก่อนสลับเป็น skeleton เพื่อกันความสูงหน้าหดกระตุก
+      const tableWrap = document.querySelector<HTMLElement>(
+        '[data-slot="table-container"]',
       );
-    } else if (emptyWrap) {
-      recordTableRegionHeight(
-        emptyWrap.parentElement?.offsetHeight ?? emptyWrap.offsetHeight,
-      );
+      const paginationEl = document.querySelector<HTMLElement>(".pagination");
+      const emptyWrap = document.querySelector<HTMLElement>(".empty-state");
+      if (tableWrap) {
+        recordTableRegionHeight(
+          tableWrap.offsetHeight + (paginationEl?.offsetHeight ?? 0),
+        );
+      } else if (emptyWrap) {
+        recordTableRegionHeight(
+          emptyWrap.parentElement?.offsetHeight ?? emptyWrap.offsetHeight,
+        );
+      }
+      // เปิดใช้ทันที (ไม่หน่วง 120ms) เพื่อให้ skeleton ของตารางขึ้นพร้อมคลิก
+      setNavigationPending(true);
     }
-    // เปิดใช้ทันที (ไม่หน่วง 120ms) เพื่อให้ skeleton ของตารางขึ้นพร้อมคลิก
-    setNavigationPending(true);
     clearTimers();
     showTimerRef.current = window.setTimeout(() => {
       setVisible(true);
@@ -129,11 +131,17 @@ export function NavigationProgress() {
       start();
     }
 
+    function handleCancel() {
+      stop();
+    }
+
     document.addEventListener("click", handleClick, true);
     window.addEventListener(NAVIGATION_START_EVENT, handleNotify);
+    window.addEventListener(NAVIGATION_CANCEL_EVENT, handleCancel);
     return () => {
       document.removeEventListener("click", handleClick, true);
       window.removeEventListener(NAVIGATION_START_EVENT, handleNotify);
+      window.removeEventListener(NAVIGATION_CANCEL_EVENT, handleCancel);
       clearTimers();
     };
   }, [clearTimers, start]);

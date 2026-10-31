@@ -42,7 +42,6 @@ import {
 } from "@/components/ui/table";
 import { getRowShippingSummary } from "@/lib/bill";
 import { formatDate, formatDateLong, formatTHB } from "@/lib/format";
-import { isOrderEligibleForInvoice } from "@/lib/invoice";
 import { cn } from "@/lib/utils";
 import {
   type BillCategoryKey,
@@ -490,7 +489,7 @@ export default async function BillsPage({
               <span className="text-[11.5px] font-extrabold tracking-tight text-[#334155]">
                 4. ค้นหาและเลือกช่วงวันชำระ (Search & Date)
               </span>
-              <FilterForm className="flex max-w-[1140px] flex-wrap items-center gap-2">
+              <FilterForm autoSubmitDelay={400} className="flex max-w-[1140px] flex-wrap items-center gap-2">
                 {channel !== "all" ? (
                   <input type="hidden" name="channel" value={channel} />
                 ) : null}
@@ -539,20 +538,6 @@ export default async function BillsPage({
                   }}
                 />
 
-                <Button
-                  type="submit"
-                  variant="default"
-                  size="sm"
-                  className={`h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial ${
-                    channel === "Shopee"
-                      ? "bg-[#ee4d2d] text-white hover:bg-[#d73211]"
-                      : channel === "Facebook"
-                        ? "bg-[#1877F2] text-white hover:bg-[#166fe5]"
-                        : ""
-                  }`}
-                >
-                  <IconSearch size={15} /> ค้นหา
-                </Button>
                 {hasFilters ? (
                   <Button
                     asChild
@@ -622,7 +607,7 @@ export default async function BillsPage({
 
         <TableLoadingBoundary
           rows={12}
-          columns={7}
+          columns={6}
           label="กำลังโหลดรายการคำสั่งซื้อ..."
         >
           {result.rows.length === 0 ? (
@@ -692,25 +677,22 @@ export default async function BillsPage({
             {(() => {
               const isFb = channel === "Facebook";
               const colOrderClass = isFb
-                ? "min-[768px]:w-[30%] min-[900px]:w-[22%] min-[900px]:min-w-[200px]"
-                : "min-[768px]:w-[30%] min-[900px]:w-[20%] min-[900px]:min-w-[190px]";
+                ? "min-[768px]:w-[38%] min-[900px]:w-[25%] min-[900px]:min-w-[200px]"
+                : "min-[768px]:w-[38%] min-[900px]:w-[23%] min-[900px]:min-w-[190px]";
               const colSkuClass = isFb
-                ? "min-[768px]:w-[35%] min-[900px]:w-[30%] min-[900px]:min-w-[240px]"
-                : "min-[768px]:w-[35%] min-[900px]:w-[25%] min-[900px]:min-w-[230px]";
+                ? "min-[768px]:w-[42%] min-[900px]:w-[35%] min-[900px]:min-w-[240px]"
+                : "min-[768px]:w-[42%] min-[900px]:w-[30%] min-[900px]:min-w-[230px]";
               const colIncomeClass = isFb
-                ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[11%] min-[900px]:min-w-[100px]"
-                : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[10%] min-[900px]:min-w-[95px]";
+                ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[12%] min-[900px]:min-w-[100px]"
+                : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[11%] min-[900px]:min-w-[95px]";
               const colShippingClass = isFb
-                ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[13%] min-[900px]:min-w-[125px]"
-                : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[12%] min-[900px]:min-w-[120px]";
+                ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[14%] min-[900px]:min-w-[125px]"
+                : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[13%] min-[900px]:min-w-[120px]";
               const colFeeClass =
-                "num min-[768px]:max-[899px]:hidden min-[900px]:w-[10%] min-[900px]:min-w-[95px]";
+                "num min-[768px]:max-[899px]:hidden min-[900px]:w-[11%] min-[900px]:min-w-[95px]";
               const colPayoutClass = isFb
-                ? "num min-[768px]:w-[17%] min-[900px]:w-[12%] min-[900px]:min-w-[110px]"
-                : "num min-[768px]:w-[17%] min-[900px]:w-[11%] min-[900px]:min-w-[105px]";
-              const colActionsClass = isFb
-                ? "num min-[768px]:w-[18%] min-[900px]:w-[12%] min-[900px]:min-w-[130px]"
-                : "num min-[768px]:w-[18%] min-[900px]:w-[12%] min-[900px]:min-w-[130px]";
+                ? "num min-[768px]:w-[20%] min-[900px]:w-[14%] min-[900px]:min-w-[115px]"
+                : "num min-[768px]:w-[20%] min-[900px]:w-[12%] min-[900px]:min-w-[110px]";
 
               return (
                 <BillPreviewProvider>
@@ -811,7 +793,6 @@ export default async function BillsPage({
                           </span>
                         </Link>
                       </TableHead>
-                      <TableHead className={colActionsClass}>เอกสาร</TableHead>
                     </TableRow>
                   </TableHeader>
               <TableBody>
@@ -1134,48 +1115,6 @@ export default async function BillsPage({
                           )}
                         </div>
                       </TableCell>
-                      <TableCell data-label="เอกสาร" className={cn(colActionsClass, "num")}>
-                        <div className="inline-flex flex-nowrap items-center justify-end rounded-lg border border-[#cbd5e1] bg-[#f8fafc] p-0.5 shadow-2xs whitespace-nowrap">
-                          <BillPreviewTrigger
-                            row={row}
-                            defaultTab="bill"
-                            triggerVariant="ghost"
-                            label="ดูบิล"
-                            className="min-[768px]:h-7 min-[768px]:min-h-[28px] rounded-[6px] border-0 bg-white px-2 text-xs font-bold text-[#0f172a] shadow-2xs hover:bg-[#f1f5f9] hover:text-primary"
-                          />
-                          {isOrderEligibleForInvoice(row) ? (
-                            <>
-                              <span
-                                aria-hidden="true"
-                                className="mx-0.5 h-4 w-px shrink-0 bg-[#cbd5e1]/80"
-                              />
-                              <BillPreviewTrigger
-                                row={row}
-                                defaultTab="invoice"
-                                triggerVariant="ghost"
-                                label="ใบกำกับฯ"
-                                className="min-[768px]:h-7 min-[768px]:min-h-[28px] rounded-[6px] border-0 bg-transparent px-2 text-xs font-semibold text-[#334155] shadow-none hover:bg-white hover:text-[#0f172a] hover:shadow-2xs"
-                              />
-                              {row.sellerSettings?.enableFullTaxInvoice ===
-                              true ? (
-                                <>
-                                  <span
-                                    aria-hidden="true"
-                                    className="mx-0.5 h-4 w-px shrink-0 bg-[#cbd5e1]/80"
-                                  />
-                                  <BillPreviewTrigger
-                                    row={row}
-                                    defaultTab="invoice_full"
-                                    triggerVariant="ghost"
-                                    label="ใบเต็ม"
-                                    className="min-[768px]:h-7 min-[768px]:min-h-[28px] rounded-[6px] border-0 bg-transparent px-2 text-xs font-semibold text-[#334155] shadow-none hover:bg-white hover:text-[#0f172a] hover:shadow-2xs"
-                                  />
-                                </>
-                              ) : null}
-                            </>
-                          ) : null}
-                        </div>
-                      </TableCell>
                     </BillTableRow>
                   );
                 })}
@@ -1281,7 +1220,6 @@ export default async function BillsPage({
                   >
                     <CompactValueToggle value={formatTHB(result.summary.payout)} />
                   </TableCell>
-                  <TableCell data-label="" className={cn(colActionsClass, "max-[767px]:hidden")} />
                 </TableRow>
               </TableFooter>
             </Table>
