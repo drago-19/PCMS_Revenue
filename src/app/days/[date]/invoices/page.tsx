@@ -7,6 +7,7 @@ import {
   type InvoicePaperSize,
 } from "@/components/InvoiceDocument";
 import { InvoiceZoomControl } from "@/components/InvoiceZoomControl";
+import { BatchPicker } from "@/components/BatchPicker";
 import { PrintButton } from "@/components/PrintButton";
 import { IconAlert, IconArrowLeft } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,23 @@ import {
 } from "@/lib/queries";
 import { getDocumentSettings } from "@/lib/settings";
 
+
+const SEGMENT_GROUP =
+  "w-full gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:w-auto sm:flex-wrap sm:items-center";
+const SEGMENT_BASE =
+  "h-8 min-h-[32px] w-full justify-center gap-1.5 px-2.5 text-xs sm:w-auto";
+const SEGMENT_ON = `${SEGMENT_BASE} font-bold shadow-xs`;
+const SEGMENT_OFF = `${SEGMENT_BASE} text-[#334155] hover:bg-white hover:text-[#0f172a]`;
+
+/** แถวตั้งค่า: ป้ายกำกับคอลัมน์ซ้ายกว้างคงที่ ให้ตัวควบคุมทุกแถวเริ่มที่แนวเดียวกัน */
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5 sm:grid sm:grid-cols-[104px_minmax(0,1fr)] sm:items-center sm:gap-3">
+      <span className="text-xs font-semibold whitespace-nowrap text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>
+    </div>
+  );
+}
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "พิมพ์ใบกำกับภาษีรวม (รายวัน / รายเดือน)" };
@@ -232,37 +250,56 @@ export default async function BulkInvoicesPage({
     <>
       <style media="print">{pagePrintCss}</style>
       <Card className="no-print mb-5 w-full gap-0 overflow-hidden border-border bg-white p-0 shadow-md min-[768px]:sticky min-[768px]:top-[61px] min-[768px]:z-30 min-[1100px]:top-0">
-        {/* แถวที่ 1: กระจายเต็มความกว้าง (ซ้าย: ปุ่มกลับ | กลาง: เลือกรอบบิล + จำนวนใบ | ขวา: รูปแบบเอกสาร + ปุ่มพิมพ์) */}
-        <div className="flex flex-col gap-2.5 border-b border-border/80 px-3.5 py-3 sm:px-5 min-[960px]:flex-row min-[960px]:flex-wrap min-[960px]:items-center min-[960px]:justify-between">
-          <div className="flex w-full items-center justify-between gap-2 min-[960px]:w-auto">
-            <Button asChild variant="outline" size="xs" className="h-9 px-3">
+        {/* ส่วนหัว: ปุ่มกลับ + ชื่อหน้า/สรุปจำนวน | ปุ่มพิมพ์ */}
+        <div className="flex flex-col gap-3 border-b border-border/80 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button
+              asChild
+              variant="outline"
+              size="icon"
+              className="size-10 shrink-0"
+              aria-label="กลับหน้าบิล"
+            >
               <Link href={`/bills?date=${encodeURIComponent(date)}`}>
-                <IconArrowLeft size={15} /> กลับหน้าบิล
+                <IconArrowLeft size={16} />
               </Link>
             </Button>
-            <Badge
-              variant="default"
-              size="sm"
-              className="h-8 px-2.5 font-bold min-[960px]:hidden"
-            >
-              {batchCount > 1
-                ? `ชุดที่ ${currentBatch}/${batchCount} (${invoices.length} ใบ)`
-                : `เตรียมพิมพ์ ${invoices.length.toLocaleString("th-TH")} ใบ`}
-            </Badge>
+            <div className="min-w-0">
+              <h1 className="text-base leading-tight font-bold text-foreground">
+                พิมพ์ใบกำกับภาษีรวม · {periodTitle}
+              </h1>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {batchCount > 1 ? (
+                  <>
+                    ชุดที่ <strong className="text-foreground">{currentBatch}/{batchCount}</strong> · ใบที่{" "}
+                    {(batchStartIdx + 1).toLocaleString("th-TH")}–{batchEndIdx.toLocaleString("th-TH")} จาก{" "}
+                    {totalFilteredCount.toLocaleString("th-TH")} ใบ
+                  </>
+                ) : (
+                  <>
+                    เตรียมพิมพ์{" "}
+                    <strong className="text-foreground">
+                      {invoices.length.toLocaleString("th-TH")} ใบ
+                    </strong>
+                  </>
+                )}
+              </p>
+            </div>
           </div>
+          <PrintButton className="w-full shrink-0 sm:w-auto" />
+        </div>
 
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
-            <div className="flex w-full items-center gap-2 sm:w-auto">
-              <span className="shrink-0 text-xs font-bold whitespace-nowrap text-foreground">
-                รอบบิล:
-              </span>
+        {/* ตัวกรองข้อมูล + ตั้งค่าการพิมพ์ (ป้ายกำกับคอลัมน์เดียวกัน จัดแนวตรงกัน) */}
+        <div className="grid gap-3 px-3.5 py-3 sm:px-5 min-[1440px]:grid-cols-2 min-[1440px]:gap-x-8">
+          <div className="flex min-w-0 flex-col gap-3">
+            <FieldRow label="รอบบิล">
               <DatePickerField
                 name="date"
                 defaultValue={date}
                 availableDates={availableDates}
                 routePattern="/days/[date]/invoices"
                 allowClear={false}
-                className="flex-1 sm:w-auto sm:flex-initial"
+                className="w-full sm:w-auto"
                 extraParams={{
                   mode: mode === "full" ? "full" : undefined,
                   paper:
@@ -275,292 +312,174 @@ export default async function BulkInvoicesPage({
                   link: effectiveLinkFilter !== "linked" ? effectiveLinkFilter : undefined,
                 }}
               />
-            </div>
-            <div
-              role="group"
-              aria-label="กรองช่องทางพิมพ์ใบกำกับภาษี"
-              className="flex w-full flex-wrap items-center gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto"
-            >
-              {[
-                { key: "all" as const, label: "ทุกช่องทาง", count: billableTotalCount },
-                { key: "TikTok" as const, label: "TikTok", count: tiktokOrdersCount },
-                { key: "Shopee" as const, label: "Shopee", count: shopeeOrdersCount },
-                { key: "Facebook" as const, label: "Facebook", count: facebookOrdersCount },
-              ].map((ch) => {
-                const active = channelFilter === ch.key;
-                return (
-                  <Button
-                    key={ch.key}
-                    asChild
-                    variant={active ? "default" : "ghost"}
-                    size="xs"
-                    className={
-                      active
-                        ? ch.key === "Shopee"
-                          ? "h-8 min-h-[32px] flex-1 justify-center bg-[#ee4d2d] px-2 text-white shadow-xs hover:bg-[#d73211] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
-                          : ch.key === "Facebook"
-                            ? "h-8 min-h-[32px] flex-1 justify-center bg-[#1877F2] px-2 text-white shadow-xs hover:bg-[#166fe5] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
-                            : "h-8 min-h-[32px] flex-1 justify-center px-2 shadow-xs sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
-                        : "h-8 min-h-[32px] flex-1 justify-center px-2 text-[#334155] hover:bg-white hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:flex-initial sm:px-2.5"
-                    }
-                  >
-                    <Link href={buildPrintHref({ nextChannel: ch.key })} scroll={false}>
-                      {ch.label} ({ch.count.toLocaleString("th-TH")})
-                    </Link>
-                  </Button>
-                );
-              })}
-            </div>
-            <Badge
-              variant="default"
-              size="sm"
-              className="hidden h-7 px-2.5 font-bold min-[960px]:inline-flex"
-            >
-              {batchCount > 1
-                ? `พิมพ์ชุดที่ ${currentBatch}/${batchCount} (${(batchStartIdx + 1).toLocaleString("th-TH")}–${batchEndIdx.toLocaleString("th-TH")} จาก ${totalFilteredCount.toLocaleString("th-TH")} ใบ)`
-                : `เตรียมพิมพ์ ${invoices.length.toLocaleString("th-TH")} ใบ`}
-            </Badge>
-          </div>
-
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
-            {enableFullTaxInvoice ? (
+            </FieldRow>
+            <FieldRow label="ช่องทาง">
               <div
                 role="group"
-                aria-label="รูปแบบใบกำกับภาษี"
-                className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-[#f1f5f9] p-1 sm:inline-flex sm:w-auto sm:items-center"
+                aria-label="กรองช่องทางพิมพ์ใบกำกับภาษี"
+                className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
               >
-                <Button
-                  asChild
-                  variant={mode === "abbreviated" ? "default" : "ghost"}
-                  size="xs"
-                  className={
-                    mode === "abbreviated"
-                      ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
-                      : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                  }
-                >
-                  <Link
-                    href={buildPrintHref({
-                      nextMode: "abbreviated",
-                      nextPaper: settings.defaultPaperSize ?? "a6",
-                    })}
-                    scroll={false}
-                  >
-                    ใบกำกับฯ อย่างย่อ
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  variant={mode === "full" ? "default" : "ghost"}
-                  size="xs"
-                  className={
-                    mode === "full"
-                      ? "h-8 min-h-[32px] w-full shadow-xs sm:w-auto"
-                      : "h-8 min-h-[32px] w-full text-[#334155] hover:bg-white hover:text-[#0f172a] sm:w-auto"
-                  }
-                >
-                  <Link
-                    href={buildPrintHref({ nextMode: "full", nextPaper: "a4" })}
-                    scroll={false}
-                  >
-                    แบบเต็มรูป (A4)
-                  </Link>
-                </Button>
+                {[
+                  { key: "all" as const, label: "ทุกช่องทาง", count: billableTotalCount },
+                  { key: "TikTok" as const, label: "TikTok", count: tiktokOrdersCount },
+                  { key: "Shopee" as const, label: "Shopee", count: shopeeOrdersCount },
+                  { key: "Facebook" as const, label: "Facebook", count: facebookOrdersCount },
+                ].map((ch) => {
+                  const active = channelFilter === ch.key;
+                  const brand =
+                    active && ch.key === "Shopee"
+                      ? " bg-[#ee4d2d] text-white hover:bg-[#d73211]"
+                      : active && ch.key === "Facebook"
+                        ? " bg-[#1877F2] text-white hover:bg-[#166fe5]"
+                        : "";
+                  return (
+                    <Button
+                      key={ch.key}
+                      asChild
+                      variant={active ? "default" : "ghost"}
+                      size="xs"
+                      className={(active ? SEGMENT_ON : SEGMENT_OFF) + brand}
+                    >
+                      <Link href={buildPrintHref({ nextChannel: ch.key })} scroll={false}>
+                        {ch.label}
+                        <span className={active ? "opacity-80" : "text-muted-foreground"}>
+                          {ch.count.toLocaleString("th-TH")}
+                        </span>
+                      </Link>
+                    </Button>
+                  );
+                })}
               </div>
-            ) : null}
-            <PrintButton className="w-full sm:w-auto" />
-          </div>
-        </div>
-
-        {/* แถวที่ 2: กระจายเต็มความกว้างในบรรทัดเดียว (ซ้าย: คัดกรองสถานะ | ขวา: ขนาดกระดาษพิมพ์) */}
-        {unlinkedOrdersCount > 0 || mode === "abbreviated" ? (
-          <div className="flex flex-col gap-2.5 bg-[#f8fafc] px-3.5 py-2.5 sm:px-5 min-[960px]:flex-row min-[960px]:flex-wrap min-[960px]:items-center min-[960px]:justify-between">
+            </FieldRow>
             {unlinkedOrdersCount > 0 ? (
-              <div className="flex w-full flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
-                <span className="text-xs font-bold whitespace-nowrap text-foreground">
-                  คัดกรองบิล:
-                </span>
+              <FieldRow label="คัดกรองบิล">
                 <div
                   role="group"
                   aria-label="คัดกรองสถานะการผูกไฟล์"
-                  className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-white p-1 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center"
+                  className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
                 >
-                  <Button
-                    asChild
-                    variant={effectiveLinkFilter === "linked" ? "default" : "ghost"}
-                    size="xs"
-                    className={
-                      effectiveLinkFilter === "linked"
-                        ? "h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:w-auto"
-                        : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
-                    }
-                  >
-                    <Link href={buildPrintHref({ nextLink: "linked" })} scroll={false}>
-                      <span
-                        className={`size-2 shrink-0 rounded-full ${effectiveLinkFilter === "linked"
-                            ? "bg-white"
-                            : "bg-[#059669]"
-                          }`}
-                      />
-                      ข้อมูลครบ ({linkedOrdersCount.toLocaleString("th-TH")})
-                    </Link>
-                  </Button>
-                  <Button
-                    asChild
-                    variant={effectiveLinkFilter === "all" ? "default" : "ghost"}
-                    size="xs"
-                    className={
-                      effectiveLinkFilter === "all"
-                        ? "h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:w-auto"
-                        : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
-                    }
-                  >
-                    <Link href={buildPrintHref({ nextLink: "all" })} scroll={false}>
-                      ทั้งหมด ({channelFilteredCount.toLocaleString("th-TH")})
-                    </Link>
-                  </Button>
-                  <Button
-                    asChild
-                    variant={effectiveLinkFilter === "unlinked" ? "default" : "ghost"}
-                    size="xs"
-                    className={
-                      effectiveLinkFilter === "unlinked"
-                        ? "col-span-2 h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:col-span-1 sm:w-auto"
-                        : "col-span-2 h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:col-span-1 sm:w-auto"
-                    }
-                  >
-                    <Link href={buildPrintHref({ nextLink: "unlinked" })} scroll={false}>
-                      <span
-                        className={`size-2 shrink-0 rounded-full ${effectiveLinkFilter === "unlinked"
-                            ? "bg-white"
-                            : "bg-[#d97706]"
-                          }`}
-                      />
-                      รอไฟล์ ออเดอร์ใน shipnity ({unlinkedOrdersCount.toLocaleString("th-TH")})
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="hidden min-[960px]:block" />
-            )}
-
-            {mode === "abbreviated" ? (
-              <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
-                <div className="flex w-full flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
-                  <span className="text-xs font-bold whitespace-nowrap text-foreground">
-                    ขนาดกระดาษ:
-                  </span>
-                  <div
-                    role="group"
-                    aria-label="ขนาดกระดาษพิมพ์"
-                    className="grid w-full grid-cols-2 gap-1 rounded-xl border border-border bg-white p-1 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center"
-                  >
-                    {[
-                      {
-                        key: "a6" as InvoicePaperSize,
-                        label: "100×150 มม. (A6)",
-                      },
-                      {
-                        key: "a4-4up" as InvoicePaperSize,
-                        label: "A4 แบ่ง 4 ใบ",
-                      },
-                      {
-                        key: "80mm" as InvoicePaperSize,
-                        label: "สลิป 80 มม.",
-                      },
-                      {
-                        key: "a4" as InvoicePaperSize,
-                        label: "A4 เต็มแผ่น",
-                      },
-                    ].map((opt) => {
-                      const active = paper === opt.key;
-                      return (
-                        <Button
-                          key={opt.key}
-                          asChild
-                          variant={active ? "default" : "ghost"}
-                          size="xs"
-                          className={
-                            active
-                              ? "h-8 min-h-[32px] w-full px-2.5 shadow-2xs sm:w-auto"
-                              : "h-8 min-h-[32px] w-full px-2.5 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
-                          }
-                        >
-                          <Link href={buildPrintHref({ nextPaper: opt.key })} scroll={false}>
-                            {opt.label}
-                          </Link>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {paper === "a6" || paper === "a4-4up" || paper === "80mm" ? (
-                  <InvoiceZoomControl compact />
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* แถบแบ่งชุดพิมพ์ (Batch Print Pagination) เมื่อมีใบกำกับภาษีมากกว่า 100 ใบ ป้องกันเบราว์เซอร์ค้างเมื่อพิมพ์ทั้งเดือน */}
-        {totalFilteredCount > 100 ? (
-          <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-border/80 bg-[#f8fafc] px-3.5 py-2.5 sm:px-5 sm:py-2">
-            <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
-              <span className="text-xs font-bold whitespace-nowrap text-foreground">
-                แบ่งชุดพิมพ์ ({totalFilteredCount.toLocaleString("th-TH")} ใบ):
-              </span>
-              <div
-                role="group"
-                aria-label="เลือกชุดใบกำกับภาษีที่ต้องการพิมพ์"
-                className="grid w-full grid-cols-2 gap-1.5 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-1"
-              >
-                {(() => {
-                  const visibleBatches: number[] = [];
-                  if (batchCount <= 12) {
-                    for (let i = 1; i <= batchCount; i++) visibleBatches.push(i);
-                  } else {
-                    const startB = Math.max(1, Math.min(currentBatch - 4, batchCount - 9));
-                    const endB = Math.min(batchCount, startB + 9);
-                    if (startB > 1) visibleBatches.push(1);
-                    for (let i = startB; i <= endB; i++) visibleBatches.push(i);
-                    if (endB < batchCount) visibleBatches.push(batchCount);
-                  }
-                  return visibleBatches.map((bNum) => {
-                    const i = bNum - 1;
-                    const sIdx = i * batchSize + 1;
-                    const eIdx = Math.min(totalFilteredCount, (i + 1) * batchSize);
-                    const active = currentBatch === bNum;
+                  {[
+                    { key: "linked" as const, label: "ข้อมูลครบ", count: linkedOrdersCount, dot: "bg-[#059669]" },
+                    { key: "all" as const, label: "ทั้งหมด", count: channelFilteredCount, dot: "" },
+                    { key: "unlinked" as const, label: "รอไฟล์ ออเดอร์ใน shipnity", count: unlinkedOrdersCount, dot: "bg-[#d97706]" },
+                  ].map((opt) => {
+                    const active = effectiveLinkFilter === opt.key;
                     return (
                       <Button
-                        key={bNum}
+                        key={opt.key}
                         asChild
-                        variant={active ? "default" : "outline"}
+                        variant={active ? "default" : "ghost"}
                         size="xs"
-                        className={
-                          active
-                            ? "h-8 min-h-[32px] w-full justify-center px-2.5 text-xs font-bold shadow-2xs sm:w-auto"
-                            : "h-8 min-h-[32px] w-full justify-center bg-white px-2.5 text-xs text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:w-auto"
-                        }
+                        className={`${active ? SEGMENT_ON : SEGMENT_OFF}${opt.key === "unlinked" ? " col-span-2 sm:col-span-1" : ""}`}
                       >
-                        <Link href={buildPrintHref({ nextBatch: bNum })} scroll={false}>
-                          ชุด {bNum} ({sIdx.toLocaleString("th-TH")}–{eIdx.toLocaleString("th-TH")})
+                        <Link href={buildPrintHref({ nextLink: opt.key })} scroll={false}>
+                          {opt.dot ? (
+                            <span className={`size-2 shrink-0 rounded-full ${active ? "bg-white" : opt.dot}`} />
+                          ) : null}
+                          {opt.label}
+                          <span className={active ? "opacity-80" : "text-muted-foreground"}>
+                            {opt.count.toLocaleString("th-TH")}
+                          </span>
                         </Link>
                       </Button>
                     );
-                  });
-                })()}
-              </div>
-            </div>
+                  })}
+                </div>
+              </FieldRow>
+            ) : null}
+          </div>
 
-            <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
-              <span className="text-xs font-semibold whitespace-nowrap text-muted-foreground">
-                จำนวนต่อชุด:
+          <div className="flex min-w-0 flex-col gap-3 border-t border-border/70 pt-3 min-[1440px]:border-t-0 min-[1440px]:border-l min-[1440px]:pt-0 min-[1440px]:pl-8">
+            {enableFullTaxInvoice ? (
+              <FieldRow label="รูปแบบเอกสาร">
+                <div
+                  role="group"
+                  aria-label="รูปแบบใบกำกับภาษี"
+                  className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
+                >
+                  <Button
+                    asChild
+                    variant={mode === "abbreviated" ? "default" : "ghost"}
+                    size="xs"
+                    className={mode === "abbreviated" ? SEGMENT_ON : SEGMENT_OFF}
+                  >
+                    <Link
+                      href={buildPrintHref({
+                        nextMode: "abbreviated",
+                        nextPaper: settings.defaultPaperSize ?? "a6",
+                      })}
+                      scroll={false}
+                    >
+                      ใบกำกับฯ อย่างย่อ
+                    </Link>
+                  </Button>
+                  <Button
+                    asChild
+                    variant={mode === "full" ? "default" : "ghost"}
+                    size="xs"
+                    className={mode === "full" ? SEGMENT_ON : SEGMENT_OFF}
+                  >
+                    <Link href={buildPrintHref({ nextMode: "full", nextPaper: "a4" })} scroll={false}>
+                      แบบเต็มรูป (A4)
+                    </Link>
+                  </Button>
+                </div>
+              </FieldRow>
+            ) : null}
+            {mode === "abbreviated" ? (
+              <FieldRow label="ขนาดกระดาษ">
+                <div
+                  role="group"
+                  aria-label="ขนาดกระดาษพิมพ์"
+                  className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
+                >
+                  {[
+                    { key: "a6" as InvoicePaperSize, label: "100×150 มม. (A6)" },
+                    { key: "a4-4up" as InvoicePaperSize, label: "A4 แบ่ง 4 ใบ" },
+                    { key: "80mm" as InvoicePaperSize, label: "สลิป 80 มม." },
+                    { key: "a4" as InvoicePaperSize, label: "A4 เต็มแผ่น" },
+                  ].map((opt) => {
+                    const active = paper === opt.key;
+                    return (
+                      <Button
+                        key={opt.key}
+                        asChild
+                        variant={active ? "default" : "ghost"}
+                        size="xs"
+                        className={active ? SEGMENT_ON : SEGMENT_OFF}
+                      >
+                        <Link href={buildPrintHref({ nextPaper: opt.key })} scroll={false}>
+                          {opt.label}
+                        </Link>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </FieldRow>
+            ) : null}
+            {mode === "abbreviated" &&
+              (paper === "a6" || paper === "a4-4up" || paper === "80mm") ? (
+              <div className="hidden sm:block sm:pl-[116px]">
+                <InvoiceZoomControl compact />
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* แบ่งชุดพิมพ์ (Batch Print Pagination) เมื่อมีใบกำกับภาษีมากกว่า 100 ใบ ป้องกันเบราว์เซอร์ค้างเมื่อพิมพ์ทั้งเดือน */}
+        {totalFilteredCount > 100 ? (
+          <div className="flex flex-col gap-2.5 border-t border-border/80 bg-[#f8fafc] px-3.5 py-3 sm:px-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-foreground">
+                แบ่งชุดพิมพ์{" "}
+                <span className="font-normal text-muted-foreground">
+                  · {totalFilteredCount.toLocaleString("th-TH")} ใบ / {batchCount} ชุด
+                </span>
               </span>
               <div
                 role="group"
                 aria-label="จำนวนใบกำกับภาษีต่อชุดพิมพ์"
-                className="grid w-full grid-cols-3 items-center gap-1 rounded-xl border border-border bg-white p-1 sm:inline-flex sm:w-auto"
+                className={`${SEGMENT_GROUP} grid grid-cols-3 sm:inline-flex`}
               >
                 {([100, 200, 500] as const).map((sz) => {
                   const active = batchSize === sz;
@@ -570,17 +489,10 @@ export default async function BulkInvoicesPage({
                       asChild
                       variant={active ? "default" : "ghost"}
                       size="xs"
-                      className={
-                        active
-                          ? "h-8 min-h-[32px] w-full justify-center px-2.5 text-xs font-bold sm:w-auto"
-                          : "h-8 min-h-[32px] w-full justify-center px-2.5 text-xs text-[#334155] hover:bg-[#f1f5f9] sm:w-auto"
-                      }
+                      className={active ? SEGMENT_ON : SEGMENT_OFF}
                     >
                       <Link
-                        href={buildPrintHref({
-                          nextBatchSize: sz,
-                          nextBatch: 1,
-                        })}
+                        href={buildPrintHref({ nextBatchSize: sz, nextBatch: 1 })}
                         scroll={false}
                       >
                         {sz} ใบ/ชุด
@@ -590,6 +502,30 @@ export default async function BulkInvoicesPage({
                 })}
               </div>
             </div>
+            <BatchPicker
+              currentBatch={currentBatch}
+              items={(() => {
+                const visibleBatches: number[] = [];
+                if (batchCount <= 12) {
+                  for (let i = 1; i <= batchCount; i++) visibleBatches.push(i);
+                } else {
+                  const startB = Math.max(1, Math.min(currentBatch - 4, batchCount - 9));
+                  const endB = Math.min(batchCount, startB + 9);
+                  if (startB > 1) visibleBatches.push(1);
+                  for (let i = startB; i <= endB; i++) visibleBatches.push(i);
+                  if (endB < batchCount) visibleBatches.push(batchCount);
+                }
+                return visibleBatches.map((bNum) => {
+                  const sIdx = (bNum - 1) * batchSize + 1;
+                  const eIdx = Math.min(totalFilteredCount, bNum * batchSize);
+                  return {
+                    batch: bNum,
+                    href: buildPrintHref({ nextBatch: bNum }),
+                    rangeLabel: `${sIdx.toLocaleString("th-TH")}–${eIdx.toLocaleString("th-TH")}`,
+                  };
+                });
+              })()}
+            />
           </div>
         ) : null}
 
