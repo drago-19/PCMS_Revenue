@@ -1,17 +1,29 @@
 import Link from "next/link";
-import { BillPreviewTrigger } from "@/components/BillPreviewDialog";
+import {
+  BillPreviewProvider,
+  BillPreviewTrigger,
+  BillTableRow,
+} from "@/components/BillPreviewDialog";
+import {
+  BillsCategoryTabs,
+  BillsChannelBar,
+  BillsFilterProvider,
+  BillsSubFilters,
+} from "@/components/BillsFilterInteractive";
 import { CompactValueToggle } from "@/components/CompactValueToggle";
 import { CopyButton } from "@/components/CopyButton";
 import { DatePickerField } from "@/components/DatePickerField";
 import { FilterForm } from "@/components/FilterForm";
 import { EmptyState, PageHeader, StatCard } from "@/components/PageHeader";
 import { PaginationBar } from "@/components/PaginationBar";
+import { TableLoadingBoundary } from "@/components/TableLoadingBoundary";
 import {
   IconAlert,
   IconCheckCircle,
   IconReceipt,
   IconSearch,
   IconTrend,
+  IconTruck,
   IconUpload,
   IconWallet,
 } from "@/components/icons";
@@ -28,9 +40,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getRowShippingSummary } from "@/lib/bill";
 import { formatDate, formatDateLong, formatTHB } from "@/lib/format";
+import { isOrderEligibleForInvoice } from "@/lib/invoice";
+import { cn } from "@/lib/utils";
 import {
   type BillCategoryKey,
+  type BillLinkStatusKey,
   type BillSortKey,
   listBills,
   listDailyBatches,
@@ -94,14 +110,28 @@ export default async function BillsPage({
   const date = (params.date ?? "").trim();
   const createdDate = (params.createdDate ?? "").trim();
   const rawChannel = (params.channel ?? "all").trim();
-  const channel: "all" | "TikTok" | "Shopee" =
-    rawChannel === "TikTok" || rawChannel === "Shopee" ? rawChannel : "all";
+  const channel: "all" | "TikTok" | "Shopee" | "Facebook" =
+    rawChannel === "TikTok" ||
+    rawChannel === "Shopee" ||
+    rawChannel === "Facebook"
+      ? rawChannel
+      : "all";
   const rawStatus = (params.status ?? "all").trim();
   const status: "all" | "ok" | "mismatch" =
-    rawStatus === "ok" || rawStatus === "mismatch" ? rawStatus : "all";
+    channel === "Shopee" || channel === "Facebook"
+      ? "all"
+      : rawStatus === "ok" || rawStatus === "mismatch"
+        ? rawStatus
+        : "all";
   const rawLink = (params.link ?? "all").trim();
-  const linkStatus: "all" | "linked" | "unlinked" | "oms_only" =
-    rawLink === "linked" || rawLink === "unlinked" || rawLink === "oms_only"
+  const linkStatus: BillLinkStatusKey =
+    rawLink === "linked" ||
+    rawLink === "unlinked" ||
+    rawLink === "oms_only" ||
+    rawLink === "no_price" ||
+    rawLink === "all_fb" ||
+    rawLink === "shopee_negative" ||
+    rawLink === "shopee_zero"
       ? rawLink
       : "all";
   const rawCategory = (params.category ?? "normal").trim();
@@ -138,9 +168,9 @@ export default async function BillsPage({
 
   function buildHref(overrides: {
     nextPage?: number;
-    nextChannel?: "all" | "TikTok" | "Shopee";
+    nextChannel?: "all" | "TikTok" | "Shopee" | "Facebook";
     nextStatus?: "all" | "ok" | "mismatch";
-    nextLink?: "all" | "linked" | "unlinked" | "oms_only";
+    nextLink?: BillLinkStatusKey;
     nextCategory?: BillCategoryKey;
     nextSort?: BillSortKey;
     nextDate?: string;
@@ -209,19 +239,19 @@ export default async function BillsPage({
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop & Shopee · Order Settlements"
+        eyebrow="TikTok Shop, Shopee & Facebook · Order Settlements"
         title="หมวดบิลคำสั่งซื้อทั้งหมด"
         description={`กำลังแสดงข้อมูล: ${dateScopeText} · คลิกดูบิลหรือใบกำกับภาษีรายคำสั่งซื้อแบบป๊อปอัปได้ทันที`}
         actions={
           <Button asChild variant="default">
-            <Link href="/import">
+            <Link href="/import" prefetch>
               <IconUpload size={17} /> อัปโหลดไฟล์รายได้
             </Link>
           </Button>
         }
       />
 
-      <div className="stats">
+      <div className="stats [&>.stat]:p-[14px]">
         <StatCard
           label={
             category === "refund_fee"
@@ -240,26 +270,73 @@ export default async function BillsPage({
           icon={<IconTrend size={19} />}
         />
         <StatCard
+          label="สรุปค่าขนส่ง (ยอดสุทธิ)"
+          value={
+            result.summary.shippingNet > 0
+              ? `+${formatTHB(result.summary.shippingNet)}`
+              : formatTHB(result.summary.shippingNet)
+          }
+          hint={
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-tight font-medium">
+              <span className="inline-flex items-center gap-1 whitespace-nowrap text-emerald-700">
+                <span>รับมา:</span>
+                <strong className="font-bold">
+                  <CompactValueToggle
+                    value={`+${formatTHB(result.summary.shippingPositive)}`}
+                  />
+                </strong>
+              </span>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap text-rose-600">
+                <span>จ่ายจริง:</span>
+                <strong className="font-bold">
+                  <CompactValueToggle
+                    value={formatTHB(result.summary.shippingNegative)}
+                  />
+                </strong>
+              </span>
+            </div>
+          }
+          tone={
+            result.summary.shippingNet < 0
+              ? "negative"
+              : result.summary.shippingNet > 0
+                ? "positive"
+                : "default"
+          }
+          icon={<IconTruck size={19} />}
+        />
+        <StatCard
           label={
-            category === "refund_fee"
-              ? "ค่าขนส่งตีกลับ / ค่าธรรมเนียม"
-              : "หักค่าธรรมเนียมรวม"
+            channel === "Facebook"
+              ? "หักค่าธรรมเนียม (ไม่มี)"
+              : category === "refund_fee"
+                ? "ค่าขนส่งตีกลับ / ค่าธรรมเนียม"
+                : "หักค่าธรรมเนียมรวม"
           }
           value={formatTHB(result.summary.fees)}
           hint={
-            category === "refund_fee"
-              ? "ค่าส่งขาไป-ขากลับและค่าธรรมเนียมที่ถูกหัก"
-              : category === "normal" &&
-                  !q &&
-                  !createdDate &&
-                  channel === "all" &&
-                  status === "all" &&
-                  linkStatus === "all" &&
-                  result.categoryCounts.refundFee > 0
-                ? `รวมค่าส่งตีกลับ (${result.categoryCounts.refundFee} ใบ) = ${formatTHB(result.periodNetSummary.orderFees)}`
-                : "ค่าธรรมเนียมแพลตฟอร์มทั้งหมด"
+            channel === "Facebook"
+              ? "ช่องทาง Facebook ไม่มีหักค่าธรรมเนียมแพลตฟอร์ม"
+              : category === "refund_fee"
+                ? "ค่าส่งขาไป-ขากลับและค่าธรรมเนียมที่ถูกหัก"
+                : category === "normal" &&
+                    !q &&
+                    !createdDate &&
+                    channel === "all" &&
+                    status === "all" &&
+                    linkStatus === "all" &&
+                    result.categoryCounts.refundFee > 0
+                  ? (
+                      <>
+                        รวมค่าส่งตีกลับ ({result.categoryCounts.refundFee} ใบ) ={" "}
+                        <CompactValueToggle
+                          value={formatTHB(result.periodNetSummary.orderFees)}
+                        />
+                      </>
+                    )
+                  : "ค่าธรรมเนียมแพลตฟอร์มทั้งหมด"
           }
-          tone="negative"
+          tone={result.summary.fees < 0 ? "negative" : "default"}
           icon={<IconAlert size={19} />}
         />
         <StatCard
@@ -277,13 +354,25 @@ export default async function BillsPage({
             status === "all" &&
             linkStatus === "all" &&
             (result.categoryCounts.refundFeePayout !== 0 ||
-              result.periodNetSummary.otherPayout !== 0)
-              ? `สุทธิหลังหักตีกลับ ${formatTHB(result.periodNetSummary.orderPayout)}${
-                  result.periodNetSummary.otherPayout !== 0
-                    ? ` · รวมชดเชย ${formatTHB(result.periodNetSummary.totalPayout)}`
-                    : ""
-                }`
-              : dateScopeText
+              result.periodNetSummary.otherPayout !== 0) ? (
+              <>
+                สุทธิหลังหักตีกลับ{" "}
+                <CompactValueToggle
+                  value={formatTHB(result.periodNetSummary.orderPayout)}
+                />
+                {result.periodNetSummary.otherPayout !== 0 ? (
+                  <>
+                    {" "}
+                    · รวมชดเชย{" "}
+                    <CompactValueToggle
+                      value={formatTHB(result.periodNetSummary.totalPayout)}
+                    />
+                  </>
+                ) : null}
+              </>
+            ) : (
+              dateScopeText
+            )
           }
           tone={result.summary.payout < 0 ? "negative" : "positive"}
           icon={<IconWallet size={19} />}
@@ -310,447 +399,234 @@ export default async function BillsPage({
       </div>
 
       <Card className="workspace-table-card">
-        <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
-          {/* แท็บหมวดบิลหลัก 3 หมวด: บิลขายปกติ | คืนเงิน/ตีกลับ (ถูกหักเงิน) | ยกเลิก/ยอด 0 บาท */}
-          <div
-            role="tablist"
-            aria-label="หมวดประเภทบิลคำสั่งซื้อ"
-            className="mb-3 grid grid-cols-1 gap-1.5 rounded-xl border border-border bg-white p-1.5 shadow-2xs min-[640px]:grid-cols-3"
-          >
-            {[
-              {
-                key: "normal" as const,
-                label: "บิลขายปกติ",
-                subLabel: "มีรายได้ · ออกใบกำกับภาษี",
-                count: result.categoryCounts.normal,
-                dotColor: "bg-[#059669]",
-                activeClass:
-                  "border-primary bg-primary text-white shadow-xs",
-              },
-              {
-                key: "refund_fee" as const,
-                label: "คืนเงิน / ตีกลับ (ถูกหักเงิน)",
-                subLabel:
-                  result.categoryCounts.refundFeePayout !== 0
-                    ? `ถูกหักสุทธิ ${formatTHB(result.categoryCounts.refundFeePayout)}`
-                    : "คืนเงินหลังโอน / เสียค่าส่งตีกลับ",
-                count: result.categoryCounts.refundFee,
-                dotColor: "bg-[#dc2626]",
-                activeClass:
-                  "border-[#dc2626] bg-[#dc2626] text-white shadow-xs",
-              },
-              {
-                key: "zero" as const,
-                label: "ยกเลิก / ยอด 0 บาท",
-                subLabel: "ยกเลิกหรือไม่เสียค่าธรรมเนียม",
-                count: result.categoryCounts.zero,
-                dotColor: "bg-[#64748b]",
-                activeClass:
-                  "border-[#334155] bg-[#334155] text-white shadow-xs",
-              },
-            ].map((tab) => {
-              const active = category === tab.key;
-              return (
-                <Link
-                  key={tab.key}
-                  role="tab"
-                  aria-selected={active}
-                  scroll={false}
-                  href={buildHref({
-                    nextCategory: tab.key,
-                    nextLink: "all",
-                    nextPage: 1,
-                  })}
-                  className={
-                    active
-                      ? `flex min-h-[44px] items-center justify-between gap-2 rounded-lg border px-3 py-1.5 transition-colors ${tab.activeClass}`
-                      : "flex min-h-[44px] items-center justify-between gap-2 rounded-lg border border-transparent bg-[#f8fafc] px-3 py-1.5 text-[#0f172a] transition-colors hover:border-[#cbd5e1] hover:bg-[#f1f5f9]"
-                  }
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`size-2.5 shrink-0 rounded-full ${
-                        active ? "bg-white" : tab.dotColor
-                      }`}
-                    />
-                    <div className="flex min-w-0 flex-col leading-tight">
-                      <span className="truncate text-xs font-bold">
-                        {tab.label}
-                      </span>
-                      <span
-                        className={`truncate text-[11px] ${
-                          active ? "text-white/85" : "text-muted-foreground"
-                        }`}
-                      >
-                        {tab.subLabel}
-                      </span>
-                    </div>
-                  </div>
-                  <span
-                    className={`mono shrink-0 rounded-md px-2 py-0.5 text-xs font-extrabold ${
-                      active
-                        ? "bg-white/20 text-white"
-                        : "border border-[#e2e8f0] bg-white text-[#0f172a]"
-                    }`}
-                  >
-                    <CompactValueToggle
-                      value={tab.count.toLocaleString("th-TH")}
-                      stopPropagationOnClick
-                    />
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-
-          {/* แถวที่ 1: ค้นหา + เลือกเดือน/วันจากปฏิทิน + พิมพ์ใบกำกับฯ */}
-          <FilterForm className="flex flex-wrap items-center gap-2">
-            {channel !== "all" ? (
-              <input type="hidden" name="channel" value={channel} />
-            ) : null}
-            {status !== "all" ? (
-              <input type="hidden" name="status" value={status} />
-            ) : null}
-            {linkStatus !== "all" ? (
-              <input type="hidden" name="link" value={linkStatus} />
-            ) : null}
-            {category !== "normal" ? (
-              <input type="hidden" name="category" value={category} />
-            ) : null}
-            {sort !== "latest" ? (
-              <input type="hidden" name="sort" value={sort} />
-            ) : null}
-            {createdDate ? (
-              <input type="hidden" name="createdDate" value={createdDate} />
-            ) : null}
-            <div className="field h-10 w-full bg-white sm:min-w-[220px] sm:w-auto sm:flex-1">
-              <IconSearch size={16} className="shrink-0" />
-              <Input
-                type="search"
-                name="q"
-                defaultValue={q}
-                placeholder="ค้นหาเลขคำสั่งซื้อ, รหัส OF, หรือรหัสสินค้า (SKU)..."
-                aria-label="ค้นหาบิล"
-                className="h-full min-h-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
-              />
-            </div>
-
-            <DatePickerField
-              name="date"
-              defaultValue={date}
-              placeholder="ทุกวันชำระ (เลือกเดือน/วัน)"
-              availableDates={availableDates}
-              basePath="/bills"
-              className="w-full sm:w-auto"
-              extraParams={{
-                q: q || undefined,
-                createdDate: createdDate || undefined,
-                channel: channel !== "all" ? channel : undefined,
-                status: status !== "all" ? status : undefined,
-                link: linkStatus !== "all" ? linkStatus : undefined,
-                category: category !== "normal" ? category : undefined,
-                sort: sort !== "latest" ? sort : undefined,
+        <BillsFilterProvider
+          category={category}
+          linkStatus={linkStatus}
+          channel={channel}
+          status={status}
+        >
+          <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
+            {/* ชั้นที่ 1 (ใหญ่สุด): เลือกแพลตฟอร์ม / ช่องทางจำหน่าย + สถานะยอด */}
+            <BillsChannelBar
+              channelCounts={result.channelCounts}
+              total={result.total}
+              q={q}
+              channelHrefs={{
+                all: buildHref({
+                  nextChannel: "all",
+                  nextLink: "all",
+                  nextPage: 1,
+                }),
+                TikTok: buildHref({
+                  nextChannel: "TikTok",
+                  nextLink: "all",
+                  nextPage: 1,
+                }),
+                Shopee: buildHref({
+                  nextChannel: "Shopee",
+                  nextLink: "all",
+                  nextStatus: "all",
+                  nextPage: 1,
+                }),
+                Facebook: buildHref({
+                  nextChannel: "Facebook",
+                  nextLink: "all",
+                  nextStatus: "all",
+                  nextPage: 1,
+                }),
+              }}
+              statusHrefs={{
+                all: buildHref({ nextStatus: "all", nextPage: 1 }),
+                ok: buildHref({ nextStatus: "ok", nextPage: 1 }),
+                mismatch: buildHref({ nextStatus: "mismatch", nextPage: 1 }),
               }}
             />
 
-            <Button
-              type="submit"
-              variant="default"
-              size="sm"
-              className="h-10 min-h-[40px] flex-1 shrink-0 sm:flex-initial"
-            >
-              <IconSearch size={15} /> ค้นหา
-            </Button>
-            {hasFilters ? (
-              <Button
-                asChild
-                variant="outline"
-                size="sm"
-                className="h-10 min-h-[40px] flex-1 shrink-0 sm:flex-initial"
-              >
-                <Link href="/bills" scroll={false}>
-                  ล้างตัวกรอง
-                </Link>
-              </Button>
-            ) : null}
-            {printTargetPeriod ? (
-              <Button
-                asChild
-                variant="secondary"
-                size="sm"
-                className="h-10 min-h-[40px] w-full shrink-0 sm:w-auto"
-              >
-                <Link
-                  href={
-                    channel !== "all"
-                      ? `/days/${printTargetPeriod}/invoices?channel=${encodeURIComponent(channel)}`
-                      : `/days/${printTargetPeriod}/invoices`
-                  }
-                >
-                  <IconReceipt size={15} />{" "}
-                  {isMonthSelected || !date
-                    ? `พิมพ์ทั้งเดือน (${formatYearMonthLabel(printTargetPeriod)})`
-                    : `พิมพ์ทั้งวัน (${formatDateLong(printTargetPeriod)})`}
-                </Link>
-              </Button>
-            ) : null}
-          </FilterForm>
+            {/* ชั้นที่ 2: เลือกประเภทบิลหลัก 3 หมวด: บิลขายปกติ | คืนเงิน/ตีกลับ/ขาดทุน (ติดลบ) | ยกเลิก/ยอด 0 บาท */}
+            <BillsCategoryTabs
+              categoryCounts={result.categoryCounts}
+              hrefs={{
+                normal: buildHref({
+                  nextCategory: "normal",
+                  nextLink: "all",
+                  nextPage: 1,
+                }),
+                refund_fee: buildHref({
+                  nextCategory: "refund_fee",
+                  nextLink: "all",
+                  nextPage: 1,
+                }),
+                zero: buildHref({
+                  nextCategory: "zero",
+                  nextLink: "all",
+                  nextPage: 1,
+                }),
+              }}
+            />
 
-          {createdDate ? (
-            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs">
-              <span className="font-bold text-foreground">
-                กำลังกรองเฉพาะบิลที่สั่งซื้อวันที่{" "}
-                <strong className="font-extrabold text-primary">
-                  {formatDateLong(createdDate)} ({formatDate(createdDate)})
-                </strong>{" "}
-                จำนวน {result.total.toLocaleString("th-TH")} รายการ
+            {/* ชั้นที่ 3: สถานะความครบของข้อมูล (เปลี่ยนตามช่องทางและหมวดอัตโนมัติ) */}
+            <BillsSubFilters
+              linkCounts={result.linkCounts}
+              linkHrefs={{
+                all: buildHref({ nextLink: "all", nextPage: 1 }),
+                linked: buildHref({ nextLink: "linked", nextPage: 1 }),
+                unlinked: buildHref({ nextLink: "unlinked", nextPage: 1 }),
+                oms_only: buildHref({ nextLink: "oms_only", nextPage: 1 }),
+                no_price: buildHref({ nextLink: "no_price", nextPage: 1 }),
+                all_fb: buildHref({ nextLink: "all_fb", nextPage: 1 }),
+                shopee_negative: buildHref({
+                  nextLink: "shopee_negative",
+                  nextPage: 1,
+                }),
+                shopee_zero: buildHref({
+                  nextLink: "shopee_zero",
+                  nextPage: 1,
+                }),
+              }}
+            />
+
+            {/* ชั้นที่ 4 (ล่างสุดก่อนเข้าตาราง): ค้นหา + เลือกเดือน/วันจากปฏิทิน + พิมพ์ใบกำกับฯ */}
+            <div className="flex flex-col gap-1.5 border-t border-border/70 pt-2.5">
+              <span className="text-[11.5px] font-extrabold tracking-tight text-[#334155]">
+                4. ค้นหาและเลือกช่วงวันชำระ (Search & Date)
               </span>
-              <Link
-                href={buildHref({ nextCreatedDate: "", nextPage: 1 })}
-                scroll={false}
-                className="font-extrabold text-primary underline underline-offset-2 hover:opacity-80"
-              >
-                ยกเลิกตัวกรองวันสั่งซื้อ ×
-              </Link>
-            </div>
-          ) : null}
+              <FilterForm className="flex max-w-[1140px] flex-wrap items-center gap-2">
+                {channel !== "all" ? (
+                  <input type="hidden" name="channel" value={channel} />
+                ) : null}
+                {status !== "all" ? (
+                  <input type="hidden" name="status" value={status} />
+                ) : null}
+                {linkStatus !== "all" ? (
+                  <input type="hidden" name="link" value={linkStatus} />
+                ) : null}
+                {category !== "normal" ? (
+                  <input type="hidden" name="category" value={category} />
+                ) : null}
+                {sort !== "latest" ? (
+                  <input type="hidden" name="sort" value={sort} />
+                ) : null}
+                {createdDate ? (
+                  <input type="hidden" name="createdDate" value={createdDate} />
+                ) : null}
+                <div className="field h-10 w-full bg-white min-[640px]:min-w-[240px] min-[640px]:max-w-[420px] min-[640px]:flex-1">
+                  <IconSearch size={16} className="shrink-0" />
+                  <Input
+                    type="search"
+                    name="q"
+                    defaultValue={q}
+                    placeholder="ค้นหาเลขคำสั่งซื้อ, รหัส OF, หรือรหัสสินค้า (SKU)..."
+                    aria-label="ค้นหาบิล"
+                    className="h-full min-h-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
+                  />
+                </div>
 
-          {/* แถวที่ 2: แท็บสถานะการผูกไฟล์ 4 ช่องเต็มความกว้างอย่างสมดุล */}
-          <div
-            role="group"
-            aria-label="กรองตามสถานะการผูกไฟล์"
-            className="mt-2.5 grid grid-cols-1 gap-1.5 border-t border-border/70 pt-2.5 min-[520px]:grid-cols-2 min-[960px]:grid-cols-4"
-          >
-            {[
-              {
-                key: "all" as const,
-                label: "ทั้งหมด",
-                subLabel: "ทุกรายการในระบบ",
-                count: result.linkCounts.all,
-                dotColor: "bg-[#64748b]",
-              },
-              {
-                key: "linked" as const,
-                label: "ข้อมูลครบ",
-                subLabel: "พร้อมออกใบกำกับฯ",
-                count: result.linkCounts.linked,
-                dotColor: "bg-[#059669]",
-              },
-              {
-                key: "unlinked" as const,
-                label: "รอไฟล์ ออเดอร์ใน shipnity",
-                subLabel:
-                  result.linkCounts.missingOmsCreatedDates.length > 0
-                    ? `วันสั่งซื้อ ${result.linkCounts.missingOmsCreatedDates
-                        .slice(0, 2)
-                        .map((d) => formatDate(d))
-                        .join(", ")}`
-                    : "มีเฉพาะยอดโอน",
-                count: result.linkCounts.unlinked,
-                dotColor: "bg-[#d97706]",
-              },
-              {
-                key: "oms_only" as const,
-                label: "มีเฉพาะ ออเดอร์ใน shipnity",
-                subLabel: "รอไฟล์รายได้รอบโอน",
-                count: result.linkCounts.omsOnly,
-                dotColor: "bg-[#2563eb]",
-              },
-            ].map((item) => {
-              const active = linkStatus === item.key;
-              return (
-                <Link
-                  key={item.key}
-                  href={buildHref({ nextLink: item.key, nextPage: 1 })}
-                  scroll={false}
-                  className={
-                    active
-                      ? "flex min-h-[42px] items-center justify-between gap-2 rounded-xl border border-primary bg-primary px-3 py-1.5 text-white shadow-xs transition-colors"
-                      : "flex min-h-[42px] items-center justify-between gap-2 rounded-xl border border-border bg-white px-3 py-1.5 text-[#0f172a] shadow-2xs transition-colors hover:border-[#cbd5e1] hover:bg-[#f1f5f9]"
-                  }
+                <DatePickerField
+                  name="date"
+                  defaultValue={date}
+                  placeholder="ทุกวันชำระ (เลือกเดือน/วัน)"
+                  availableDates={availableDates}
+                  basePath="/bills"
+                  className="w-full min-[640px]:w-auto"
+                  extraParams={{
+                    q: q || undefined,
+                    createdDate: createdDate || undefined,
+                    channel: channel !== "all" ? channel : undefined,
+                    status: status !== "all" ? status : undefined,
+                    link: linkStatus !== "all" ? linkStatus : undefined,
+                    category: category !== "normal" ? category : undefined,
+                    sort: sort !== "latest" ? sort : undefined,
+                  }}
+                />
+
+                <Button
+                  type="submit"
+                  variant="default"
+                  size="sm"
+                  className={`h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial ${
+                    channel === "Shopee"
+                      ? "bg-[#ee4d2d] text-white hover:bg-[#d73211]"
+                      : channel === "Facebook"
+                        ? "bg-[#1877F2] text-white hover:bg-[#166fe5]"
+                        : ""
+                  }`}
                 >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`size-2.5 shrink-0 rounded-full ${
-                        active ? "bg-white" : item.dotColor
-                      }`}
-                    />
-                    <div className="flex min-w-0 flex-col leading-tight">
-                      <span className="truncate text-xs font-bold">
-                        {item.label}
-                      </span>
-                      <span
-                        className={`truncate text-[11px] ${
-                          active ? "text-white/85" : "text-muted-foreground"
-                        }`}
-                      >
-                        {item.subLabel}
-                      </span>
-                    </div>
-                  </div>
-                  <span
-                    className={`mono shrink-0 rounded-lg px-2 py-0.5 text-xs font-extrabold ${
-                      active
-                        ? "bg-white/20 text-white"
-                        : "bg-[#f1f5f9] text-[#0f172a]"
-                    }`}
+                  <IconSearch size={15} /> ค้นหา
+                </Button>
+                {hasFilters ? (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial"
                   >
-                    <CompactValueToggle
-                      value={item.count.toLocaleString("th-TH")}
-                      stopPropagationOnClick
-                    />
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
-
-          {/* แถวที่ 3: ช่องทางจำหน่าย (TikTok / Shopee) + สถานะตรวจยอด + เรียงลำดับ จัดระเบียบชิดซ้าย-ขวา */}
-          <div className="mt-2 flex flex-col gap-2 min-[960px]:flex-row min-[960px]:flex-wrap min-[960px]:items-center min-[960px]:justify-between">
-            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[960px]:w-auto">
-              <div
-                role="group"
-                aria-label="กรองตามช่องทางจำหน่าย"
-                className="grid w-full grid-cols-3 items-center gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs sm:inline-flex sm:w-auto sm:flex-wrap"
-              >
-                <span className="col-span-3 px-1.5 pt-0.5 text-[11px] font-bold text-[#475569] sm:col-span-1 sm:px-2 sm:pt-0 sm:text-[11.5px]">
-                  ช่องทาง:
-                </span>
-                {[
-                  {
-                    key: "all" as const,
-                    label: "ทุกช่องทาง",
-                    count: result.channelCounts.all ?? result.total,
-                    dotColor: "",
-                  },
-                  {
-                    key: "TikTok" as const,
-                    label: "TikTok",
-                    count: result.channelCounts.TikTok ?? 0,
-                    dotColor: "bg-primary",
-                  },
-                  {
-                    key: "Shopee" as const,
-                    label: "Shopee",
-                    count: result.channelCounts.Shopee ?? 0,
-                    dotColor: "bg-[#ee4d2d]",
-                  },
-                ].map((ch) => {
-                  const active = channel === ch.key;
-                  return (
-                    <Button
-                      key={ch.key}
-                      asChild
-                      variant={active ? "default" : "ghost"}
-                      size="xs"
-                      className={
-                        active
-                          ? ch.key === "Shopee"
-                            ? "h-8 min-h-[32px] w-full bg-[#ee4d2d] px-2 text-white shadow-2xs hover:bg-[#d73211] sm:h-7 sm:min-h-[28px] sm:w-auto"
-                            : "h-8 min-h-[32px] w-full px-2 shadow-2xs sm:h-7 sm:min-h-[28px] sm:w-auto"
-                          : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
+                    <Link href="/bills" scroll={false} prefetch>
+                      ล้างตัวกรอง
+                    </Link>
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled
+                    aria-label="ล้างตัวกรอง (ยังไม่ได้เลือกตัวกรอง)"
+                    className="h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial"
+                  >
+                    ล้างตัวกรอง
+                  </Button>
+                )}
+                {printTargetPeriod ? (
+                  <Button
+                    asChild
+                    variant="secondary"
+                    size="sm"
+                    className="h-10 min-h-[40px] w-full shrink-0 min-[640px]:w-auto"
+                  >
+                    <Link
+                      href={
+                        channel !== "all"
+                          ? `/days/${printTargetPeriod}/invoices?channel=${encodeURIComponent(channel)}`
+                          : `/days/${printTargetPeriod}/invoices`
                       }
                     >
-                      <Link
-                        href={buildHref({ nextChannel: ch.key, nextPage: 1 })}
-                        scroll={false}
-                      >
-                        {ch.dotColor ? (
-                          <span
-                            className={`size-2 shrink-0 rounded-full ${active ? "bg-white" : ch.dotColor}`}
-                          />
-                        ) : null}
-                        <span>{ch.label}</span>
-                        <span
-                          className={`text-xs ${active ? "text-white/90" : "text-muted-foreground"}`}
-                        >
-                          (
-                          <CompactValueToggle
-                            value={ch.count.toLocaleString("th-TH")}
-                            stopPropagationOnClick
-                          />
-                          )
-                        </span>
-                      </Link>
-                    </Button>
-                  );
-                })}
-              </div>
-
-              <div
-                className="grid w-full grid-cols-3 items-center gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs sm:inline-flex sm:w-auto sm:flex-wrap"
-                role="navigation"
-                aria-label="กรองตามสถานะตรวจยอด"
-              >
-                <span className="col-span-3 px-1.5 pt-0.5 text-[11px] font-bold text-[#475569] sm:col-span-1 sm:px-2 sm:pt-0 sm:text-[11.5px]">
-                  สถานะยอด:
-                </span>
-                <Button
-                  asChild
-                  variant={status === "all" ? "default" : "ghost"}
-                  size="xs"
-                  className={
-                    status === "all"
-                      ? "h-8 min-h-[32px] w-full px-2 shadow-2xs sm:h-7 sm:min-h-[28px] sm:w-auto"
-                      : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
-                  }
-                >
-                  <Link
-                    href={buildHref({ nextStatus: "all", nextPage: 1 })}
-                    scroll={false}
-                  >
-                    ทุกสถานะยอด
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  variant={status === "ok" ? "default" : "ghost"}
-                  size="xs"
-                  className={
-                    status === "ok"
-                      ? "h-8 min-h-[32px] w-full px-2 shadow-2xs sm:h-7 sm:min-h-[28px] sm:w-auto"
-                      : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
-                  }
-                >
-                  <Link
-                    href={buildHref({ nextStatus: "ok", nextPage: 1 })}
-                    scroll={false}
-                  >
-                    <IconCheckCircle size={13} /> ยอดตรง
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  variant={status === "mismatch" ? "default" : "ghost"}
-                  size="xs"
-                  className={
-                    status === "mismatch"
-                      ? "h-8 min-h-[32px] w-full px-2 shadow-2xs sm:h-7 sm:min-h-[28px] sm:w-auto"
-                      : "h-8 min-h-[32px] w-full px-2 text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a] sm:h-7 sm:min-h-[28px] sm:w-auto"
-                  }
-                >
-                  <Link
-                    href={buildHref({ nextStatus: "mismatch", nextPage: 1 })}
-                    scroll={false}
-                  >
-                    <IconAlert size={13} /> ต้องตรวจสอบ
-                  </Link>
-                </Button>
-              </div>
-
-              {q ? (
-                <Badge variant="warning" size="sm">
-                  ค้นหา: &ldquo;{q}&rdquo;
-                </Badge>
-              ) : null}
+                      <IconReceipt size={15} />{" "}
+                      {isMonthSelected || !date
+                        ? `พิมพ์ทั้งเดือน (${formatYearMonthLabel(printTargetPeriod)})`
+                        : `พิมพ์ทั้งวัน (${formatDateLong(printTargetPeriod)})`}
+                    </Link>
+                  </Button>
+                ) : null}
+              </FilterForm>
             </div>
 
-           
+            {createdDate ? (
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs">
+                <span className="font-bold text-foreground">
+                  กำลังกรองเฉพาะบิลที่สั่งซื้อวันที่{" "}
+                  <strong className="font-extrabold text-primary">
+                    {formatDateLong(createdDate)} ({formatDate(createdDate)})
+                  </strong>{" "}
+                  จำนวน {result.total.toLocaleString("th-TH")} รายการ
+                </span>
+                <Link
+                  href={buildHref({ nextCreatedDate: "", nextPage: 1 })}
+                  scroll={false}
+                  className="font-extrabold text-primary underline underline-offset-2 hover:opacity-80"
+                >
+                  ยกเลิกตัวกรองวันสั่งซื้อ ×
+                </Link>
+              </div>
+            ) : null}
           </div>
-        </div>
 
-        {result.rows.length === 0 ? (
-          <div className="p-6">
+        <TableLoadingBoundary
+          rows={12}
+          columns={7}
+          label="กำลังโหลดรายการคำสั่งซื้อ..."
+        >
+          {result.rows.length === 0 ? (
+          <div className="flex min-h-[560px] flex-col items-center justify-center p-6">
             <EmptyState
               icon={<IconReceipt size={28} />}
               title="ไม่พบบิลในหมวดที่เลือก"
@@ -796,13 +672,13 @@ export default async function BillsPage({
                   ) : null}
                   {hasFilters ? (
                     <Button asChild variant="secondary">
-                      <Link href="/bills" scroll={false}>
+                      <Link href="/bills" scroll={false} prefetch>
                         ล้างตัวกรองทั้งหมด
                       </Link>
                     </Button>
                   ) : (
                     <Button asChild variant="default">
-                      <Link href="/import">
+                      <Link href="/import" prefetch>
                         <IconUpload size={17} /> อัปโหลดไฟล์แรก
                       </Link>
                     </Button>
@@ -813,91 +689,131 @@ export default async function BillsPage({
           </div>
         ) : (
           <>
-            <Table variant="stack">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="min-[768px]:w-[215px] min-[1280px]:w-[225px]">
-                    <Link
-                      href={buildHref({
-                        nextSort: sort === "latest" ? "oldest" : "latest",
-                        nextPage: 1,
-                      })}
-                      scroll={false}
-                      className="inline-flex items-center gap-1 text-[#0f172a] hover:text-primary"
-                    >
-                      <span>หมายเลขคำสั่งซื้อ / ช่องทาง</span>
-                      <span className="text-[11px] text-[#64748b]">
-                        {sort === "latest"
-                          ? "↓"
-                          : sort === "oldest"
-                            ? "↑"
-                            : "↕"}
-                      </span>
-                    </Link>
-                  </TableHead>
-                  <TableHead>รายการสินค้า (SKU)</TableHead>
-                  <TableHead className="num min-[768px]:max-[899px]:hidden">
-                    <Link
-                      href={buildHref({
-                        nextSort:
-                          sort === "income_asc" ? "income_desc" : "income_asc",
-                        nextPage: 1,
-                      })}
-                      scroll={false}
-                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
-                    >
-                      <span>รายได้</span>
-                      <span className="text-[11px] text-[#64748b]">
-                        {sort === "income_asc"
-                          ? "↑"
-                          : sort === "income_desc"
-                            ? "↓"
-                            : "↕"}
-                      </span>
-                    </Link>
-                  </TableHead>
-                  <TableHead className="num min-[768px]:max-[899px]:hidden">
-                    <Link
-                      href={buildHref({
-                        nextSort: sort === "fee_asc" ? "fee_desc" : "fee_asc",
-                        nextPage: 1,
-                      })}
-                      scroll={false}
-                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
-                    >
-                      <span>ค่าธรรมเนียม</span>
-                      <span className="text-[11px] text-[#64748b]">
-                        {sort === "fee_asc"
-                          ? "↑"
-                          : sort === "fee_desc"
-                            ? "↓"
-                            : "↕"}
-                      </span>
-                    </Link>
-                  </TableHead>
-                  <TableHead className="num">
-                    <Link
-                      href={buildHref({
-                        nextSort:
-                          sort === "payout_asc" ? "payout_desc" : "payout_asc",
-                        nextPage: 1,
-                      })}
-                      scroll={false}
-                      className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
-                    >
-                      <span>ยอดชำระสุทธิ</span>
-                      <span className="text-[11px] text-[#64748b]">
-                        {sort === "payout_asc"
-                          ? "↑"
-                          : sort === "payout_desc"
-                            ? "↓"
-                            : "↕"}
-                      </span>
-                    </Link>
-                  </TableHead>
-                  <TableHead className="num">เอกสาร</TableHead>
-                </TableRow>
-              </TableHeader>
+            {(() => {
+              const isFb = channel === "Facebook";
+              const colOrderClass = isFb
+                ? "min-[768px]:w-[30%] min-[900px]:w-[22%] min-[900px]:min-w-[200px]"
+                : "min-[768px]:w-[30%] min-[900px]:w-[20%] min-[900px]:min-w-[190px]";
+              const colSkuClass = isFb
+                ? "min-[768px]:w-[35%] min-[900px]:w-[30%] min-[900px]:min-w-[240px]"
+                : "min-[768px]:w-[35%] min-[900px]:w-[25%] min-[900px]:min-w-[230px]";
+              const colIncomeClass = isFb
+                ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[11%] min-[900px]:min-w-[100px]"
+                : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[10%] min-[900px]:min-w-[95px]";
+              const colShippingClass = isFb
+                ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[13%] min-[900px]:min-w-[125px]"
+                : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[12%] min-[900px]:min-w-[120px]";
+              const colFeeClass =
+                "num min-[768px]:max-[899px]:hidden min-[900px]:w-[10%] min-[900px]:min-w-[95px]";
+              const colPayoutClass = isFb
+                ? "num min-[768px]:w-[17%] min-[900px]:w-[12%] min-[900px]:min-w-[110px]"
+                : "num min-[768px]:w-[17%] min-[900px]:w-[11%] min-[900px]:min-w-[105px]";
+              const colActionsClass = isFb
+                ? "num min-[768px]:w-[18%] min-[900px]:w-[12%] min-[900px]:min-w-[130px]"
+                : "num min-[768px]:w-[18%] min-[900px]:w-[12%] min-[900px]:min-w-[130px]";
+
+              return (
+                <BillPreviewProvider>
+                  <Table
+                    variant="stack"
+                    className="bills-table-animated min-[768px]:table-fixed"
+                  >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className={colOrderClass}>
+                        <Link
+                          href={buildHref({
+                            nextSort: sort === "latest" ? "oldest" : "latest",
+                            nextPage: 1,
+                          })}
+                          scroll={false}
+                          className="inline-flex items-center gap-1 text-[#0f172a] hover:text-primary"
+                        >
+                          <span>หมายเลขคำสั่งซื้อ / ช่องทาง</span>
+                          <span className="text-[11px] text-[#64748b]">
+                            {sort === "latest"
+                              ? "↓"
+                              : sort === "oldest"
+                                ? "↑"
+                                : "↕"}
+                          </span>
+                        </Link>
+                      </TableHead>
+                      <TableHead className={colSkuClass}>
+                        รายการสินค้า (SKU)
+                      </TableHead>
+                      <TableHead className={colIncomeClass}>
+                        <Link
+                          href={buildHref({
+                            nextSort:
+                              sort === "income_asc"
+                                ? "income_desc"
+                                : "income_asc",
+                            nextPage: 1,
+                          })}
+                          scroll={false}
+                          className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                        >
+                          <span>รายได้</span>
+                          <span className="text-[11px] text-[#64748b]">
+                            {sort === "income_asc"
+                              ? "↑"
+                              : sort === "income_desc"
+                                ? "↓"
+                                : "↕"}
+                          </span>
+                        </Link>
+                      </TableHead>
+                      <TableHead className={colShippingClass}>
+                        ค่าขนส่ง
+                      </TableHead>
+                      {channel !== "Facebook" ? (
+                        <TableHead className={colFeeClass}>
+                          <Link
+                            href={buildHref({
+                              nextSort:
+                                sort === "fee_asc" ? "fee_desc" : "fee_asc",
+                              nextPage: 1,
+                            })}
+                            scroll={false}
+                            className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                          >
+                            <span>ค่าธรรมเนียม</span>
+                            <span className="text-[11px] text-[#64748b]">
+                              {sort === "fee_asc"
+                                ? "↑"
+                                : sort === "fee_desc"
+                                  ? "↓"
+                                  : "↕"}
+                            </span>
+                          </Link>
+                        </TableHead>
+                      ) : null}
+                      <TableHead className={colPayoutClass}>
+                        <Link
+                          href={buildHref({
+                            nextSort:
+                              sort === "payout_asc"
+                                ? "payout_desc"
+                                : "payout_asc",
+                            nextPage: 1,
+                          })}
+                          scroll={false}
+                          className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
+                        >
+                          <span>ยอดชำระสุทธิ</span>
+                          <span className="text-[11px] text-[#64748b]">
+                            {sort === "payout_asc"
+                              ? "↑"
+                              : sort === "payout_desc"
+                                ? "↓"
+                                : "↕"}
+                          </span>
+                        </Link>
+                      </TableHead>
+                      <TableHead className={colActionsClass}>เอกสาร</TableHead>
+                    </TableRow>
+                  </TableHeader>
               <TableBody>
                 {result.rows.map((row) => {
                   const ok =
@@ -905,30 +821,68 @@ export default async function BillsPage({
                     Math.abs(row.checks.feeDiff) < 0.01 &&
                     Math.abs(row.checks.payoutDiff) < 0.01;
                   return (
-                    <TableRow key={row.id} className="min-[768px]:[&>td]:align-top">
+                    <BillTableRow key={row.id} row={row} className="min-[768px]:[&>td]:align-top">
                       <TableCell
                         data-label="หมายเลขคำสั่งซื้อ / ช่องทาง"
-                        className="min-[768px]:w-[215px] min-[1280px]:w-[225px]"
+                        className={colOrderClass}
                       >
                         <div className="flex flex-col gap-1.5 max-[767px]:items-end">
-                          <span className="inline-flex max-w-full items-center gap-1 leading-none">
-                            <BillPreviewTrigger
-                              row={row}
-                              defaultTab="bill"
-                              triggerVariant="link"
-                              className="font-bold text-[#0f172a] hover:text-primary"
-                            />
+                          <span className="inline-flex max-w-full items-center gap-1.5 leading-none">
+                            <span className="mono text-[12.5px] min-[1280px]:text-[13px] font-bold text-[#0f172a] group-hover:text-primary group-hover:underline">
+                              {row.externalId.includes("|")
+                                ? row.orderCode ||
+                                  row.externalId.split("|")[0] ||
+                                  row.externalId
+                                : row.externalId}
+                            </span>
                             <CopyButton value={row.externalId} />
                           </span>
                           <div className="flex min-w-0 flex-wrap items-center gap-1 max-[767px]:justify-end">
                             <Badge
-                              variant={row.channel === "Shopee" ? "shopee" : "default"}
+                              variant={
+                                row.channel === "Shopee"
+                                  ? "shopee"
+                                  : row.channel === "Facebook"
+                                    ? "facebook"
+                                    : "default"
+                              }
                               size="sm"
                               className="shrink-0 px-1.5 py-0 text-[11px]"
                             >
-                              {row.channel === "Shopee" ? "Shopee" : "TikTok"}
+                              {row.channel === "Shopee"
+                                ? "Shopee"
+                                : row.channel === "Facebook"
+                                  ? "Facebook"
+                                  : "TikTok"}
                             </Badge>
-                            {row.income < 0 ? (
+                            {row.isNoProductPriceOrder ? (
+                              <Badge
+                                variant="neutral"
+                                size="sm"
+                                className="shrink-0 border-[#c4b5fd] bg-[#f5f3ff] px-1.5 py-0 text-[11px] font-semibold text-[#6d28d9]"
+                              >
+                                เปลี่ยนสินค้า · ไม่ยื่นภาษี
+                              </Badge>
+                            ) : row.channel === "Shopee" &&
+                              row.payout <= 0 &&
+                              row.income > 0 &&
+                              Math.abs(row.feeTotal) >= row.income - 0.01 ? (
+                              <Badge
+                                variant="danger"
+                                size="sm"
+                                className="shrink-0 px-1.5 py-0 text-[11px]"
+                              >
+                                ตีกลับเต็มจำนวน 100%
+                              </Badge>
+                            ) : row.channel === "Shopee" && row.payout < 0 ? (
+                              <Badge
+                                variant="danger"
+                                size="sm"
+                                className="shrink-0 px-1.5 py-0 text-[11px]"
+                              >
+                                หักคืน/ต้นทุนติดลบ
+                              </Badge>
+                            ) : row.income < 0 ? (
                               <Badge
                                 variant="danger"
                                 size="sm"
@@ -965,13 +919,17 @@ export default async function BillsPage({
                                 ผูก #{row.orderCode}
                               </Badge>
                             ) : (
-                              <Badge variant="warning" size="sm" className="shrink-0 px-1.5 py-0 text-[11px]">
+                              <Badge
+                                variant="warning"
+                                size="sm"
+                                className="shrink-0 px-1.5 py-0 text-[11px]"
+                              >
                                 รอผูก ออเดอร์ใน shipnity
                               </Badge>
                             )}
                             {row.customerName ? (
                               <span
-                                className="min-w-0 max-w-[55px] min-[1280px]:max-w-[90px] truncate text-[11.5px] font-medium text-[#475569] max-[767px]:max-w-[140px]"
+                                className="min-w-0 max-w-[120px] min-[1280px]:max-w-[170px] truncate text-[11.5px] font-medium text-[#475569] max-[767px]:max-w-[140px]"
                                 title={row.customerName}
                               >
                                 · {row.customerName}
@@ -982,6 +940,7 @@ export default async function BillsPage({
                       </TableCell>
                       <TableCell
                         data-label="รายการสินค้า (SKU)"
+                        className={colSkuClass}
                       >
                         {row.omsItems && row.omsItems.length > 0 ? (
                           <div className="flex w-full flex-col gap-1 text-xs max-[767px]:items-end">
@@ -991,11 +950,11 @@ export default async function BillsPage({
                                 className="flex w-full min-w-0 items-center justify-between gap-1.5 rounded-md border border-[#e2e8f0] bg-[#f8fafc]/80 px-2 py-1"
                                 title={`${item.skuCode} · ${item.productName} (×${item.quantity})`}
                               >
-                                <div className="flex min-w-0 items-center gap-1.5">
+                                <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                                   <span className="mono shrink-0 rounded border border-[#cbd5e1] bg-white px-1.5 py-0.5 text-[11px] font-bold text-[#0f172a] shadow-2xs">
                                     {item.skuCode}
                                   </span>
-                                  <span className="min-w-0 max-w-[76px] min-[840px]:max-w-[115px] min-[900px]:max-w-[72px] min-[980px]:max-w-[125px] min-[1100px]:max-w-[92px] min-[1200px]:max-w-[140px] min-[1360px]:max-w-[220px] min-[1536px]:max-w-[340px] truncate font-medium text-[#1e293b]">
+                                  <span className="min-w-0 flex-1 truncate font-medium text-[#1e293b]">
                                     {item.productName}
                                   </span>
                                 </div>
@@ -1045,43 +1004,111 @@ export default async function BillsPage({
                       </TableCell>
                       <TableCell
                         data-label="รายได้"
-                        className={`num font-semibold min-[768px]:max-[899px]:hidden ${
+                        className={cn(
+                          colIncomeClass,
+                          "font-semibold",
                           row.income < 0
                             ? "danger"
                             : row.income === 0
                               ? "text-[#64748b]"
-                              : "text-[#0f172a]"
-                        }`}
+                              : "text-[#0f172a]",
+                        )}
                       >
                         <div className="min-[768px]:pt-1">
                           {formatTHB(row.income)}
                         </div>
                       </TableCell>
                       <TableCell
-                        data-label="ค่าธรรมเนียม"
-                        className="num danger font-semibold min-[768px]:max-[899px]:hidden"
+                        data-label="ค่าขนส่ง"
+                        className={cn(colShippingClass, "font-semibold")}
                       >
-                        <div className="flex flex-col items-end gap-0.5 min-[768px]:pt-1">
-                          <span>{formatTHB(row.feeTotal)}</span>
-                          {row.feeTotal === 0 &&
-                            row.normalized.transactionType === "คำสั่งซื้อ (OMS)" ? (
-                            <span className="max-w-[115px] whitespace-normal text-right text-[10.5px] leading-tight font-normal text-muted-foreground">
-                              {row.channel === "Shopee"
-                                ? "(ออเดอร์ Shopee จาก shipnity)"
-                                : "(ยังไม่มีข้อมูลรายได้จาก TikTok)"}
-                            </span>
-                          ) : null}
-                        </div>
+                        {(() => {
+                          const ship = getRowShippingSummary(row);
+                          const hasBoth =
+                            ship.positiveAmount > 0 && ship.negativeAmount < 0;
+                          return (
+                            <div className="flex flex-col items-end gap-0.5 min-[768px]:pt-1 leading-tight">
+                              <span
+                                className={`inline-flex items-center gap-1 font-bold ${
+                                  ship.netAmount < 0
+                                    ? "text-rose-600 dark:text-rose-400"
+                                    : ship.netAmount > 0
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : "text-[#64748b]"
+                                }`}
+                              >
+                                {hasBoth ? (
+                                  <span className="text-[10px] font-medium text-slate-500">
+                                    {ship.netAmount === 0
+                                      ? "เท่าทุน"
+                                      : "ส่วนต่าง"}
+                                  </span>
+                                ) : null}
+                                <span>
+                                  {ship.netAmount > 0
+                                    ? `+${formatTHB(ship.netAmount)}`
+                                    : formatTHB(ship.netAmount)}
+                                </span>
+                              </span>
+                              {hasBoth ? (
+                                <div className="flex flex-col items-end text-[10px] leading-tight font-medium text-slate-500">
+                                  <span className="whitespace-nowrap">
+                                    รับ{" "}
+                                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                      +{formatTHB(ship.positiveAmount)}
+                                    </span>
+                                  </span>
+                                  <span className="whitespace-nowrap">
+                                    จ่าย{" "}
+                                    <span className="font-bold text-rose-600 dark:text-rose-400">
+                                      {formatTHB(ship.negativeAmount)}
+                                    </span>
+                                  </span>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </TableCell>
+                      {channel !== "Facebook" ? (
+                        <TableCell
+                          data-label="ค่าธรรมเนียม"
+                          className={cn(
+                            colFeeClass,
+                            "font-semibold",
+                            row.feeTotal < 0 ? "danger" : "text-[#64748b]",
+                          )}
+                        >
+                          <div className="flex flex-col items-end gap-0.5 min-[768px]:pt-1">
+                            <span>
+                              {row.channel === "Facebook"
+                                ? "-"
+                                : formatTHB(row.feeTotal)}
+                            </span>
+                            {row.channel !== "Facebook" &&
+                            row.feeTotal === 0 &&
+                            row.normalized.transactionType ===
+                              "คำสั่งซื้อ (OMS)" ? (
+                              <span className="max-w-[115px] whitespace-normal text-right text-[10px] leading-tight font-normal text-muted-foreground">
+                                {row.channel === "Shopee"
+                                  ? "(ออเดอร์ Shopee จาก shipnity)"
+                                  : "(ยังไม่มีข้อมูลรายได้จาก TikTok)"}
+                              </span>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      ) : null}
                       <TableCell
                         data-label="ยอดชำระสุทธิ"
-                        className={`num payout-col font-extrabold text-[13.5px] min-[1280px]:text-[14px] ${
+                        className={cn(
+                          colPayoutClass,
+                          "payout-col font-extrabold text-[13.5px] min-[1280px]:text-[14px]",
                           row.payout < 0
                             ? "danger"
                             : row.payout === 0
                               ? "text-[#64748b]"
-                              : "positive"
-                        }`}
+                              : "positive",
+                        )}
                       >
                         <div className="flex flex-col items-end gap-1 min-[768px]:pt-0.5">
                           <span className="leading-snug">{formatTHB(row.payout)}</span>
@@ -1107,7 +1134,7 @@ export default async function BillsPage({
                           )}
                         </div>
                       </TableCell>
-                      <TableCell data-label="เอกสาร" className="num">
+                      <TableCell data-label="เอกสาร" className={cn(colActionsClass, "num")}>
                         <div className="inline-flex flex-nowrap items-center justify-end rounded-lg border border-[#cbd5e1] bg-[#f8fafc] p-0.5 shadow-2xs whitespace-nowrap">
                           <BillPreviewTrigger
                             row={row}
@@ -1116,9 +1143,7 @@ export default async function BillsPage({
                             label="ดูบิล"
                             className="min-[768px]:h-7 min-[768px]:min-h-[28px] rounded-[6px] border-0 bg-white px-2 text-xs font-bold text-[#0f172a] shadow-2xs hover:bg-[#f1f5f9] hover:text-primary"
                           />
-                          {row.transactionType === "คำสั่งซื้อ (OMS)" ||
-                          row.income > 0 ||
-                          row.payout > 0 ? (
+                          {isOrderEligibleForInvoice(row) ? (
                             <>
                               <span
                                 aria-hidden="true"
@@ -1151,7 +1176,7 @@ export default async function BillsPage({
                           ) : null}
                         </div>
                       </TableCell>
-                    </TableRow>
+                    </BillTableRow>
                   );
                 })}
               </TableBody>
@@ -1172,38 +1197,97 @@ export default async function BillsPage({
                   </TableCell>
                   <TableCell
                     data-label="รวมรายได้"
-                    className={`num font-bold min-[768px]:max-[899px]:hidden ${
+                    className={cn(
+                      colIncomeClass,
+                      "font-bold",
                       result.summary.income < 0
                         ? "danger"
                         : result.summary.income === 0
                           ? "text-[#64748b]"
-                          : "text-[#0f172a]"
-                    }`}
+                          : "text-[#0f172a]",
+                    )}
                   >
-                    {formatTHB(result.summary.income)}
+                    <CompactValueToggle value={formatTHB(result.summary.income)} />
                   </TableCell>
                   <TableCell
-                    data-label="รวมค่าธรรมเนียม"
-                    className="num danger font-bold min-[768px]:max-[899px]:hidden"
+                    data-label="รวมค่าขนส่ง (สุทธิ)"
+                    className={cn(
+                      colShippingClass,
+                      "font-bold",
+                      result.summary.shippingNet < 0
+                        ? "danger"
+                        : result.summary.shippingNet > 0
+                          ? "positive"
+                          : "text-[#64748b]",
+                    )}
                   >
-                    {formatTHB(result.summary.fees)}
+                    <div className="flex flex-col items-end gap-0.5 leading-tight">
+                      <span>
+                        <CompactValueToggle
+                          value={
+                            result.summary.shippingNet > 0
+                              ? `+${formatTHB(result.summary.shippingNet)}`
+                              : formatTHB(result.summary.shippingNet)
+                          }
+                        />
+                      </span>
+                      <div className="flex flex-col items-end text-[10px] leading-tight font-medium text-slate-500">
+                        {result.summary.shippingPositive > 0 ? (
+                          <span className="whitespace-nowrap">
+                            รับ{" "}
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                              <CompactValueToggle
+                                value={`+${formatTHB(result.summary.shippingPositive)}`}
+                              />
+                            </span>
+                          </span>
+                        ) : null}
+                        {result.summary.shippingNegative < 0 ? (
+                          <span className="whitespace-nowrap">
+                            จ่าย{" "}
+                            <span className="font-bold text-rose-600 dark:text-rose-400">
+                              <CompactValueToggle
+                                value={formatTHB(result.summary.shippingNegative)}
+                              />
+                            </span>
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                   </TableCell>
+                  {channel !== "Facebook" ? (
+                    <TableCell
+                      data-label="รวมค่าธรรมเนียม"
+                      className={cn(
+                        colFeeClass,
+                        "font-bold",
+                        result.summary.fees < 0 ? "danger" : "text-[#64748b]",
+                      )}
+                    >
+                      <CompactValueToggle value={formatTHB(result.summary.fees)} />
+                    </TableCell>
+                  ) : null}
                   <TableCell
                     data-label="รวมยอดชำระสุทธิ"
-                    className={`num payout-col font-extrabold text-[14px] ${
+                    className={cn(
+                      colPayoutClass,
+                      "payout-col font-extrabold text-[14px]",
                       result.summary.payout < 0
                         ? "danger"
                         : result.summary.payout === 0
                           ? "text-[#64748b]"
-                          : "positive"
-                    }`}
+                          : "positive",
+                    )}
                   >
-                    {formatTHB(result.summary.payout)}
+                    <CompactValueToggle value={formatTHB(result.summary.payout)} />
                   </TableCell>
-                  <TableCell data-label="" className="max-[767px]:hidden" />
+                  <TableCell data-label="" className={cn(colActionsClass, "max-[767px]:hidden")} />
                 </TableRow>
               </TableFooter>
             </Table>
+          </BillPreviewProvider>
+        );
+        })()}
 
             <PaginationBar
               page={result.page}
@@ -1225,6 +1309,8 @@ export default async function BillsPage({
             />
           </>
         )}
+        </TableLoadingBoundary>
+        </BillsFilterProvider>
       </Card>
     </div>
   );

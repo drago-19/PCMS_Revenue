@@ -4,6 +4,7 @@ import { ClearAllImportsButton } from "@/components/DeleteImportButton";
 import { ExcelFilePreviewDialog } from "@/components/ExcelPreviewDialog";
 import { EmptyState, PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
 import { PaginationBar } from "@/components/PaginationBar";
+import { TableLoadingBoundary } from "@/components/TableLoadingBoundary";
 import {
   IconCalendar,
   IconCheckCircle,
@@ -173,12 +174,22 @@ export default async function ImportHistoryPage({
                 basePath="/history"
               />
               {date ? (
-                <Button asChild variant="ghost" size="sm">
+                <Button asChild variant="outline" size="sm">
                   <Link href="/history" scroll={false}>
                     ล้างตัวกรอง
                   </Link>
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled
+                  aria-label="ล้างตัวกรอง (ยังไม่ได้เลือกตัวกรอง)"
+                >
+                  ล้างตัวกรอง
+                </Button>
+              )}
               <span className="text-xs text-muted-foreground">
                 ทั้งหมด <strong>{result.total.toLocaleString("th-TH")}</strong> ไฟล์
               </span>
@@ -186,8 +197,13 @@ export default async function ImportHistoryPage({
           </div>
         </div>
 
+        <TableLoadingBoundary
+          rows={12}
+          columns={7}
+          label="กำลังโหลดประวัติการนำเข้าไฟล์"
+        >
         {result.rows.length === 0 ? (
-          <div className="p-6">
+          <div className="flex min-h-[560px] flex-col items-center justify-center p-6">
             <EmptyState
               icon={<IconFile size={28} />}
               title="ยังไม่มีประวัติการนำเข้าไฟล์"
@@ -203,20 +219,23 @@ export default async function ImportHistoryPage({
           </div>
         ) : (
           <>
-            <Table variant="stack">
+            <Table
+              variant="stack"
+              className="bills-table-animated min-[768px]:table-fixed"
+            >
               <TableHeader>
                 <TableRow>
-                  <TableHead>ไฟล์ที่นำเข้า</TableHead>
-                  <TableHead className="min-[768px]:max-[1439px]:hidden">
+                  <TableHead className="min-[768px]:w-auto">ไฟล์ที่นำเข้า</TableHead>
+                  <TableHead className="min-[768px]:max-[1439px]:hidden min-[1440px]:w-[150px]">
                     นำเข้าเมื่อ
                   </TableHead>
-                  <TableHead>รอบชำระ</TableHead>
-                  <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                  <TableHead className="min-[768px]:w-[175px] min-[1280px]:w-[190px]">รอบชำระ</TableHead>
+                  <TableHead className="num min-[768px]:max-[1099px]:hidden min-[1100px]:w-[88px]">
                     จำนวนแถว
                   </TableHead>
-                  <TableHead className="num">จำนวนบิล</TableHead>
-                  <TableHead>สถานะ</TableHead>
-                  <TableHead className="num">การจัดการ</TableHead>
+                  <TableHead className="num min-[768px]:w-[92px] min-[1280px]:w-[100px]">จำนวนบิล</TableHead>
+                  <TableHead className="min-[768px]:w-[85px]">สถานะ</TableHead>
+                  <TableHead className="num min-[768px]:w-[295px] min-[1280px]:w-[300px]">การจัดการ</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -331,6 +350,7 @@ export default async function ImportHistoryPage({
             />
           </>
         )}
+        </TableLoadingBoundary>
       </Card>
     </div>
   );

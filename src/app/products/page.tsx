@@ -3,6 +3,7 @@ import { DatePickerField } from "@/components/DatePickerField";
 import { FilterForm } from "@/components/FilterForm";
 import { EmptyState, PageHeader, StatCard } from "@/components/PageHeader";
 import { PaginationBar } from "@/components/PaginationBar";
+import { TableLoadingBoundary } from "@/components/TableLoadingBoundary";
 import {
   IconFile,
   IconReceipt,
@@ -140,12 +141,12 @@ export default async function ProductsPage({
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop & Shopee · SKU Summary Table"
+        eyebrow="TikTok Shop, Shopee & Facebook · SKU Summary Table"
         title="หมวดสรุปยอดขายตามรหัสสินค้า (SKU)"
         description={
           scopeHintLabel
-            ? `กำลังแสดงข้อมูล: ${scopeHintLabel} · ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop และ Shopee`
-            : "ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop และ Shopee ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
+            ? `กำลังแสดงข้อมูล: ${scopeHintLabel} · ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop, Shopee และ Facebook`
+            : "ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop, Shopee และ Facebook ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
         }
         actions={
           <Button asChild variant="default">
@@ -173,7 +174,7 @@ export default async function ProductsPage({
           hint={
             scopeHintLabel
               ? `จำนวนชิ้นรวม (${scopeHintLabel})`
-              : "รวมคำสั่งซื้อ TikTok Shop และ Shopee"
+              : "รวมคำสั่งซื้อ TikTok Shop, Shopee และ Facebook"
           }
           tone="positive"
           icon={<IconReceipt size={19} />}
@@ -212,6 +213,9 @@ export default async function ProductsPage({
                 </Badge>
                 <Badge variant="shopee" size="default" className="font-bold">
                   Shopee
+                </Badge>
+                <Badge variant="facebook" size="default" className="font-bold">
+                  Facebook
                 </Badge>
               </div>
             </div>
@@ -262,13 +266,29 @@ export default async function ProductsPage({
                     ล้างตัวกรอง
                   </Link>
                 </Button>
-              ) : null}
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled
+                  aria-label="ล้างตัวกรอง (ยังไม่ได้เลือกตัวกรอง)"
+                  className="h-10 min-h-[40px] flex-1 shrink-0 min-[640px]:flex-initial"
+                >
+                  ล้างตัวกรอง
+                </Button>
+              )}
             </FilterForm>
           </div>
         </div>
 
+        <TableLoadingBoundary
+          rows={12}
+          columns={6}
+          label="กำลังโหลดสรุปยอดรหัสสินค้า"
+        >
         {result.rows.length === 0 ? (
-          <div className="p-6">
+          <div className="flex min-h-[560px] flex-col items-center justify-center p-6">
             <EmptyState
               icon={<IconFile size={28} />}
               title="ยังไม่มีข้อมูลรหัสสินค้า (SKU)"
@@ -283,14 +303,22 @@ export default async function ProductsPage({
             />
           </div>
         ) : (
-          <>
-            <Table variant="stack">
+          <div
+            key={`${sort}-${page}-${date}-${q}`}
+            className="bills-content-region"
+          >
+            <Table
+              variant="stack"
+              className="bills-table-animated min-[768px]:table-fixed"
+            >
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-12 text-center">#</TableHead>
-                  <TableHead>รหัสสินค้า (SKU)</TableHead>
-                  <TableHead>ชื่อสินค้า</TableHead>
-                  <TableHead className="num min-[768px]:max-[959px]:hidden">
+                  <TableHead className="min-[768px]:w-[175px] min-[1280px]:w-[195px]">
+                    รหัสสินค้า (SKU)
+                  </TableHead>
+                  <TableHead className="min-[768px]:w-auto">ชื่อสินค้า</TableHead>
+                  <TableHead className="num min-[768px]:max-[959px]:hidden min-[960px]:w-[115px] min-[1280px]:w-[130px]">
                     <Link
                       href={buildProductsHref({
                         nextSort:
@@ -310,7 +338,7 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num">
+                  <TableHead className="num min-[768px]:w-[118px] min-[1280px]:w-[130px]">
                     <Link
                       href={buildProductsHref({
                         nextSort: sort === "qty_asc" ? "qty_desc" : "qty_asc",
@@ -329,7 +357,7 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num min-[768px]:max-[1099px]:hidden">
+                  <TableHead className="num min-[768px]:max-[1099px]:hidden min-[1100px]:w-[118px] min-[1280px]:w-[130px]">
                     <Link
                       href={buildProductsHref({
                         nextSort:
@@ -349,7 +377,7 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num">
+                  <TableHead className="num min-[768px]:w-[132px] min-[1280px]:w-[148px]">
                     <Link
                       href={buildProductsHref({
                         nextSort:
@@ -369,7 +397,9 @@ export default async function ProductsPage({
                       </span>
                     </Link>
                   </TableHead>
-                  <TableHead className="num">ดูบิล</TableHead>
+                  <TableHead className="num min-[768px]:w-[122px] min-[1280px]:w-[132px]">
+                    ดูบิล
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -491,8 +521,9 @@ export default async function ProductsPage({
                 sort: sort !== "qty_desc" ? sort : undefined,
               }}
             />
-          </>
+          </div>
         )}
+        </TableLoadingBoundary>
       </Card>
     </div>
   );

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
+import { useEffect, useState, type ComponentType, type FormEvent } from "react";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   KeyRoundIcon,
+  Loader2Icon,
   LogOutIcon,
   MenuIcon,
   SettingsIcon,
@@ -94,6 +95,35 @@ const items = [
   },
 ];
 
+function NavItemIcon({
+  icon: Icon,
+}: {
+  icon: ComponentType<{ size?: number; className?: string }>;
+}) {
+  const { pending } = useLinkStatus();
+  return (
+    <span className="relative inline-flex size-[18px] shrink-0 items-center justify-center">
+      <Icon
+        size={18}
+        aria-hidden="true"
+        className={cn(
+          "transition-opacity duration-150 ease-out",
+          pending ? "opacity-0" : "opacity-100",
+        )}
+      />
+      <Loader2Icon
+        aria-hidden="true"
+        data-nav-pending={pending ? "true" : undefined}
+        className={cn(
+          "absolute size-[18px] transition-opacity duration-150 ease-out",
+          pending ? "opacity-100" : "opacity-0",
+          pending && "motion-safe:animate-spin",
+        )}
+      />
+    </span>
+  );
+}
+
 function NavLinks({
   pathname,
   onNavigate,
@@ -123,8 +153,8 @@ function NavLinks({
               title={item.label}
               aria-current={active ? "page" : undefined}
             >
-              <Icon size={18} />
-              <span className="flex flex-col leading-tight">
+              <NavItemIcon icon={Icon} />
+              <span className="flex min-w-0 flex-col leading-tight">
                 <span className="!inline font-bold">{item.label}</span>
                 <span
                   className={cn(

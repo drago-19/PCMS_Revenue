@@ -87,6 +87,8 @@ export function UnknownColumnsManager({
 }: UnknownColumnsManagerProps) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  // ระบุ "ปุ่มที่กำลังทำงาน" เพื่อให้ spinner ขึ้นเฉพาะปุ่มที่ถูกกด (ปุ่มอื่นแค่ disabled)
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [categories, setCategories] = useState<
     Record<string, UnknownColumnCategory | "">
   >(() => {
@@ -109,9 +111,11 @@ export function UnknownColumnsManager({
 
   async function saveCategories(
     patchCategories: Record<string, UnknownColumnCategory | "">,
+    actionKey = "save",
   ) {
     if (busy || readOnly) return;
     setBusy(true);
+    setPendingKey(actionKey);
     try {
       const response = await fetch("/api/settings/column-mappings", {
         method: "PUT",
@@ -144,6 +148,7 @@ export function UnknownColumnsManager({
       toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองอีกครั้ง");
     } finally {
       setBusy(false);
+      setPendingKey(null);
     }
   }
 
@@ -159,12 +164,13 @@ export function UnknownColumnsManager({
     };
     setCategories(next);
     setNewColHeader("");
-    await saveCategories(next);
+    await saveCategories(next, "add");
   }
 
   async function handleRemoveHeaderRule(header: string) {
     if (busy || readOnly) return;
     setBusy(true);
+    setPendingKey(`header:${header}`);
     try {
       const response = await fetch(
         `/api/settings/column-mappings?header=${encodeURIComponent(header)}`,
@@ -181,13 +187,14 @@ export function UnknownColumnsManager({
       }
     } finally {
       setBusy(false);
+      setPendingKey(null);
     }
   }
 
   async function handleRemoveCategoryRule(header: string) {
     const next = { ...categories, [header]: "" as const };
     setCategories(next);
-    await saveCategories(next);
+    await saveCategories(next, `category:${header}`);
   }
 
   const extraSavedCategoryHeaders = Object.keys(categories).filter(
@@ -212,10 +219,13 @@ export function UnknownColumnsManager({
               type="button"
               variant="default"
               size="sm"
+              loading={pendingKey === "save"}
               disabled={busy}
               onClick={() => saveCategories(categories)}
             >
-              {busy ? "กำลังบันทึกและคำนวณใหม่..." : "บันทึกหมวดหมู่และคำนวณยอดใหม่ทันที"}
+              {pendingKey === "save"
+                ? "กำลังบันทึกและคำนวณใหม่..."
+                : "บันทึกหมวดหมู่และคำนวณยอดใหม่ทันที"}
             </Button>
           ) : null}
         </div>
@@ -374,10 +384,11 @@ export function UnknownColumnsManager({
               type="button"
               variant="default"
               size="sm"
+              loading={pendingKey === "add"}
               disabled={busy}
               onClick={handleAddCustomCategoryRule}
             >
-              + เพิ่มหมวดหมู่คอลัมน์
+              {pendingKey === "add" ? "กำลังเพิ่ม..." : "+ เพิ่มหมวดหมู่คอลัมน์"}
             </Button>
           </div>
         ) : null}
@@ -417,6 +428,7 @@ export function UnknownColumnsManager({
                         type="button"
                         variant="ghost"
                         size="sm"
+                        loading={pendingKey === `header:${header}`}
                         disabled={busy}
                         onClick={() => handleRemoveHeaderRule(header)}
                       >
@@ -447,6 +459,7 @@ export function UnknownColumnsManager({
                           type="button"
                           variant="ghost"
                           size="sm"
+                          loading={pendingKey === `category:${header}`}
                           disabled={busy}
                           onClick={() => handleRemoveCategoryRule(header)}
                         >

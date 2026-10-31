@@ -401,8 +401,8 @@ export function UploadCompletenessCalendar({
                     <div className="text-[11px] font-bold leading-tight text-emerald-800 dark:text-emerald-300">
                       {row.normalOrders === 0
                         ? "ไม่มีคำสั่งซื้อ (0 บิล)"
-                        : row.shopeeOrders > 0 && row.tiktokOrders === 0
-                          ? `ครบ 2 ไฟล์ Shopee (${formatNumber(row.normalOrders)} บิล)`
+                        : (row.shopeeOrders > 0 || row.facebookOrders > 0) && row.tiktokOrders === 0
+                          ? `ครบ 2 ไฟล์ Shipnity (${formatNumber(row.normalOrders)} บิล)`
                           : `ครบ 3 ไฟล์ (${formatNumber(row.normalOrders)} บิล)`}
                     </div>
                   ) : (
@@ -547,7 +547,7 @@ export function UploadCompletenessCalendar({
                     : selectedDay.hasFile3
                       ? "ในไฟล์ TikTok ที่อัปโหลดแล้ว ไม่มีบิลในวันนี้ (0 บิล) · ยังขาดไฟล์ Shipnity ของเดือนนี้"
                       : "ยังไม่มีข้อมูลคำสั่งซื้อในวันนี้ (0 บิล)"
-                  : `บิลขายปกติทั้งหมด ${formatNumber(selectedDay.normalOrders)} บิล (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล · Shopee ${formatNumber(selectedDay.shopeeOrders)} บิล)`}
+                  : `บิลขายปกติทั้งหมด ${formatNumber(selectedDay.normalOrders)} บิล (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล · Shopee ${formatNumber(selectedDay.shopeeOrders)} บิล · Facebook ${formatNumber(selectedDay.facebookOrders)} บิล)`}
               </DialogDescription>
             </DialogHeader>
 
@@ -562,7 +562,7 @@ export function UploadCompletenessCalendar({
                 )}
               >
                 <span className="text-xs font-bold text-foreground">
-                  1. ไฟล์ออเดอร์ Shipnity (TikTok & Shopee)
+                  1. ไฟล์ออเดอร์ Shipnity (TikTok, Shopee & Facebook)
                 </span>
                 <span
                   className={cn(
@@ -592,7 +592,7 @@ export function UploadCompletenessCalendar({
                 )}
               >
                 <span className="text-xs font-bold text-foreground">
-                  2. ไฟล์สินค้า Shipnity (TikTok & Shopee)
+                  2. ไฟล์สินค้า Shipnity (TikTok, Shopee & Facebook)
                 </span>
                 <span
                   className={cn(
@@ -637,7 +637,7 @@ export function UploadCompletenessCalendar({
                       ? "✓ อัปโหลดแล้ว (ไม่มีบิลในวันนี้)"
                       : "ยังไม่อัปโหลด"
                     : selectedDay.tiktokOrders === 0
-                      ? `✓ ไม่ต้องใช้ (มีเฉพาะ Shopee ${formatNumber(selectedDay.shopeeOrders)} บิล)`
+                      ? `✓ ไม่ต้องใช้ (มีเฉพาะ Shopee/Facebook ${formatNumber(selectedDay.shopeeOrders + selectedDay.facebookOrders)} บิล)`
                       : selectedDay.hasFile3
                         ? `✓ ครบ (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล)`
                         : `✕ ขาด ${formatNumber(selectedDay.missingFile3Count)} จาก ${formatNumber(selectedDay.tiktokOrders)} บิล TikTok`}

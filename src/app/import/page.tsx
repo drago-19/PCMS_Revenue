@@ -35,9 +35,9 @@ export default async function ImportPage({
   return (
     <>
       <PageHeader
-        eyebrow="TikTok Shop & Shopee · นำเข้าและแมปข้อมูล 3 ไฟล์"
+        eyebrow="TikTok Shop, Shopee & Facebook · นำเข้าและแมปข้อมูล 3 ไฟล์"
         title="หมวดอัปโหลดไฟล์รายได้ & รายการสินค้า"
-        description="รองรับทั้งไฟล์ .xlsx และ .csv จากทั้ง 3 ส่วน: (1) ไฟล์ออเดอร์ใน shipnity  (2) ไฟล์รายได้ TikTok Shop  (3) ไฟล์สินค้าในออเดอร์ shipnity (รองรับทั้งช่องทาง TikTok และ Shopee)"
+        description="รองรับทั้งไฟล์ .xlsx และ .csv จากทั้ง 3 ส่วน: (1) ไฟล์ออเดอร์ใน shipnity  (2) ไฟล์รายได้ TikTok Shop  (3) ไฟล์สินค้าในออเดอร์ shipnity (รองรับทั้งช่องทาง TikTok, Shopee และ Facebook)"
         actions={
           <>
             <Button asChild variant="outline">

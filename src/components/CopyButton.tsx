@@ -53,7 +53,10 @@ export function CopyButton({
     [],
   );
 
-  async function handleClick() {
+  async function handleClick(e?: React.MouseEvent) {
+    if (e) {
+      e.stopPropagation();
+    }
     const ok = await copyToClipboard(value);
     setStatus(ok ? "copied" : "failed");
     if (timer.current) clearTimeout(timer.current);

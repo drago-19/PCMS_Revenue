@@ -59,7 +59,7 @@ export function StatCard({
 }: {
   label: string;
   value: string;
-  hint?: string;
+  hint?: ReactNode;
   icon?: ReactNode;
 } & VariantProps<typeof statCardVariants>) {
   return (
