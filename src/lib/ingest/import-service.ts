@@ -7,6 +7,7 @@ import {
 } from "../db";
 import { compressFileBlob } from "../file-blob";
 import { SELLER } from "../seller";
+import { INVOICE_ELIGIBLE_SQL } from "../invoice-eligibility";
 import { round2 } from "../format";
 import {
   getReportTotal,
@@ -814,22 +815,7 @@ export async function reconcileAndSyncThreeFiles(
       params,
       client,
     );
-
-    await query(
-      `INSERT INTO invoice_registry (order_id, invoice_no)
-       SELECT u.order_id,
-              'SEQ/INIT/' || nextval('invoice_seq')::text
-       FROM unnest($1::text[]) AS u(order_id)
-       JOIN transactions t ON t.external_id = u.order_id AND t.is_order = 1
-       WHERE t.link_priority <> 3
-         AND NOT (t.channel IN ('Shopee', 'Facebook') AND (t.income <= 0 OR t.payout <= 0))
-         AND NOT EXISTS (
-           SELECT 1 FROM invoice_registry r WHERE r.order_id = u.order_id
-         )
-       ON CONFLICT (order_id) DO NOTHING`,
-      [extIds],
-      client,
-    );
+    // เลขที่ใบกำกับฯ ออกใน syncMonthlyInvoiceRegistry (ท้ายฟังก์ชันนี้) เท่านั้น
   }
 
   // 5. Stamp order_code, oms_order_uid, and channel onto matched transactions
@@ -930,73 +916,151 @@ export async function reconcileAndSyncThreeFiles(
   };
 }
 
+/**
+ * ทะเบียนเลขที่ใบกำกับภาษี — เลขที่ออกแล้ว "ล็อก" ห้ามเปลี่ยน (อ้างอิงทางภาษี)
+ * - ออเดอร์เดิมที่มีเลขแล้ว → ใช้เลขเดิมเสมอ (แม้ข้อมูลถูกอัปเดต)
+ * - ออเดอร์ใหม่ที่เข้าเงื่อนไขบิลขายปกติ (INVOICE_ELIGIBLE_SQL) → seq = MAX(seq ของเดือน) + 1
+ *   (ภายในการนำเข้าครั้งเดียวกัน เรียง TikTok → Shopee → Facebook แล้วตามวันที่)
+ * - ออเดอร์ที่มีเลขแล้วแต่ไม่เข้าเงื่อนไขแล้ว (คืนเงิน/ตีกลับ/ยกเลิก) → status = 'void' (ไม่ลบ ไม่นำเลขกลับมาใช้)
+ * - void แล้วกลับมาเข้าเงื่อนไข → active ด้วยเลขเดิม
+ * ทุกการเปลี่ยนแปลงบันทึกลง invoice_registry_audit (append-only)
+ *
+ * importId ระบุ → ทำงานเฉพาะออเดอร์ที่ไฟล์นี้แตะ (กันสแกนทั้งตาราง) · ไม่ระบุ → ทั้งระบบ (ใช้กับสคริปต์ backfill)
+ */
 export async function syncMonthlyInvoiceRegistry(
   client: Queryable,
   importId?: number,
 ): Promise<void> {
+  const scoped = importId !== undefined && importId !== null;
+  const candidatesSql = scoped
+    ? `cand AS (
+         SELECT t.external_id FROM transactions t WHERE t.is_order = 1 AND t.import_id = $1
+         UNION
+         SELECT t.external_id FROM oms_orders o
+         JOIN transactions t ON t.oms_order_uid = o.order_uid AND t.is_order = 1
+         WHERE o.import_id = $1
+         UNION
+         SELECT t.external_id FROM oms_orders o
+         JOIN transactions t ON t.external_id = o.matched_external_id AND t.is_order = 1
+         WHERE o.import_id = $1
+         UNION
+         SELECT t.external_id FROM oms_order_items i
+         JOIN transactions t ON t.oms_order_uid = i.order_uid AND t.is_order = 1
+         WHERE i.import_id = $1
+         UNION
+         SELECT r.order_id FROM invoice_registry r WHERE r.seq IS NULL
+       )`
+    : `cand AS (
+         SELECT t.external_id FROM transactions t WHERE t.is_order = 1 AND $1::int IS NULL
+         UNION
+         SELECT r.order_id FROM invoice_registry r WHERE $1::int IS NULL
+       )`;
+  const params = [scoped ? importId : null];
+
+  // กันการนำเข้าพร้อมกันออกเลขชนกัน (ล็อกต่อ schema/บริษัท จนจบ transaction)
   await query(
-    `DELETE FROM invoice_registry r
-     WHERE NOT EXISTS (
-       SELECT 1 FROM transactions t
-       WHERE t.external_id = r.order_id
-         AND t.is_order = 1
-         AND t.link_priority <> 3
-         AND NOT (t.channel IN ('Shopee', 'Facebook') AND (t.income <= 0 OR t.payout <= 0))
-     )`,
+    `SELECT pg_advisory_xact_lock(hashtext(current_schema() || ':invoice_registry'))`,
     [],
     client,
   );
 
+  // 1) void: มีเลขแล้วแต่ไม่เข้าเงื่อนไขบิลขายปกติแล้ว
   await query(
-    `WITH tx_ym AS (
-       SELECT r.order_id,
-              r.invoice_no,
-              r.created_at,
-              t.import_id,
-              COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') AS eff_date,
-              CASE
-                WHEN COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
-                THEN SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
-                     || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2)
-                ELSE '0000'
-              END AS yymm
-       FROM invoice_registry r
-       JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
-     ),
-     dirty_months AS (
-       SELECT DISTINCT yymm FROM tx_ym
-       WHERE ($1::int IS NULL OR import_id = $1)
-          OR invoice_no NOT LIKE ('SEQ/' || yymm || '/%')
-       UNION
-       SELECT DISTINCT SUBSTRING(invoice_no FROM 5 FOR 4) AS yymm
-       FROM tx_ym
-       WHERE invoice_no LIKE 'SEQ/____/%'
-         AND SUBSTRING(invoice_no FROM 5 FOR 4) <> yymm
-     ),
-     ordered AS (
-       SELECT tx_ym.order_id,
-              tx_ym.yymm,
-              ROW_NUMBER() OVER (
-                PARTITION BY tx_ym.yymm
-                ORDER BY tx_ym.eff_date ASC, tx_ym.created_at ASC, tx_ym.order_id ASC
-              ) AS rn
-       FROM tx_ym
-       JOIN dirty_months dm ON dm.yymm = tx_ym.yymm
+    `WITH ${candidatesSql},
+     upd AS (
+       UPDATE invoice_registry r
+       SET status = 'void',
+           voided_at = now(),
+           void_reason = 'ไม่เข้าเงื่อนไขบิลขายปกติ (คืนเงิน/ตีกลับ/ยกเลิก/ข้อมูลไม่ครบ)'
+       FROM cand c
+       WHERE r.order_id = c.external_id
+         AND r.status = 'active'
+         AND r.seq IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM transactions t
+           WHERE t.external_id = r.order_id AND ${INVOICE_ELIGIBLE_SQL}
+         )
+       RETURNING r.order_id, r.invoice_no, r.void_reason
      )
-     UPDATE invoice_registry r
-     SET invoice_no = '__TMP_SEQ__/' || o.yymm || '/' || LPAD(o.rn::text, GREATEST(5, LENGTH(o.rn::text)), '0')
-     FROM ordered o
-     WHERE r.order_id = o.order_id
-       AND r.invoice_no IS DISTINCT FROM ('SEQ/' || o.yymm || '/' || LPAD(o.rn::text, GREATEST(5, LENGTH(o.rn::text)), '0'))`,
-    [importId ?? null],
+     INSERT INTO invoice_registry_audit (order_id, invoice_no, action, reason, import_id)
+     SELECT order_id, invoice_no, 'void', void_reason, $1::int FROM upd`,
+    params,
     client,
   );
 
+  // 2) unvoid: กลับมาเข้าเงื่อนไข → ใช้เลขเดิม
   await query(
-    `UPDATE invoice_registry
-     SET invoice_no = 'SEQ/' || SUBSTRING(invoice_no FROM 13)
-     WHERE invoice_no LIKE '__TMP_SEQ__/%'`,
-    [],
+    `WITH ${candidatesSql},
+     upd AS (
+       UPDATE invoice_registry r
+       SET status = 'active', voided_at = NULL, void_reason = NULL
+       FROM cand c
+       WHERE r.order_id = c.external_id
+         AND r.status = 'void'
+         AND EXISTS (
+           SELECT 1 FROM transactions t
+           WHERE t.external_id = r.order_id AND ${INVOICE_ELIGIBLE_SQL}
+         )
+       RETURNING r.order_id, r.invoice_no
+     )
+     INSERT INTO invoice_registry_audit (order_id, invoice_no, action, import_id)
+     SELECT order_id, invoice_no, 'unvoid', $1::int FROM upd`,
+    params,
+    client,
+  );
+
+  // 3) assign: ออเดอร์ที่เข้าเงื่อนไขแต่ยังไม่มีเลข → ต่อท้าย MAX(seq) ของเดือน (batch เดียว ไม่วนทีละแถว)
+  await query(
+    `WITH ${candidatesSql},
+     newo AS (
+       SELECT DISTINCT ON (t.external_id)
+              t.external_id,
+              t.channel,
+              COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) AS eff_date,
+              SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
+                || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2) AS yymm
+       FROM cand c
+       JOIN transactions t ON t.external_id = c.external_id AND ${INVOICE_ELIGIBLE_SQL}
+       WHERE COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
+         AND NOT EXISTS (
+           SELECT 1 FROM invoice_registry r WHERE r.order_id = t.external_id AND r.seq IS NOT NULL
+         )
+       ORDER BY t.external_id, t.id
+     ),
+     mx AS (
+       SELECT r.yymm, MAX(r.seq) AS max_seq
+       FROM invoice_registry r
+       WHERE r.yymm IN (SELECT DISTINCT yymm FROM newo)
+       GROUP BY r.yymm
+     ),
+     numbered AS (
+       SELECT n.external_id, n.channel, n.yymm,
+              COALESCE(mx.max_seq, 0) + ROW_NUMBER() OVER (
+                PARTITION BY n.yymm
+                ORDER BY CASE n.channel WHEN 'TikTok' THEN 1 WHEN 'Shopee' THEN 2 WHEN 'Facebook' THEN 3 ELSE 4 END ASC,
+                         n.eff_date ASC, n.external_id ASC
+              ) AS seq
+       FROM newo n
+       LEFT JOIN mx ON mx.yymm = n.yymm
+     ),
+     ins AS (
+       INSERT INTO invoice_registry (order_id, invoice_no, yymm, seq, channel, status)
+       SELECT external_id,
+              'SEQ/' || yymm || '/' || LPAD(seq::text, GREATEST(5, LENGTH(seq::text)), '0'),
+              yymm, seq, channel, 'active'
+       FROM numbered
+       ON CONFLICT (order_id) DO UPDATE
+         SET invoice_no = EXCLUDED.invoice_no,
+             yymm = EXCLUDED.yymm,
+             seq = EXCLUDED.seq,
+             channel = EXCLUDED.channel,
+             status = 'active'
+         WHERE invoice_registry.seq IS NULL
+       RETURNING order_id, invoice_no
+     )
+     INSERT INTO invoice_registry_audit (order_id, invoice_no, action, import_id)
+     SELECT order_id, invoice_no, 'assign', $1::int FROM ins`,
+    params,
     client,
   );
 }
@@ -1546,9 +1610,6 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
 
         const orderParams: unknown[] = [];
         const orderPlaceholders: string[] = [];
-        const invoiceOrderIds: string[] = [];
-        const invoicePrefixes: string[] = [];
-        const zeroOrderIds: string[] = [];
 
         for (let i = 0; i < orderChunk.length; i++) {
           const transaction = orderChunk[i]!;
@@ -1599,12 +1660,6 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
             now,
             "TikTok",
           );
-          if (income > 0 || payout > 0) {
-            invoiceOrderIds.push(transaction.externalId);
-            invoicePrefixes.push(invoicePrefix(transaction.paidAt));
-          } else {
-            zeroOrderIds.push(transaction.externalId);
-          }
         }
 
         await query(
@@ -1618,28 +1673,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
           client,
         );
 
-        if (zeroOrderIds.length > 0) {
-          await query(
-            "DELETE FROM invoice_registry WHERE order_id = ANY($1::text[])",
-            [zeroOrderIds],
-            client,
-          );
-        }
-
-        if (invoiceOrderIds.length > 0) {
-          await query(
-            `INSERT INTO invoice_registry (order_id, invoice_no)
-             SELECT u.order_id,
-                    'SEQ/INIT/' || nextval('invoice_seq')::text
-             FROM unnest($1::text[]) AS u(order_id)
-             WHERE NOT EXISTS (
-               SELECT 1 FROM invoice_registry r WHERE r.order_id = u.order_id
-             )
-             ON CONFLICT (order_id) DO NOTHING`,
-            [invoiceOrderIds],
-            client,
-          );
-        }
+        // เลขที่ใบกำกับฯ: ออกเลข/void ใน syncMonthlyInvoiceRegistry (เรียกท้าย reconcileAndSyncThreeFiles) เท่านั้น — เลขที่ออกแล้วล็อก ห้ามลบ
       }
 
       if (otherChunk.length > 0) {

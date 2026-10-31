@@ -6,6 +6,7 @@ import {
 } from "./db";
 import { decompressFileBlob } from "./file-blob";
 import { formatInvoiceNoWithPrefix, type SellerInfo } from "./seller";
+import { INVOICE_ELIGIBLE_SQL } from "./invoice-eligibility";
 import { getDocumentSettings } from "./settings";
 import {
   readInputSheets,
@@ -741,7 +742,7 @@ export async function listDuplicateOrderTransactionsForImport(
   const rows = await query<Record<string, unknown>>(
     `SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
      FROM transactions t
-     LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+     LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
      LEFT JOIN imports i ON i.id = t.import_id
      WHERE t.import_id = $1
        AND COALESCE((t.normalized_json->>'sourceRows')::int, 1) > 1
@@ -1192,27 +1193,37 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
       }
     }
 
+    // เลขที่ใบกำกับฯ ล็อกแล้ว: ลบไฟล์นำเข้า → void (ไม่ลบ) เพื่อให้นำเข้าใหม่แล้วได้เลขเดิมกลับมา
     await query(
-      `DELETE FROM invoice_registry r
-       WHERE NOT EXISTS (
-         SELECT 1 FROM transactions t
-         WHERE t.external_id = r.order_id AND t.is_order = 1
+      `WITH upd AS (
+         UPDATE invoice_registry r
+         SET status = 'void', voided_at = now(), void_reason = 'ลบไฟล์นำเข้า'
+         WHERE r.status = 'active'
+           AND NOT EXISTS (
+             SELECT 1 FROM transactions t
+             WHERE t.external_id = r.order_id AND t.is_order = 1
+           )
+           AND ($1::text[] IS NULL OR r.order_id = ANY($1::text[]))
+         RETURNING r.order_id, r.invoice_no, r.void_reason
        )
-       AND ($1::text[] IS NULL OR r.order_id = ANY($1::text[]))`,
-      [affectedOrderIds.length > 0 ? affectedOrderIds : null],
+       INSERT INTO invoice_registry_audit (order_id, invoice_no, action, reason, import_id)
+       SELECT order_id, invoice_no, 'void', void_reason, $2::int FROM upd`,
+      [affectedOrderIds.length > 0 ? affectedOrderIds : null, id],
       target,
     );
 
     if (Number(remainingImports?.c ?? 0) === 0) {
-      await query("DELETE FROM invoice_registry", [], target);
-      const remaining = await queryOne<{ c: string | number }>(
-        "SELECT COUNT(*) AS c FROM invoice_registry",
-        [],
+      await query(
+        `WITH upd AS (
+           UPDATE invoice_registry SET status = 'void', voided_at = now(), void_reason = 'ลบไฟล์นำเข้าทั้งหมด'
+           WHERE status = 'active'
+           RETURNING order_id, invoice_no, void_reason
+         )
+         INSERT INTO invoice_registry_audit (order_id, invoice_no, action, reason, import_id)
+         SELECT order_id, invoice_no, 'void', void_reason, $1::int FROM upd`,
+        [id],
         target,
       );
-      if (Number(remaining?.c ?? 0) === 0) {
-        await query("ALTER SEQUENCE invoice_seq RESTART WITH 1", [], target);
-      }
     }
 
     return true;
@@ -1237,8 +1248,18 @@ export async function deleteAllImports(db?: Queryable): Promise<number> {
     await query("DELETE FROM products", [], target);
     await query("DELETE FROM daily_summaries", [], target);
     await query("DELETE FROM sku_summaries", [], target);
-    await query("DELETE FROM invoice_registry", [], target);
-    await query("ALTER SEQUENCE invoice_seq RESTART WITH 1", [], target);
+    // เลขที่ใบกำกับฯ ล็อกแล้ว (อ้างอิงทางภาษี) — ไม่ลบทะเบียน แค่ void ทั้งหมด + บันทึก audit
+    await query(
+      `WITH upd AS (
+         UPDATE invoice_registry SET status = 'void', voided_at = now(), void_reason = 'ล้างข้อมูลนำเข้าทั้งหมด'
+         WHERE status = 'active'
+         RETURNING order_id, invoice_no, void_reason
+       )
+       INSERT INTO invoice_registry_audit (order_id, invoice_no, action, reason)
+       SELECT order_id, invoice_no, 'void', void_reason FROM upd`,
+      [],
+      target,
+    );
     return deleted.length;
   };
   if (db) return runClear(db);
@@ -1593,7 +1614,7 @@ export async function getDailyBatch(
   const rows = await query<Record<string, unknown>>(
     `SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
      FROM transactions t
-     LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+     LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
      LEFT JOIN imports i ON i.id = t.import_id
      WHERE ${txDateWhere}
        AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
@@ -1792,7 +1813,7 @@ export async function getDailyBatchPaged(
        SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
        FROM page_ids p
        JOIN transactions t ON t.id = p.id
-       LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+       LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
        LEFT JOIN imports i ON i.id = t.import_id
        ORDER BY ${orderBySql}`,
       [date, pageSize, (page - 1) * pageSize],
@@ -1802,7 +1823,7 @@ export async function getDailyBatchPaged(
       ? query<Record<string, unknown>>(
           `SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
            FROM transactions t
-           LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+           LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
            LEFT JOIN imports i ON i.id = t.import_id
            WHERE t.paid_date = $1
              AND t.is_order = 0
@@ -1882,10 +1903,14 @@ export async function getBulkInvoicesBatch(
   const rawLink = options.rawLink ?? "linked";
   const batchSize: 100 | 200 | 500 = options.batchSize ?? 200;
   const isMonth = /^\d{4}-\d{2}$/.test(date);
+  if (isMonth) {
+    return getMonthlyInvoicesBatchKeyset({ date, channelFilter, batch: options.batch, batchSize }, db);
+  }
   const txDateWhere = isMonth ? "t.paid_date LIKE $1" : "t.paid_date = $1";
   const dateParam = isMonth ? `${date}-%` : date;
 
-  const billableClause = `((t.channel = 'TikTok' AND t.transaction_type <> 'คำสั่งซื้อ (OMS)' AND t.income > 0 AND t.payout > 0) OR (t.channel IN ('Shopee', 'Facebook') AND t.income > 0 AND t.payout > 0)) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`;
+  // ออกใบกำกับภาษีเฉพาะ "บิลขายปกติ" (ไม่รวมคืนเงิน/ตีกลับ/ยกเลิก/เปลี่ยนสินค้า) — แยกเงื่อนไขตามช่องทาง
+  const billableClause = `(${INVOICE_ELIGIBLE_SQL})`;
   const isLinkedSql = `(${ORDER_LINK_PRIORITY_SQL} = 0)`;
   const chMatchSql =
     channelFilter === "Shopee"
@@ -1959,24 +1984,26 @@ export async function getBulkInvoicesBatch(
   const [rows, missingDateRows] = await Promise.all([
     totalFilteredCount > 0
       ? query<Record<string, unknown>>(
+          // เรียงตามเลขที่ใบกำกับฯ จากน้อยไปมาก เพื่อให้ "ชุดที่ N" ตรงกับลำดับเลขที่เอกสารที่รันต่อเนื่อง
+          // (LENGTH ก่อน แล้วค่อยเทียบข้อความ → เรียงเชิงตัวเลขได้แม้เลขเกิน 99999)
           `WITH page_ids AS (
-             SELECT t.id
-             FROM transactions t
+             SELECT t.id FROM transactions t
+             LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
              WHERE ${txDateWhere}
                AND t.is_order = 1
                AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
                AND ${billableClause}
                AND (${chMatchSql})
                ${linkClause}
-             ORDER BY t.paid_date DESC, ${ORDER_LINK_PRIORITY_SQL} ASC, t.external_id ASC
+             ORDER BY r.yymm ASC NULLS LAST, r.seq ASC NULLS LAST, t.paid_date ASC, t.external_id ASC
              LIMIT $2 OFFSET $3
            )
            SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
            FROM page_ids p
            JOIN transactions t ON t.id = p.id
-           LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+           LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
            LEFT JOIN imports i ON i.id = t.import_id
-           ORDER BY t.paid_date DESC, ${ORDER_LINK_PRIORITY_SQL} ASC, t.external_id ASC`,
+           ORDER BY r.yymm ASC NULLS LAST, r.seq ASC NULLS LAST, t.paid_date ASC, t.external_id ASC`,
           [dateParam, batchSize, batchStartIdx],
           db,
         )
@@ -2020,6 +2047,115 @@ export async function getBulkInvoicesBatch(
     batchStartIdx,
     batchEndIdx,
     missingOmsDates: missingDateRows.map((r) => String(r.created_date)),
+    orders,
+  };
+}
+
+/**
+ * หน้าพิมพ์รวม "ทั้งเดือน": อ่านจากทะเบียนเลขที่ใบกำกับฯ (status = 'active') แบบ Keyset ตาม seq — ไม่ใช้ OFFSET
+ * - นับจำนวนจาก invoice_registry อย่างเดียว (index-only scan บน ix_invoice_registry_*)
+ * - หา seq เริ่มต้นของชุด N ด้วย ROW_NUMBER บนคอลัมน์ seq ล้วน แล้วดึง LIMIT batchSize จาก seq นั้น
+ */
+async function getMonthlyInvoicesBatchKeyset(
+  options: {
+    date: string;
+    channelFilter: "all" | "TikTok" | "Shopee" | "Facebook";
+    batch?: number;
+    batchSize: 100 | 200 | 500;
+  },
+  db?: Queryable,
+): Promise<BulkInvoicesBatchResult | null> {
+  const { date, channelFilter, batchSize } = options;
+  const yymm = `${date.slice(2, 4)}${date.slice(5, 7)}`;
+  const channelWhere =
+    channelFilter === "TikTok"
+      ? `AND r.channel = 'TikTok'`
+      : channelFilter === "Shopee"
+        ? `AND r.channel = 'Shopee'`
+        : channelFilter === "Facebook"
+          ? `AND r.channel = 'Facebook'`
+          : "";
+
+  const countsRow = await queryOne<Record<string, unknown>>(
+    `SELECT COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE r.channel = 'TikTok') AS tiktok_count,
+            COUNT(*) FILTER (WHERE r.channel = 'Shopee') AS shopee_count,
+            COUNT(*) FILTER (WHERE r.channel = 'Facebook') AS facebook_count
+     FROM invoice_registry r
+     WHERE r.yymm = $1 AND r.status = 'active'`,
+    [yymm],
+    db,
+  );
+  const billableTotalCount = Number(countsRow?.total ?? 0);
+  if (billableTotalCount === 0) return null;
+  const tiktokOrdersCount = Number(countsRow?.tiktok_count ?? 0);
+  const shopeeOrdersCount = Number(countsRow?.shopee_count ?? 0);
+  const facebookOrdersCount = Number(countsRow?.facebook_count ?? 0);
+  const channelFilteredCount =
+    channelFilter === "TikTok"
+      ? tiktokOrdersCount
+      : channelFilter === "Shopee"
+        ? shopeeOrdersCount
+        : channelFilter === "Facebook"
+          ? facebookOrdersCount
+          : billableTotalCount;
+
+  const batchCount = Math.max(1, Math.ceil(channelFilteredCount / batchSize));
+  const rawBatch = Number(options.batch ?? 1);
+  const currentBatch =
+    Number.isFinite(rawBatch) && rawBatch >= 1 ? Math.min(Math.floor(rawBatch), batchCount) : 1;
+  const batchStartIdx = (currentBatch - 1) * batchSize;
+  const batchEndIdx = Math.min(channelFilteredCount, batchStartIdx + batchSize);
+
+  const rows =
+    channelFilteredCount > 0
+      ? await query<Record<string, unknown>>(
+          `WITH start_seq AS (
+             SELECT x.seq FROM (
+               SELECT r.seq, ROW_NUMBER() OVER (ORDER BY r.seq) AS rn
+               FROM invoice_registry r
+               WHERE r.yymm = $1 AND r.status = 'active' ${channelWhere}
+             ) x
+             WHERE x.rn = $2
+           ),
+           page AS (
+             SELECT r.order_id, r.seq
+             FROM invoice_registry r
+             WHERE r.yymm = $1 AND r.status = 'active' ${channelWhere}
+               AND r.seq >= (SELECT seq FROM start_seq)
+             ORDER BY r.seq
+             LIMIT $3
+           )
+           SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
+           FROM page p
+           JOIN invoice_registry r ON r.order_id = p.order_id
+           JOIN transactions t ON t.external_id = p.order_id AND t.is_order = 1
+           LEFT JOIN imports i ON i.id = t.import_id
+           ORDER BY p.seq`,
+          [yymm, batchStartIdx + 1, batchSize],
+          db,
+        )
+      : [];
+
+  const orders = await enrichTransactionsWithOms(rows.map(mapTransaction), db);
+
+  return {
+    date,
+    billableTotalCount,
+    tiktokOrdersCount,
+    shopeeOrdersCount,
+    facebookOrdersCount,
+    channelFilteredCount,
+    linkedOrdersCount: channelFilteredCount,
+    unlinkedOrdersCount: 0,
+    effectiveLinkFilter: "linked",
+    totalFilteredCount: channelFilteredCount,
+    batchSize,
+    batchCount,
+    currentBatch,
+    batchStartIdx,
+    batchEndIdx,
+    missingOmsDates: [],
     orders,
   };
 }
@@ -2496,7 +2632,7 @@ export async function listBills(
         ? Promise.resolve(null)
         : queryOne<Record<string, unknown>>(
             `SELECT COUNT(*) AS count,
-                    COUNT(*) AS all_count,
+                    SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS all_count,
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 0 THEN 1 ELSE 0 END) AS linked_count,
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 1 THEN 1 ELSE 0 END) AS oms_only_count,
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 2 THEN 1 ELSE 0 END) AS unlinked_count,
@@ -2509,9 +2645,9 @@ export async function listBills(
                     ROUND(SUM(t.payout)::numeric, 2) AS payout,
                     ROUND(COALESCE(SUM(t.shipping_positive), 0)::numeric, 2) AS shipping_positive,
                     ROUND(COALESCE(SUM(t.shipping_negative), 0)::numeric, 2) AS shipping_negative,
-                    SUM(CASE WHEN t.channel = 'TikTok' THEN 1 ELSE 0 END) AS tiktok_count,
-                    SUM(CASE WHEN t.channel = 'Shopee' THEN 1 ELSE 0 END) AS shopee_count,
-                    SUM(CASE WHEN t.channel = 'Facebook' THEN 1 ELSE 0 END) AS facebook_count,
+                    SUM(CASE WHEN t.channel = 'TikTok' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS tiktok_count,
+                    SUM(CASE WHEN t.channel = 'Shopee' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS shopee_count,
+                    SUM(CASE WHEN t.channel = 'Facebook' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS facebook_count,
                     MIN(NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS min_paid_date,
                     MAX(NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS max_paid_date,
                     COUNT(DISTINCT NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS distinct_dates
@@ -2519,7 +2655,7 @@ export async function listBills(
             params,
             db,
           ),
-      channelCountsResolved
+      channelCountsResolved || (channel === "all" && linkStatus === "all")
         ? Promise.resolve(null)
         : queryOne<Record<string, unknown>>(
             `SELECT COUNT(*) AS all_count,
@@ -2572,7 +2708,7 @@ export async function listBills(
         channelCounts.Shopee = Number(chStatsRow.shopee_count ?? 0);
         channelCounts.Facebook = Number(chStatsRow.facebook_count ?? 0);
       } else {
-        channelCounts.all = total;
+        channelCounts.all = Number(summaryRow?.all_count ?? total);
         channelCounts.TikTok = Number(summaryRow?.tiktok_count ?? total);
         channelCounts.Shopee = Number(summaryRow?.shopee_count ?? 0);
         channelCounts.Facebook = Number(summaryRow?.facebook_count ?? 0);
@@ -2661,18 +2797,22 @@ export async function listBills(
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, pageCount);
+  const pageIdsOrderBySql =
+    q.length >= 3
+      ? orderBySql.replace(/^t\.paid_date\b/, "(t.paid_date || '')")
+      : orderBySql;
   const rows = await query<Record<string, unknown>>(
     `WITH page_ids AS (
        SELECT t.id
        FROM transactions t
        WHERE ${where}
-       ORDER BY ${orderBySql}
+       ORDER BY ${pageIdsOrderBySql}
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}
      )
      SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
      FROM page_ids p
      JOIN transactions t ON t.id = p.id
-     LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+     LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
      LEFT JOIN imports i ON i.id = t.import_id
      ORDER BY ${orderBySql}`,
     [...params, pageSize, (safePage - 1) * pageSize],
@@ -2718,7 +2858,7 @@ export async function getBill(
   const row = await queryOne<Record<string, unknown>>(
     `SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
      FROM transactions t
-     LEFT JOIN invoice_registry r ON r.order_id = t.external_id
+     LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
      LEFT JOIN imports i ON i.id = t.import_id
      WHERE (t.external_id = $1 OR t.order_code = $1)
        AND t.is_order = 1
@@ -2737,7 +2877,7 @@ export async function getInvoiceNo(
   db?: Queryable,
 ): Promise<string | null> {
   const row = await queryOne<{ invoice_no: string }>(
-    "SELECT invoice_no FROM invoice_registry WHERE order_id = $1",
+    "SELECT invoice_no FROM invoice_registry WHERE order_id = $1 AND status = 'active'",
     [orderId],
     db,
   );
@@ -2988,9 +3128,9 @@ export async function listSkuSummariesPaged(
   }
   if (q) {
     clauses.push(
-      `(s.sku_code ILIKE $${params.length + 1} ESCAPE '\\' OR s.product_name ILIKE $${params.length + 2} ESCAPE '\\')`,
+      `(s.sku_code || ' ' || s.product_name) ILIKE $${params.length + 1} ESCAPE '\\'`,
     );
-    params.push(`%${q}%`, `%${q}%`);
+    params.push(`%${q}%`);
   }
   const where = `WHERE ${clauses.join(" AND ")}`;
 

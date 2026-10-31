@@ -507,7 +507,7 @@ test("detects and parses OMS orders, OMS items, and CSV settlement with 15-digit
   assert.equal(receipt29.receiptVatAmount, 29.44);
 });
 
-test("deleteImport removes orphaned invoice_registry rows and resets invoice_seq when empty", async () => {
+test("deleteImport voids (never deletes) orphaned invoice_registry rows — invoice numbers are locked", async () => {
   const { deleteImport } = await import("../src/lib/queries");
   const executedSql: string[] = [];
 
@@ -516,9 +516,6 @@ test("deleteImport removes orphaned invoice_registry rows and resets invoice_seq
       executedSql.push(sql.replace(/\s+/g, " ").trim());
       if (sql.includes("DELETE FROM imports")) {
         return { rows: [{ id: 99 }] };
-      }
-      if (sql.includes("SELECT COUNT(*) AS c FROM invoice_registry")) {
-        return { rows: [{ c: 0 }] };
       }
       return { rows: [] };
     },
@@ -535,12 +532,12 @@ test("deleteImport removes orphaned invoice_registry rows and resets invoice_seq
     "should delete orphaned products rows",
   );
   assert.ok(
-    executedSql.some((s) => s.includes("DELETE FROM invoice_registry r WHERE NOT EXISTS")),
-    "should delete orphaned invoice_registry rows",
+    executedSql.some((s) => s.includes("UPDATE invoice_registry r SET status = 'void'")),
+    "should void orphaned invoice_registry rows",
   );
   assert.ok(
-    executedSql.some((s) => s.includes("ALTER SEQUENCE invoice_seq RESTART WITH 1")),
-    "should reset invoice_seq when invoice_registry is empty",
+    !executedSql.some((s) => s.includes("DELETE FROM invoice_registry") || s.includes("ALTER SEQUENCE invoice_seq")),
+    "must never delete invoice numbers or reset the sequence",
   );
 });
 
@@ -1584,6 +1581,9 @@ test("billion-row scale: getDailyBatchPaged, getBulkInvoicesBatch, and listBills
           ],
         };
       }
+      if (clean.includes("FROM invoice_registry r WHERE r.yymm = $1 AND r.status = 'active'") && clean.includes("COUNT(*) AS total")) {
+        return { rows: [{ total: 95000, tiktok_count: 85000, shopee_count: 9000, facebook_count: 1000 }] };
+      }
       return { rows: [] };
     },
   };
@@ -1608,21 +1608,30 @@ test("billion-row scale: getDailyBatchPaged, getBulkInvoicesBatch, and listBills
     "getDailyBatchPaged should use Deferred Join with SQL LIMIT/OFFSET",
   );
 
+  // ทั้งเดือน: อ่านจากทะเบียนเลขที่ (active) แบบ Keyset ตาม seq — ห้ามใช้ OFFSET
   executedSqls.length = 0;
   const bulkBatch = await getBulkInvoicesBatch(
     { date: "2026-10", batch: 4, batchSize: 200 },
     mockDb as never,
   );
   assert.ok(bulkBatch);
-  assert.equal(bulkBatch.billableTotalCount, 100000);
+  assert.equal(bulkBatch.billableTotalCount, 95000);
   assert.equal(bulkBatch.totalFilteredCount, 95000);
   assert.equal(bulkBatch.batchCount, 475);
   assert.equal(bulkBatch.currentBatch, 4);
   assert.equal(bulkBatch.batchStartIdx, 600);
   assert.equal(bulkBatch.batchEndIdx, 800);
+  const monthSql = executedSqls.find((s) => s.includes("WITH start_seq AS"));
+  assert.ok(monthSql, "monthly getBulkInvoicesBatch should use keyset (start_seq + seq >=)");
+  assert.ok(monthSql.includes("r.seq >= (SELECT seq FROM start_seq)"));
+  assert.ok(!monthSql.includes("OFFSET"), "monthly bulk invoices must not use OFFSET");
+
+  // รายวัน: ยังใช้ Deferred Join (ข้อมูลรายวันมีขนาดเล็ก)
+  executedSqls.length = 0;
+  await getBulkInvoicesBatch({ date: "2026-10-25", batch: 1, batchSize: 200 }, mockDb as never);
   assert.ok(
     executedSqls.some((s) => s.includes("WITH page_ids AS ( SELECT t.id FROM transactions t")),
-    "getBulkInvoicesBatch should use Deferred Join with SQL LIMIT/OFFSET",
+    "daily getBulkInvoicesBatch should use Deferred Join",
   );
 
   executedSqls.length = 0;
@@ -2436,7 +2445,12 @@ test("in-page filter/sort/pagination/tab links and router pushes preserve scroll
   assert.ok(((billsSource + billsFilterSource).match(/scroll=\{false\}/g) ?? []).length >= 15);
   assert.ok((productsSource.match(/scroll=\{false\}/g) ?? []).length >= 5);
   assert.ok((historySource.match(/scroll=\{false\}/g) ?? []).length >= 1);
-  assert.ok((bulkInvoicesSource.match(/scroll=\{false\}/g) ?? []).length >= 9);
+  // หน้าพิมพ์รวม: ทุกลิงก์ในหน้าใช้ scroll={false} (6 จุดหลังรวมปุ่มเป็น map) + ปุ่มชุดพิมพ์ย้ายไป BatchPicker (router.push scroll: false)
+  assert.ok((bulkInvoicesSource.match(/scroll=\{false\}/g) ?? []).length >= 6);
+  assert.match(
+    fs.readFileSync(path.resolve(process.cwd(), "src/components/BatchPicker.tsx"), "utf8"),
+    /router\.push\(item\.href, \{ scroll: false \}\)/,
+  );
   assert.ok((singleInvoiceSource.match(/scroll=\{false\}/g) ?? []).length >= 3);
   assert.equal((importReportSource.match(/scroll=\{false\}/g) ?? []).length, 4);
 });
