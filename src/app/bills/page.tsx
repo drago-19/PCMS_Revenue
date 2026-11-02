@@ -10,6 +10,9 @@ import {
   BillsFilterProvider,
   BillsSubFilters,
 } from "@/components/BillsFilterInteractive";
+import { BillsMobileFilterCollapse } from "@/components/BillsMobileFilterCollapse";
+import { BillsShippingHeaderFilter } from "@/components/BillsShippingHeaderFilter";
+import { BillsShopTabs } from "@/components/BillsShopTabs";
 import { CompactValueToggle } from "@/components/CompactValueToggle";
 import { CopyButton } from "@/components/CopyButton";
 import { DatePickerField } from "@/components/DatePickerField";
@@ -46,6 +49,7 @@ import { cn } from "@/lib/utils";
 import {
   type BillCategoryKey,
   type BillLinkStatusKey,
+  type BillShippingFilterKey,
   type BillSortKey,
   listBills,
   listDailyBatches,
@@ -64,6 +68,8 @@ const VALID_BILL_SORTS: BillSortKey[] = [
   "income_asc",
   "fee_desc",
   "fee_asc",
+  "shipping_desc",
+  "shipping_asc",
 ];
 
 const THAI_MONTHS_SHORT = [
@@ -97,9 +103,11 @@ export default async function BillsPage({
     date?: string;
     createdDate?: string;
     channel?: string;
+    shop?: string;
     status?: string;
     link?: string;
     category?: string;
+    shipping?: string;
     sort?: string;
     page?: string;
   }>;
@@ -108,6 +116,18 @@ export default async function BillsPage({
   const q = (params.q ?? "").trim();
   const date = (params.date ?? "").trim();
   const createdDate = (params.createdDate ?? "").trim();
+  const rawShop = (params.shop ?? "all").trim();
+  const shop =
+    rawShop === "Kiddee Shop" ||
+    rawShop === "Kissi Studio" ||
+    rawShop === "รอผูกไฟล์ร้านค้า" ||
+    rawShop === "อื่นๆ"
+      ? rawShop === "อื่นๆ"
+        ? "รอผูกไฟล์ร้านค้า"
+        : rawShop
+      : rawShop !== "" && rawShop !== "all"
+        ? rawShop
+        : "all";
   const rawChannel = (params.channel ?? "all").trim();
   const channel: "all" | "TikTok" | "Shopee" | "Facebook" =
     rawChannel === "TikTok" ||
@@ -138,6 +158,14 @@ export default async function BillsPage({
     rawCategory === "refund_fee" || rawCategory === "zero"
       ? rawCategory
       : "normal";
+  const rawShipping = (params.shipping ?? "all").trim();
+  const shipping: BillShippingFilterKey =
+    rawShipping === "profit" ||
+    rawShipping === "even" ||
+    rawShipping === "loss" ||
+    rawShipping === "diff"
+      ? rawShipping
+      : "all";
   const rawSort = (params.sort ?? "latest").trim() as BillSortKey;
   const sort: BillSortKey = VALID_BILL_SORTS.includes(rawSort)
     ? rawSort
@@ -150,9 +178,11 @@ export default async function BillsPage({
       date,
       createdDate,
       channel,
+      shop,
       status,
       linkStatus,
       category,
+      shipping,
       sort,
       page,
       pageSize: 20,
@@ -168,9 +198,11 @@ export default async function BillsPage({
   function buildHref(overrides: {
     nextPage?: number;
     nextChannel?: "all" | "TikTok" | "Shopee" | "Facebook";
+    nextShop?: string;
     nextStatus?: "all" | "ok" | "mismatch";
     nextLink?: BillLinkStatusKey;
     nextCategory?: BillCategoryKey;
+    nextShipping?: BillShippingFilterKey;
     nextSort?: BillSortKey;
     nextDate?: string;
     nextCreatedDate?: string;
@@ -185,6 +217,8 @@ export default async function BillsPage({
         ? overrides.nextCreatedDate
         : createdDate;
     if (targetCreatedDate) search.set("createdDate", targetCreatedDate);
+    const targetShop = overrides.nextShop !== undefined ? overrides.nextShop : shop;
+    if (targetShop && targetShop !== "all") search.set("shop", targetShop);
     const targetChannel = overrides.nextChannel ?? channel;
     if (targetChannel !== "all") search.set("channel", targetChannel);
     const targetStatus = overrides.nextStatus ?? status;
@@ -193,6 +227,8 @@ export default async function BillsPage({
     if (targetLink !== "all") search.set("link", targetLink);
     const targetCategory = overrides.nextCategory ?? category;
     if (targetCategory !== "normal") search.set("category", targetCategory);
+    const targetShipping = overrides.nextShipping ?? shipping;
+    if (targetShipping !== "all") search.set("shipping", targetShipping);
     const targetSort = overrides.nextSort ?? sort;
     if (targetSort !== "latest") search.set("sort", targetSort);
     const targetPage = overrides.nextPage ?? 1;
@@ -206,9 +242,11 @@ export default async function BillsPage({
       date ||
       createdDate ||
       channel !== "all" ||
+      shop !== "all" ||
       status !== "all" ||
       linkStatus !== "all" ||
       category !== "normal" ||
+      shipping !== "all" ||
       sort !== "latest",
   );
 
@@ -405,6 +443,18 @@ export default async function BillsPage({
           status={status}
         >
           <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-3 min-[640px]:px-5">
+            {/* ชั้นที่ 0: เลือกร้านค้า (Kiddee Shop / Kissi Studio / รวมทุกร้าน) */}
+            <BillsShopTabs
+              activeShop={shop}
+              shopCounts={result.shopCounts}
+              buildShopHref={(nextShop) => buildHref({ nextShop, nextPage: 1 })}
+              hrefs={{
+                all: buildHref({ nextShop: "all", nextPage: 1 }),
+                kiddee: buildHref({ nextShop: "Kiddee Shop", nextPage: 1 }),
+                kissi: buildHref({ nextShop: "Kissi Studio", nextPage: 1 }),
+              }}
+            />
+
             {/* ชั้นที่ 1 (ใหญ่สุด): เลือกแพลตฟอร์ม / ช่องทางจำหน่าย + สถานะยอด */}
             <BillsChannelBar
               channelCounts={result.channelCounts}
@@ -441,48 +491,78 @@ export default async function BillsPage({
               }}
             />
 
-            {/* ชั้นที่ 2: เลือกประเภทบิลหลัก 3 หมวด: บิลขายปกติ | คืนเงิน/ตีกลับ/ขาดทุน (ติดลบ) | ยกเลิก/ยอด 0 บาท */}
-            <BillsCategoryTabs
-              categoryCounts={result.categoryCounts}
-              hrefs={{
-                normal: buildHref({
-                  nextCategory: "normal",
-                  nextLink: "all",
-                  nextPage: 1,
-                }),
-                refund_fee: buildHref({
-                  nextCategory: "refund_fee",
-                  nextLink: "all",
-                  nextPage: 1,
-                }),
-                zero: buildHref({
-                  nextCategory: "zero",
-                  nextLink: "all",
-                  nextPage: 1,
-                }),
-              }}
-            />
+            {/* ตัวกรองชั้น 2 และ 3: บนเดสก์ท็อปแสดงครบตามเดิม / บนมือถือพับเก็บได้ด้วย BillsMobileFilterCollapse */}
+            <BillsMobileFilterCollapse
+              category={category}
+              linkStatus={linkStatus}
+              categoryLabel={
+                category === "refund_fee"
+                  ? "คืนเงิน / ตีกลับ"
+                  : category === "zero"
+                    ? "ยกเลิก / ยอด 0"
+                    : "บิลขายปกติ"
+              }
+              linkLabel={
+                linkStatus === "linked"
+                  ? "ข้อมูลครบ"
+                  : linkStatus === "unlinked"
+                    ? "รอไฟล์ออเดอร์"
+                    : linkStatus === "oms_only"
+                      ? "รอไฟล์รายได้"
+                      : linkStatus === "no_price"
+                        ? "เปลี่ยนสินค้า 0 บาท"
+                        : linkStatus === "all_fb"
+                          ? "รวมทั้งหมดใน FB"
+                          : linkStatus === "shopee_negative"
+                            ? "ขาดทุน/ติดลบ"
+                            : linkStatus === "shopee_zero"
+                              ? "ตีกลับ 100%"
+                              : "ทั้งหมด"
+              }
+            >
+              {/* ชั้นที่ 2: เลือกประเภทบิลหลัก 3 หมวด: บิลขายปกติ | คืนเงิน/ตีกลับ/ขาดทุน (ติดลบ) | ยกเลิก/ยอด 0 บาท */}
+              <BillsCategoryTabs
+                categoryCounts={result.categoryCounts}
+                hrefs={{
+                  normal: buildHref({
+                    nextCategory: "normal",
+                    nextLink: "all",
+                    nextPage: 1,
+                  }),
+                  refund_fee: buildHref({
+                    nextCategory: "refund_fee",
+                    nextLink: "all",
+                    nextPage: 1,
+                  }),
+                  zero: buildHref({
+                    nextCategory: "zero",
+                    nextLink: "all",
+                    nextPage: 1,
+                  }),
+                }}
+              />
 
-            {/* ชั้นที่ 3: สถานะความครบของข้อมูล (เปลี่ยนตามช่องทางและหมวดอัตโนมัติ) */}
-            <BillsSubFilters
-              linkCounts={result.linkCounts}
-              linkHrefs={{
-                all: buildHref({ nextLink: "all", nextPage: 1 }),
-                linked: buildHref({ nextLink: "linked", nextPage: 1 }),
-                unlinked: buildHref({ nextLink: "unlinked", nextPage: 1 }),
-                oms_only: buildHref({ nextLink: "oms_only", nextPage: 1 }),
-                no_price: buildHref({ nextLink: "no_price", nextPage: 1 }),
-                all_fb: buildHref({ nextLink: "all_fb", nextPage: 1 }),
-                shopee_negative: buildHref({
-                  nextLink: "shopee_negative",
-                  nextPage: 1,
-                }),
-                shopee_zero: buildHref({
-                  nextLink: "shopee_zero",
-                  nextPage: 1,
-                }),
-              }}
-            />
+              {/* ชั้นที่ 3: สถานะความครบของข้อมูล (เปลี่ยนตามช่องทางและหมวดอัตโนมัติ) */}
+              <BillsSubFilters
+                linkCounts={result.linkCounts}
+                linkHrefs={{
+                  all: buildHref({ nextLink: "all", nextPage: 1 }),
+                  linked: buildHref({ nextLink: "linked", nextPage: 1 }),
+                  unlinked: buildHref({ nextLink: "unlinked", nextPage: 1 }),
+                  oms_only: buildHref({ nextLink: "oms_only", nextPage: 1 }),
+                  no_price: buildHref({ nextLink: "no_price", nextPage: 1 }),
+                  all_fb: buildHref({ nextLink: "all_fb", nextPage: 1 }),
+                  shopee_negative: buildHref({
+                    nextLink: "shopee_negative",
+                    nextPage: 1,
+                  }),
+                  shopee_zero: buildHref({
+                    nextLink: "shopee_zero",
+                    nextPage: 1,
+                  }),
+                }}
+              />
+            </BillsMobileFilterCollapse>
 
             {/* ชั้นที่ 4 (ล่างสุดก่อนเข้าตาราง): ค้นหา + เลือกเดือน/วันจากปฏิทิน + พิมพ์ใบกำกับฯ */}
             <div className="flex flex-col gap-1.5 border-t border-border/70 pt-2.5">
@@ -508,6 +588,12 @@ export default async function BillsPage({
                 {createdDate ? (
                   <input type="hidden" name="createdDate" value={createdDate} />
                 ) : null}
+                {shipping !== "all" ? (
+                  <input type="hidden" name="shipping" value={shipping} />
+                ) : null}
+                {shop !== "all" ? (
+                  <input type="hidden" name="shop" value={shop} />
+                ) : null}
                 <div className="field h-10 w-full bg-white min-[640px]:min-w-[240px] min-[640px]:max-w-[420px] min-[640px]:flex-1">
                   <IconSearch size={16} className="shrink-0" />
                   <Input
@@ -531,9 +617,11 @@ export default async function BillsPage({
                     q: q || undefined,
                     createdDate: createdDate || undefined,
                     channel: channel !== "all" ? channel : undefined,
+                    shop: shop !== "all" ? shop : undefined,
                     status: status !== "all" ? status : undefined,
                     link: linkStatus !== "all" ? linkStatus : undefined,
                     category: category !== "normal" ? category : undefined,
+                    shipping: shipping !== "all" ? shipping : undefined,
                     sort: sort !== "latest" ? sort : undefined,
                   }}
                 />
@@ -600,6 +688,56 @@ export default async function BillsPage({
                   className="font-extrabold text-primary underline underline-offset-2 hover:opacity-80"
                 >
                   ยกเลิกตัวกรองวันสั่งซื้อ ×
+                </Link>
+              </div>
+            ) : null}
+
+            {shipping !== "all" ? (
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs">
+                <span className="font-bold text-foreground">
+                  กำลังกรองค่าขนส่ง:{" "}
+                  <strong className="font-extrabold text-primary">
+                    {shipping === "profit"
+                      ? "ได้กำไรค่าส่ง (> ฿0.00)"
+                      : shipping === "even"
+                        ? "เท่าทุน (= ฿0.00)"
+                        : shipping === "loss"
+                          ? "ส่วนต่างติดลบ / เข้าเนื้อ (< ฿0.00)"
+                          : "มีส่วนต่างทั้งหมด (≠ ฿0.00)"}
+                  </strong>{" "}
+                  จำนวน {result.total.toLocaleString("th-TH")} รายการ
+                </span>
+                <Link
+                  href={buildHref({ nextShipping: "all", nextPage: 1 })}
+                  scroll={false}
+                  className="font-extrabold text-primary underline underline-offset-2 hover:opacity-80"
+                >
+                  แสดงทุกสถานะค่าขนส่ง (ล้างตัวกรอง) ×
+                </Link>
+              </div>
+            ) : null}
+
+            {shop !== "all" ? (
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2 text-xs">
+                <span className="font-bold text-foreground">
+                  กำลังแสดงเฉพาะร้านค้า:{" "}
+                  <strong className="font-extrabold text-primary">
+                    {shop === "Kiddee Shop"
+                      ? "🛍️ Kiddee Shop"
+                      : shop === "Kissi Studio"
+                        ? "👗 Kissi Studio"
+                        : shop === "รอผูกไฟล์ร้านค้า" || shop === "อื่นๆ"
+                          ? "⏳ รอผูกไฟล์ร้านค้า"
+                          : shop}
+                  </strong>{" "}
+                  จำนวน {result.total.toLocaleString("th-TH")} รายการ
+                </span>
+                <Link
+                  href={buildHref({ nextShop: "all", nextPage: 1 })}
+                  scroll={false}
+                  className="font-extrabold text-primary underline underline-offset-2 hover:opacity-80"
+                >
+                  แสดงทุกร้านค้า (ล้างตัวกรอง) ×
                 </Link>
               </div>
             ) : null}
@@ -747,7 +885,17 @@ export default async function BillsPage({
                         </Link>
                       </TableHead>
                       <TableHead className={colShippingClass}>
-                        ค่าขนส่ง
+                        <BillsShippingHeaderFilter
+                          currentShipping={shipping}
+                          currentSort={sort}
+                          hrefAll={buildHref({ nextShipping: "all", nextPage: 1 })}
+                          hrefProfit={buildHref({ nextShipping: "profit", nextPage: 1 })}
+                          hrefEven={buildHref({ nextShipping: "even", nextPage: 1 })}
+                          hrefLoss={buildHref({ nextShipping: "loss", nextPage: 1 })}
+                          hrefDiff={buildHref({ nextShipping: "diff", nextPage: 1 })}
+                          hrefSortDesc={buildHref({ nextSort: "shipping_desc", nextPage: 1 })}
+                          hrefSortAsc={buildHref({ nextSort: "shipping_asc", nextPage: 1 })}
+                        />
                       </TableHead>
                       {channel !== "Facebook" ? (
                         <TableHead className={colFeeClass}>
@@ -836,6 +984,34 @@ export default async function BillsPage({
                                   ? "Facebook"
                                   : "TikTok"}
                             </Badge>
+                            {row.shopName && row.shopName !== "อื่นๆ" && row.shopName !== "รอผูกไฟล์ร้านค้า" ? (
+                              <Badge
+                                variant="outline"
+                                size="sm"
+                                className={cn(
+                                  "shrink-0 px-2 py-0 text-[11px] font-bold",
+                                  row.shopName === "Kiddee Shop"
+                                    ? "border-sky-300 bg-sky-100 text-sky-950"
+                                    : row.shopName === "Kissi Studio"
+                                      ? "border-purple-300 bg-purple-100 text-purple-950"
+                                      : "border-slate-300 bg-slate-100 text-slate-900",
+                                )}
+                              >
+                                {row.shopName === "Kiddee Shop"
+                                  ? "🛍️ Kiddee"
+                                  : row.shopName === "Kissi Studio"
+                                    ? "👗 Kissi"
+                                    : row.shopName}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                size="sm"
+                                className="shrink-0 px-2 py-0 text-[11px] font-bold border-amber-300 bg-amber-50 text-amber-950"
+                              >
+                                ⏳ รอผูกไฟล์ร้านค้า
+                              </Badge>
+                            )}
                             {row.isNoProductPriceOrder ? (
                               <Badge
                                 variant="neutral"

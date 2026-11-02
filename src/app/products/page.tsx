@@ -298,7 +298,7 @@ export default async function ProductsPage({
           <div className="bills-content-region">
             <Table
               variant="stack"
-              className="bills-table-animated min-[768px]:table-fixed min-w-[740px]"
+              className="bills-table-animated min-[768px]:table-fixed min-[768px]:min-w-[740px]"
             >
               <TableHeader>
                 <TableRow>

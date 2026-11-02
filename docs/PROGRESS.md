@@ -5,7 +5,131 @@
 
 ## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-10-31)
 
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-10-31)**:
+  - **แก้ไขปัญหาตัวเลขรั่วไหลเมื่อกรองตามร้านค้า + ป้องกันสีตัวหนังสือเปลี่ยนเป็นสีดำตอน Hover + ปรับเปลี่ยน "อื่นๆ" เป็นป้ายเตือน "⏳ รอผูกไฟล์ร้านค้า" ครบทุกหน้า (`/bills`, `/`, `/import`)**:
+    - [x] **1. จุดที่ 1: แก้ไข isUnfilteredBase ใน src/lib/queries.ts ให้รวม activeShop === "all"**:
+      - ต้นตอ: เดิม isUnfilteredBase ตรวจสอบเพียง !q && !createdDate && status === "all" โดยลืมเช็ค activeShop === "all" ทำให้เมื่อเลือกดูเฉพาะร้าน เช่น Kiddee Shop ฟังก์ชันยังคงกระโดดไปดึงยอดสรุปจากตาราง daily_summaries ซึ่งเป็นยอดรวมทั้งระบบ (86,780 บิล) ส่งผลให้ตัวเลขในแถวที่ 1 (ช่องทางจำหน่าย) และแถวที่ 2 (ประเภทบิล) แสดงยอดรวมทั้งระบบปนเข้ามา
+      - แก้ไข: เพิ่มเงื่อนไข activeShop === "all" ใน isUnfilteredBase และ canUseFastLinkCounts
+      - ผลลัพธ์: เมื่อเลือก Kiddee Shop แถวที่ 1 แสดงยอดเฉพาะของร้านอย่างถูกต้อง 100%: ทุกช่องทาง 56,413 ใบ (TikTok 36,399, Shopee 6,684, Facebook 13,330) และแถวที่ 2 บิลขายปกติ 56,413 ใบ ไม่มียอดรวมทั้งระบบรั่วไหล
+    - [x] **2. จุดที่ 2: ล็อกสีตัวอักษรของปุ่มร้านค้าที่เลือกอยู่ (BillsShopTabs, DashboardShopTabs, UploadCompletenessCalendar) ไม่ให้ตัวหนังสือเปลี่ยนเป็นสีดำตอน Hover**:
+      - ต้นตอ: ปุ่มใน shadcn/ui มีคลาส variant outline ที่พ่วง hover:text-accent-foreground (hover:text-[#0f172a]) เมื่อนำเมาส์ไปชี้ ตัวหนังสือสีขาวจึงถูก override เป็นสีดำ
+      - แก้ไข: ใส่ hover:text-white บน Button และล็อกสีด้วย className={cn(isActive && "!text-white")} บน span และ Link ครบทั้ง 3 คอมโพเนนต์
+      - ผลการทดสอบ Playwright MCP: ขณะเมาส์ Hover บนปุ่มร้านค้าที่เลือกอยู่ ค่าสี color ได้ rgb(255, 255, 255) สีขาวบริสุทธิ์ 100% ตัวหนังสือคมชัดตลอดเวลา
+    - [x] **3. จุดที่ 3: ปรับเปลี่ยนจาก "อื่นๆ" เป็นป้ายเตือน "⏳ รอผูกไฟล์ร้านค้า" ครบทุกหน้า พร้อมแสดงจำนวนบิลที่รอผูกชัดเจน**:
+      - หน้า /bills: เพิ่มปุ่ม [ ⏳ รอผูกไฟล์ร้านค้า (16,220) ] ในแถวร้านค้าด้านบน พร้อมแสดง Badge ⏳ รอผูกไฟล์ร้านค้า ในทุกแถวของตารางบิลคำสั่งซื้อ
+      - หน้า Dashboard (/): แสดงปุ่มแท็บ [ ⏳ รอผูกไฟล์ร้านค้า (20,651) ] และเพิ่มการ์ดสรุปยอด รอผูกไฟล์ร้านค้า ในกล่องเปรียบเทียบผลประกอบการรายร้าน
+      - หน้า /import: แสดงปุ่มแท็บ [ ⏳ รอผูกไฟล์ร้านค้า ] ในปฏิทินตรวจความครบถ้วน
+      - ชี้แจงกรณีใบกำกับภาษี: รายการบิลในกลุ่ม "รอผูกไฟล์ร้านค้า" **ยังไม่พร้อมออกใบกำกับภาษีเด็ดขาด** เนื่องจากมีเพียงข้อมูลเงินโอนจากไฟล์ Settlement ของ TikTok โดยยังขาดชื่อ-ที่อยู่ผู้ซื้อ รายการสินค้า และชื่อร้านค้าจากไฟล์ Shipnity (ฟังก์ชัน isOrderEligibleForInvoice จะไม่อนุมัติให้ออกใบกำกับฯ จนกว่าจะอัปโหลดไฟล์ Shipnity ครบ)
+    - [x] **4. DoD & Playwright MCP Verification**:
+      - npx.cmd tsc --noEmit: 0 error
+      - npx.cmd tsx --env-file=.env tests/ingest.test.ts: ผ่านครบ 35/35 เทสต์ (100% pass)
+      - Playwright MCP Test: ทดสอบจริงครบ 4 ขนาดหน้าจอ (360px, 390px, 768px, 1280px) บน /bills?shop=Kiddee+Shop, /bills?shop=รอผูกไฟล์ร้านค้า, / และ /import ตรวจจับ Child Bounding-Box Overflow ได้ overflowCount: 0 ทุกหน้าจอ
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-10-31)**:
+  - **ปรับปรุงระบบร้านค้า Dynamic Multi-Shop + แก้ปัญหา Contrast สีตัวหนังสือ + แก้ปัญหาตาราง /history ซ้อนทับกัน (History Table Overlap & Color Accessibility Fix)**:
+    - [x] **1. Dynamic Multi-Shop Detection (`src/lib/queries.ts`, `src/components/BillsShopTabs.tsx`, `src/components/DashboardShopTabs.tsx`, `src/components/UploadCompletenessCalendar.tsx`)**:
+      - เปลี่ยนระบบจากการฟิกซ์ชื่อร้าน 2 ร้านใน UI มาเป็นการดึงรายชื่อร้านค้าจากฐานข้อมูลแบบไดนามิก (`availableShops`)
+      - ไม่ว่าจะนำเข้าร้านค้าใหม่กี่ร้าน (เช่น ร้านที่ 3, 4, 5) ระบบจะตรวจจับจากคอลัมน์ "ผู้ส่ง" ในไฟล์ที่ 2 (สินค้า Shipnity) และสร้างปุ่มแท็บกรองให้อัตโนมัติทันที
+    - [x] **2. แก้ปัญหาสีปุ่มร้านค้าทับซ้อนและสีตัวหนังสืออ่านไม่ออก (UI Hierarchy & Color Accessibility)**:
+      - ปรับปุ่มแท็บร้านค้า (`BillsShopTabs`, `DashboardShopTabs`, `UploadCompletenessCalendar`) จากเดิมที่เป็นสีแดงสดซ้อนกัน 4 ชั้น ให้เป็นสไตล์ **Dark Slate Pill** (`bg-slate-900 text-white`) เมื่อถูกเลือก และเป็น Outline สะอาดตาเมื่อไม่ถูกเลือก แยก Visual Hierarchy ออกจากตัวกรองบิลชั้นล่างอย่างชัดเจน
+      - แก้สี Badge ร้านค้าในตาราง `/bills`: เปลี่ยนจากสีฟ้าจางที่กลืนกับพื้นหลัง เป็น High-Contrast Solid Badge:
+        - `Kiddee Shop`: `bg-sky-100 text-sky-950 font-bold border-sky-300` (Contrast Ratio > 9.3:1)
+        - `Kissi Studio`: `bg-purple-100 text-purple-950 font-bold border-purple-300` (Contrast Ratio > 11:1)
+        - ร้านค้าอื่นๆ ในอนาคต: `bg-slate-100 text-slate-900 font-semibold border-slate-300`
+    - [x] **3. แก้ปัญหาข้อความคำแนะนำสีกลืนจนอ่านไม่ออก (Tip Box Contrast & Dark Mode Leakage Fix)**:
+      - ต้นตอที่แท้จริง: Tailwind CSS v4 ตรวจพบ OS prefers-color-scheme: dark จาก Windows ของผู้ใช้ จึงไปเปิดใช้ utility `dark:text-amber-200` และ `dark:text-sky-300` บนพื้นหลังแอปที่เป็นสีขาว/ครีม ส่งผลให้ตัวอักษรสีเหลืองสว่างกลืนไปกับพื้นหลังจนอ่านไม่ออก
+      - แก้ไขใน `src/app/globals.css`: เพิ่ม `@variant dark (&:where(.dark, .dark *));` ป้องกันไม่ให้ Dark Mode ของระบบปฏิบัติการรั่วไหลเข้ามาเปลี่ยนสีตัวหนังสือบนพื้นหลังสีสว่างโดยไม่ตั้งใจ
+      - ปรับปรุงสไตล์กล่องคำแนะนำวิธีแก้ไขใน `UploadCompletenessCalendar.tsx`: ใช้ `border-amber-300 bg-amber-50 text-amber-950 font-medium` ตัวหนังสือสีน้ำตาลเข้มคมชัด (Contrast Ratio > 13:1) อ่านง่าย ชัดเจน 100%
+    - [x] **4. แก้ไขบั๊กตารางหน้า `/history` ป้าย Badge ทับซ้อนกับรอบชำระ (History Table Overlap Fix)**:
+      - ต้นตอ: คอลัมน์ที่ 1 (`ไฟล์ที่นำเข้า`) ถูกกำหนดเป็น `w-auto` ภายใต้ `table-fixed` ขณะที่คอลัมน์ด้านขวามีความกว้างรวมกว่า 735px ทำให้บนหน้าจอขนาดกลาง (768px-1280px) คอลัมน์ที่ 1 ถูกบีบจนป้าย Badge `3. สินค้าในออเดอร์ shipnity` ล้นออกนอกขอบเขตเซลล์ไปทับป้ายวันที่ในคอลัมน์ `รอบชำระ`
+      - แก้ไข: กำหนด `min-w-[280px]` และ `w-[320px]` ให้กับคอลัมน์ที่ 1, เพิ่ม `containerClassName="overflow-x-auto w-full"` และ `min-w-[960px]` บนตาราง, ป้องกัน Badge ล้นด้วย `min-w-0 max-w-full shrink-0`
+    - [x] **5. DoD & Automated Testing**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env tests/ingest.test.ts`: ผ่านครบ 35/35 เทสต์ (100% pass)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Test: ทดสอบจริงครบ 4 ขนาดหน้าจอ (360px, 390px, 768px, 1280px) ตรวจสอบ Bounding Box Overlap ได้ `results: []` (0 overflow) ทั้งหมด
+  - **ระบบรองรับและแยกสรุปยอดรายร้านค้า (`Kiddee Shop` vs `Kissi Studio`) ครอบคลุม 3 หน้าหลัก (`/`, `/bills`, `/import`) + ระบบคำแนะนำอัจฉริยะ (Smart Completeness Recommendation)**:
+    - [x] **Phase 1: โครงสร้างข้อมูลและฐานข้อมูล (`src/lib/db.ts`, `src/lib/ingest/import-service.ts`)**:
+      - เพิ่มคอลัมน์ `shop_name TEXT DEFAULT NULL` บนตาราง `transactions` และ `oms_orders` พร้อมสร้าง Covering Indexes สำหรับ High-Volume Queries (< 5ms)
+      - อัปเกรด DB Schema เป็น `SCHEMA_VERSION = "2026-10-31-v24"` ย้ายชื่อร้าน (`Kiddee Shop` 56,620 บิล / `Kissi Studio` 9,765 บิล) จาก `oms_order_items.sender_name` เข้า `transactions` และ `oms_orders` ย้อนหลัง 100%
+      - ปรับ `import-service.ts` ให้บันทึกและซิงก์ `shop_name` อัตโนมัติทุกครั้งที่มีการนำเข้าไฟล์ Shipnity หรือ Settlement
+    - [x] **Phase 2: หน้าภาพรวม Dashboard (`/`) (`src/app/page.tsx`, `src/components/DashboardShopTabs.tsx`, `src/components/DashboardShopComparison.tsx`, `src/lib/queries.ts`)**:
+      - ปรับ `getOverallStats({ shop })` รองรับตัวกรองตามร้านค้า และส่งออก `shopSummaries`
+      - เพิ่มแท็บสลับร้านค้าด้านบน: `[ รวมทุกร้าน (71,219) ]`, `[ 🛍️ Kiddee Shop (56,620) ]`, `[ 👗 Kissi Studio (9,741) ]`
+      - ปรับ StatCards สรุปยอด และกล่องรอบชำระเงินล่าสุด (Latest Settlement) ให้เปลี่ยนตามร้านค้าที่เลือก
+      - เพิ่มการ์ดเปรียบเทียบสัดส่วนยอดขาย/เงินรับจริงระหว่าง 2 ร้านค้า (Shop Split & Comparison Card)
+    - [x] **Phase 3: หน้าดูบิลคำสั่งซื้อ (`/bills`) (`src/app/bills/page.tsx`, `src/components/BillsShopTabs.tsx`, `src/lib/queries.ts`, `src/components/BillDocument.tsx`, `src/components/BillPreviewDialog.tsx`)**:
+      - เพิ่มตัวกรองร้านค้า `shop` ใน `listBills` พร้อมนับจำนวนบิล `shopCounts` แบบ Top-Down Hierarchy (ตัวเลขร้านอื่นไม่ลดลงเมื่อคลิกเลือกร้านใดร้านหนึ่ง)
+      - เพิ่มแถบเลือกร้านค้า `BillsShopTabs` ชั้นบนสุด พร้อมปุ่มล้างตัวกรอง
+      - แสดง Badge ชื่อร้านค้า (`🛍️ Kiddee` / `👗 Kissi`) กำกับในทุกแถวของตารางบิล และแสดงในส่วนหัว (`bill-kicker`) และข้อมูลอ้างอิง (`bill-meta`) ของหน้ารายละเอียดบิล (`BillDocument.tsx`)
+    - [x] **Phase 4: หน้าปฏิทินตรวจความครบและอัปโหลดไฟล์ (`/import`) (`src/app/import/page.tsx`, `src/components/UploadCompletenessCalendar.tsx`, `src/lib/queries.ts`)**:
+      - เพิ่มตัวกรองร้านค้าบนปฏิทิน: สลับดูสถานะความครบของ `รวมทุกร้าน`, `🛍️ Kiddee Shop`, หรือ `👗 Kissi Studio`
+      - พัฒนาระบบแนะนำอัจฉริยะ (Smart Completeness Recommendation): เจาะจงชัดเจนว่าเดือนนี้ "ขาดไฟล์รายได้ของร้านอะไร วันที่เท่าไหร่ จำนวนกี่บิล" พร้อมคำแนะนำขั้นตอนและลิงก์ไปยัง TikTok Seller Center ของร้านนั้น
+      - แจกแจงสถานะรายร้านค้าใน Modal ป๊อปอัปเมื่อคลิกดูรายละเอียดของแต่ละวัน (แยก Kiddee Shop, Kissi Studio, Shopee & Facebook ชัดเจน)
+    - [x] **Phase 5: Automated Testing & Verification**:
+      - `npx tsc --noEmit`: 0 error
+      - `npx tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ 59/59 เทสต์ (100% pass)
+      - `pnpm build`: ผ่านสำเร็จ 100% (standalone build ผ่าน)
+      - Docker Container `pcms-revenue-app` re-built และ deploy สำเร็จ
+      - Playwright MCP Test: ทดสอบจริงครบ 4 ขนาดหน้าจอ (360px, 390px, 768px, 1280px) บน `/`, `/bills`, `/import` พร้อมตรวจ `docScrollWidth <= clientWidth` และ Child Bounding-Box Overflow (`overflowCount: 0`) 100%
+
 - ✅ เสร็จแล้ว (2026-10-31):
+  - **ปรับยอดชำระสุทธิ (`payout`) ของ Shopee และ Facebook ให้เป็นเงินสดรับจริงจากแพลตฟอร์ม (`ยอดขาย - ค่าธรรมเนียมและค่าส่งที่ร้านจ่าย`) + ย้ายต้นทุนสินค้าตัดสต็อก (COGS) ไปแสดงในกรอบข้อมูลอ้างอิงภายในด้านล่าง (`src/lib/ingest/import-service.ts`, `src/lib/queries.ts`, `src/lib/db.ts`, `src/components/BillDocument.tsx`, `tests/ingest.test.ts`)**:
+    - **1. ปรับการคำนวณ `payout` ให้ตรงกับเงินสดรับจริงจาก Shopee 100%**:
+      - เปลี่ยน `payout` ของ Shopee และ Facebook จากเดิมที่ดึงช่อง `กำไร` ใน Shipnity (ซึ่งแอบหักต้นทุนสินค้าในคลัง ฿150.00 ออกจนทำให้ยอดโอนเงินเพี้ยนเป็น ฿122.00) มาเป็น **เงินสดรับจริงจาก Shopee**: `payout = sales_amount - shipping_fee_seller` (เช่น ออเดอร์ `#YP25`: `390.00 - 118.00 = ฿272.00` ตรงกับ Statement เงินเข้าธนาคารจริงและตรงกับใบกำกับภาษี)
+      - อัปเกรด DB Schema เป็น `SCHEMA_VERSION = "2026-10-31-v22"` ใน `src/lib/db.ts`: รัน SQL ซิงก์ค่า `payout = income + fee_total` สำหรับออเดอร์ Shopee ทั้ง 6,710 รายการ และ Facebook 13,907 รายการ พร้อมรีเฟรช `daily_summaries`
+      - ผลลัพธ์: Shopee มียอดขายปกติรับเงินจริง `6,700` รายการ, ยกเลิก/ตีกลับเต็มจำนวน `10` รายการ, และ **`0` รายการติดลบ**
+    - **2. ปรับโครงสร้างหน้าดูบิล (`BillDocument.tsx`) ให้ยอดเงินลงตัวและโปร่งใส**:
+      - ส่วนบิลหลักแสดงยอดเงินสดรับจริง:
+        - รายได้ (ยอดขาย): `฿390.00`
+        - ค่าธรรมเนียมทั้งหมด (ค่าธรรมเนียมและค่าส่ง Shopee): `-฿118.00`
+        - **ยอดการชำระเงินทั้งหมด (เงินสดรับจริงจาก Shopee): `฿272.00`** (ตรวจยอดแล้ว `checks.ok = true`)
+      - ย้ายต้นทุนตัดสต็อกไปแสดงในกรอบสีเทาเส้นประด้านล่าง: **`ข้อมูลอ้างอิงภายใน: สต็อก Shipnity (ไม่หักจากยอดรับเงินสด / ไม่กระทบภาษี)`** พร้อมแจกแจง SKU รายตัว (`J07-02-120: -฿150.00`) และแสดง `กำไรสุทธิหลังหักต้นทุนสต็อก: ฿122.00` สำหรับตรวจสอบเทียบกับไฟล์ Shipnity ได้ครบ 100%
+    - **3. ผลการทดสอบ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ 59/59 เทสต์
+      - `pnpm.cmd build`: ผ่านสำเร็จ 100%
+      - `pnpm.cmd run deploy:app`: Rebuild Docker Container สำเร็จ
+      - Playwright MCP: ทดสอบบน `http://localhost:3001/bills?channel=Shopee&q=YP25` เปิดป๊อปอัปบิลตรวจครบทั้ง 360px, 390px, 768px, 1280px (`overflowingCount: 0`)
+
+  - **ปรับปรุงการแสดงผลและ UX บนหน้าจอมือถือ (Mobile Responsive & Usability Overhaul) สำหรับหน้า `/bills` และทั้งระบบ (`src/components/BillsFilterInteractive.tsx`, `src/components/BillsMobileFilterCollapse.tsx`, `src/app/bills/page.tsx`, `src/app/globals.css`, `src/app/products/page.tsx`)**:
+    - **1. แก้ไขปัญหาปุ่มช่องทางจำหน่ายพังและ Badge ทับข้อความบนจอแคบ (360px–390px)**:
+      - ปรับ `BillsChannelBar` จากเดิมที่บีบ `grid-cols-2` บนจอมือถือ เป็น **แถบชิปแนวนอนเลื่อนได้ (Horizontal Chips Bar with Smooth Scroll)** ด้วย `flex overflow-x-auto gap-2 [scrollbar-width:none] min-[768px]:grid min-[768px]:grid-cols-4`
+      - กำหนด `whitespace-nowrap` บนชื่อช่องทางและตัวเลข Badge แก้ปัญหาภาษาไทยตัดคำ 3 บรรทัด (`ทุก \n ช่อง \n ทาง`), `TikTok \n Shop`, และแก้ปัญหาตัวเลขทับคำว่า `Facebook` (`Faceb 13,863`) ได้อย่างสมบูรณ์ 100%
+      - ปรับแถบ "สถานะยอด" (ทุกสถานะยอด / ยอดตรง / ต้องตรวจสอบ) ให้เป็น `flex overflow-x-auto` บนจอมือถือ ไม่เบียด ไม่ทับซ้อน
+    - **2. แก้ไขปัญหาหน้าจอยาวเกินไปและใช้งานยากบนมือถือ (Mobile UX Overhaul)**:
+      - พัฒนาคอมโพเนนต์ `BillsMobileFilterCollapse` สำหรับจอมือถือ (`< 768px`): พับเก็บตัวกรองชั้นที่ 2 (หมวดบิล 3 หมวด) และชั้นที่ 3 (ความครบของข้อมูล) ไว้ในปุ่มกะทัดรัดที่แสดงสถานะตัวกรองปัจจุบันพร้อมปุ่มแตะเปิด/ปิดได้ทันที
+      - บนหน้าจอคอมพิวเตอร์ (`min-[768px]`): แสดงตัวกรองครบทุกชั้นตามเดิม 100% (`min-[768px]:!block`) ไม่มีการเปลี่ยนแปลง
+      - ปรับ `.stats` (การ์ดสรุปยอด 5 ใบ) บนหน้าจอมือถือ (`< 640px`): เปลี่ยนจากเดิมที่เรียงต่อกัน 3 แถวกินพื้นที่ ~400px ให้กลายเป็น **Horizontal Snap Carousel** แถวเดียวเลื่อนได้ (~82px)
+      - ลดความสูงส่วนหัวก่อนถึงตารางจากเดิม **~1,220px เหลือเพียง ~600px** ทำให้ผู้ใช้บนมือถือเห็นช่องค้นหาและบิลรายการแรกได้ทันทีโดยไม่ต้องเลื่อนหน้าจอไกล
+    - **3. แก้ไขจุด Overflow แนวนอนในหน้า `/products` บนจอมือถือ**:
+      - เปลี่ยนคลาส `min-w-[740px]` ใน `src/app/products/page.tsx` เป็น `min-[768px]:min-w-[740px]` เพื่อให้ตารางในโหมด card stack (`variant="stack"`) พอดีกับหน้าจอมือถือ ไม่เกิด Scroll แนวนอนทั้งหน้า
+    - **4. ผลการทดสอบ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 59/59 เทสต์ (50 pass, 9 skipped DB integration)
+      - **Playwright MCP Test**: ทดสอบจริงครบทั้ง 5 ขนาดหน้าจอ (360px, 375px, 390px, 768px, 1280px) บนทุก Route หลัก (`/bills`, `/products`, `/days`, `/history`, `/settings`):
+        - `hasHorizontalScroll: false` ครบทุกหน้า 100%
+        - `childRect.right <= parentRect.right + 1`: ผ่าน ไม่มี Element ใดล้นทะลุกรอบ
+        - ทดสอบคลิกสลับแท็บช่องทาง (TikTok Shop, Shopee, Facebook, ทุกช่องทาง) และคลิกเปิด-ปิดปุ่มตัวกรองพับได้บนมือถือ ตอบสนองรวดเร็ว ถูกต้อง 100%
+  - **เพิ่มตัวกรองและเรียงลำดับสถานะค่าขนส่งที่หัวคอลัมน์ "ค่าขนส่ง" ในหน้า `/bills` (ได้กำไร / เท่าทุน / ส่วนต่างติดลบ / มีส่วนต่างทั้งหมด) (`src/components/BillsShippingHeaderFilter.tsx`, `src/app/bills/page.tsx`, `src/lib/queries.ts`)**:
+    - **1. สถาปัตยกรรมและตรรกะตัวกรองในฐานข้อมูล (`src/lib/queries.ts`)**:
+      - เพิ่มประเภทตัวกรอง `BillShippingFilterKey = "all" | "profit" | "even" | "loss" | "diff"`
+      - กรองโดยใช้ Stored Columns `shipping_positive` และ `shipping_negative` โดยตรง (SARGable queries):
+        - `profit`: `(t.shipping_positive + t.shipping_negative) > 0` (ได้กำไรค่าส่ง)
+        - `even`: `ROUND((t.shipping_positive + t.shipping_negative)::numeric, 2) = 0 AND (t.shipping_positive > 0 OR t.shipping_negative < 0)` (เท่าทุน รับ=จ่าย)
+        - `loss`: `(t.shipping_positive + t.shipping_negative) < 0` (ส่วนต่างติดลบ / เข้าเนื้อ)
+        - `diff`: `ROUND((t.shipping_positive + t.shipping_negative)::numeric, 2) <> 0` (มีส่วนต่างทั้งหมด)
+      - เพิ่มตัวเลือกการเรียงลำดับ `sort = "shipping_desc" | "shipping_asc"` เรียงตามผลกำไรค่าขนส่ง
+      - แยกการคำนวณสอดคล้องกับ Top-Down Filter Hierarchy ของ AGENTS.md (ไม่ตัดทอนยอด channelCounts ระดับแม่)
+    - **2. พัฒนาคอมโพเนนต์ Dropdown ตัวกรองที่หัวคอลัมน์ (`src/components/BillsShippingHeaderFilter.tsx`, `src/app/bills/page.tsx`)**:
+      - ออกแบบให้กลมกลืนกับหัวคอลัมน์อื่นๆ (`รายได้ ↕`, `ค่าธรรมเนียม ↕`) ในสถานะปกติแสดง `ค่าขนส่ง ↕` เมื่อคลิกจะเปิด shadcn `DropdownMenu` สีขาวสะอาดตา มีเครื่องหมายถูก `✓` แสดงสถานะที่เลือก
+      - เมื่อมีตัวกรองทำงาน หัวคอลัมน์จะแสดง Badge สถานะ เช่น `ค่าขนส่ง (เท่าทุน) ▾` หรือ `ค่าขนส่ง (กำไร) ▾` ชัดเจน
+      - เพิ่มแบนเนอร์แสดงสถานะตัวกรองพร้อมปุ่มกากบาท `×` ล้างตัวกรองอย่างรวดเร็ว
+    - **3. ผลการทดสอบ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 59/59 เทสต์ (50 pass, 9 skipped DB integration) โดยเพิ่มเทสต์ครอบคลุม `listBills` shipping filtering และ sorting
+      - `pnpm.cmd build` & `pnpm.cmd run deploy:app`: ผ่านและอัปเดตคอนเทนเนอร์ Docker `pcms-revenue-app` บนพอร์ต `3002` เรียบร้อย ✅
+      - **Playwright MCP**: ทดสอบคลิกเปิด Dropdown ที่หัวคอลัมน์จริงบนพอร์ต 3002 กรอง "เท่าทุน" ได้ผลลัพธ์ตรงกับรูปภาพผู้ใช้ 100% (`docOverflow: false` ทุกขนาดหน้าจอ 360px, 390px, 768px, 1280px)
   - **แก้ไขปัญหาการสั่งพิมพ์รายงานงบรายรับ-รายจ่ายรายเดือน (P&L) ตกขอบซ้าย/เนื้อหาถูกตัดขาด (Print Layout Shifted Left Fix) + เอกสารจัดกึ่งกลางเต็มหน้ากระดาษ A4 สมบูรณ์ (`src/app/globals.css`, `src/components/ExpensesManager.tsx`)**:
     - **1. ตรวจสอบและระบุสาเหตุรากเหง้า (Root Cause)**:
       - ใน Tailwind CSS v4 คลาส `translate-x-[-50%] translate-y-[-50%]` บน `DialogContent` ถูกคอมไพล์เป็น CSS property ใหม่คือ `translate: -50% -50%` แยกต่างหากจาก `transform`

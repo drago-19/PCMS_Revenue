@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { DashboardShopComparison } from "@/components/DashboardShopComparison";
+import { DashboardShopTabs } from "@/components/DashboardShopTabs";
 import { PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
 import {
   IconAlert,
@@ -18,22 +20,34 @@ import { getOverallStats, listDailyBatches, listImports } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ shop?: string }>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const activeShop = (sp.shop ?? "all").trim();
+
   const [stats, batches, imports] = await Promise.all([
-    getOverallStats(),
-    listDailyBatches(1),
+    getOverallStats({ shop: activeShop }),
+    listDailyBatches(1, { shop: activeShop }),
     listImports(1),
   ]);
 
   const latest = batches[0] ?? null;
   const latestImport = imports[0] ?? null;
 
+  const totalAllOrderCount = stats.shopSummaries?.reduce(
+    (acc, s) => acc + s.orderCount,
+    0,
+  ) ?? stats.orderCount;
+
   return (
     <div className="flex flex-col gap-[14px]">
       <PageHeader
-        eyebrow="TikTok Shop · Finance Overview"
+        eyebrow="TikTok Shop, Shopee & Facebook · Multi-Shop Finance Overview"
         title="หมวดภาพรวมสรุปยอดรายได้"
-        description="สรุปยอดชำระสะสม รอบโอนเงินล่าสุด และทางลัดเข้าสู่แต่ละหมวดหมู่โดยไม่ต้องเลื่อนหาข้อมูลยาว"
+        description="สรุปยอดชำระสะสม รอบโอนเงินล่าสุด และแยกดูผลประกอบการรายร้านค้าได้ทันที"
         actions={
           <>
             <Button asChild variant="secondary">
@@ -49,6 +63,15 @@ export default async function DashboardPage() {
           </>
         }
       />
+
+      {/* แถบสลับร้านค้า (รวมทุกร้าน · Kiddee Shop · Kissi Studio) */}
+      {stats.shopSummaries && stats.shopSummaries.length > 0 ? (
+        <DashboardShopTabs
+          activeShop={activeShop}
+          shopSummaries={stats.shopSummaries}
+          totalOrderCount={totalAllOrderCount}
+        />
+      ) : null}
 
       {!latest ? (
         <Card className="empty-hero">
@@ -87,34 +110,42 @@ export default async function DashboardPage() {
         <>
           <div className="stats m-0">
             <StatCard
-              label="ยอดชำระสุทธิสะสม"
+              label={activeShop !== "all" ? `ยอดชำระสุทธิสะสม (${activeShop})` : "ยอดชำระสุทธิสะสม"}
               value={formatTHB(stats.totalPayout)}
-              hint="ยอดเงินโอนจากบิลคำสั่งซื้อทั้งหมด"
+              hint={activeShop !== "all" ? `ยอดเงินโอนจากบิลเฉพาะร้าน ${activeShop}` : "ยอดเงินโอนจากบิลคำสั่งซื้อทั้งหมด"}
               tone="positive"
               icon={<IconWallet size={19} />}
             />
             <StatCard
-              label="รายได้รวมก่อนหัก"
+              label={activeShop !== "all" ? `รายได้รวมก่อนหัก (${activeShop})` : "รายได้รวมก่อนหัก"}
               value={formatTHB(stats.totalIncome)}
               hint="ยอดขายรวมส่วนลดและค่าจัดส่ง"
               tone="brand"
               icon={<IconTrend size={19} />}
             />
             <StatCard
-              label="ค่าธรรมเนียม TikTok Shop"
+              label={activeShop !== "all" ? `ค่าธรรมเนียม (${activeShop})` : "ค่าธรรมเนียมทั้งหมด"}
               value={formatTHB(stats.totalFees)}
               hint="ค่าคอมมิชชั่น + ค่าธุรกรรม + ค่าส่ง"
               tone="negative"
               icon={<IconAlert size={19} />}
             />
             <StatCard
-              label="จำนวนบิลคำสั่งซื้อสะสม"
+              label={activeShop !== "all" ? `จำนวนบิล (${activeShop})` : "จำนวนบิลคำสั่งซื้อสะสม"}
               value={`${stats.orderCount.toLocaleString("th-TH")} ใบ`}
-              hint={`นำเข้าแล้ว ${stats.importCount.toLocaleString("th-TH")} ไฟล์`}
+              hint={activeShop !== "all" ? `จากบิลร้าน ${activeShop}` : `นำเข้าแล้ว ${stats.importCount.toLocaleString("th-TH")} ไฟล์`}
               tone="default"
               icon={<IconReceipt size={19} />}
             />
           </div>
+
+          {/* การ์ดเปรียบเทียบสัดส่วน 2 ร้าน (แสดงเมื่อเลือกโหมดรวมทุกร้าน) */}
+          {activeShop === "all" && stats.shopSummaries && stats.shopSummaries.length > 0 ? (
+            <DashboardShopComparison
+              shopSummaries={stats.shopSummaries}
+              totalPayout={stats.totalPayout}
+            />
+          ) : null}
 
           <section className="hero">
             <div className="hero-main">
@@ -123,6 +154,15 @@ export default async function DashboardPage() {
                   <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
                   รอบชำระเงินล่าสุด · Latest Settlement
                 </p>
+                {activeShop !== "all" ? (
+                  <Badge variant="info" className="font-extrabold">
+                    เฉพาะร้าน {activeShop}
+                  </Badge>
+                ) : (
+                  <Badge variant="neutral" className="border-border bg-white/80 text-foreground font-bold">
+                    รวมทุกร้าน
+                  </Badge>
+                )}
                 <Badge variant="neutral" className="border-border bg-white/80 text-foreground">
                   อัปเดตจาก {stats.importCount} ไฟล์
                 </Badge>
@@ -150,7 +190,10 @@ export default async function DashboardPage() {
               </div>
               <div className="hero-actions">
                 <Button asChild variant="default">
-                  <Link href={`/bills?date=${latest.date}`} prefetch={false}>
+                  <Link
+                    href={`/bills?date=${latest.date}${activeShop !== "all" ? `&shop=${encodeURIComponent(activeShop)}` : ""}`}
+                    prefetch={false}
+                  >
                     เปิดดูบิลรอบนี้ ({latest.orderCount.toLocaleString("th-TH")} บิล){" "}
                     <IconChevronRight size={16} />
                   </Link>
@@ -195,8 +238,8 @@ export default async function DashboardPage() {
               </div>
               <div className="mt-4 pt-3 border-t border-border">
                 <Button asChild variant="secondary" size="sm" className="w-full justify-between">
-                  <Link href="/bills" prefetch={false}>
-                    ค้นหาบิลทั้งหมด ({stats.orderCount.toLocaleString("th-TH")}){" "}
+                  <Link href={activeShop !== "all" ? `/bills?shop=${encodeURIComponent(activeShop)}` : "/bills"} prefetch={false}>
+                    ค้นหาบิล ({stats.orderCount.toLocaleString("th-TH")}){" "}
                     <IconChevronRight size={15} />
                   </Link>
                 </Button>
@@ -233,7 +276,7 @@ export default async function DashboardPage() {
                   หมวดอัปโหลดไฟล์รายได้
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  อัปโหลดไฟล์ .xlsx จาก TikTok Shop พร้อมป๊อปอัปแสดงเปอร์เซ็นต์ความคืบหน้าแบบเรียลไทม์
+                  อัปโหลดไฟล์ .xlsx จาก TikTok Shop, Shopee และ Shipnity พร้อมปฏิทินตรวจความครบของแต่ละร้าน
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-border">

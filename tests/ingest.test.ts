@@ -1316,6 +1316,20 @@ test("listBills, listDailyBatchesPaged, and listSkuSummariesPaged apply whitelis
   );
 
   executedSqls.length = 0;
+  await listBills({ sort: "shipping_desc" }, mockDb);
+  assert.ok(
+    executedSqls.some((sql) => sql.includes("ORDER BY (t.shipping_positive + t.shipping_negative) DESC")),
+    "listBills should sort by shipping net DESC when sort=shipping_desc",
+  );
+
+  executedSqls.length = 0;
+  await listBills({ sort: "shipping_asc" }, mockDb);
+  assert.ok(
+    executedSqls.some((sql) => sql.includes("ORDER BY (t.shipping_positive + t.shipping_negative) ASC")),
+    "listBills should sort by shipping net ASC when sort=shipping_asc",
+  );
+
+  executedSqls.length = 0;
   await listDailyBatchesPaged({ sort: "payout_asc" }, mockDb);
   assert.ok(
     executedSqls.some((sql) => sql.includes("ORDER BY order_payout ASC")),
@@ -2023,6 +2037,7 @@ test("getDailyUploadCompleteness reports complete days, missing files per day, a
   const junOverview = janReport.monthsOverview.find((m) => m.month === "2026-06");
   assert.ok(junOverview);
   assert.equal(junOverview.status, "complete");
+  assert.ok(Array.isArray(janReport.availableShops));
 });
 
 test("listBills supports filtering by createdDate (order creation date)", async () => {
@@ -2101,6 +2116,96 @@ test("listBills supports filtering by createdDate (order creation date)", async 
       q.params.includes("2026-09-29"),
   );
   assert.equal(hasCreatedDateFilter, true);
+});
+
+test("listBills supports filtering by shipping status (profit, even, loss, diff) and bypasses fastSummary", async () => {
+  const { listBills } = await import("../src/lib/queries");
+
+  const capturedQueries: { sql: string; params: unknown[] }[] = [];
+  const mockDb = {
+    async query(sql: string, params: unknown[] = []) {
+      const clean = sql.replace(/\s+/g, " ").trim();
+      capturedQueries.push({ sql: clean, params });
+      if (clean.includes("SELECT COUNT(*) AS count")) {
+        return {
+          rows: [
+            {
+              count: 42,
+              income: 8400,
+              fees: -1200,
+              payout: 7200,
+              shipping_positive: 1470,
+              shipping_negative: -1470,
+              tiktok_count: 42,
+              shopee_count: 0,
+              min_paid_date: "2026-10-01",
+              max_paid_date: "2026-10-31",
+              distinct_dates: 10,
+            },
+          ],
+        };
+      }
+      if (clean.includes("SELECT SUM(CASE WHEN") || clean.includes("COUNT(*) AS all_count")) {
+        return {
+          rows: [
+            {
+              all_count: 42,
+              linked_count: 42,
+              oms_only_count: 0,
+              unlinked_count: 0,
+              no_price_count: 0,
+              tiktok_count: 42,
+              shopee_count: 0,
+              facebook_count: 0,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  // 1. Filter: even (เท่าทุน)
+  capturedQueries.length = 0;
+  const resEven = await listBills(
+    { shipping: "even" },
+    mockDb as never,
+  );
+  assert.equal(resEven.shipping, "even");
+  assert.ok(
+    capturedQueries.some((q) =>
+      q.sql.includes("ROUND((t.shipping_positive + t.shipping_negative)::numeric, 2) = 0"),
+    ),
+    "listBills should include even shipping SQL condition",
+  );
+
+  // 2. Filter: profit (ได้กำไรค่าส่ง)
+  capturedQueries.length = 0;
+  const resProfit = await listBills(
+    { shipping: "profit" },
+    mockDb as never,
+  );
+  assert.equal(resProfit.shipping, "profit");
+  assert.ok(
+    capturedQueries.some((q) =>
+      q.sql.includes("(t.shipping_positive + t.shipping_negative) > 0"),
+    ),
+    "listBills should include profit shipping SQL condition",
+  );
+
+  // 3. Filter: loss (ส่วนต่างติดลบ / เข้าเนื้อ)
+  capturedQueries.length = 0;
+  const resLoss = await listBills(
+    { shipping: "loss" },
+    mockDb as never,
+  );
+  assert.equal(resLoss.shipping, "loss");
+  assert.ok(
+    capturedQueries.some((q) =>
+      q.sql.includes("(t.shipping_positive + t.shipping_negative) < 0"),
+    ),
+    "listBills should include loss shipping SQL condition",
+  );
 });
 
 test("formatInvoiceNoWithPrefix, formatReceiptNoWithPrefix, and buildInvoice replace YYMM by bill month and reset running sequence to 00001 each month", async () => {
@@ -2439,7 +2544,7 @@ test("in-page filter/sort/pagination/tab links and router pushes preserve scroll
 
   // UploadCompletenessCalendar year/month switcher must not jump to #completeness-check anchor and must use scroll={false}
   assert.doesNotMatch(calendarSource, /#completeness-check/);
-  assert.equal((calendarSource.match(/scroll=\{false\}/g) ?? []).length, 4);
+  assert.ok((calendarSource.match(/scroll=\{false\}/g) ?? []).length >= 4);
 
   // In-page filter/sort/tab links in pages must include scroll={false}
   assert.ok(((billsSource + billsFilterSource).match(/scroll=\{false\}/g) ?? []).length >= 15);

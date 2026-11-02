@@ -21,15 +21,18 @@ export default async function ImportPage({
     year?: string;
     month?: string;
     mode?: string;
+    shop?: string;
   }>;
 }) {
   const sp = (await searchParams) ?? {};
   const mode: UploadDateMode = sp.mode === "paid" ? "paid" : "created";
+  const shop = (sp.shop ?? "all").trim();
 
   const report = await getDailyUploadCompleteness({
     year: sp.year,
     month: sp.month,
     mode,
+    shop,
   });
 
   return (

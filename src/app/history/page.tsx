@@ -221,28 +221,39 @@ export default async function ImportHistoryPage({
           <>
             <Table
               variant="stack"
-              className="bills-table-animated min-[768px]:table-fixed"
+              containerClassName="overflow-x-auto w-full"
+              className="bills-table-animated min-[768px]:min-w-[960px] min-[768px]:table-fixed"
             >
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-[768px]:w-auto">ไฟล์ที่นำเข้า</TableHead>
+                  <TableHead className="min-[768px]:w-[320px] min-[1280px]:w-auto min-[768px]:min-w-[280px]">
+                    ไฟล์ที่นำเข้า
+                  </TableHead>
                   <TableHead className="min-[768px]:max-[1439px]:hidden min-[1440px]:w-[150px]">
                     นำเข้าเมื่อ
                   </TableHead>
-                  <TableHead className="min-[768px]:w-[175px] min-[1280px]:w-[190px]">รอบชำระ</TableHead>
+                  <TableHead className="min-[768px]:w-[185px] min-[1280px]:w-[195px] shrink-0">
+                    รอบชำระ
+                  </TableHead>
                   <TableHead className="num min-[768px]:max-[1099px]:hidden min-[1100px]:w-[88px]">
                     จำนวนแถว
                   </TableHead>
-                  <TableHead className="num min-[768px]:w-[92px] min-[1280px]:w-[100px]">จำนวนบิล</TableHead>
-                  <TableHead className="min-[768px]:w-[85px]">สถานะ</TableHead>
-                  <TableHead className="num min-[768px]:w-[295px] min-[1280px]:w-[300px]">การจัดการ</TableHead>
+                  <TableHead className="num min-[768px]:w-[92px] min-[1280px]:w-[100px]">
+                    จำนวนบิล
+                  </TableHead>
+                  <TableHead className="min-[768px]:w-[85px]">
+                    สถานะ
+                  </TableHead>
+                  <TableHead className="num min-[768px]:w-[295px] min-[1280px]:w-[300px]">
+                    การจัดการ
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {result.rows.map((item) => (
                   <TableRow key={item.id}>
-                    <TableCell data-label="ไฟล์ที่นำเข้า">
-                      <div className="flex flex-col gap-1">
+                    <TableCell data-label="ไฟล์ที่นำเข้า" className="min-w-0">
+                      <div className="flex flex-col gap-1 min-w-0 max-w-full">
                         <ExcelFilePreviewDialog
                           importId={item.id}
                           filename={item.filename}
@@ -250,7 +261,7 @@ export default async function ImportHistoryPage({
                           rowCount={item.rowCount}
                           triggerVariant="filename"
                         />
-                        <span className="file-meta flex flex-wrap items-center gap-1.5 text-xs text-[#475569]">
+                        <span className="file-meta flex flex-wrap items-center gap-1.5 text-xs text-[#475569] min-w-0 max-w-full">
                           <Badge
                             variant={
                               item.fileType === "oms_orders"
@@ -260,6 +271,7 @@ export default async function ImportHistoryPage({
                                   : "default"
                             }
                             size="sm"
+                            className="shrink-0 max-w-full"
                           >
                             {item.fileType === "oms_orders"
                               ? "1. ออเดอร์ใน shipnity"

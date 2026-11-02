@@ -82,7 +82,15 @@ function getShortDayMissingTags(row: DailyUploadCompletenessRow): string[] {
     tags.push("ขาดสินค้า");
   }
   if (row.missingFile3Count > 0) {
-    tags.push("ขาดรายได้ TikTok");
+    if ((row.kiddeeMissingFile3 ?? 0) > 0 && (row.kissiMissingFile3 ?? 0) === 0) {
+      tags.push("ขาด TikTok (Kiddee)");
+    } else if ((row.kissiMissingFile3 ?? 0) > 0 && (row.kiddeeMissingFile3 ?? 0) === 0) {
+      tags.push("ขาด TikTok (Kissi)");
+    } else if ((row.kiddeeMissingFile3 ?? 0) > 0 && (row.kissiMissingFile3 ?? 0) > 0) {
+      tags.push("ขาด TikTok (2 ร้าน)");
+    } else {
+      tags.push("ขาดรายได้ TikTok");
+    }
   }
   return tags;
 }
@@ -116,10 +124,34 @@ export function UploadCompletenessCalendar({
     [report.monthsOverview, report.month],
   );
 
+  const monthKiddeeMissing = useMemo(
+    () => report.rows.reduce((sum, r) => sum + (r.kiddeeMissingFile3 ?? 0), 0),
+    [report.rows],
+  );
+  const monthKissiMissing = useMemo(
+    () => report.rows.reduce((sum, r) => sum + (r.kissiMissingFile3 ?? 0), 0),
+    [report.rows],
+  );
+  const kiddeeMissingDates = useMemo(
+    () =>
+      report.rows
+        .filter((r) => (r.kiddeeMissingFile3 ?? 0) > 0)
+        .map((r) => Number(r.date.slice(8, 10))),
+    [report.rows],
+  );
+  const kissiMissingDates = useMemo(
+    () =>
+      report.rows
+        .filter((r) => (r.kissiMissingFile3 ?? 0) > 0)
+        .map((r) => Number(r.date.slice(8, 10))),
+    [report.rows],
+  );
+
   const buildMonthHref = (ym: string) => {
     const qs = new URLSearchParams();
     qs.set("month", ym);
     if (report.mode !== "created") qs.set("mode", report.mode);
+    if (report.activeShop && report.activeShop !== "all") qs.set("shop", report.activeShop);
     return `/import?${qs.toString()}`;
   };
 
@@ -127,6 +159,15 @@ export function UploadCompletenessCalendar({
     const qs = new URLSearchParams();
     qs.set("year", String(year));
     if (report.mode !== "created") qs.set("mode", report.mode);
+    if (report.activeShop && report.activeShop !== "all") qs.set("shop", report.activeShop);
+    return `/import?${qs.toString()}`;
+  };
+
+  const buildShopHref = (shopName: string) => {
+    const qs = new URLSearchParams();
+    qs.set("month", report.month);
+    if (report.mode !== "created") qs.set("mode", report.mode);
+    if (shopName !== "all") qs.set("shop", shopName);
     return `/import?${qs.toString()}`;
   };
 
@@ -155,11 +196,11 @@ export function UploadCompletenessCalendar({
 
           {/* คำอธิบายสี (เขียว = ครบ / แดง = ยังไม่ครบ) */}
           <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-emerald-800 dark:text-emerald-300">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-emerald-800">
               <span className="size-2.5 rounded-full bg-emerald-500" />
               สีเขียว = ข้อมูลครบ 3 ไฟล์
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-rose-800 dark:text-rose-300">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-rose-800">
               <span className="size-2.5 rounded-full bg-rose-500" />
               สีแดง = ข้อมูลยังไม่ครบ
             </span>
@@ -217,6 +258,88 @@ export function UploadCompletenessCalendar({
               {report.year + 1} ›
             </Link>
           </Button>
+        </div>
+
+        {/* แถบเลือกร้านค้า */}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
+          <span className="mr-1 text-xs font-bold text-muted-foreground">
+            เลือกร้าน:
+          </span>
+          {(() => {
+            const rawShops =
+              report.availableShops && report.availableShops.length > 0
+                ? report.availableShops
+                : ["Kiddee Shop", "Kissi Studio"];
+            const namedShops = rawShops
+              .filter((n) => n !== "all" && n !== "อื่นๆ" && n !== "รอผูกไฟล์ร้านค้า")
+              .sort();
+            const hasUnlinked = rawShops.some(
+              (n) => n === "รอผูกไฟล์ร้านค้า" || n === "อื่นๆ",
+            );
+            const shopOptions = [
+              { key: "all", label: "รวมทุกร้าน", icon: "🏢", isUnlinked: false },
+              ...namedShops.map((name) => ({
+                key: name,
+                label: name,
+                icon: name.includes("Kiddee")
+                  ? "🛍️"
+                  : name.includes("Kissi")
+                    ? "👗"
+                    : "🏪",
+                isUnlinked: false,
+              })),
+              ...(hasUnlinked
+                ? [
+                    {
+                      key: "รอผูกไฟล์ร้านค้า",
+                      label: "รอผูกไฟล์ร้านค้า",
+                      icon: "⏳",
+                      isUnlinked: true,
+                    },
+                  ]
+                : []),
+            ];
+            return shopOptions.map((s) => {
+              const active =
+                s.key === "รอผูกไฟล์ร้านค้า"
+                  ? report.activeShop === "รอผูกไฟล์ร้านค้า" || report.activeShop === "อื่นๆ"
+                  : (report.activeShop || "all") === s.key;
+              return (
+                <Button
+                  key={s.key}
+                  asChild
+                  size="sm"
+                  variant="outline"
+                  className={cn(
+                    "min-h-10 px-3.5 font-bold gap-1.5 transition-all",
+                    active
+                      ? "bg-slate-900 text-white hover:bg-slate-800 hover:text-white shadow-xs border-slate-900 font-extrabold"
+                      : s.isUnlinked
+                        ? "border-amber-300 bg-amber-50/80 text-amber-950 hover:bg-amber-100 hover:text-amber-950 font-semibold"
+                        : "bg-white hover:bg-slate-100 text-slate-700 border-slate-200",
+                  )}
+                >
+                  <Link
+                    href={buildShopHref(s.key)}
+                    scroll={false}
+                    className={cn("flex items-center gap-1.5", active && "!text-white")}
+                  >
+                    <span>{s.icon}</span>
+                    <span className={cn(active && "!text-white")}>{s.label}</span>
+                  </Link>
+                </Button>
+              );
+            });
+          })()}
+          {report.activeShop && report.activeShop !== "all" ? (
+            <Link
+              href={buildShopHref("all")}
+              scroll={false}
+              className="ml-1 text-xs font-semibold text-primary underline underline-offset-2 hover:opacity-80"
+            >
+              แสดงทุกร้าน (ล้างตัวกรอง) ×
+            </Link>
+          ) : null}
         </div>
 
         {/* ขั้นที่ 1: เลือกเดือนของปีนี้ (แสดงสีเขียว/แดงชัดเจนว่าเดือนไหนครบหรือขาดอะไร) */}
@@ -422,6 +545,80 @@ export function UploadCompletenessCalendar({
             );
           })}
         </div>
+
+        {/* กล่องคำแนะนำอัจฉริยะ (Smart Completeness Recommendation) */}
+        {incompleteDays.length > 0 ? (
+          <div className="mb-5 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/[0.08] via-amber-500/[0.04] to-card p-3.5 sm:p-4 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <span className="text-base">💡</span>
+              <h4 className="text-sm font-extrabold text-foreground">
+                คำแนะนำอัจฉริยะ: วิธีทำให้ข้อมูลเดือน{formatMonthLong(report.month)} ครบ 100%
+              </h4>
+            </div>
+
+            <div className="mt-2.5 grid grid-cols-1 gap-2.5 text-xs min-[768px]:grid-cols-2">
+              {/* Kiddee Shop Analysis */}
+              <div className="rounded-lg border border-border bg-card p-3 shadow-2xs">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-bold text-foreground">🛍️ ร้าน Kiddee Shop</span>
+                  <Badge
+                    variant={monthKiddeeMissing > 0 ? "danger" : "success"}
+                    size="sm"
+                  >
+                    {monthKiddeeMissing > 0 ? `ขาด ${formatNumber(monthKiddeeMissing)} บิล` : "✓ ครบถ้วนแล้ว"}
+                  </Badge>
+                </div>
+                {monthKiddeeMissing > 0 ? (
+                  <div className="mt-1.5 space-y-1 text-muted-foreground leading-relaxed">
+                    <div>
+                      ยังขาดไฟล์รายได้ TikTok ในวันที่:{" "}
+                      <strong className="text-foreground">
+                        {kiddeeMissingDates.join(", ")} {formatMonthLong(report.month)}
+                      </strong>
+                    </div>
+                    <div className="font-semibold text-primary">
+                      👉 วิธีแก้ไข: เข้า TikTok Shop Seller Center ของ <strong>Kiddee Shop</strong> ไปที่ <u>การเงิน &gt; การถอนเงิน / ใบแจ้งยอดเงินโอน (Settlements)</u> แล้วส่งออกไฟล์ Settlement ของเดือนนี้มาอัปโหลด
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                    ✓ ไฟล์รายได้ TikTok ของร้าน Kiddee Shop ครบถ้วนแล้ว
+                  </p>
+                )}
+              </div>
+
+              {/* Kissi Studio Analysis */}
+              <div className="rounded-lg border border-border bg-card p-3 shadow-2xs">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-bold text-foreground">👗 ร้าน Kissi Studio</span>
+                  <Badge
+                    variant={monthKissiMissing > 0 ? "danger" : "success"}
+                    size="sm"
+                  >
+                    {monthKissiMissing > 0 ? `ขาด ${formatNumber(monthKissiMissing)} บิล` : "✓ ครบถ้วนแล้ว"}
+                  </Badge>
+                </div>
+                {monthKissiMissing > 0 ? (
+                  <div className="mt-1.5 space-y-1 text-muted-foreground leading-relaxed">
+                    <div>
+                      ยังขาดไฟล์รายได้ TikTok ในวันที่:{" "}
+                      <strong className="text-foreground">
+                        {kissiMissingDates.join(", ")} {formatMonthLong(report.month)}
+                      </strong>
+                    </div>
+                    <div className="font-semibold text-primary">
+                      👉 วิธีแก้ไข: เข้า TikTok Shop Seller Center ของ <strong>Kissi Studio</strong> ไปที่ <u>การเงิน &gt; การถอนเงิน / ใบแจ้งยอดเงินโอน (Settlements)</u> แล้วส่งออกไฟล์ Settlement ของเดือนนี้มาอัปโหลด
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                    ✓ ไฟล์รายได้ TikTok ของร้าน Kissi Studio ครบถ้วนแล้ว
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* ขั้นที่ 3: สรุปเฉพาะวันที่ยังไม่ครบในเดือนนี้ (สั้น กระชับ อ่านง่าย) */}
         <div className="mt-5 rounded-xl border border-border/80 bg-muted/20 p-3.5 sm:p-4">
@@ -644,6 +841,116 @@ export function UploadCompletenessCalendar({
                 </span>
               </div>
             </div>
+
+            {/* สถานะแยกตามร้านค้าในวันนี้ */}
+            {selectedDay.normalOrders > 0 ? (() => {
+              const selKiddeeOrders = selectedDay.kiddeeOrders ?? 0;
+              const selKissiOrders = selectedDay.kissiOrders ?? 0;
+              const selKiddeeMissing = selectedDay.kiddeeMissingFile3 ?? 0;
+              const selKissiMissing = selectedDay.kissiMissingFile3 ?? 0;
+              return (
+                <div className="mt-3 rounded-xl border border-border/80 bg-muted/20 p-3">
+                  <div className="text-xs font-bold text-muted-foreground mb-2">
+                    สถานะแยกตามร้านค้าในวันนี้:
+                  </div>
+                  <div className="space-y-2">
+                    {/* Kiddee Shop */}
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="flex items-center gap-1.5 font-bold text-foreground">
+                        <span>🛍️</span>
+                        <span>Kiddee Shop:</span>
+                        <span className="font-normal text-muted-foreground">
+                          {selKiddeeOrders > 0
+                            ? `${formatNumber(selKiddeeOrders)} บิล`
+                            : "ไม่มีบิล"}
+                        </span>
+                      </span>
+                      <Badge
+                        variant={
+                          selKiddeeOrders === 0 || selKiddeeMissing === 0
+                            ? "success"
+                            : "danger"
+                        }
+                        size="sm"
+                      >
+                        {selKiddeeOrders === 0
+                          ? "ไม่มีบิล"
+                          : selKiddeeMissing === 0
+                            ? "✓ ครบถ้วน"
+                            : `✕ ขาดรายได้ TikTok ${formatNumber(selKiddeeMissing)} บิล`}
+                      </Badge>
+                    </div>
+
+                    {/* Kissi Studio */}
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="flex items-center gap-1.5 font-bold text-foreground">
+                        <span>👗</span>
+                        <span>Kissi Studio:</span>
+                        <span className="font-normal text-muted-foreground">
+                          {selKissiOrders > 0
+                            ? `${formatNumber(selKissiOrders)} บิล`
+                            : "ไม่มีบิล"}
+                        </span>
+                      </span>
+                      <Badge
+                        variant={
+                          selKissiOrders === 0 || selKissiMissing === 0
+                            ? "success"
+                            : "danger"
+                        }
+                        size="sm"
+                      >
+                        {selKissiOrders === 0
+                          ? "ไม่มีบิล"
+                          : selKissiMissing === 0
+                            ? "✓ ครบถ้วน"
+                            : `✕ ขาดรายได้ TikTok ${formatNumber(selKissiMissing)} บิล`}
+                      </Badge>
+                    </div>
+
+                    {/* Shopee & Facebook */}
+                    {selectedDay.shopeeOrders > 0 || selectedDay.facebookOrders > 0 ? (
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="flex items-center gap-1.5 font-bold text-foreground">
+                          <span>🛒</span>
+                          <span>Shopee & Facebook:</span>
+                          <span className="font-normal text-muted-foreground">
+                            {formatNumber(selectedDay.shopeeOrders + selectedDay.facebookOrders)} บิล
+                          </span>
+                        </span>
+                        <Badge variant="success" size="sm">
+                          ✓ ครบตามไฟล์ Shipnity
+                        </Badge>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* คำแนะนำวิธีแก้ไขเฉพาะวัน */}
+                  {selectedDay.missingFile3Count > 0 ? (
+                    <div className="mt-2.5 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs leading-relaxed text-amber-950 font-medium shadow-2xs">
+                      <span className="font-bold text-amber-900">💡 วิธีแก้ไข: </span>
+                      {selKiddeeMissing > 0 && selKissiMissing === 0 ? (
+                        <>
+                          เข้า TikTok Seller Center ของร้าน <strong>Kiddee Shop</strong> แล้วดาวน์โหลดไฟล์ Settlement ของช่วงวันนี้มาอัปโหลด
+                        </>
+                      ) : selKissiMissing > 0 && selKiddeeMissing === 0 ? (
+                        <>
+                          เข้า TikTok Seller Center ของร้าน <strong>Kissi Studio</strong> แล้วดาวน์โหลดไฟล์ Settlement ของช่วงวันนี้มาอัปโหลด
+                        </>
+                      ) : selKiddeeMissing > 0 && selKissiMissing > 0 ? (
+                        <>
+                          เข้า TikTok Seller Center ของทั้งร้าน <strong>Kiddee Shop</strong> และ <strong>Kissi Studio</strong> แล้วดาวน์โหลดไฟล์ Settlement มาอัปโหลดทั้งสองร้าน
+                        </>
+                      ) : (
+                        <>
+                          เข้า TikTok Seller Center แล้วดาวน์โหลดไฟล์ Settlement ของช่วงวันนี้มาอัปโหลด
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })() : null}
 
             {selectedDay.normalOrders > 0 ? (
               <div className="mt-4 flex justify-end gap-2">

@@ -682,6 +682,7 @@ export function BillPreviewModal({
             {effectiveTab === "bill" ? (
               <BillDocument
                 bill={bill}
+                shopName={row.shopName}
                 invoiceNo={row.invoiceNo}
                 channel={row.channel}
                 orderCode={row.orderCode}

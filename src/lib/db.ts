@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-10-31-v20";
+const SCHEMA_VERSION = "2026-10-31-v24";
 
 export type { CompanyId };
 
@@ -351,6 +351,7 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS oms_order_uid TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_name TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_tax_id TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS buyer_address TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS shop_name TEXT;
 DO $$
 BEGIN
   IF EXISTS (
@@ -396,6 +397,8 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS shipping_negative DOUBLE PRECI
 CREATE INDEX IF NOT EXISTS ix_transactions_channel ON transactions(channel);
 CREATE INDEX IF NOT EXISTS ix_transactions_order_code ON transactions(order_code);
 CREATE INDEX IF NOT EXISTS ix_transactions_oms_order_uid ON transactions(oms_order_uid);
+CREATE INDEX IF NOT EXISTS ix_transactions_shop_name ON transactions(shop_name);
+CREATE INDEX IF NOT EXISTS ix_transactions_shop_order ON transactions(shop_name, is_order);
 
 CREATE TABLE IF NOT EXISTS oms_orders (
   order_uid TEXT PRIMARY KEY,
@@ -430,8 +433,10 @@ CREATE TABLE IF NOT EXISTS oms_orders (
 );
 
 ALTER TABLE oms_orders ADD COLUMN IF NOT EXISTS order_uid TEXT;
+ALTER TABLE oms_orders ADD COLUMN IF NOT EXISTS shop_name TEXT;
 
 CREATE INDEX IF NOT EXISTS ix_oms_orders_order_code ON oms_orders(order_code);
+CREATE INDEX IF NOT EXISTS ix_oms_orders_shop_name ON oms_orders(shop_name);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_mp_norm ON oms_orders(marketplace_order_norm);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_mp_prefix ON oms_orders(marketplace_order_prefix);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_matched_ext ON oms_orders(matched_external_id);
@@ -848,7 +853,7 @@ BEGIN
 
   -- Platform Financial Isolation (AGENTS.md Rule 3 & 4):
   -- 1. TikTok OMS placeholder rows (before Settlement): payout = income + fee_total (sales_amount - shipping_fee_seller), cogs = 0
-  -- 2. Shopee & Facebook (Shipnity 2-file channels): payout = o.profit_amount directly from Shipnity file, cogs = GREATEST(0, income + fee_total - o.profit_amount)
+  -- 2. Shopee & Facebook (Shipnity 2-file channels): payout = income + fee_total (sales_amount - shipping_fee_seller), cogs = GREATEST(0, income + fee_total - o.profit_amount)
   -- 3. Remove invoice_registry entries for non-billable orders (link_priority = 3 or Shopee/Facebook orders with payout <= 0)
   IF EXISTS (
     SELECT 1 FROM transactions t
@@ -863,7 +868,7 @@ BEGIN
     WHERE t.is_order = 1
       AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
       AND t.channel IN ('Shopee', 'Facebook')
-      AND ABS(t.payout - ROUND(o.profit_amount::numeric, 2)) >= 0.01
+      AND ABS(t.payout - ROUND((t.income + t.fee_total)::numeric, 2)) >= 0.01
     LIMIT 1
   ) THEN
     UPDATE transactions t
@@ -883,15 +888,19 @@ BEGIN
       AND ABS(t.payout - ROUND((t.income + t.fee_total)::numeric, 2)) >= 0.01;
 
     UPDATE transactions t
-    SET payout = ROUND(o.profit_amount::numeric, 2),
+    SET payout = ROUND((t.income + t.fee_total)::numeric, 2),
         normalized_json = jsonb_set(
           jsonb_set(
-            t.normalized_json,
-            '{fields,payout}',
-            to_jsonb(ROUND(o.profit_amount::numeric, 2))
+            jsonb_set(
+              t.normalized_json,
+              '{fields,payout}',
+              to_jsonb(ROUND((t.income + t.fee_total)::numeric, 2))
+            ),
+            '{fields,cogs}',
+            to_jsonb(GREATEST(0, ROUND((t.income + t.fee_total - o.profit_amount)::numeric, 2)))
           ),
-          '{fields,cogs}',
-          to_jsonb(GREATEST(0, ROUND((t.income + t.fee_total - o.profit_amount)::numeric, 2)))
+          '{fields,shipnityProfit}',
+          to_jsonb(ROUND(o.profit_amount::numeric, 2))
         )
     FROM oms_orders o
     WHERE t.oms_order_uid = o.order_uid
@@ -899,7 +908,7 @@ BEGIN
       AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
       AND t.channel IN ('Shopee', 'Facebook')
       AND (
-        ABS(t.payout - ROUND(o.profit_amount::numeric, 2)) >= 0.01
+        ABS(t.payout - ROUND((t.income + t.fee_total)::numeric, 2)) >= 0.01
         OR COALESCE((t.normalized_json->'fields'->>'cogs')::numeric, -1) IS DISTINCT FROM GREATEST(0, ROUND((t.income + t.fee_total - o.profit_amount)::numeric, 2))
       );
 
@@ -932,6 +941,38 @@ BEGIN
     ) s
     WHERE d.paid_date = s.paid_date
       AND (d.order_payout IS DISTINCT FROM s.order_payout OR d.total_payout IS DISTINCT FROM s.total_payout);
+  END IF;
+
+  -- Backfill shop_name from oms_order_items (sender_name)
+  IF EXISTS (
+    SELECT 1 FROM oms_orders WHERE shop_name IS NULL LIMIT 1
+  ) OR EXISTS (
+    SELECT 1 FROM transactions WHERE shop_name IS NULL AND order_code IS NOT NULL AND order_code <> '' LIMIT 1
+  ) THEN
+    UPDATE oms_orders o
+    SET shop_name = sub.sender_name
+    FROM (
+      SELECT DISTINCT order_code, created_date, sender_name
+      FROM oms_order_items
+      WHERE sender_name IS NOT NULL AND sender_name <> ''
+    ) sub
+    WHERE o.order_code = sub.order_code AND o.created_date = sub.created_date AND o.shop_name IS NULL;
+
+    UPDATE transactions t
+    SET shop_name = sub.sender_name
+    FROM (
+      SELECT DISTINCT order_code, created_date, sender_name
+      FROM oms_order_items
+      WHERE sender_name IS NOT NULL AND sender_name <> ''
+    ) sub
+    WHERE t.order_code = sub.order_code AND t.created_date = sub.created_date AND t.shop_name IS NULL;
+
+    UPDATE transactions t
+    SET shop_name = o.shop_name
+    FROM oms_orders o
+    WHERE (t.oms_order_uid = o.order_uid OR t.order_code = o.order_code OR t.related_order_id = o.marketplace_order_norm)
+      AND t.shop_name IS NULL
+      AND o.shop_name IS NOT NULL;
   END IF;
 END $$;
 

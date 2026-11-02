@@ -451,7 +451,8 @@ export async function saveOmsItemsBatch(
            MAX(note) AS note,
            MAX(created_date) AS created_date,
            MAX(paid_date) AS paid_date,
-           SUM(quantity)::int AS total_qty,
+            MAX(sender_name) AS sender_name,
+            SUM(quantity)::int AS total_qty,
            SUM(unit_price * quantity) AS list_total,
            MAX(order_sales_amount) AS sales_amount
          FROM oms_order_items
@@ -461,20 +462,22 @@ export async function saveOmsItemsBatch(
        INSERT INTO oms_orders (
          order_uid, order_code, import_id, channel, customer_name, customer_phone, courier,
          shipping_fee_customer, bank, tracking_no, note, created_date, paid_date,
-         discount_total, total_qty, sales_amount, profit_amount
-       )
-       SELECT
-         a.order_uid, a.order_code, $2, COALESCE(a.channel, 'TikTok'), a.customer_name, a.customer_phone, a.courier,
-         COALESCE(a.shipping_fee_customer, 0), a.bank, a.tracking_no, a.note,
-         COALESCE(a.created_date, ''), COALESCE(a.paid_date, ''),
-         GREATEST(0, COALESCE(a.list_total, 0) - COALESCE(a.sales_amount, 0)),
-         COALESCE(a.total_qty, 1), COALESCE(a.sales_amount, 0), COALESCE(a.sales_amount, 0)
-       FROM agg a
-       ON CONFLICT (order_uid) DO UPDATE SET
-         customer_name = COALESCE(oms_orders.customer_name, EXCLUDED.customer_name),
-         customer_phone = COALESCE(oms_orders.customer_phone, EXCLUDED.customer_phone),
-         tracking_no = COALESCE(oms_orders.tracking_no, EXCLUDED.tracking_no),
-         total_qty = CASE WHEN oms_orders.total_qty > 0 THEN oms_orders.total_qty ELSE EXCLUDED.total_qty END`,
+         discount_total, total_qty, sales_amount, profit_amount, shop_name
+        )
+        SELECT
+          a.order_uid, a.order_code, $2, COALESCE(a.channel, 'TikTok'), a.customer_name, a.customer_phone, a.courier,
+          COALESCE(a.shipping_fee_customer, 0), a.bank, a.tracking_no, a.note,
+          COALESCE(a.created_date, ''), COALESCE(a.paid_date, ''),
+          GREATEST(0, COALESCE(a.list_total, 0) - COALESCE(a.sales_amount, 0)),
+          COALESCE(a.total_qty, 1), COALESCE(a.sales_amount, 0), COALESCE(a.sales_amount, 0),
+          a.sender_name
+        FROM agg a
+        ON CONFLICT (order_uid) DO UPDATE SET
+          customer_name = COALESCE(oms_orders.customer_name, EXCLUDED.customer_name),
+          customer_phone = COALESCE(oms_orders.customer_phone, EXCLUDED.customer_phone),
+          tracking_no = COALESCE(oms_orders.tracking_no, EXCLUDED.tracking_no),
+          shop_name = COALESCE(EXCLUDED.shop_name, oms_orders.shop_name),
+          total_qty = CASE WHEN oms_orders.total_qty > 0 THEN oms_orders.total_qty ELSE EXCLUDED.total_qty END`,
       [uidChunk, importId],
       client,
     );
@@ -762,9 +765,10 @@ export async function reconcileAndSyncThreeFiles(
       };
 
       const targetImportId = Number(r.import_id ?? fallbackImportId);
-      const base = i * 22;
+      const shopName = r.shop_name ? String(r.shop_name) : null;
+      const base = i * 23;
       placeholders.push(
-        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16}::jsonb,$${base + 17}::jsonb,$${base + 18}::jsonb,$${base + 19},$${base + 20},$${base + 21},$${base + 22})`,
+        `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16}::jsonb,$${base + 17}::jsonb,$${base + 18}::jsonb,$${base + 19},$${base + 20},$${base + 21},$${base + 22},$${base + 23})`,
       );
       params.push(
         targetImportId,
@@ -789,6 +793,7 @@ export async function reconcileAndSyncThreeFiles(
         channel,
         orderCode,
         orderUid,
+        shopName,
       );
       extIds.push(externalId);
       prefixes.push(invoicePrefix(paidDate));
@@ -810,7 +815,7 @@ export async function reconcileAndSyncThreeFiles(
         import_id, external_id, transaction_type, is_order, created_date, paid_date,
         currency, income, fee_total, adjustment, payout, related_order_id,
         product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
-        normalized_json, created_at, channel, order_code, oms_order_uid
+        normalized_json, created_at, channel, order_code, oms_order_uid, shop_name
       ) VALUES ${placeholders.join(", ")}`,
       params,
       client,
@@ -825,6 +830,7 @@ export async function reconcileAndSyncThreeFiles(
     `UPDATE transactions t
      SET order_code = o.order_code,
          oms_order_uid = o.order_uid,
+         shop_name = COALESCE(o.shop_name, t.shop_name),
          channel = CASE
            WHEN t.transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 'TikTok'
            ELSE COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')

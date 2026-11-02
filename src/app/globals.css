@@ -3,6 +3,8 @@
 @import "tailwindcss/utilities" layer(utilities);
 @import "tw-animate-css";
 
+@variant dark (&:where(.dark, .dark *));
+
 /* โทน TikTok Shop Seller Center mapped ให้ shadcn/ui ใช้ต่อ
    NOTE: ไม่มี preflight ของ Tailwind ในไฟล์นี้โดยตั้งใจ — เปิดใช้แล้วสไตล์เดิมทั้งระบบพัง */
 :root {
@@ -2448,16 +2450,43 @@ table.data {
     font-size: 23px;
   }
 
+  .workspace-page > .stats,
   .stats {
-    gap: 10px;
+    display: flex !important;
+    overflow-x: auto !important;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 8px !important;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+    margin-top: 10px !important;
   }
 
-  .stat {
-    padding: 13px;
+  .workspace-page > .stats::-webkit-scrollbar,
+  .stats::-webkit-scrollbar {
+    display: none;
   }
 
-  .stat-value {
-    font-size: 18px;
+  .workspace-page > .stats .stat,
+  .stats .stat {
+    flex: 0 0 calc(72% - 8px) !important;
+    min-width: 220px !important;
+    max-width: 280px !important;
+    scroll-snap-align: start;
+    padding: 10px 14px !important;
+    min-height: 82px !important;
+  }
+
+  .workspace-page > .stats .stat-value,
+  .stats .stat-value {
+    font-size: 16.5px !important;
+    margin-top: 2px !important;
+  }
+
+  .workspace-page > .stats .stat-hint,
+  .stats .stat-hint {
+    font-size: 11px !important;
+    margin-top: 2px !important;
   }
 
   .stat-icon {

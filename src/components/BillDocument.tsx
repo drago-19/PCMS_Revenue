@@ -27,6 +27,7 @@ export function BillDocument({
   omsItems,
   omsNote,
   isNoProductPriceOrder,
+  shopName,
 }: {
   bill: BillModel;
   source: { filename: string; importedAt: string; importId: number };
@@ -45,6 +46,7 @@ export function BillDocument({
   omsItems?: OmsLineItem[];
   omsNote?: string | null;
   isNoProductPriceOrder?: boolean;
+  shopName?: string | null;
 }) {
   const isOmsPlaceholder = bill.transactionType === "คำสั่งซื้อ (OMS)";
   const hasFees =
@@ -109,7 +111,19 @@ export function BillDocument({
     <article className="bill-card">
       <header className="bill-card-head">
         <div>
-          <p className="bill-kicker">{channelLabel} · รายละเอียดรายได้</p>
+          <p className="bill-kicker">
+            {shopName ? (
+              <span className="font-bold">
+                {shopName === "Kiddee Shop"
+                  ? "🛍️ Kiddee Shop"
+                  : shopName === "Kissi Studio"
+                    ? "👗 Kissi Studio"
+                    : shopName}
+                {" · "}
+              </span>
+            ) : null}
+            {channelLabel} · รายละเอียดรายได้
+          </p>
           <h2>การแจกแจงรายละเอียดการชำระเงิน</h2>
         </div>
         <div className="bill-head-side">
@@ -144,6 +158,18 @@ export function BillDocument({
       </header>
 
       <dl className="bill-meta">
+        {shopName ? (
+          <div>
+            <dt>ร้านค้า (Shipnity)</dt>
+            <dd className="font-bold text-foreground">
+              {shopName === "Kiddee Shop"
+                ? "🛍️ Kiddee Shop"
+                : shopName === "Kissi Studio"
+                  ? "👗 Kissi Studio"
+                  : shopName}
+            </dd>
+          </div>
+        ) : null}
         <div>
           <dt>หมายเลขคำสั่งซื้อ ({channelLabel})</dt>
           <dd className="mono">
@@ -302,11 +328,11 @@ export function BillDocument({
 
           const reasonTitle =
             bill.payout === 0 && isFullReturn
-              ? "สาเหตุที่กำไรสุทธิเป็น 0.00 บาท: ลูกค้าตีกลับ/ยกเลิกเต็มจำนวน 100% (ถูกหักยอดขายคืนเต็มจำนวน)"
+              ? "สาเหตุที่ยอดเงินสดเป็น 0.00 บาท: ลูกค้าตีกลับ/ยกเลิกเต็มจำนวน 100% (ถูกหักยอดขายคืนเต็มจำนวน)"
               : bill.payout < 0 && isFullReturn
-                ? `สาเหตุที่ติดลบ ${formatTHB(bill.payout)}: ออเดอร์ถูกหักยอดขายคืนเต็มจำนวน และถูกหักต้นทุนสินค้าตัดสต็อก ${formatTHB(bill.cogsTotal)}`
+                ? `สาเหตุที่เงินสดติดลบ ${formatTHB(bill.payout)}: ออเดอร์ถูกหักยอดขายคืนเต็มจำนวน และมีค่าส่ง/ค่าปรับส่วนเกิน`
                 : bill.payout < 0
-                  ? `สาเหตุที่ติดลบ ${formatTHB(bill.payout)} (ตามช่องกำไรในไฟล์ Shipnity): เหลือเงินหลังหักค่าส่ง/ค่าธรรมเนียม ${formatTHB(netCashBeforeCogs)} แต่หักต้นทุนสินค้าตัดสต็อก ${formatTHB(bill.cogsTotal)}`
+                  ? `สาเหตุที่เงินสดติดลบ ${formatTHB(bill.payout)}: ค่าส่ง/ค่าธรรมเนียมสูงกว่ายอดขาย`
                   : `แจกแจงที่มาของยอด ${formatTHB(bill.payout)} (ตามไฟล์ Shipnity)`;
 
           return (
@@ -317,11 +343,11 @@ export function BillDocument({
                   <span>{reasonTitle}</span>
                 </div>
                 <Badge
-                  variant={bill.payout < 0 ? "danger" : "warning"}
+                  variant={bill.payout - bill.cogsTotal < 0 ? "danger" : "warning"}
                   size="sm"
                   className="font-bold"
                 >
-                  กำไรตามไฟล์ Shipnity {formatTHB(bill.payout)}
+                  กำไรตามไฟล์ Shipnity {formatTHB(bill.payout - bill.cogsTotal)}
                 </Badge>
               </div>
 
@@ -346,10 +372,10 @@ export function BillDocument({
                   </div>
                   <div className="flex items-center justify-between gap-2 border-t border-dashed border-[#cbd5e1] pt-1 font-semibold text-[#047857]">
                     <span>
-                      = ยอดเงินคงเหลือหลังหักค่าส่ง/ค่าธรรมเนียม (ยอดขาย - ค่าส่งที่ร้านจ่าย)
+                      = ยอดเงินสดรับสุทธิ (ยอดขาย - ค่าส่งที่ร้านจ่าย)
                     </span>
                     <span className="mono font-bold">
-                      {formatTHB(netCashBeforeCogs)}
+                      {formatTHB(bill.payout)}
                     </span>
                   </div>
                   {bill.cogsTotal > 0 ? (
@@ -364,14 +390,14 @@ export function BillDocument({
                   ) : null}
                   <div className="flex items-center justify-between gap-2 border-t border-[#e2e8f0] pt-1.5 font-extrabold text-[12.5px]">
                     <span>
-                      = ช่อง &ldquo;กำไร&rdquo; ในไฟล์ Shipnity (คอลัมน์ V · ยอดชำระสุทธิ)
+                      = ช่อง &ldquo;กำไร&rdquo; ในไฟล์ Shipnity (คอลัมน์ V · หลังหักต้นทุนสต็อก)
                     </span>
                     <span
                       className={`mono ${
-                        bill.payout < 0 ? "text-[#dc2626]" : "text-[#0f172a]"
+                        bill.payout - bill.cogsTotal < 0 ? "text-[#dc2626]" : "text-[#0f172a]"
                       }`}
                     >
-                      {formatTHB(bill.payout)}
+                      {formatTHB(bill.payout - bill.cogsTotal)}
                     </span>
                   </div>
                 </div>
@@ -383,13 +409,13 @@ export function BillDocument({
                   <strong>{source.filename}</strong> ออเดอร์นี้มี{" "}
                   <strong>ช่องยอดขาย = {formatTHB(bill.incomeTotal)}</strong> หัก{" "}
                   <strong>ช่องค่าส่งที่ร้านจ่าย = {formatTHB(bill.feeTotal)}</strong>{" "}
-                  (เหลือเงินสดก่อนหักต้นทุน <strong>{formatTHB(netCashBeforeCogs)}</strong>)
+                  (เงินสดรับจริง <strong>{formatTHB(bill.payout)}</strong>)
                   {bill.cogsTotal > 0 ? (
                     <>
                       {" "}จากนั้นระบบสต็อกของ Shipnity หัก{" "}
                       <strong>ต้นทุนสินค้าในคลังออกอีก {formatTHB(-bill.cogsTotal)}</strong>{" "}
-                      จึงทำให้ช่อง &ldquo;กำไร&rdquo; ในไฟล์ติดลบเป็น{" "}
-                      <strong className="text-[#dc2626]">{formatTHB(bill.payout)}</strong>
+                      จึงทำให้ช่อง &ldquo;กำไร&rdquo; ในไฟล์กลายเป็น{" "}
+                      <strong className={bill.payout - bill.cogsTotal < 0 ? "text-[#dc2626]" : ""}>{formatTHB(bill.payout - bill.cogsTotal)}</strong>
                     </>
                   ) : null}
                 </p>
@@ -722,32 +748,46 @@ export function BillDocument({
         </section>
       ) : null}
 
+      <div className="bill-total">
+        <span>
+          {isOmsChannel
+            ? `ยอดการชำระเงินทั้งหมด (เงินสดรับจริงจาก ${channelLabel})`
+            : `ยอดการชำระเงินทั้งหมด`}
+        </span>
+        <span className={bill.payout < 0 ? "amount danger text-[#e11d48]" : ""}>
+          {formatTHB(bill.payout)}
+        </span>
+      </div>
+
       {isOmsChannel && bill.cogsTotal > 0 ? (
-        <section className="bill-section">
-          <div className="bill-section-head">
-            <span>ต้นทุนสินค้า (ตัดสต็อก)</span>
-            <span className="amount font-bold text-[#dc2626]">{formatTHB(-bill.cogsTotal)}</span>
+        <section className="mx-4 mt-3.5 rounded-xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] p-3 text-xs text-[#475569] sm:mx-6">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-[#e2e8f0] pb-2 font-bold text-[#334155]">
+            <div className="flex items-center gap-1.5">
+              <span>ข้อมูลอ้างอิงภายใน: สต็อก Shipnity (ไม่หักจากยอดรับเงินสด / ไม่กระทบภาษี)</span>
+            </div>
+            <Badge variant="outline" size="sm" className="bg-white text-[#475569]">
+              อ้างอิงไฟล์ {source.filename}
+            </Badge>
           </div>
-          <div className="bill-rows">
+          <div className="mt-2.5 space-y-2">
+            <div className="flex items-center justify-between font-semibold">
+              <span>• ต้นทุนสินค้าในคลัง (ตัดสต็อก {omsItems?.length ? `${omsItems.reduce((s, it) => s + it.quantity, 0)} ชิ้น` : ""})</span>
+              <span className="mono font-bold text-[#dc2626]">{formatTHB(-bill.cogsTotal)}</span>
+            </div>
             {omsItems && omsItems.length === 1 ? (
               (() => {
                 const it = omsItems[0]!;
                 const qty = it.quantity || 1;
                 return (
-                  <div className="bill-row child">
+                  <div className="pl-3 text-[11.5px] text-[#64748b]">
                     <span>
-                      • <strong className="mono">{it.skuCode}</strong> · {it.productName} × {qty} ชิ้น
+                      - <strong className="mono">{it.skuCode}</strong> · {it.productName} × {qty} ชิ้น
                       {qty > 1 ? (
-                        <span className="text-[11.5px] text-[#64748b]">
-                          {" "}(ต้นทุนเฉลี่ยชิ้นละ {formatTHB(bill.cogsTotal / qty)})
-                        </span>
+                        <span> (ต้นทุนเฉลี่ยชิ้นละ {formatTHB(bill.cogsTotal / qty)})</span>
                       ) : (
-                        <span className="text-[11.5px] text-[#64748b]">
-                          {" "}(ต้นทุน {formatTHB(bill.cogsTotal)})
-                        </span>
+                        <span> (ต้นทุน {formatTHB(bill.cogsTotal)})</span>
                       )}
                     </span>
-                    <span className="amount font-medium text-[#dc2626]">{formatTHB(-bill.cogsTotal)}</span>
                   </div>
                 );
               })()
@@ -762,7 +802,6 @@ export function BillDocument({
                   0,
                 );
 
-                // Allocate cost pro-rata by price if available, otherwise by quantity
                 let runningSum = 0;
                 const allocated = omsItems.map((it, idx) => {
                   let cost = 0;
@@ -786,45 +825,30 @@ export function BillDocument({
                 });
 
                 return (
-                  <>
-                    <div className="bill-row muted text-[11.5px] font-semibold text-[#475569]">
-                      <span>แจกแจงต้นทุนสินค้าในออเดอร์นี้ ({totalQty} ชิ้น):</span>
-                      <span className="amount font-bold text-[#dc2626]">{formatTHB(-bill.cogsTotal)}</span>
-                    </div>
+                  <div className="pl-3 space-y-1 text-[11.5px] text-[#64748b]">
                     {allocated.map(({ it, cost }, idx) => (
-                      <div key={`${it.skuCode}-${idx}`} className="bill-row child">
+                      <div key={`${it.skuCode}-${idx}`} className="flex items-center justify-between">
                         <span>
-                          • <strong className="mono">{it.skuCode}</strong> · {it.productName} × {it.quantity || 1} ชิ้น
-                          <span className="text-[11.5px] text-[#64748b]">
-                            {" "}(ต้นทุนประเมิน {formatTHB(cost)})
-                          </span>
+                          - <strong className="mono">{it.skuCode}</strong> · {it.productName} × {it.quantity || 1} ชิ้น
                         </span>
-                        <span className="amount font-medium text-[#dc2626]">{formatTHB(-cost)}</span>
+                        <span className="mono font-medium text-[#dc2626]">{formatTHB(-cost)}</span>
                       </div>
                     ))}
-                  </>
+                  </div>
                 );
               })()
             ) : (
-              <div className="bill-row child">
-                <span>ต้นทุนสินค้าตัดสต็อกของ Shipnity</span>
-                <span className="amount font-bold text-[#dc2626]">{formatTHB(-bill.cogsTotal)}</span>
+              <div className="pl-3 text-[11.5px] text-[#64748b]">
+                <span>- ต้นทุนสินค้าตัดสต็อกของ Shipnity: {formatTHB(-bill.cogsTotal)}</span>
               </div>
             )}
+            <div className="flex items-center justify-between border-t border-dashed border-[#cbd5e1] pt-2 font-bold text-[#0f172a]">
+              <span>• กำไรสุทธิหลังหักต้นทุนสต็อก (ตามช่อง &ldquo;กำไร&rdquo; ในไฟล์ Shipnity)</span>
+              <span className="mono font-bold text-[#047857]">{formatTHB(bill.payout - bill.cogsTotal)}</span>
+            </div>
           </div>
         </section>
       ) : null}
-
-      <div className="bill-total">
-        <span>
-          {isOmsChannel
-            ? `กำไรสุทธิ (ตามช่องกำไรในไฟล์ Shipnity · ยอดชำระสุทธิ)`
-            : `ยอดการชำระเงินทั้งหมด`}
-        </span>
-        <span className={bill.payout < 0 ? "amount danger text-[#e11d48]" : ""}>
-          {formatTHB(bill.payout)}
-        </span>
-      </div>
 
       {!bill.checks.ok ? (
         <div className="bill-alert">
