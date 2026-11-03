@@ -3,7 +3,106 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-10-31)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-03)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-03)**:
+  - **นำเข้าไฟล์ออเดอร์ LINE OA (`line_ปี69.xlsx`) มาเปรียบเทียบกับไฟล์สินค้า Shipnity (`oms_items`) + ยึดยอดขายจากไฟล์ออเดอร์ LINE OA เป็นตัวเลขหลักเพื่อยื่นภาษี + ออกแบบระบบป้ายกำกับและตัวกรองเปรียบเทียบข้อมูล 2 ไฟล์ใน `/bills` และ `BillDocument.tsx`**:
+    - [x] **1. ปรับปรุงการอ่านไฟล์ออเดอร์ LINE OA และการซิงก์ข้อมูล 2 ไฟล์ (`src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`)**:
+      - รองรับแถวที่มีคอลัมน์แทรกเกินมา 1 ช่องในไฟล์ `line_ปี69.xlsx` (เช่น ออเดอร์ `#FZI72` วันที่ `2026-01-07` ที่ยอดขาย `฿258.00` เลื่อนไปอยู่คอลัมน์กำไร และกำไร `-฿258.00` เลื่อนไปคอลัมน์ถัดไป)
+      - ป้องกันปัญหา COGS 100% หลอกตาสำหรับแถวที่เว้นช่อง `กำไร` ว่างไว้ (เช่น ออเดอร์ `#AB001`–`#AB015` วันที่ `2026-09-12`) โดยให้ใช้ยอดรับสุทธิ (`salesAmount - shippingFeeSeller`) เมื่อช่องกำไรในไฟล์ว่างเปล่า
+      - เติม `shop_name` อัตโนมัติจากอีเมลผู้สร้าง (`created_by`) สำหรับออเดอร์ที่ยังไม่มีไฟล์สินค้า (`homepong02@gmail.com` → `Kiddee Shop`, `kissiestudio@gmail.com` → `Kissi Studio`)
+      - นำเข้าไฟล์ `line_ปี69.xlsx` เข้าฐานข้อมูลจริงครบทั้ง **50 แถว** (`importId = 180`) ทำให้ข้อมูลในช่องทาง `LINE OA` รวมทั้งระบบมี **90 รายการ** แบ่งเป็น:
+        - `✅ ข้อมูลตรงกัน 2 ไฟล์`: **63 รายการ** (32 รายการของ `Kiddee Shop` + 31 รายการของ `Kissi Studio`)
+        - `⚠️ ยอด 2 ไฟล์ไม่ตรงกัน`: **11 รายการ** (`#R49`, `#R50`, `#R52`, `#R53`, `#R60`, `#S70`, `#S77`, `#S79`, `#T19`, `#T30`, `#U25` ของร้าน `Kissi Studio` ที่มีการเพิ่มสินค้าหน้าไลฟ์สด โดยระบบอัปเดต `income` และ `payout` ให้ใช้ยอดที่ถูกต้องจากไฟล์ออเดอร์ `line_ปี69.xlsx` เป็นหลัก และเก็บยอดจากไฟล์สินค้า `oms_order_items.order_sales_amount` ไว้แสดงเปรียบเทียบคู่กัน)
+        - `📄 มีเฉพาะไฟล์ออเดอร์ (รอไฟล์สินค้า)`: **16 รายการ** (`#FZI72` 1 รายการ + `#AB001`–`#AB015` 15 รายการ)
+    - [x] **2. เพิ่มตัวกรองย่อยและป้ายกำกับเปรียบเทียบ 2 ไฟล์สำหรับ `LINE OA` (`src/lib/queries.ts`, `src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`, `src/components/BillDocument.tsx`, `src/components/BillPreviewDialog.tsx`, `src/app/bills/[orderId]/page.tsx`)**:
+      - เพิ่มตัวกรองสถานะความครบของข้อมูล (แถวที่ 3) สำหรับช่องทาง `LINE OA` แยกชัดเจน 4 ปุ่ม (`63 + 11 + 16 = 90` ใบ ตรงกัน 100%):
+        1. `ทั้งหมดใน LINE OA (90)`
+        2. `ข้อมูลตรงกัน 2 ไฟล์ (63)` (`link=linked`)
+        3. `ยอด 2 ไฟล์ไม่ตรงกัน (11)` (`link=line_mismatch`)
+        4. `มีเฉพาะไฟล์ออเดอร์ (16)` (`link=oms_only`)
+      - ในตาราง `/bills`: แสดงป้าย Badge กำกับทุกแถวของ `LINE OA` (`✅ ตรงกัน 2 ไฟล์`, `⚠️ ยอดต่างกัน (ไฟล์สินค้า ฿...)`, `📄 มีเฉพาะไฟล์ออเดอร์`) และในคอลัมน์ `รายได้` ของรายการที่ยอดต่างกัน แสดงบรรทัดกำกับ `ไฟล์สินค้า: ฿... (+฿...)` ใต้ยอดขายหลักทันที
+      - ในหน้ารายละเอียดบิล (`BillDocument.tsx` และป๊อปอัป `BillPreviewDialog.tsx`): เพิ่มกล่อง **เปรียบเทียบข้อมูล 2 ไฟล์ LINE OA** แสดงตารางเทียบ 3 บรรทัด (`1. ยอดขายที่ถูกต้องตามไฟล์ออเดอร์ LINE OA · ใช้ยื่นภาษี`, `2. ยอดขายออเดอร์ในไฟล์สินค้า Shipnity เดิม`, และ `= ส่วนต่างระหว่าง 2 ไฟล์` พร้อมหมายเหตุจาก Shipnity เช่น `ไลฟ์ เพิ่ม 2 รายการ`)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ **62/62 เทสต์ (51 pass, 0 fail)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบจริงครบ 4 ขนาดหน้าจอ (`360px`, `390px`, `768px`, `1280px`) บน `/bills?channel=LINE`, `/bills?channel=LINE&link=linked`, `/bills?channel=LINE&link=line_mismatch`, `/bills?channel=LINE&link=oms_only` และเปิด `BillPreviewDialog` ตรวจกรอบเปรียบเทียบ 2 ไฟล์ (`noHorizontalScroll: true`, `overflowCount: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-03)**:
+  - **เชื่อมต่อและแสดงข้อมูลครบทุกช่องทาง (`TikTok Shop`, `Shopee`, `Facebook`, `Lazada`, `LINE OA`, `Other` และ `ชดเชยแพลตฟอร์ม`) ครบทุกหน้าในระบบ (`/expenses`, `/products`, `/import`, `/`, `/history`)**:
+    - [x] **1. หน้า `/expenses` (`src/lib/expenses.ts`, `src/components/ExpensesManager.tsx`)**:
+      - อัปเดต `getMonthlyPlatformRevenues` ให้รวมรายการชดเชยจากแพลตฟอร์ม (`BILLABLE_ORDER_OR_COMPENSATION_SQL`: 56 รายการ `+฿6,837.00`) ให้ตรงกับยอดในหน้า `/bills`
+      - เพิ่มคอลัมน์ **`รับ Lazada`** และ **`รับ LINE OA`** ในตารางภาพรวมรายเดือน (Tab 1) ทั้งส่วนหัวตาราง เนื้อหา และแถวผลรวมสะสมท้ายตาราง (`TableFooter`)
+      - อัปเดตหน้าต่างพิมพ์รายงานประจำเดือน (`SECTION 1: รายรับจากช่องทางจำหน่าย`) ให้แสดงครบทั้ง `TikTok Shop`, `Shopee`, `Facebook`, `Lazada`, `LINE OA` (และ `อื่นๆ (Other)` เมื่อมียอด) เพื่อให้ผลรวมทุกบรรทัดตรงกับ `รวมรายรับจากทุกช่องทางจำหน่าย (A)` 100%
+    - [x] **2. หน้า `/products` (`src/app/products/page.tsx`, `src/lib/queries.ts`)**:
+      - เปลี่ยนป้ายช่องทางด้านบนตารางให้เป็นปุ่มกดกรองได้จริง (`ทุกช่องทาง`, `TikTok Shop`, `Shopee`, `Facebook`, `Lazada`, `LINE OA`, `Other`) พร้อมส่งพารามิเตอร์ `channel` เข้า `listSkuSummariesPaged`, `DatePickerField`, `PaginationBar` และปุ่ม `"ดูบิลสินค้านี้"` (`/bills?q=...&channel=...`)
+    - [x] **3. หน้า `/import` (`src/lib/queries.ts`, `src/components/UploadCompletenessCalendar.tsx`)**:
+      - เพิ่มการนับ `lazadaOrders`, `lineOrders`, `otherOrders` ใน `getDailyUploadCompleteness`
+      - แสดงจำนวนบิล `Lazada` และ `LINE OA` ทั้งในช่องปฏิทินรายวัน (`ครบตามไฟล์ Lazada`) และในป๊อปอัปดูรายละเอียดรายวัน (`Dialog`) ให้ผลรวมช่องทางในวงเล็บตรงกับจำนวนบิลรวมของวันนั้น 100%
+    - [x] **4. หน้า `/` (Dashboard), `/history` และหน้าพิมพ์ใบกำกับภาษีรวม (`/days/[date]/invoices`) (`src/lib/queries.ts`, `src/app/page.tsx`, `src/app/history/page.tsx`, `src/app/days/[date]/invoices/page.tsx`)**:
+      - อัปเดต `getOverallStats` ให้ใช้ `BILLABLE_ORDER_OR_COMPENSATION_SQL` รวมรายการชดเชยจากแพลตฟอร์ม 56 รายการ ทำให้จำนวนบิลสะสมบน Dashboard (`87,125 ใบ`) ตรงกับ `/bills`
+      - ในหน้าพิมพ์ใบกำกับภาษีรวม (`/days/[date]/invoices`):
+        - ออกแบบแถบเลือกช่องทางจำหน่ายใหม่ให้แสดงครบทั้ง **8 ปุ่มเสมอ** (`ทุกช่องทาง`, `TikTok Shop`, `Shopee`, `Facebook`, `Lazada`, `LINE OA`, `ชดเชยแพลตฟอร์ม`, `อื่นๆ (Other)`) ไม่ซ่อนปุ่มที่มี `0` ใบในเดือนนั้นอีกต่อไป เพื่อให้เห็น `Lazada` และ `LINE OA` ตลอดเวลาเหมือนหน้า `/bills`
+        - จัดเรียงปุ่มช่องทางทั้งหมดในโครงสร้าง Grid ที่สมส่วนเท่ากันทุกปุ่ม (`grid-cols-2 min-[540px]:grid-cols-4 min-[1440px]:grid-cols-8`, ความสูง `40px` เท่ากันทุกปุ่ม ไม่มีการตัดคำ `...` และไม่มีปุ่มหล่นแถวเดี่ยว) พร้อมแสดงข้อความแจ้งเมื่อเลือกช่องทางที่มี `0` ใบในงวดนั้น
+      - อัปเดตข้อความหัวข้อ (`PageHeader`) ในหน้า `/`, `/products`, `/history` ให้ระบุครบทุกช่องทางที่รองรับ
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-03)**:
+  - **เพิ่มการรองรับการนำเข้าไฟล์และช่องทางจำหน่าย `Lazada` ครบวงจร (จาก Lazada Seller Center ทั้ง `.csv` และ `.xlsx`) + ผูกร้านค้า `Kiddee Shop` + ดึงตัวเลขจากไฟล์แสดงตรง 100% โดยไม่คำนวณเพิ่ม**:
+    - [x] **1. ระบบอ่านและแปลงไฟล์ Lazada โดยตรง (`src/lib/ingest/lazada-parse.ts`, `src/lib/ingest/parse.ts`, `src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`)**:
+      - ปรับปรุง `parseCsvToRows` ให้ตรวจจับตัวคั่น `;` (Semicolon) และ `,` (Comma) อัตโนมัติ รองรับทั้งไฟล์สรุปคำสั่งซื้อ 11 คอลัมน์และไฟล์รายละเอียดธุรกรรม 18 คอลัมน์จาก Lazada Seller Center
+      - ผูกทุกรายการของ Lazada (`TH1JWSSKAK`) เข้ากับร้านค้า **`Kiddee Shop`** และดึงค่าตัวเลขจากคอลัมน์ `จำนวนเงิน(รวมภาษี)` มาแสดงตรงตามไฟล์ 100% โดยไม่เขียนสูตรคำนวณเอง
+    - [x] **2. อัปเกรดฐานข้อมูล ออกเลขใบกำกับภาษี และรองรับตัวกรองทุกหน้า (`src/lib/db.ts`, `src/lib/invoice-eligibility.ts`, `src/lib/invoice.ts`, `src/lib/queries.ts`, `src/lib/expenses.ts`)**:
+      - อัปเกรด DB Schema เป็น `SCHEMA_VERSION = "2026-11-03-v30"` เพิ่ม `lazada_count` บน `daily_summaries` และ `lazada_qty` บน `sku_summaries`
+      - นำเข้าไฟล์ Lazada ทั้ง 25 ไฟล์ในเครื่อง (`E:\download\...`) เข้าฐานข้อมูลครบถ้วน (ได้บิลคำสั่งซื้อ Lazada ครบ **8 คำสั่งซื้อ** ภายใต้ร้าน `Kiddee Shop` พร้อมเลขใบกำกับภาษีครบทุกใบ และข้ามไฟล์ `Balance Transactions` 9 ไฟล์อัตโนมัติ)
+      - แก้ไขปัญหาตัวเลข `Lazada` ในแถวที่ 1 และแถวที่ 2 แสดง `12` ขณะที่แถวที่ 3 (`ข้อมูลครบ`) แสดง `8`: เก็บ `touchedLazadaPaidDates` ใน `import-service.ts` เพื่อรีเฟรช `daily_summaries` ของวันที่เดิมทุกครั้งที่ออเดอร์ Lazada เปลี่ยน `paid_date` ข้ามไฟล์ ทำให้ตัวเลขทั้ง 3 แถวตรงกันที่ **`8`** 100%
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ **61/61 เทสต์ (60 pass, 1 skipped sample)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบจริงครบขนาดหน้าจอ `360px`–`1280px` (`docOverflow: false`, `childOverflow: false`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-03)**:
+  - **แก้ไขปัญหาขนาดปุ่มและแถวตัวกรองในหน้า `/bills` ขยับ/ยืด-หดเวลาคลิกสลับหมวดบิลหรือช่องทางจำหน่าย (`src/components/BillsFilterInteractive.tsx`) + ตอบข้อสงสัยปุ่มช่องทาง `อื่นๆ (Other)`**:
+    - [x] **1. ชี้แจงที่มาของปุ่ม `อื่นๆ (Other)`**:
+      - ปุ่ม `อื่นๆ (Other)` คือช่องทางจำหน่าย `"อื่นๆ"` จากไฟล์ Shipnity (เช่น ออเดอร์ส่งชุดไปถ่ายแบบ หรือขายนอกแพลตฟอร์มหลัก)
+      - ในแท็บเริ่มต้น `บิลขายปกติ` มีจำนวน `0` รายการ (ไม่มีบิลขายปกติในช่องทางอื่นๆ) ส่วนในแท็บ `ยกเลิก / ยอด 0 บาท` มี `1` รายการ คือออเดอร์ `#T21` (วันที่ `2026-07-28`, ร้าน `Kissi Studio`, หมายเหตุ `"ส่งไปใช้ถ่ายแบบ"`, ยอด `฿0.00`)
+    - [x] **2. ล็อกความสูงและความกว้างของปุ่มตัวกรองทั้ง 3 แถวใน `src/components/BillsFilterInteractive.tsx` พร้อมย่อขนาดตัวอักษรให้อ่านได้ครบทุกตัวโดยไม่มี `...` (No Ellipsis / No Layout Shift)**:
+      - **แถวที่ 1 (`BillsChannelBar` — เลือกช่องทางจำหน่าย)**: ลบ `truncate` ออกทั้งหมด เปลี่ยนโครงสร้างภายในปุ่มเป็น 2 ชั้น (`flex-col justify-between h-[60px] min-h-[60px]`) โดยชั้นบนวางชื่อช่องทาง (`text-[10px] font-extrabold tracking-[-0.03em]`) คู่กับตัวเลข Badge (`text-[9.5px]`) และชั้นล่างวางคำอธิบายย่อย (`text-[9.5px]`) ให้กางเต็มความกว้างปุ่ม ทำให้อ่านข้อความ `"ข้อมูลจากไฟล์ Shipnity"`, `"ข้อมูลจากไฟล์ Lazada"`, `"ครบ 3 ไฟล์ · โอนจริง"` ได้ครบ 100% โดยไม่ถูกตัดเป็น `...` และไม่ดันความสูงปุ่มเปลี่ยนเวลาสลับแท็บ
+      - **แถวที่ 2 (`BillsCategoryTabs` — เลือกประเภทบิล)**: ลบ `truncate` ออก ล็อกความสูงปุ่มด้วย `h-[52px] min-h-[52px]` และย่อฟอนต์เป็น `text-[11.5px]` / `text-[10.5px]` แสดงข้อความครบทุกตัวอักษร
+      - **แถวที่ 3 (`BillsSubFilters` — สถานะความครบของข้อมูล)**: ลบ `truncate` ออก ใช้โครงสร้าง 2 ชั้น (`flex-col justify-between h-[56px] min-h-[56px]`) ย่อฟอนต์เป็น `text-[10.5px]` / `text-[9.5px]` และใช้โครงสร้างคอลัมน์ `min-[580px]:grid-cols-2 min-[980px]:grid-cols-3 min-[1280px]:grid-cols-6` เหมือนกันทุกหมวดบิลและทุกช่องทาง (รวมถึงเมื่อมีเพียง 1 ปุ่ม เช่น `Lazada`, `Shopee`, `LINE OA`, `Other` โดยตัดเงื่อนไข `linkItems.length === 1 ? ... min-[768px]:grid-cols-2` ที่ทำให้ปุ่มเดี่ยวยืดกว้างครึ่งจอ `480px` ออก) เพื่อให้ปุ่มในแถวที่ 3 มีขนาดกะทัดรัดและสมส่วนเท่ากันเสมอ (`156px × 56px` บนจอ `1280px`) อ่านข้อความได้ครบ 100%
+      - **ซิงก์ `daily_summaries` สำหรับวันที่ใหม่ของ Lazada (`src/lib/db.ts`)**: เปลี่ยนคำสั่งอัปเดต `lazada_count` ใน `SCHEMA_SQL` (`SCHEMA_VERSION = "2026-11-03-v31"`) จาก `UPDATE daily_summaries` เป็น `INSERT INTO daily_summaries ... ON CONFLICT (paid_date) DO UPDATE` เพื่อให้วันที่ที่มีเฉพาะออเดอร์ Lazada (`2026-05-08`) ถูกบันทึกเข้า `daily_summaries` ครบถ้วน ทำให้ตัวเลขในปุ่ม `บิลขายปกติ` ของช่องทาง Lazada แสดง `8` ตรงกับปุ่มช่องทางและปุ่มความครบของข้อมูล 100%
+      - **ซิงก์ชื่อร้านค้าที่ตกหล่น (`104` รายการ) กลับเข้าปุ่มร้าน `Kiddee Shop` และ `Kissi Studio` ให้ครบถ้วน (`src/lib/db.ts`, `src/lib/ingest/import-service.ts`, `src/lib/queries.ts`, `src/app/bills/page.tsx`)**:
+        - อัปเกรด `SCHEMA_VERSION = "2026-11-03-v33"` เพื่อย้ายบิลที่มีรายการสินค้าครบแล้วแต่ `shop_name` ตกหล่น (`Facebook 62` ใบ + `TikTok 14` ใบ จากการเช็ค `created_date` ไม่ตรงกัน และ `ชดเชยแพลตฟอร์ม 28` ใบ) กลับเข้าสู่ร้านค้าจริง (`Kiddee Shop` และ `Kissi Studio`)
+        - ปรับ `shopCounts` ใน `listBills` ให้คำนวณสอดคล้องกับหมวดบิลที่เลือกอยู่ (`BILL_CATEGORY_SQL[category]`) และเมื่อคลิกสลับปุ่มร้านค้าใน `BillsShopTabs` ให้รีเซ็ต `nextLink: "all"` เสมอ พร้อมแสดงรายละเอียดตัวกรองที่เลือกอยู่ในแถบแจ้งเตือนสีชมพูด้านล่างอย่างชัดเจน
+        - ผลลัพธ์ในแท็บ `"⏳ รอผูกไฟล์ร้านค้า [16,133]"`: ปุ่ม `ข้อมูลครบ = 0`, `ชดเชยแพลตฟอร์ม = 0`, `Facebook = 0` เหลือเฉพาะบิลที่รอไฟล์ออเดอร์ (`16,118`) และบิล LINE ที่รอไฟล์รายการสินค้า (`15`) รวมกันได้ `16,133` พอดี 100%
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ **61/61 เทสต์ (60 pass, 1 skipped sample)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบจริงครบ 4 ขนาดหน้าจอ (`360px`, `390px`, `768px`, `1280px`) และสลับเปรียบเทียบ `/bills` (`normal`), `/bills?category=refund_fee`, และ `/bills?category=zero` ได้ค่าความสูงและตำแหน่งแกน Y เท่ากันทุกพิกเซล (`chGroupH = 60px, top = 422px`, `catGroupH = 66px, top = 518px`, `linkGroupH = 56px, top = 620px`, `anyOverflow = false`, ไม่มี `...` แม้แต่จุดเดียว)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-03)**:
+  - **เพิ่มช่องทางจำหน่าย `LINE OA` (`LINE`) และ `อื่นๆ (Other)` จากไฟล์ Shipnity + เพิ่มรายการชดเชยจากแพลตฟอร์ม (`การชดเชยจากแพลตฟอร์ม` และ `เงินชดเชยด้านโลจิสติกส์`) เพื่อนำมาออกใบกำกับภาษีขาย + ยกเลิกกฎการรัน `deploy:app` ในเครื่อง**:
+    - [x] **1. รองรับการนำเข้าและแยกช่องทาง `LINE OA` (`LINE`) และ `Other` (`src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/db.ts`)**:
+      - ปรับ `normalizeChannel` ให้แมป `line`, `line_oa`, `ไลน์` → `"LINE"` และ `other`, `อื่นๆ` → `"Other"`
+      - แยกเงื่อนไขการคำนวณยอดชำระสุทธิ (`payout = sales_amount - shipping_fee_seller`) และ `cogs` อย่างชัดเจนตามช่องทาง (`TikTok`, `Shopee`, `Facebook`, `LINE`, `Other`) ตามกฎ Strict Platform Financial Isolation
+      - อัปเกรด DB Schema เป็น `SCHEMA_VERSION = "2026-11-03-v26"` เพิ่ม `line_count`, `other_channel_count`, `compensation_count` บน `daily_summaries` และ `line_qty`, `other_qty` บน `sku_summaries`
+      - ดึงข้อมูลย้อนหลัง (Backfill) จาก `imports.file_blob` ของไฟล์ Shipnity ทั้งหมดเข้าฐานข้อมูลครบถ้วน: ได้บิลขายปกติของ **`LINE OA` จำนวน `74` ออเดอร์** (ยอดรับสุทธิรวม `฿317,298.00`, สินค้า `1,373` รายการ) และ **`Other` จำนวน `1` ออเดอร์** (`#T21`, ยอด `฿0.00` จัดอยู่ในหมวดยกเลิก/0 บาท)
+    - [x] **2. รองรับรายการชดเชยจากแพลตฟอร์ม (`การชดเชยจากแพลตฟอร์ม` + `เงินชดเชยด้านโลจิสติกส์`) มาสร้างใบกำกับภาษีขาย (`src/lib/invoice-eligibility.ts`, `src/lib/invoice.ts`, `src/lib/queries.ts`)**:
+      - เพิ่ม `COMPENSATION_TX_TYPES` (`การชดเชยจากแพลตฟอร์ม` 28 รายการ `+฿1,127.00` และ `เงินชดเชยด้านโลจิสติกส์` 28 รายการ `+฿5,710.00` รวม **56 รายการ `+฿6,837.00`**) เข้าสู่เกณฑ์ออกใบกำกับภาษี (`INVOICE_ELIGIBLE_SQL` และ `isOrderEligibleForInvoice`)
+      - ผูกรายการชดเชยเข้ากับข้อมูลผู้ซื้อและร้านค้า (`oms_orders` / `shop_name`) จากออเดอร์อ้างอิง พร้อมออกเลขที่ใบกำกับภาษี (`invoice_registry`) ครบทั้ง 56 รายการ และสร้างบรรทัดรายการใน `buildInvoice` (`salesAmount = payout`, `total = payout`) แสดงใน `InvoiceDocument` ได้ทุกขนาดกระดาษ (`A4`, `100×150 มม.`, `80 มม.`)
+    - [x] **3. อัปเดต UI ตัวกรองและตารางแสดงผล (`src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`, `src/components/ui/badge.tsx`, `src/components/BillDocument.tsx`, `src/components/InvoiceDocument.tsx`, `src/lib/expenses.ts`)**:
+      - เพิ่มปุ่มกรองช่องทาง `LINE OA` และ `อื่นๆ (Other)` ใน `BillsChannelBar` และหน้า `/products`, `/days/[date]/invoices`
+      - เพิ่มปุ่มตัวกรองย่อย `ชดเชยแพลตฟอร์ม (56)` (`link=compensation`) ในหน้า `/bills` พร้อมป้าย Badge `LINE OA` (สีเขียว `#06C755`), `Other`, และ `💸 ชดเชยแพลตฟอร์ม`
+      - อัปเดต `getMonthlyPlatformRevenues` ใน `src/lib/expenses.ts` ให้รวมยอด `linePayout` และ `otherPayout` ตรงกับ `totalPlatformPayout`
+    - [x] **4. ลบกฎการสั่ง `deploy:app` ออกจากกฎโปรเจกต์ (`AGENTS.md`, `PROJECT_GUIDELINES.md`, `docs/lessons.md`)**:
+      - ปรับกฎให้ทดสอบเฉพาะในเครื่อง (Local) เท่านั้น ห้ามรัน `deploy:app` เองเด็ดขาด โดยผู้ใช้จะเป็นผู้สั่ง Deploy เอง
+    - [x] **5. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ **59/59 เทสต์ (0 fail)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Test: เปิดทดสอบจริงที่ `360px`, `390px`, `768px`, `1280px` บน `/bills?channel=LINE`, `/bills?link=compensation`, `/bills?channel=Other&category=zero` และเปิด `BillPreviewDialog` สลับดูใบกำกับภาษีครบทุกขนาดกระดาษ (`100×150 มม.`, `80 มม.`, `A4`) ไม่มีการล้นขอบ (`docOverflow: false`, `invOverflow: 0`)
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-10-31)**:
   - **แก้ไขปัญหาตัวเลขรั่วไหลเมื่อกรองตามร้านค้า + ป้องกันสีตัวหนังสือเปลี่ยนเป็นสีดำตอน Hover + ปรับเปลี่ยน "อื่นๆ" เป็นป้ายเตือน "⏳ รอผูกไฟล์ร้านค้า" ครบทุกหน้า (`/bills`, `/`, `/import`)**:

@@ -80,7 +80,8 @@
 
 ## 5. ก่อนส่งงาน
 
-- `npx tsc --noEmit` และ `pnpm build` ผ่าน
+- `npx tsc --noEmit`, `pnpm test` และ `pnpm build` ผ่านในเครื่อง (Local) เท่านั้น
+- **ห้ามรัน `deploy:app` หรือสั่ง Deploy เองเด็ดขาด**: เซิร์ฟเวอร์จริงอยู่อีกเครื่อง ผู้ใช้จะเป็นผู้ Deploy เอง ให้ทดสอบเฉพาะในเครื่อง (`localhost:3001`) พอ
 - **บังคับใช้ `playwright` MCP (`@playwright/mcp`) ในการเปิดเบราว์เซอร์ทดสอบเสมอ** (ใช้แทน `chrome-devtools-mcp` เป็นหลัก) โดยเปิดทดสอบจริงที่ `360px`, `390px`, `768px` และ `1280px` แล้วทดสอบเส้นทางหลักของหน้าที่แก้ พร้อมตรวจการชน/ซ้อนทับของปุ่มและ Badge (รายงานผลพร้อมสิ่งที่กดผ่าน/ไม่ผ่าน)
 - **ห้ามเทสต์แค่หน้าเดียวเมื่อแก้คอมโพเนนต์ร่วม (Test All Render Surfaces & All Button States)**:
   - หากแก้คอมโพเนนต์หรือ CSS ที่ใช้ร่วมกันหลายจุด (เช่น `InvoiceDocument`, `BillDocument`, `InvoiceZoomControl` ที่แสดงทั้งในหน้าเต็ม `/days/[date]/invoices`, `/invoices/[orderId]`, ในป๊อปอัป `BillPreviewDialog`, และในกรอบพรีวิว `/settings`) **ต้องเปิด Playwright MCP กดทดสอบครบทุกหน้า ทุก Modal/Dialog และครบทุกตัวเลือกปุ่ม (เช่น ทุกระดับซูม `100%–300%` และทุกขนาดกระดาษ)** ก่อนส่งงานเสมอ

@@ -133,7 +133,7 @@ test("expenses: monthly platform revenue aggregation separates channels accurate
 
   for (const r of revs) {
     assert.match(r.yearMonth, /^\d{4}-\d{2}$/);
-    const sum = Math.round((r.tiktokPayout + r.shopeePayout + r.facebookPayout) * 100) / 100;
+    const sum = Math.round((r.tiktokPayout + r.shopeePayout + r.facebookPayout + (r.lazadaPayout ?? 0) + r.linePayout + r.otherPayout) * 100) / 100;
     assert.equal(r.totalPlatformPayout, sum);
   }
 });

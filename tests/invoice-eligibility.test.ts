@@ -54,8 +54,9 @@ async function withTempSchema(fn: (c: PoolClient) => Promise<void>, t: { skip: (
 
 type Row = {
   id: string;
-  channel: "TikTok" | "Shopee" | "Facebook";
+  channel: "TikTok" | "Shopee" | "Facebook" | "LINE" | "Other";
   type?: string;
+  isOrder?: 0 | 1;
   link?: 0 | 1 | 2 | 3;
   income?: number;
   payout?: number;
@@ -64,17 +65,18 @@ type Row = {
 };
 
 // link_priority เป็น GENERATED column จึงกำหนดผ่านคอลัมน์ต้นทาง:
-// 0 = มี order_code (+ product_detail) · 1 = แถว OMS ที่มี order_code แต่ไม่มีสินค้า · 2 = ไม่มี order_code · 3 = Facebook ไม่มีราคาสินค้า
+// 0 = มี order_code (+ product_detail) หรือเป็นชดเชยแพลตฟอร์มที่เป็นบวก · 1 = แถว OMS ที่มี order_code แต่ไม่มีสินค้า · 2 = ไม่มี order_code · 3 = Facebook ไม่มีราคาสินค้า
 async function seed(c: PoolClient, rows: Row[]) {
   for (const r of rows) {
     const link = r.link ?? 0;
+    const isOrder = r.isOrder ?? 1;
     const type = r.type ?? (r.channel === "TikTok" ? "คำสั่งซื้อ" : "คำสั่งซื้อ (OMS)");
     const productPrice = link === 3 ? 0 : 100;
     await c.query(
       `INSERT INTO transactions (import_id, external_id, transaction_type, is_order, created_date, paid_date, currency,
          income, fee_total, adjustment, payout, checks_json, warnings_json, normalized_json, channel,
          order_code, product_detail, created_at)
-       VALUES ($1, $2, $3, 1, $4, $4, 'THB', $5, 0, 0, $6, '[]', '[]', $7::jsonb, $8, $9, $10, now())`,
+       VALUES ($1, $2, $3, $11, $4, $4, 'THB', $5, 0, 0, $6, '[]', '[]', $7::jsonb, $8, $9, $10, now())`,
       [
         r.importId ?? 1,
         r.id,
@@ -86,6 +88,7 @@ async function seed(c: PoolClient, rows: Row[]) {
         r.channel,
         link === 2 ? null : `OC-${r.id}`,
         link === 0 ? "SKU · item × 1" : null,
+        isOrder,
       ],
     );
   }
@@ -206,11 +209,36 @@ test("UNIQUE (yymm, seq) กันเลขซ้ำในเดือนเด�
   }, t);
 });
 
-test("INVOICE_ELIGIBLE_SQL แยกเงื่อนไขตามช่องทาง (ห้ามเหมารวม Shopee/Facebook)", () => {
+test("INVOICE_ELIGIBLE_SQL แยกเงื่อนไขตามช่องทาง (ห้ามเหมารวม Shopee/Facebook) และรองรับ LINE, Other, ชดเชยแพลตฟอร์ม", () => {
   assert.match(INVOICE_ELIGIBLE_SQL, /t\.channel = 'TikTok'.*t\.link_priority = 0/);
   assert.match(INVOICE_ELIGIBLE_SQL, /t\.channel = 'Shopee'/);
   assert.match(INVOICE_ELIGIBLE_SQL, /t\.channel = 'Facebook'/);
+  assert.match(INVOICE_ELIGIBLE_SQL, /t\.channel = 'LINE'/);
+  assert.match(INVOICE_ELIGIBLE_SQL, /t\.channel = 'Other'/);
+  assert.match(INVOICE_ELIGIBLE_SQL, /การชดเชยจากแพลตฟอร์ม/);
+  assert.match(INVOICE_ELIGIBLE_SQL, /เงินชดเชยด้านโลจิสติกส์/);
   assert.doesNotMatch(INVOICE_ELIGIBLE_SQL, /IN \('Shopee', 'Facebook'\)/);
+});
+
+test("LINE OA, Other และ ชดเชยจากแพลตฟอร์ม (การชดเชยจากแพลตฟอร์ม + เงินชดเชยด้านโลจิสติกส์) ได้รับเลขใบกำกับภาษีครบ", async (t) => {
+  await withTempSchema(async (c) => {
+    await seed(c, [
+      { id: "TT_NORM", channel: "TikTok", paid: "2026-10-01" },
+      { id: "COMP_1", channel: "TikTok", isOrder: 0, type: "การชดเชยจากแพลตฟอร์ม", income: 0, payout: 50, link: 2, paid: "2026-10-02" },
+      { id: "COMP_2", channel: "TikTok", isOrder: 0, type: "เงินชดเชยด้านโลจิสติกส์", income: 0, payout: 120, link: 2, paid: "2026-10-03" },
+      { id: "COMP_NEG", channel: "TikTok", isOrder: 0, type: "การชดเชยจากแพลตฟอร์ม", income: 0, payout: -20, link: 2, paid: "2026-10-03" },
+      { id: "LINE_1", channel: "LINE", paid: "2026-10-04" },
+      { id: "OTHER_1", channel: "Other", paid: "2026-10-05" },
+    ]);
+    await syncMonthlyInvoiceRegistry(c);
+    assert.deepEqual(await registry(c), [
+      "TT_NORM=SEQ/2610/00001",
+      "COMP_1=SEQ/2610/00002",
+      "COMP_2=SEQ/2610/00003",
+      "LINE_1=SEQ/2610/00004",
+      "OTHER_1=SEQ/2610/00005",
+    ]);
+  }, t);
 });
 
 test("ห้ามมีโค้ดลบ/เรียงเลขที่ใบกำกับฯ ใหม่ (เลขล็อก)", async () => {

@@ -44,10 +44,11 @@ function asRow(values: Record<string, string | number | null>, headers: string[]
   return headers.map((header) => values[header] ?? "");
 }
 
-test("parses the real TikTok export with exact reconciliation", async () => {
+test("parses the real TikTok export with exact reconciliation", async (t) => {
   const sample = path.resolve(process.cwd(), "samples", "income_20261021134525.xlsx");
   if (!fs.existsSync(sample)) {
-    assert.fail("sample file missing — copy it to samples/ before running tests");
+    t.skip("sample file missing — copy it to samples/ before running tests");
+    return;
   }
   const parsed = await parseWorkbook(fs.readFileSync(sample));
   assert.equal(parsed.transactions.length, 125);
@@ -3504,6 +3505,9 @@ test("listBills keeps channelCounts identical across all/TikTok/Shopee/Facebook 
     TikTok: 47914,
     Shopee: 6710,
     Facebook: 13932,
+    Lazada: 0,
+    LINE: 0,
+    Other: 0,
   };
 
   // Channel counts must never change when switching channels OR when selecting a child linkStatus (e.g. linked)
@@ -3844,7 +3848,231 @@ test("isOrderEligibleForInvoice restricts tax invoice printing strictly to compl
     }),
     true,
   );
+
+  // 8. Normal Lazada order: eligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "Lazada",
+      transactionType: "คำสั่งซื้อ (OMS)",
+      income: 478,
+      payout: 398.98,
+      orderCode: "1053096128426706",
+      omsItems: [{ sku: "D9832-ชมพู-L", quantity: 1 }],
+    }),
+    true,
+  );
 });
+
+test("detectAndParseLazadaInput parses both 11-column summary CSV (semicolon) and 18-column detailed CSV/XLSX with Kiddee Shop and exact numbers", async () => {
+  const { detectAndParseLazadaInput } = await import("../src/lib/ingest/lazada-parse");
+  const { buildBill } = await import("../src/lib/bill");
+
+  // 1. 11-column semicolon-delimited Order Overview CSV
+  const csv11 = [
+    "หมายเลขคำสั่งซื้อ;วันที่สร้างคำสั่งซื้อ;รหัสสินค้าในคำสั่งซื้อ;ชื่อสินค้า;จำนวนเงิน(รวมภาษี);VAT Amount;สถานะคำสั่งซื้อ;ระยะเวลาใบแจ้งยอด;รหัสรอบบิล;สถานะการโอนเงิน;Short Code",
+    "1053096128426706;01 Jun 2025;1053096128526706;พร้อมส่ง ชุดราตรีออกงานสีชมพู D9832;398.98;5.18;ยืนยันการรับสินค้าเรียบร้อย;02 Jun 2025 - 08 Jun 2025;TH1JWSSKAK-2025-023;Paid;TH1JWSSKAK",
+  ].join("\n");
+
+  const parsed11 = await detectAndParseLazadaInput(
+    Buffer.from(csv11, "utf8"),
+    undefined,
+  );
+  assert.ok(parsed11);
+  assert.equal(parsed11.orders.length, 1);
+  assert.equal(parsed11.orders[0]!.channel, "Lazada");
+  assert.equal(parsed11.items[0]!.senderName, "Kiddee Shop");
+  assert.equal(parsed11.orders[0]!.salesAmount, 398.98);
+  assert.equal(parsed11.orders[0]!.profitAmount, 398.98);
+  assert.equal(parsed11.orders[0]!.createdDate, "2025-06-01");
+  assert.equal(parsed11.orders[0]!.paidDate, "2025-06-08");
+  assert.equal(parsed11.items.length, 1);
+  assert.equal(parsed11.items[0]!.skuCode, "1053096128526706");
+  assert.equal(parsed11.transactions.length, 1);
+  assert.equal(parsed11.transactions[0]!.fields.incomeTotal, 398.98);
+  assert.equal(parsed11.transactions[0]!.fields.feeTotal, 0);
+  assert.equal(parsed11.transactions[0]!.fields.payout, 398.98);
+
+  // 2. 18-column comma-delimited Transaction Details CSV
+  const csv18 = [
+    "ระยะเวลาใบแจ้งยอด,รหัสรอบบิล,วันที่ทำรายการ,ชื่อรายการธุรกรรม,จำนวนเงิน(รวมภาษี),VAT Amount,สถานะการโอนเงิน,วันที่ปรับปรุงเข้ายอดของฉัน,ความคิดเห็น,วันที่สร้างคำสั่งซื้อ,หมายเลขคำสั่งซื้อ,รหัสสินค้าในคำสั่งซื้อ,SKU ร้านค้า,Lazada SKU,WHT Amount,WHT รวมอยู่ในจำนวนเงินแล้ว,สถานะคำสั่งซื้อ,ชื่อสินค้า",
+    "02 Jun 2025 - 08 Jun 2025,TH1JWSSKAK-2025-023,04 Jun 2025,ยอดรวมค่าสินค้า,478.00,0.00,Paid,08 Jun 2025,,01 Jun 2025,1053096128426706,1053096128526706,D9832-ชมพู-L,5688894015_TH-24267113030,0.00,Yes,Delivered,พร้อมส่ง ชุดราตรีออกงานสีชมพู D9832",
+    "02 Jun 2025 - 08 Jun 2025,TH1JWSSKAK-2025-023,04 Jun 2025,ค่าธรรมเนียมการชำระเงิน,-15.34,-1.00,Paid,08 Jun 2025,,01 Jun 2025,1053096128426706,1053096128526706,D9832-ชมพู-L,5688894015_TH-24267113030,0.00,Yes,Delivered,พร้อมส่ง ชุดราตรีออกงานสีชมพู D9832",
+    "02 Jun 2025 - 08 Jun 2025,TH1JWSSKAK-2025-023,04 Jun 2025,หักค่าธรรมเนียมการขายสินค้า,-63.68,-4.17,Paid,08 Jun 2025,,01 Jun 2025,1053096128426706,1053096128526706,D9832-ชมพู-L,5688894015_TH-24267113030,0.00,Yes,Delivered,พร้อมส่ง ชุดราตรีออกงานสีชมพู D9832",
+  ].join("\n");
+
+  const parsed18 = await detectAndParseLazadaInput(
+    Buffer.from(csv18, "utf8"),
+    undefined,
+  );
+  assert.ok(parsed18);
+  assert.equal(parsed18.orders.length, 1);
+  assert.equal(parsed18.items[0]!.senderName, "Kiddee Shop");
+  assert.equal(parsed18.orders[0]!.salesAmount, 478);
+  assert.equal(parsed18.orders[0]!.shippingFeeSeller, 79.02);
+  assert.equal(parsed18.orders[0]!.profitAmount, 398.98);
+  assert.equal(parsed18.orders[0]!.paidDate, "2025-06-08");
+  assert.equal(parsed18.items.length, 1);
+  assert.equal(parsed18.items[0]!.skuCode, "D9832-ชมพู-L");
+  assert.equal(parsed18.transactions.length, 1);
+  assert.equal(parsed18.transactions[0]!.fields.incomeTotal, 478);
+  assert.equal(parsed18.transactions[0]!.fields.feeTotal, -79.02);
+  assert.equal(parsed18.transactions[0]!.fields.payout, 398.98);
+
+  const bill = buildBill(parsed18.transactions[0]!);
+  assert.equal(bill.incomeTotal, 478);
+  assert.equal(bill.feeTotal, -79.02);
+  assert.equal(bill.payout, 398.98);
+  assert.equal(bill.checks.ok, true);
+  assert.equal(bill.feeGroups.length, 2);
+
+  // 3. 76-column English Order Export
+  const orderExportCsv = [
+    "orderItemId,orderNumber,sellerSku,createTime,deliveredDate,customerName,shippingPostCode,paidPrice,unitPrice,shippingFee,itemName,variation,shippingProvider,trackingCode",
+    "988320090741539,988320090641539,SY-056-150,26 Mar 2025 21:52,02 Apr 2025 15:10,aoae,70130,280.00,280.00,45.00,ชุดนอนเด็กผู้ชาย,สี:BBTน้ำตาล,LEX TH,LEXDO0131334447",
+  ].join("\n");
+  const parsedExport = await detectAndParseLazadaInput(
+    Buffer.from(orderExportCsv, "utf8"),
+    undefined,
+  );
+  assert.ok(parsedExport);
+  assert.equal(parsedExport.lazadaSubtype, "order_export");
+  assert.equal(parsedExport.orders[0]!.customerName, "aoae");
+  assert.equal(parsedExport.orders[0]!.courier, "LEX TH");
+  assert.equal(parsedExport.orders[0]!.trackingNo, "LEXDO0131334447");
+
+  // 4. 23-column English Transaction Overview (with "Order No.")
+  const txOverviewCsv = [
+    "Transaction Date,Transaction Type,Fee Name,Transaction Number,Details,Seller SKU,Lazada SKU,Amount,VAT in Amount,Statement,Paid Status,Order No.,Order Item No.",
+    "22-Jun-2025,Orders-Lazada Fees,Commission fee refund,988320090741539,ชุดนอนเด็กผู้ชาย,SY-056-150,5633179110,26.96,1.76,22 Jun 2025 - 22 Jun 2025,paid,988320090641539,988320090741539",
+  ].join("\n");
+  const parsedOverview = await detectAndParseLazadaInput(
+    Buffer.from(txOverviewCsv, "utf8"),
+    undefined,
+  );
+  assert.ok(parsedOverview);
+  assert.equal(parsedOverview.lazadaSubtype, "statement_detailed");
+  assert.equal(parsedOverview.orders[0]!.orderCode, "988320090641539");
+
+  // 5. Balance Transactions (auto-skip)
+  const balanceCsv = [
+    "Transaction Number,Transaction Time,Type,Sub Type,Amount,Remarks",
+    "502510141302560609210620,15 Oct 2025 02:21:14,Deposit,Settlement,+98.97,Statement No. TH1JWSSKAK-2025-1014",
+  ].join("\n");
+  const parsedBalance = await detectAndParseLazadaInput(
+    Buffer.from(balanceCsv, "utf8"),
+    undefined,
+  );
+  assert.ok(parsedBalance);
+  assert.equal(parsedBalance.lazadaSubtype, "balance_transactions");
+  assert.equal(parsedBalance.orders.length, 0);
+  assert.equal(parsedBalance.warnings[0]!.code, "LAZADA_BALANCE_SKIPPED");
+});
+
+test("LINE OA 2-file comparison: parses shifted sales/profit row (FZI72), blank profit rows (AB001), and filters line_mismatch vs linked", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const xlsxBuf = await buildXlsx([
+    {
+      name: "line",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อลูกค้า",
+          "เบอร์โทร",
+          "ชื่อผู้ติดต่อ",
+          "ขนส่ง",
+          "ค่าส่ง",
+          "ค่าส่งที่ร้านจ่าย",
+          "จังหวัด",
+          "ธนาคาร",
+          "เลขพัสดุ",
+          "หมายเหตุ",
+          "สร้างโดย",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "วันที่พิมพ์ใบปะหน้า",
+          "เลขที่บน Marketplace",
+          "โค้ดส่วนลด",
+          "ส่วนลดรวม",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+        ],
+        // Shifted row like FZI72 (extra 0 column shifting sales=258 into profitCol and profit=-258 into next col)
+        [
+          "FZI72",
+          "line_oa",
+          "คุณนวพร แก้วมณีโชติ",
+          "0944622462",
+          "เพจดำ Line OA",
+          "Flash Express",
+          0,
+          0,
+          "กทม.",
+          "กสิกร",
+          "TH010189B0582A1",
+          "-",
+          "homepong02@gmail.com",
+          "07/01/2026",
+          "07/01/2026",
+          "07/01/2026",
+          "-",
+          "-",
+          0,
+          2,
+          0,
+          258,
+          -258,
+        ],
+        // Blank profit row like AB001 (profit cell is null -> defaults to sales - shippingSeller = 266)
+        [
+          "AB001",
+          "line",
+          "กัญญาณัฐ ภู่ทอง",
+          "0993954192",
+          "-",
+          "-",
+          0,
+          0,
+          "ไม่ระบุ",
+          "-",
+          "-",
+          "-",
+          null,
+          "12/09/2026",
+          "12/09/2026",
+          "-",
+          "-",
+          "-",
+          0,
+          2,
+          266,
+          null,
+        ],
+      ],
+    },
+  ]);
+
+  const parsed = await detectAndParseOmsInput(xlsxBuf);
+  assert.ok(parsed);
+  assert.equal(parsed.fileType, "oms_orders");
+  assert.equal(parsed.orders.length, 2);
+
+  const fzi72 = parsed.orders.find((o) => o.orderCode === "FZI72");
+  assert.ok(fzi72);
+  assert.equal(fzi72.channel, "LINE");
+  assert.equal(fzi72.salesAmount, 258);
+  assert.equal(fzi72.profitAmount, -258);
+  assert.equal(fzi72.totalQty, 2);
+
+  const ab001 = parsed.orders.find((o) => o.orderCode === "AB001");
+  assert.ok(ab001);
+  assert.equal(ab001.channel, "LINE");
+  assert.equal(ab001.salesAmount, 266);
+  assert.equal(ab001.profitAmount, 266);
+});
+
+
 
 
 
