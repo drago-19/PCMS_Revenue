@@ -1173,25 +1173,27 @@ export async function syncMonthlyInvoiceRegistry(
        ORDER BY t.external_id, t.id
      ),
      mx AS (
-       SELECT r.yymm, MAX(r.seq) AS max_seq
+       SELECT r.yymm, COALESCE(NULLIF(r.channel, ''), 'TikTok') AS channel, MAX(r.seq) AS max_seq
        FROM invoice_registry r
        WHERE r.yymm IN (SELECT DISTINCT yymm FROM newo)
-       GROUP BY r.yymm
+       GROUP BY r.yymm, COALESCE(NULLIF(r.channel, ''), 'TikTok')
      ),
      numbered AS (
-       SELECT n.external_id, n.channel, n.yymm,
+       SELECT n.external_id, COALESCE(NULLIF(n.channel, ''), 'TikTok') AS channel, n.yymm,
               COALESCE(mx.max_seq, 0) + ROW_NUMBER() OVER (
-                PARTITION BY n.yymm
-                ORDER BY CASE n.channel WHEN 'TikTok' THEN 1 WHEN 'Shopee' THEN 2 WHEN 'Facebook' THEN 3 WHEN 'Lazada' THEN 4 WHEN 'LINE' THEN 5 WHEN 'Other' THEN 6 ELSE 7 END ASC,
-                         n.eff_date ASC, n.external_id ASC
+                PARTITION BY n.yymm, COALESCE(NULLIF(n.channel, ''), 'TikTok')
+                ORDER BY n.eff_date ASC, n.external_id ASC
               ) AS seq
        FROM newo n
-       LEFT JOIN mx ON mx.yymm = n.yymm
+       LEFT JOIN mx ON mx.yymm = n.yymm AND mx.channel = COALESCE(NULLIF(n.channel, ''), 'TikTok')
      ),
      ins AS (
        INSERT INTO invoice_registry (order_id, invoice_no, yymm, seq, channel, status)
        SELECT external_id,
-              'SEQ/' || yymm || '/' || LPAD(seq::text, GREATEST(5, LENGTH(seq::text)), '0'),
+              CASE
+                WHEN channel = 'TikTok' THEN 'SEQ/' || yymm || '/' || LPAD(seq::text, GREATEST(5, LENGTH(seq::text)), '0')
+                ELSE 'SEQ/' || UPPER(channel) || '/' || yymm || '/' || LPAD(seq::text, GREATEST(5, LENGTH(seq::text)), '0')
+              END,
               yymm, seq, channel, 'active'
        FROM numbered
        ON CONFLICT (order_id) DO UPDATE

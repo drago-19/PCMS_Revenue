@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-03-v33";
+const SCHEMA_VERSION = "2026-11-03-v34";
 
 export type { CompanyId };
 
@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS invoice_registry (
 -- ล็อกเลขที่ใบกำกับฯ (ออกแล้วห้ามเปลี่ยน): เก็บ yymm/seq เป็นคอลัมน์จริง + สถานะ void แทนการลบ (Backward Compatible: nullable ก่อน)
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS yymm TEXT;
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS seq BIGINT;
-ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS channel TEXT;
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'TikTok';
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ;
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS void_reason TEXT;
@@ -327,7 +327,8 @@ UPDATE invoice_registry
 SET yymm = SUBSTRING(invoice_no FROM 5 FOR 4),
     seq = SUBSTRING(invoice_no FROM 10)::bigint
 WHERE seq IS NULL AND invoice_no ~ '^SEQ/[0-9]{4}/[0-9]{1,15}$';
-CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_registry_yymm_seq ON invoice_registry (yymm, seq);
+UPDATE invoice_registry SET channel = 'TikTok' WHERE channel IS NULL OR channel = '';
+DROP INDEX IF EXISTS ux_invoice_registry_yymm_seq;
 CREATE INDEX IF NOT EXISTS ix_invoice_registry_print
   ON invoice_registry (yymm, status, channel, seq) INCLUDE (order_id);
 CREATE INDEX IF NOT EXISTS ix_invoice_registry_print_all
@@ -885,11 +886,91 @@ BEGIN
     GROUP BY i.sku_code;
   END IF;
 
-  -- invoice_registry: เลขที่ใบกำกับฯ ถูกล็อกแล้ว (ห้ามลบ/เรียงใหม่) — การ void/ออกเลขใหม่ทำใน syncMonthlyInvoiceRegistry เท่านั้น
-  -- และเติม channel ให้แถวเก่าที่ยังไม่มี (ทำครั้งเดียว)
+  -- invoice_registry: แยกลำดับเลขที่ใบกำกับภาษีตามแพลตฟอร์ม (channel) ต่อเดือน (yymm, channel, seq)
   UPDATE invoice_registry r SET channel = t.channel FROM transactions t
-  WHERE r.channel IS NULL AND t.external_id = r.order_id
+  WHERE (r.channel IS NULL OR r.channel = '') AND t.external_id = r.order_id
     AND (t.is_order = 1 OR (t.is_order = 0 AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND t.payout > 0));
+  UPDATE invoice_registry SET channel = 'TikTok' WHERE channel IS NULL OR channel = '';
+
+  IF EXISTS (
+    SELECT 1 FROM invoice_registry
+    WHERE channel <> 'TikTok' AND invoice_no ~ '^SEQ/[0-9]{4}/'
+    LIMIT 1
+  ) THEN
+    UPDATE invoice_registry
+    SET invoice_no = 'MIG/' || order_id,
+        seq = NULL
+    WHERE seq IS NOT NULL;
+
+    WITH ranked AS (
+      SELECT r.order_id,
+             r.yymm,
+             COALESCE(NULLIF(r.channel, ''), 'TikTok') AS ch,
+             ROW_NUMBER() OVER (
+               PARTITION BY r.yymm, COALESCE(NULLIF(r.channel, ''), 'TikTok')
+               ORDER BY COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, ''), '9999-99-99') ASC,
+                        r.order_id ASC
+             ) AS new_seq
+      FROM invoice_registry r
+      LEFT JOIN transactions t ON t.external_id = r.order_id
+        AND (t.is_order = 1 OR (t.is_order = 0 AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND t.payout > 0))
+      WHERE r.yymm IS NOT NULL
+    )
+    UPDATE invoice_registry r
+    SET seq = rk.new_seq,
+        channel = rk.ch,
+        invoice_no = CASE
+          WHEN rk.ch = 'TikTok' THEN 'SEQ/' || rk.yymm || '/' || LPAD(rk.new_seq::text, GREATEST(5, LENGTH(rk.new_seq::text)), '0')
+          ELSE 'SEQ/' || UPPER(rk.ch) || '/' || rk.yymm || '/' || LPAD(rk.new_seq::text, GREATEST(5, LENGTH(rk.new_seq::text)), '0')
+        END
+    FROM ranked rk
+    WHERE r.order_id = rk.order_id;
+  END IF;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_registry_yymm_channel_seq
+    ON invoice_registry (yymm, channel, seq);
+
+  -- Migrate document_settings to include per-platform channelInvoicePrefixes (TT for TikTok, SP for Shopee, FB for Facebook, LZ for Lazada, LN for LINE, OT for Other)
+  IF EXISTS (
+    SELECT 1 FROM app_settings
+    WHERE setting_key = 'document_settings'
+      AND (value_json->'channelInvoicePrefixes') IS NULL
+  ) THEN
+    UPDATE app_settings
+    SET value_json = jsonb_set(
+      jsonb_set(
+        value_json,
+        '{invoicePrefix}',
+        to_jsonb(
+          CASE
+            WHEN COALESCE(value_json->>'invoicePrefix', '') ~ '^RF[0-9]'
+              THEN REGEXP_REPLACE(value_json->>'invoicePrefix', '^RF', 'TT')
+            WHEN COALESCE(value_json->>'invoicePrefix', '') = ''
+              THEN 'TT2610/00001'
+            ELSE value_json->>'invoicePrefix'
+          END
+        )
+      ),
+      '{channelInvoicePrefixes}',
+      jsonb_build_object(
+        'TikTok',
+        CASE
+          WHEN COALESCE(value_json->>'invoicePrefix', '') ~ '^RF[0-9]'
+            THEN REGEXP_REPLACE(value_json->>'invoicePrefix', '^RF', 'TT')
+          WHEN COALESCE(value_json->>'invoicePrefix', '') = ''
+            THEN 'TT2610/00001'
+          ELSE value_json->>'invoicePrefix'
+        END,
+        'Shopee', 'SP2610/00001',
+        'Facebook', 'FB2610/00001',
+        'Lazada', 'LZ2610/00001',
+        'LINE', 'LN2610/00001',
+        'Other', 'OT2610/00001'
+      )
+    )
+    WHERE setting_key = 'document_settings'
+      AND (value_json->'channelInvoicePrefixes') IS NULL;
+  END IF;
 
   -- Platform Financial Isolation (AGENTS.md Rule 3 & 4):
   -- 1. TikTok OMS placeholder rows (before Settlement): payout = income + fee_total (sales_amount - shipping_fee_seller), cogs = 0
