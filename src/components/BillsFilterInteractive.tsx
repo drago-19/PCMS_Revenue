@@ -625,7 +625,7 @@ export function BillsSubFilters({
               {
                 key: "line_mismatch",
                 label: "ยอด 2 ไฟล์ไม่ตรงกัน",
-                subLabel: "ยึดไฟล์ออเดอร์ · กำกับส่วนต่าง",
+                subLabel: "ยึดไฟล์ออเดอร์ · ยื่นภาษีได้",
                 count: linkCounts.lineMismatch ?? 0,
                 dotColor: "bg-[#d97706]",
                 activeClass: "border-[#b45309] bg-[#b45309] text-white shadow-xs",

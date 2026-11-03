@@ -524,23 +524,32 @@ export function BillDocument({
                 </Badge>
               </div>
               <div className="mt-2.5 rounded-lg border border-amber-200 bg-white p-2.5 text-[#1e293b]">
-                <div className="space-y-1 text-xs">
-                  <div className="flex items-center justify-between gap-2 font-bold text-emerald-800">
-                    <span>
-                      1. ยอดขายที่ถูกต้อง (ยึดตามไฟล์ออเดอร์ LINE OA · ใช้ยื่นภาษี)
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 font-bold text-emerald-800">
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span>
+                        1. ยอดขายจริงตามไฟล์ออเดอร์ LINE OA (ใช้แสดงในบิลและยื่นภาษี):
+                      </span>
+                      <Badge
+                        variant="success"
+                        size="sm"
+                        className="border-emerald-300 bg-emerald-50 px-1.5 py-0 text-[10.5px] font-bold text-emerald-900"
+                      >
+                        ✅ สามารถยื่นภาษีได้
+                      </Badge>
                     </span>
                     <span className="mono">{formatTHB(bill.incomeTotal)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-[#475569]">
                     <span>
-                      2. ยอดขายออเดอร์ในไฟล์สินค้า Shipnity เดิม (oms_items)
+                      2. ยอดเดิมในไฟล์รายการสินค้า Shipnity (ก่อนแก้ไขยอดไลฟ์สด):
                     </span>
                     <span className="mono font-semibold">
                       {formatTHB(omsItemsSalesAmount ?? 0)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 border-t border-dashed border-amber-200 pt-1 font-extrabold text-amber-900">
-                    <span>= ส่วนต่างระหว่างไฟล์ออเดอร์กับไฟล์สินค้า</span>
+                    <span>= ส่วนต่างระหว่างไฟล์ออเดอร์กับไฟล์สินค้า:</span>
                     <span className="mono">
                       {lineSalesDiff && lineSalesDiff > 0
                         ? `+${formatTHB(lineSalesDiff)}`
