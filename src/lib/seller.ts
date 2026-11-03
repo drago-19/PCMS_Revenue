@@ -1,5 +1,30 @@
 export type VatCalculationBase = "payout" | "customer_paid";
 export type DefaultInvoicePaperSize = "a6" | "a4-4up" | "80mm" | "a4";
+export type InvoiceChannelKey =
+  | "TikTok"
+  | "Shopee"
+  | "Facebook"
+  | "Lazada"
+  | "LINE"
+  | "Other";
+
+export interface ChannelInvoicePrefixes {
+  TikTok: string;
+  Shopee: string;
+  Facebook: string;
+  Lazada: string;
+  LINE: string;
+  Other: string;
+}
+
+export const DEFAULT_CHANNEL_INVOICE_PREFIXES: ChannelInvoicePrefixes = {
+  TikTok: "TT2610/00001",
+  Shopee: "SP2610/00001",
+  Facebook: "FB2610/00001",
+  Lazada: "LZ2610/00001",
+  LINE: "LN2610/00001",
+  Other: "OT2610/00001",
+};
 
 export interface SellerInfo {
   name: string;
@@ -10,6 +35,7 @@ export interface SellerInfo {
   email?: string;
   vatRate: number;
   invoicePrefix: string;
+  channelInvoicePrefixes?: ChannelInvoicePrefixes;
   receiptPrefix?: string;
   vatCalculationBase?: VatCalculationBase;
   defaultPaperSize?: DefaultInvoicePaperSize;
@@ -35,6 +61,7 @@ export const DEFAULT_SELLER: Required<SellerInfo> = {
   email: "",
   vatRate: Number(process.env.SELLER_VAT_RATE ?? 7),
   invoicePrefix: process.env.INVOICE_PREFIX ?? "TT2610/00001",
+  channelInvoicePrefixes: { ...DEFAULT_CHANNEL_INVOICE_PREFIXES },
   receiptPrefix: process.env.RECEIPT_PREFIX ?? "RC2610/00001",
   vatCalculationBase: "payout",
   defaultPaperSize: "a6",
@@ -92,7 +119,9 @@ export function extractYearMonthFromDateOrSeq(
   }
   if (rawInvoiceNo) {
     const trimmedRaw = rawInvoiceNo.trim();
-    const seqYmMatch = /^SEQ\/(\d{2})(0[1-9]|1[0-2])\/\d+$/i.exec(trimmedRaw);
+    const seqYmMatch = /^SEQ(?:\/[A-Z]+)?\/(\d{2})(0[1-9]|1[0-2])\/\d+$/i.exec(
+      trimmedRaw,
+    );
     if (seqYmMatch) {
       const yy = seqYmMatch[1]!;
       const mm = seqYmMatch[2]!;
@@ -203,19 +232,65 @@ export function formatRunningDocumentNo(
   return `${raw}${String(1 + offset).padStart(5, "0")}`;
 }
 
+export function resolveChannelKey(
+  channel?: string | null,
+): InvoiceChannelKey {
+  const ch = (channel ?? "").trim();
+  if (
+    ch === "Shopee" ||
+    ch === "Facebook" ||
+    ch === "Lazada" ||
+    ch === "LINE" ||
+    ch === "Other"
+  ) {
+    return ch;
+  }
+  return "TikTok";
+}
+
+export function resolveChannelInvoicePrefix(
+  invoicePrefix?: string,
+  channel?: string | null,
+  channelInvoicePrefixes?: Partial<ChannelInvoicePrefixes> | null,
+): string {
+  const chKey = resolveChannelKey(channel);
+  const explicitChannelPrefix = channelInvoicePrefixes?.[chKey]?.trim();
+  if (explicitChannelPrefix) {
+    return explicitChannelPrefix;
+  }
+  if (chKey === "TikTok" && invoicePrefix?.trim()) {
+    return invoicePrefix.trim();
+  }
+  if (channelInvoicePrefixes) {
+    return DEFAULT_CHANNEL_INVOICE_PREFIXES[chKey];
+  }
+  if (invoicePrefix?.trim()) {
+    return invoicePrefix.trim();
+  }
+  return DEFAULT_CHANNEL_INVOICE_PREFIXES[chKey];
+}
+
 export function formatInvoiceNoWithPrefix(
   rawInvoiceNo: string | null | undefined,
   invoicePrefix?: string,
   paidDate?: string | null,
+  channel?: string | null,
+  channelInvoicePrefixes?: Partial<ChannelInvoicePrefixes> | null,
 ): string | null {
   if (!rawInvoiceNo) return null;
   const trimmedRaw = rawInvoiceNo.trim();
   if (!trimmedRaw) return null;
   const seqIndex = extractSequenceIndex(trimmedRaw);
-  return formatRunningDocumentNo(
+  const chKey = resolveChannelKey(channel);
+  const resolvedPattern = resolveChannelInvoicePrefix(
     invoicePrefix,
+    chKey,
+    channelInvoicePrefixes,
+  );
+  return formatRunningDocumentNo(
+    resolvedPattern,
     seqIndex,
-    DEFAULT_SELLER.invoicePrefix,
+    DEFAULT_CHANNEL_INVOICE_PREFIXES[chKey],
     paidDate,
     trimmedRaw,
   );
@@ -225,10 +300,43 @@ export function formatReceiptNoWithPrefix(
   rawInvoiceNoOrExternalId: string | null | undefined,
   receiptPrefix?: string,
   dateStr?: string | null,
+  channel?: string | null,
+  channelInvoicePrefixes?: Partial<ChannelInvoicePrefixes> | null,
+  invoicePrefix?: string,
 ): string {
   const seqIndex = extractSequenceIndex(rawInvoiceNoOrExternalId);
+  let resolvedPattern = receiptPrefix;
+
+  if (channel || channelInvoicePrefixes) {
+    const chKey = resolveChannelKey(channel);
+    const chInvPattern = resolveChannelInvoicePrefix(
+      invoicePrefix,
+      chKey,
+      channelInvoicePrefixes,
+    );
+    const chLead = extractDocumentLeadPrefix(chInvPattern);
+    const recRaw = (receiptPrefix ?? "").trim() || DEFAULT_SELLER.receiptPrefix;
+    const recLead = extractDocumentLeadPrefix(recRaw);
+    const recPrefixMatch = /^(.*?)(\d+)(\D*)$/.exec(recRaw);
+    const recHead = recPrefixMatch ? (recPrefixMatch[1] ?? "") : recRaw;
+    const hasDateCode =
+      /(20\d{2}|25\d{2})(0[1-9]|1[0-2])(\D*)$/.test(recHead) ||
+      /(\d{2})(0[1-9]|1[0-2])(\D*)$/.test(recHead) ||
+      !/\d/.test(recRaw);
+
+    if (chLead && hasDateCode) {
+      const combinedLead = recLead
+        ? recLead.toUpperCase() === chLead.toUpperCase() ||
+          recLead.toUpperCase().endsWith(`-${chLead.toUpperCase()}`)
+          ? recLead
+          : `${recLead}-${chLead}`
+        : chLead;
+      resolvedPattern = buildDocumentPatternFromLead(combinedLead);
+    }
+  }
+
   return formatRunningDocumentNo(
-    receiptPrefix,
+    resolvedPattern,
     seqIndex,
     DEFAULT_SELLER.receiptPrefix,
     dateStr,

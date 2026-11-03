@@ -461,6 +461,8 @@ async function enrichTransactionsWithOms(
         tx.invoiceNo,
         sellerSettings.invoicePrefix,
         tx.paidDate || tx.createdDate,
+        tx.channel,
+        sellerSettings.channelInvoicePrefixes,
       ),
       sellerSettings,
     }));
@@ -565,12 +567,14 @@ async function enrichTransactionsWithOms(
   }
 
   return txRows.map((tx) => {
-    const formattedInvoiceNo = formatInvoiceNoWithPrefix(
-      tx.invoiceNo,
-      sellerSettings.invoicePrefix,
-      tx.paidDate || tx.createdDate,
-    );
     if (!tx.omsOrderUid && !tx.orderCode) {
+      const formattedInvoiceNo = formatInvoiceNoWithPrefix(
+        tx.invoiceNo,
+        sellerSettings.invoicePrefix,
+        tx.paidDate || tx.createdDate,
+        tx.channel,
+        sellerSettings.channelInvoicePrefixes,
+      );
       return { ...tx, invoiceNo: formattedInvoiceNo, sellerSettings };
     }
     const o =
@@ -585,6 +589,13 @@ async function enrichTransactionsWithOms(
         : o?.channel
           ? String(o.channel)
           : tx.channel;
+    const formattedInvoiceNo = formatInvoiceNoWithPrefix(
+      tx.invoiceNo,
+      sellerSettings.invoicePrefix,
+      tx.paidDate || tx.createdDate,
+      resolvedChannel,
+      sellerSettings.channelInvoicePrefixes,
+    );
     const shipCust =
       o?.shipping_fee_customer !== undefined
         ? Number(o.shipping_fee_customer)
@@ -2174,7 +2185,8 @@ export async function getBulkInvoicesBatch(
                AND ${billableClause}
                AND (${chMatchSql})
                ${linkClause}
-             ORDER BY r.yymm ASC NULLS LAST, r.seq ASC NULLS LAST, t.paid_date ASC, t.external_id ASC
+             ORDER BY CASE COALESCE(r.channel, t.channel) WHEN 'TikTok' THEN 1 WHEN 'Shopee' THEN 2 WHEN 'Facebook' THEN 3 WHEN 'Lazada' THEN 4 WHEN 'LINE' THEN 5 WHEN 'Other' THEN 6 ELSE 7 END ASC,
+                      r.yymm ASC NULLS LAST, r.seq ASC NULLS LAST, t.paid_date ASC, t.external_id ASC
              LIMIT $2 OFFSET $3
            )
            SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
@@ -2182,7 +2194,8 @@ export async function getBulkInvoicesBatch(
            JOIN transactions t ON t.id = p.id
            LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
            LEFT JOIN imports i ON i.id = t.import_id
-           ORDER BY r.yymm ASC NULLS LAST, r.seq ASC NULLS LAST, t.paid_date ASC, t.external_id ASC`,
+           ORDER BY CASE COALESCE(r.channel, t.channel) WHEN 'TikTok' THEN 1 WHEN 'Shopee' THEN 2 WHEN 'Facebook' THEN 3 WHEN 'Lazada' THEN 4 WHEN 'LINE' THEN 5 WHEN 'Other' THEN 6 ELSE 7 END ASC,
+                    r.yymm ASC NULLS LAST, r.seq ASC NULLS LAST, t.paid_date ASC, t.external_id ASC`,
           [dateParam, batchSize, batchStartIdx],
           db,
         )
@@ -2314,23 +2327,28 @@ async function getMonthlyInvoicesBatchKeyset(
   const batchStartIdx = (currentBatch - 1) * batchSize;
   const batchEndIdx = Math.min(channelFilteredCount, batchStartIdx + batchSize);
 
+  const chRankExpr = `CASE r.channel WHEN 'TikTok' THEN 1 WHEN 'Shopee' THEN 2 WHEN 'Facebook' THEN 3 WHEN 'Lazada' THEN 4 WHEN 'LINE' THEN 5 WHEN 'Other' THEN 6 ELSE 7 END`;
   const rows =
     channelFilteredCount > 0
       ? await query<Record<string, unknown>>(
           `WITH start_seq AS (
-             SELECT x.seq FROM (
-               SELECT r.seq, ROW_NUMBER() OVER (ORDER BY r.seq) AS rn
+             SELECT x.ch_rank, x.seq FROM (
+               SELECT ${chRankExpr} AS ch_rank, r.seq,
+                      ROW_NUMBER() OVER (ORDER BY ${chRankExpr} ASC, r.seq ASC) AS rn
                FROM invoice_registry r
                WHERE r.yymm = $1 AND r.status = 'active' ${channelWhere}
              ) x
              WHERE x.rn = $2
            ),
            page AS (
-             SELECT r.order_id, r.seq
+             SELECT r.order_id, r.seq, ${chRankExpr} AS ch_rank
              FROM invoice_registry r
              WHERE r.yymm = $1 AND r.status = 'active' ${channelWhere}
-               AND r.seq >= (SELECT seq FROM start_seq)
-             ORDER BY r.seq
+               AND (
+                 ${chRankExpr} > (SELECT ch_rank FROM start_seq)
+                 OR (${chRankExpr} = (SELECT ch_rank FROM start_seq) AND r.seq >= (SELECT seq FROM start_seq))
+               )
+             ORDER BY ch_rank ASC, r.seq ASC
              LIMIT $3
            )
            SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
@@ -2338,7 +2356,7 @@ async function getMonthlyInvoicesBatchKeyset(
            JOIN invoice_registry r ON r.order_id = p.order_id
            JOIN transactions t ON t.external_id = p.order_id AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
            LEFT JOIN imports i ON i.id = t.import_id
-           ORDER BY p.seq`,
+           ORDER BY p.ch_rank ASC, p.seq ASC`,
           [yymm, batchStartIdx + 1, batchSize],
           db,
         )

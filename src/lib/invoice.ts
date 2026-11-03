@@ -483,15 +483,21 @@ export function buildInvoice(
   const vatAmount = round2(total - preVatAmount);
 
   const effectiveDate = row.paidDate || row.createdDate || "";
+  const resolvedChannel = row.channel || "TikTok";
   const formattedInvoiceNo = formatInvoiceNoWithPrefix(
     row.invoiceNo,
     activeSeller.invoicePrefix,
     effectiveDate,
+    resolvedChannel,
+    activeSeller.channelInvoicePrefixes,
   );
   const receiptNo = formatReceiptNoWithPrefix(
     row.invoiceNo,
     activeSeller.receiptPrefix,
     effectiveDate,
+    resolvedChannel,
+    activeSeller.channelInvoicePrefixes,
+    activeSeller.invoicePrefix,
   );
 
   const displayOrderId = row.externalId.includes("|")

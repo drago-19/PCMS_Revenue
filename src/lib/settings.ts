@@ -8,8 +8,10 @@ import {
 } from "./db";
 import {
   applySellerSettingsToMemory,
+  DEFAULT_CHANNEL_INVOICE_PREFIXES,
   DEFAULT_SEEHENG_SELLER,
   DEFAULT_SELLER,
+  type ChannelInvoicePrefixes,
   type DefaultInvoicePaperSize,
   type SellerInfo,
   type VatCalculationBase,
@@ -48,6 +50,13 @@ function sanitizeText(raw: unknown, fallback: string, maxLen = 300): string {
   return cleaned.slice(0, maxLen);
 }
 
+function sanitizePrefixPattern(raw: unknown, fallback: string): string {
+  const cleaned = sanitizeText(raw, fallback, 32)
+    .toUpperCase()
+    .replace(/[^\p{L}\p{M}\p{N}_/-]/gu, "");
+  return cleaned || fallback;
+}
+
 export function normalizeSellerSettings(
   input: Partial<Record<string, unknown>> | null | undefined,
   companyId: CompanyId = "dragon19",
@@ -74,8 +83,15 @@ export function normalizeSellerSettings(
       ? Number(rawVat.toFixed(2))
       : DEFAULT_SELLER.vatRate;
 
+  const rawChannelPrefixes =
+    src.channelInvoicePrefixes &&
+    typeof src.channelInvoicePrefixes === "object" &&
+    !Array.isArray(src.channelInvoicePrefixes)
+      ? (src.channelInvoicePrefixes as Partial<Record<string, unknown>>)
+      : {};
+
   const cleanedPrefix = sanitizeText(
-    src.invoicePrefix,
+    rawChannelPrefixes.TikTok ?? src.invoicePrefix,
     DEFAULT_SELLER.invoicePrefix,
     32,
   )
@@ -85,6 +101,30 @@ export function normalizeSellerSettings(
     !cleanedPrefix || cleanedPrefix === "TT"
       ? DEFAULT_SELLER.invoicePrefix
       : cleanedPrefix;
+
+  const channelInvoicePrefixes: ChannelInvoicePrefixes = {
+    TikTok: invoicePrefix,
+    Shopee: sanitizePrefixPattern(
+      rawChannelPrefixes.Shopee,
+      DEFAULT_CHANNEL_INVOICE_PREFIXES.Shopee,
+    ),
+    Facebook: sanitizePrefixPattern(
+      rawChannelPrefixes.Facebook,
+      DEFAULT_CHANNEL_INVOICE_PREFIXES.Facebook,
+    ),
+    Lazada: sanitizePrefixPattern(
+      rawChannelPrefixes.Lazada,
+      DEFAULT_CHANNEL_INVOICE_PREFIXES.Lazada,
+    ),
+    LINE: sanitizePrefixPattern(
+      rawChannelPrefixes.LINE,
+      DEFAULT_CHANNEL_INVOICE_PREFIXES.LINE,
+    ),
+    Other: sanitizePrefixPattern(
+      rawChannelPrefixes.Other,
+      DEFAULT_CHANNEL_INVOICE_PREFIXES.Other,
+    ),
+  };
 
   const cleanedReceiptPrefix = sanitizeText(
     src.receiptPrefix,
@@ -157,6 +197,7 @@ export function normalizeSellerSettings(
     email,
     vatRate,
     invoicePrefix,
+    channelInvoicePrefixes,
     receiptPrefix,
     vatCalculationBase,
     defaultPaperSize,
