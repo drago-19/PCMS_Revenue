@@ -118,6 +118,15 @@ function getChannelActiveStyle(channel: string) {
   if (channel === "Facebook") {
     return "border-[#1877F2] bg-[#1877F2] text-white shadow-xs";
   }
+  if (channel === "Lazada") {
+    return "border-[#0f146d] bg-[#0f146d] text-white shadow-xs";
+  }
+  if (channel === "LINE") {
+    return "border-[#06C755] bg-[#06C755] text-white shadow-xs";
+  }
+  if (channel === "Other") {
+    return "border-[#475569] bg-[#475569] text-white shadow-xs";
+  }
   return "border-primary bg-primary text-white shadow-xs";
 }
 
@@ -130,6 +139,15 @@ function getChannelStatusButtonStyle(channel: string, active: boolean) {
   }
   if (channel === "Facebook") {
     return "h-8 min-h-[32px] w-full bg-[#1877F2] px-2.5 text-white shadow-2xs transition-[background-color,color,box-shadow,transform] duration-200 ease-out hover:bg-[#166fe5] active:scale-[0.97] sm:h-7 sm:min-h-[28px] sm:w-auto";
+  }
+  if (channel === "Lazada") {
+    return "h-8 min-h-[32px] w-full bg-[#0f146d] px-2.5 text-white shadow-2xs transition-[background-color,color,box-shadow,transform] duration-200 ease-out hover:bg-[#0c1059] active:scale-[0.97] sm:h-7 sm:min-h-[28px] sm:w-auto";
+  }
+  if (channel === "LINE") {
+    return "h-8 min-h-[32px] w-full bg-[#06C755] px-2.5 text-white shadow-2xs transition-[background-color,color,box-shadow,transform] duration-200 ease-out hover:bg-[#05b34c] active:scale-[0.97] sm:h-7 sm:min-h-[28px] sm:w-auto";
+  }
+  if (channel === "Other") {
+    return "h-8 min-h-[32px] w-full bg-[#475569] px-2.5 text-white shadow-2xs transition-[background-color,color,box-shadow,transform] duration-200 ease-out hover:bg-[#334155] active:scale-[0.97] sm:h-7 sm:min-h-[28px] sm:w-auto";
   }
   return "h-8 min-h-[32px] w-full px-2.5 shadow-2xs transition-[background-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.97] sm:h-7 sm:min-h-[28px] sm:w-auto";
 }
@@ -144,14 +162,21 @@ export function BillsChannelBar({
   channelCounts: Record<string, number>;
   total: number;
   q?: string;
-  channelHrefs: Record<"all" | "TikTok" | "Shopee" | "Facebook", string>;
+  channelHrefs: Record<
+    "all" | "TikTok" | "Shopee" | "Facebook" | "Lazada" | "LINE" | "Other",
+    string
+  >;
   statusHrefs: Record<StatusKey, string>;
 }) {
   const { optimistic, navigateWithOptimistic } = useBillsFilterContext();
   const activeChannel = optimistic.channel;
   const activeStatus = optimistic.status;
   const showStatusFilter =
-    activeChannel !== "Shopee" && activeChannel !== "Facebook";
+    activeChannel !== "Shopee" &&
+    activeChannel !== "Facebook" &&
+    activeChannel !== "Lazada" &&
+    activeChannel !== "LINE" &&
+    activeChannel !== "Other";
 
   const channels = [
     {
@@ -165,7 +190,7 @@ export function BillsChannelBar({
     {
       key: "TikTok" as const,
       label: "TikTok Shop",
-      subLabel: "ครบ 3 ไฟล์ · ยอดโอนจริง",
+      subLabel: "ครบ 3 ไฟล์ · โอนจริง",
       count: channelCounts.TikTok ?? 0,
       dotColor: "bg-primary",
       activeClass: "border-primary bg-primary text-white shadow-sm",
@@ -185,6 +210,30 @@ export function BillsChannelBar({
       count: channelCounts.Facebook ?? 0,
       dotColor: "bg-[#1877F2]",
       activeClass: "border-[#1877F2] bg-[#1877F2] text-white shadow-sm",
+    },
+    {
+      key: "Lazada" as const,
+      label: "Lazada",
+      subLabel: "ข้อมูลจากไฟล์ Lazada",
+      count: channelCounts.Lazada ?? 0,
+      dotColor: "bg-[#0f146d]",
+      activeClass: "border-[#0f146d] bg-[#0f146d] text-white shadow-sm",
+    },
+    {
+      key: "LINE" as const,
+      label: "LINE OA",
+      subLabel: "ข้อมูลจากไฟล์ Shipnity",
+      count: channelCounts.LINE ?? 0,
+      dotColor: "bg-[#06C755]",
+      activeClass: "border-[#06C755] bg-[#06C755] text-white shadow-sm",
+    },
+    {
+      key: "Other" as const,
+      label: "อื่นๆ (Other)",
+      subLabel: "ข้อมูลจากไฟล์ Shipnity",
+      count: channelCounts.Other ?? 0,
+      dotColor: "bg-[#475569]",
+      activeClass: "border-[#475569] bg-[#475569] text-white shadow-sm",
     },
   ];
 
@@ -268,7 +317,7 @@ export function BillsChannelBar({
             </div>
           ) : (
             <div
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-border bg-white px-2.5 py-1 shadow-2xs"
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-border bg-white p-1 px-2.5 shadow-2xs"
               role="status"
               aria-label="สถานะการตรวจยอดของช่องทาง"
             >
@@ -276,7 +325,10 @@ export function BillsChannelBar({
                 สถานะยอด:
               </span>
               <span className="inline-flex h-7 items-center gap-1 rounded-md bg-emerald-50 px-2 text-xs font-bold text-emerald-700">
-                <IconCheckCircle size={13} /> ยอดตรงตามไฟล์ Shipnity
+                <IconCheckCircle size={13} />{" "}
+                {activeChannel === "Lazada"
+                  ? "ยอดตรงตามไฟล์ Lazada"
+                  : "ยอดตรงตามไฟล์ Shipnity"}
               </span>
             </div>
           )}
@@ -292,11 +344,11 @@ export function BillsChannelBar({
       <div
         role="group"
         aria-label="กรองตามช่องทางจำหน่าย"
-        className="grid max-w-[1140px] grid-cols-2 gap-2 min-[768px]:grid-cols-4"
+        className="grid max-w-[1260px] grid-cols-2 gap-2 min-[768px]:grid-cols-4 min-[1280px]:grid-cols-7"
       >
         {channels.map((ch) => {
           const active = activeChannel === ch.key;
-          const href = channelHrefs[ch.key];
+          const href = channelHrefs[ch.key] ?? `/bills?channel=${ch.key}`;
           return (
             <Link
               key={ch.key}
@@ -307,45 +359,51 @@ export function BillsChannelBar({
                   channel: ch.key,
                   linkStatus: "all",
                   status:
-                    ch.key === "Shopee" || ch.key === "Facebook"
+                    ch.key === "Shopee" ||
+                    ch.key === "Facebook" ||
+                    ch.key === "Lazada" ||
+                    ch.key === "LINE" ||
+                    ch.key === "Other"
                       ? "all"
                       : activeStatus,
                 })
               }
               className={
                 active
-                  ? `flex min-h-[50px] items-center justify-between gap-2 rounded-xl border px-3.5 py-2 transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.985] ${ch.activeClass}`
-                  : "flex min-h-[50px] items-center justify-between gap-2 rounded-xl border border-border bg-white px-3.5 py-2 text-[#0f172a] shadow-2xs transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out hover:-translate-y-[1px] hover:border-[#cbd5e1] hover:bg-[#f1f5f9] hover:shadow-xs active:translate-y-0 active:scale-[0.985]"
+                  ? `flex h-[60px] min-h-[60px] flex-col justify-between rounded-xl border px-1.5 py-2 transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.985] ${ch.activeClass}`
+                  : "flex h-[60px] min-h-[60px] flex-col justify-between rounded-xl border border-border bg-white px-1.5 py-2 text-[#0f172a] shadow-2xs transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out hover:-translate-y-[1px] hover:border-[#cbd5e1] hover:bg-[#f1f5f9] hover:shadow-xs active:translate-y-0 active:scale-[0.985]"
               }
             >
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span
-                  className={`size-3 shrink-0 rounded-full ${
-                    active ? "bg-white ring-2 ring-white/30" : ch.dotColor
-                  }`}
-                />
-                <div className="flex min-w-0 flex-col leading-tight">
-                  <span className="text-[13px] font-extrabold">{ch.label}</span>
+              <div className="flex w-full items-center justify-between gap-1">
+                <div className="flex min-w-0 items-center gap-1">
                   <span
-                    className={`hidden text-[11px] min-[420px]:inline ${
-                      active ? "text-white/85" : "text-muted-foreground"
+                    className={`size-1.5 shrink-0 rounded-full ${
+                      active ? "bg-white ring-2 ring-white/30" : ch.dotColor
                     }`}
-                  >
-                    {ch.subLabel}
+                  />
+                  <span className="whitespace-nowrap text-[10px] font-extrabold leading-none tracking-[-0.03em]">
+                    {ch.label}
                   </span>
                 </div>
+                <span
+                  className={`mono inline-flex min-w-[26px] shrink-0 items-center justify-center rounded-md px-1 py-0.5 text-center text-[9.5px] font-extrabold leading-none tracking-[-0.03em] ${
+                    active
+                      ? "bg-white/20 text-white"
+                      : "border border-[#e2e8f0] bg-[#f8fafc] text-[#0f172a]"
+                  }`}
+                >
+                  <CompactValueToggle
+                    value={ch.count.toLocaleString("th-TH")}
+                    stopPropagationOnClick
+                  />
+                </span>
               </div>
               <span
-                className={`mono shrink-0 rounded-lg px-2 py-0.5 text-xs font-extrabold ${
-                  active
-                    ? "bg-white/20 text-white"
-                    : "border border-[#e2e8f0] bg-[#f8fafc] text-[#0f172a]"
+                className={`hidden whitespace-nowrap pl-2.5 text-[9.5px] leading-none tracking-tight min-[420px]:block ${
+                  active ? "text-white/85" : "text-muted-foreground"
                 }`}
               >
-                <CompactValueToggle
-                  value={ch.count.toLocaleString("th-TH")}
-                  stopPropagationOnClick
-                />
+                {ch.subLabel}
               </span>
             </Link>
           );
@@ -414,7 +472,7 @@ export function BillsCategoryTabs({
       <div
         role="tablist"
         aria-label="หมวดประเภทบิลคำสั่งซื้อ"
-        className="grid max-w-[1140px] grid-cols-1 gap-1.5 rounded-xl border border-border bg-white p-1.5 shadow-2xs min-[900px]:grid-cols-3"
+        className="grid max-w-[1260px] grid-cols-1 gap-1.5 rounded-xl border border-border bg-white p-1.5 shadow-2xs min-[900px]:grid-cols-3"
       >
         {tabs.map((tab) => {
           const active = activeCategory === tab.key;
@@ -434,20 +492,22 @@ export function BillsCategoryTabs({
               }
               className={
                 active
-                  ? `flex min-h-[46px] items-center justify-between gap-2 rounded-lg border px-3 py-1.5 transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.985] ${tab.activeClass}`
-                  : "flex min-h-[46px] items-center justify-between gap-2 rounded-lg border border-transparent bg-[#f8fafc] px-3 py-1.5 text-[#0f172a] transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out hover:-translate-y-[1px] hover:border-[#cbd5e1] hover:bg-[#f1f5f9] hover:shadow-2xs active:translate-y-0 active:scale-[0.985]"
+                  ? `flex h-[52px] min-h-[52px] items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.985] ${tab.activeClass}`
+                  : "flex h-[52px] min-h-[52px] items-center justify-between gap-2 rounded-lg border border-transparent bg-[#f8fafc] px-2.5 py-1.5 text-[#0f172a] transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out hover:-translate-y-[1px] hover:border-[#cbd5e1] hover:bg-[#f1f5f9] hover:shadow-2xs active:translate-y-0 active:scale-[0.985]"
               }
             >
-              <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex min-w-0 items-center gap-2">
                 <span
-                  className={`size-2.5 shrink-0 rounded-full ${
+                  className={`size-2 shrink-0 rounded-full ${
                     active ? "bg-white" : tab.dotColor
                   }`}
                 />
-                <div className="flex min-w-0 flex-col leading-tight">
-                  <span className="text-xs font-extrabold">{tab.label}</span>
+                <div className="flex min-w-0 flex-col leading-[1.2]">
+                  <span className="whitespace-nowrap text-[11.5px] font-extrabold tracking-tight">
+                    {tab.label}
+                  </span>
                   <span
-                    className={`text-[11px] ${
+                    className={`text-[10.5px] leading-[1.15] tracking-tight ${
                       active ? "text-white/85" : "text-muted-foreground"
                     }`}
                   >
@@ -456,7 +516,7 @@ export function BillsCategoryTabs({
                 </div>
               </div>
               <span
-                className={`mono shrink-0 rounded-md px-2 py-0.5 text-xs font-extrabold ${
+                className={`mono inline-flex min-w-[42px] shrink-0 items-center justify-center rounded-md px-1.5 py-0.5 text-center text-[11px] font-extrabold ${
                   active
                     ? "bg-white/20 text-white"
                     : "border border-[#e2e8f0] bg-white text-[#0f172a]"
@@ -508,8 +568,8 @@ export function BillsSubFilters({
         ? [
             {
               key: "linked",
-              label: "ข้อมูลครบ · พร้อมออกใบกำกับฯ",
-              subLabel: "บิลขายปกติที่มีราคาสินค้า",
+              label: "ข้อมูลครบ",
+              subLabel: "ออกใบกำกับฯ ได้",
               count: linkCounts.linked,
               dotColor: "bg-[#059669]",
               activeClass: channelActiveClass,
@@ -517,7 +577,7 @@ export function BillsSubFilters({
             },
             {
               key: "no_price",
-              label: "เปลี่ยนสินค้า / ไม่มีราคาสินค้า",
+              label: "เปลี่ยนไซส์ / ฿0",
               subLabel: "มีเฉพาะค่าส่ง · ไม่ยื่นภาษี",
               count: linkCounts.noPrice,
               dotColor: "bg-[#7c3aed]",
@@ -525,7 +585,7 @@ export function BillsSubFilters({
             },
             {
               key: "all_fb",
-              label: "รวมทั้งหมดใน Facebook",
+              label: "รวมทั้งหมด",
               subLabel: "บิลขายปกติ + เปลี่ยนสินค้า",
               count: linkCounts.allWithNoPrice,
               dotColor: "bg-[#64748b]",
@@ -535,32 +595,90 @@ export function BillsSubFilters({
         : [
             {
               key: "all",
-              label: "ทั้งหมดในหมวดนี้ (Facebook)",
-              subLabel: "ผูกออเดอร์และรายการสินค้าจากไฟล์ Shipnity ครบ 100%",
+              label: "ทั้งหมดในหมวดนี้",
+              subLabel: "ผูกออเดอร์ Shipnity ครบ 100%",
               count: linkCounts.all,
               dotColor: "bg-[#1877F2]",
               activeClass: channelActiveClass,
               isActive: () => true,
             },
           ]
-      : activeChannel === "Shopee"
-        ? [
-            {
-              key: "all",
-              label:
-                activeCategory === "normal"
-                  ? "ข้อมูลครบ · พร้อมออกใบกำกับฯ (Shopee)"
-                  : "ทั้งหมดในหมวดนี้ (Shopee)",
-              subLabel:
-                activeCategory === "normal"
-                  ? "ผูกออเดอร์และรายการสินค้าจากไฟล์ Shipnity ครบ 100%"
-                  : "รายการคำสั่งซื้อ Shopee จากไฟล์ Shipnity",
-              count: linkCounts.all,
-              dotColor: "bg-[#ee4d2d]",
-              activeClass: channelActiveClass,
-              isActive: () => true,
-            },
-          ]
+      : activeChannel === "LINE"
+        ? activeCategory === "normal"
+          ? [
+              {
+                key: "all",
+                label: "ทั้งหมดใน LINE OA",
+                subLabel: "รวมทุกสถานะใน LINE OA",
+                count: linkCounts.all,
+                dotColor: "bg-[#06C755]",
+                activeClass: channelActiveClass,
+              },
+              {
+                key: "linked",
+                label: "ข้อมูลตรงกัน 2 ไฟล์",
+                subLabel: "ออเดอร์ + สินค้าตรงกัน 100%",
+                count: linkCounts.lineMatched ?? linkCounts.linked,
+                dotColor: "bg-[#059669]",
+                activeClass: channelActiveClass,
+              },
+              {
+                key: "line_mismatch",
+                label: "ยอด 2 ไฟล์ไม่ตรงกัน",
+                subLabel: "ยึดไฟล์ออเดอร์ · กำกับส่วนต่าง",
+                count: linkCounts.lineMismatch ?? 0,
+                dotColor: "bg-[#d97706]",
+                activeClass: "border-[#b45309] bg-[#b45309] text-white shadow-xs",
+              },
+              {
+                key: "oms_only",
+                label: "มีเฉพาะไฟล์ออเดอร์",
+                subLabel: "รออัปโหลดไฟล์สินค้า (SKU)",
+                count: linkCounts.omsOnly,
+                dotColor: "bg-[#2563eb]",
+                activeClass: "border-[#1d4ed8] bg-[#1d4ed8] text-white shadow-xs",
+              },
+            ]
+          : [
+              {
+                key: "all",
+                label: "ทั้งหมดในหมวดนี้",
+                subLabel: "รายการจากไฟล์ Shipnity",
+                count: linkCounts.all,
+                dotColor: "bg-[#06C755]",
+                activeClass: channelActiveClass,
+                isActive: () => true,
+              },
+            ]
+        : activeChannel === "Shopee" ||
+            activeChannel === "Lazada" ||
+            activeChannel === "Other"
+          ? [
+              {
+                key: "all",
+                label:
+                  activeCategory === "normal"
+                    ? "ข้อมูลครบ"
+                    : "ทั้งหมดในหมวดนี้",
+                subLabel:
+                  activeCategory === "normal"
+                    ? activeChannel === "Lazada"
+                      ? "ออกใบกำกับฯ ได้ · Lazada 100%"
+                      : "ออกใบกำกับฯ ได้ · Shipnity 100%"
+                    : activeChannel === "Lazada"
+                      ? "รายการจากไฟล์ Lazada"
+                      : "รายการจากไฟล์ Shipnity",
+                count: linkCounts.all,
+                dotColor:
+                  activeChannel === "Lazada"
+                    ? "bg-[#0f146d]"
+                    : activeChannel === "Other"
+                      ? "bg-[#475569]"
+                      : "bg-[#ee4d2d]",
+                activeClass: channelActiveClass,
+                isActive: () => true,
+              },
+            ]
         : activeChannel === "TikTok"
           ? activeCategory === "normal"
             ? [
@@ -578,6 +696,17 @@ export function BillsSubFilters({
                   count: linkCounts.linked,
                   dotColor: "bg-[#059669]",
                 },
+                ...(linkCounts.compensation > 0
+                  ? [
+                      {
+                        key: "compensation" as const,
+                        label: "ชดเชยแพลตฟอร์ม",
+                        subLabel: "ออกใบกำกับฯ ได้",
+                        count: linkCounts.compensation,
+                        dotColor: "bg-[#7c3aed]",
+                      },
+                    ]
+                  : []),
                 {
                   key: "unlinked",
                   label: "รอไฟล์ออเดอร์",
@@ -639,6 +768,17 @@ export function BillsSubFilters({
                   count: linkCounts.linked,
                   dotColor: "bg-[#059669]",
                 },
+                ...(linkCounts.compensation > 0
+                  ? [
+                      {
+                        key: "compensation" as const,
+                        label: "ชดเชยแพลตฟอร์ม",
+                        subLabel: "ออกใบกำกับฯ ได้",
+                        count: linkCounts.compensation,
+                        dotColor: "bg-[#7c3aed]",
+                      },
+                    ]
+                  : []),
                 {
                   key: "no_price",
                   label: "เปลี่ยนไซส์ / ฿0",
@@ -693,13 +833,7 @@ export function BillsSubFilters({
               ];
 
   const linkGridColsClass =
-    linkItems.length === 5
-      ? "grid max-w-[1140px] grid-cols-1 gap-1.5 min-[580px]:grid-cols-2 min-[980px]:grid-cols-3 min-[1280px]:grid-cols-5"
-      : linkItems.length === 3
-        ? "grid max-w-[1140px] grid-cols-1 gap-1.5 min-[900px]:grid-cols-3"
-        : linkItems.length === 1
-          ? "grid max-w-[560px] grid-cols-1 gap-1.5"
-          : "grid max-w-[1140px] grid-cols-1 gap-1.5 min-[580px]:grid-cols-2 min-[1040px]:grid-cols-4";
+    "grid max-w-[1260px] grid-cols-1 gap-1.5 min-[580px]:grid-cols-2 min-[980px]:grid-cols-3 min-[1280px]:grid-cols-6";
 
   if (linkItems.length === 0) return null;
 
@@ -729,38 +863,40 @@ export function BillsSubFilters({
               }
               className={
                 active
-                  ? `flex min-h-[44px] items-center justify-between gap-2 rounded-xl border px-3 py-1.5 transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.985] ${activeColorClass}`
-                  : "flex min-h-[44px] items-center justify-between gap-2 rounded-xl border border-border bg-white px-3 py-1.5 text-[#0f172a] shadow-2xs transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out hover:-translate-y-[1px] hover:border-[#cbd5e1] hover:bg-[#f1f5f9] hover:shadow-xs active:translate-y-0 active:scale-[0.985]"
+                  ? `flex h-[56px] min-h-[56px] flex-col justify-between rounded-xl border px-1.5 py-2 transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out active:scale-[0.985] ${activeColorClass}`
+                  : "flex h-[56px] min-h-[56px] flex-col justify-between rounded-xl border border-border bg-white px-1.5 py-2 text-[#0f172a] shadow-2xs transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out hover:-translate-y-[1px] hover:border-[#cbd5e1] hover:bg-[#f1f5f9] hover:shadow-xs active:translate-y-0 active:scale-[0.985]"
               }
             >
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span
-                  className={`size-2.5 shrink-0 rounded-full ${
-                    active ? "bg-white" : item.dotColor
-                  }`}
-                />
-                <div className="flex min-w-0 flex-col leading-tight">
-                  <span className="text-xs font-extrabold">{item.label}</span>
+              <div className="flex w-full items-center justify-between gap-1">
+                <div className="flex min-w-0 items-center gap-1">
                   <span
-                    className={`text-[11px] ${
-                      active ? "text-white/85" : "text-muted-foreground"
+                    className={`size-1.5 shrink-0 rounded-full ${
+                      active ? "bg-white" : item.dotColor
                     }`}
-                  >
-                    {item.subLabel}
+                  />
+                  <span className="whitespace-nowrap text-[10.5px] font-extrabold leading-none tracking-[-0.02em]">
+                    {item.label}
                   </span>
                 </div>
+                <span
+                  className={`mono inline-flex min-w-[26px] shrink-0 items-center justify-center rounded-md px-1 py-0.5 text-center text-[9.5px] font-extrabold leading-none tracking-[-0.03em] ${
+                    active
+                      ? "bg-white/20 text-white"
+                      : "bg-[#f1f5f9] text-[#0f172a]"
+                  }`}
+                >
+                  <CompactValueToggle
+                    value={item.count.toLocaleString("th-TH")}
+                    stopPropagationOnClick
+                  />
+                </span>
               </div>
               <span
-                className={`mono shrink-0 rounded-lg px-2 py-0.5 text-xs font-extrabold ${
-                  active
-                    ? "bg-white/20 text-white"
-                    : "bg-[#f1f5f9] text-[#0f172a]"
+                className={`whitespace-nowrap pl-2.5 text-[9.5px] leading-none tracking-tight ${
+                  active ? "text-white/85" : "text-muted-foreground"
                 }`}
               >
-                <CompactValueToggle
-                  value={item.count.toLocaleString("th-TH")}
-                  stopPropagationOnClick
-                />
+                {item.subLabel}
               </span>
             </Link>
           );

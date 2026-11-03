@@ -129,15 +129,22 @@ export default async function BillsPage({
         ? rawShop
         : "all";
   const rawChannel = (params.channel ?? "all").trim();
-  const channel: "all" | "TikTok" | "Shopee" | "Facebook" =
+  const channel: "all" | "TikTok" | "Shopee" | "Facebook" | "Lazada" | "LINE" | "Other" =
     rawChannel === "TikTok" ||
     rawChannel === "Shopee" ||
-    rawChannel === "Facebook"
+    rawChannel === "Facebook" ||
+    rawChannel === "Lazada" ||
+    rawChannel === "LINE" ||
+    rawChannel === "Other"
       ? rawChannel
       : "all";
   const rawStatus = (params.status ?? "all").trim();
   const status: "all" | "ok" | "mismatch" =
-    channel === "Shopee" || channel === "Facebook"
+    channel === "Shopee" ||
+    channel === "Facebook" ||
+    channel === "Lazada" ||
+    channel === "LINE" ||
+    channel === "Other"
       ? "all"
       : rawStatus === "ok" || rawStatus === "mismatch"
         ? rawStatus
@@ -149,8 +156,10 @@ export default async function BillsPage({
     rawLink === "oms_only" ||
     rawLink === "no_price" ||
     rawLink === "all_fb" ||
+    rawLink === "compensation" ||
     rawLink === "shopee_negative" ||
-    rawLink === "shopee_zero"
+    rawLink === "shopee_zero" ||
+    rawLink === "line_mismatch"
       ? rawLink
       : "all";
   const rawCategory = (params.category ?? "normal").trim();
@@ -197,7 +206,7 @@ export default async function BillsPage({
 
   function buildHref(overrides: {
     nextPage?: number;
-    nextChannel?: "all" | "TikTok" | "Shopee" | "Facebook";
+    nextChannel?: "all" | "TikTok" | "Shopee" | "Facebook" | "Lazada" | "LINE" | "Other";
     nextShop?: string;
     nextStatus?: "all" | "ok" | "mismatch";
     nextLink?: BillLinkStatusKey;
@@ -447,11 +456,21 @@ export default async function BillsPage({
             <BillsShopTabs
               activeShop={shop}
               shopCounts={result.shopCounts}
-              buildShopHref={(nextShop) => buildHref({ nextShop, nextPage: 1 })}
+              buildShopHref={(nextShop) =>
+                buildHref({ nextShop, nextLink: "all", nextPage: 1 })
+              }
               hrefs={{
-                all: buildHref({ nextShop: "all", nextPage: 1 }),
-                kiddee: buildHref({ nextShop: "Kiddee Shop", nextPage: 1 }),
-                kissi: buildHref({ nextShop: "Kissi Studio", nextPage: 1 }),
+                all: buildHref({ nextShop: "all", nextLink: "all", nextPage: 1 }),
+                kiddee: buildHref({
+                  nextShop: "Kiddee Shop",
+                  nextLink: "all",
+                  nextPage: 1,
+                }),
+                kissi: buildHref({
+                  nextShop: "Kissi Studio",
+                  nextLink: "all",
+                  nextPage: 1,
+                }),
               }}
             />
 
@@ -483,6 +502,24 @@ export default async function BillsPage({
                   nextStatus: "all",
                   nextPage: 1,
                 }),
+                Lazada: buildHref({
+                  nextChannel: "Lazada",
+                  nextLink: "all",
+                  nextStatus: "all",
+                  nextPage: 1,
+                }),
+                LINE: buildHref({
+                  nextChannel: "LINE",
+                  nextLink: "all",
+                  nextStatus: "all",
+                  nextPage: 1,
+                }),
+                Other: buildHref({
+                  nextChannel: "Other",
+                  nextLink: "all",
+                  nextStatus: "all",
+                  nextPage: 1,
+                }),
               }}
               statusHrefs={{
                 all: buildHref({ nextStatus: "all", nextPage: 1 }),
@@ -504,20 +541,28 @@ export default async function BillsPage({
               }
               linkLabel={
                 linkStatus === "linked"
-                  ? "ข้อมูลครบ"
-                  : linkStatus === "unlinked"
-                    ? "รอไฟล์ออเดอร์"
-                    : linkStatus === "oms_only"
-                      ? "รอไฟล์รายได้"
-                      : linkStatus === "no_price"
-                        ? "เปลี่ยนสินค้า 0 บาท"
-                        : linkStatus === "all_fb"
-                          ? "รวมทั้งหมดใน FB"
-                          : linkStatus === "shopee_negative"
-                            ? "ขาดทุน/ติดลบ"
-                            : linkStatus === "shopee_zero"
-                              ? "ตีกลับ 100%"
-                              : "ทั้งหมด"
+                  ? channel === "LINE"
+                    ? "ตรงกัน 2 ไฟล์"
+                    : "ข้อมูลครบ"
+                  : linkStatus === "line_mismatch"
+                    ? "ยอด 2 ไฟล์ไม่ตรงกัน"
+                    : linkStatus === "compensation"
+                      ? "ชดเชยแพลตฟอร์ม"
+                      : linkStatus === "unlinked"
+                        ? "รอไฟล์ออเดอร์"
+                        : linkStatus === "oms_only"
+                          ? channel === "LINE"
+                            ? "มีเฉพาะไฟล์ออเดอร์"
+                            : "รอไฟล์รายได้"
+                          : linkStatus === "no_price"
+                            ? "เปลี่ยนสินค้า 0 บาท"
+                            : linkStatus === "all_fb"
+                              ? "รวมทั้งหมดใน FB"
+                              : linkStatus === "shopee_negative"
+                                ? "ขาดทุน/ติดลบ"
+                                : linkStatus === "shopee_zero"
+                                  ? "ตีกลับ 100%"
+                                  : "ทั้งหมด"
               }
             >
               {/* ชั้นที่ 2: เลือกประเภทบิลหลัก 3 หมวด: บิลขายปกติ | คืนเงิน/ตีกลับ/ขาดทุน (ติดลบ) | ยกเลิก/ยอด 0 บาท */}
@@ -552,12 +597,20 @@ export default async function BillsPage({
                   oms_only: buildHref({ nextLink: "oms_only", nextPage: 1 }),
                   no_price: buildHref({ nextLink: "no_price", nextPage: 1 }),
                   all_fb: buildHref({ nextLink: "all_fb", nextPage: 1 }),
+                  compensation: buildHref({
+                    nextLink: "compensation",
+                    nextPage: 1,
+                  }),
                   shopee_negative: buildHref({
                     nextLink: "shopee_negative",
                     nextPage: 1,
                   }),
                   shopee_zero: buildHref({
                     nextLink: "shopee_zero",
+                    nextPage: 1,
+                  }),
+                  line_mismatch: buildHref({
+                    nextLink: "line_mismatch",
                     nextPage: 1,
                   }),
                 }}
@@ -729,11 +782,27 @@ export default async function BillsPage({
                         : shop === "รอผูกไฟล์ร้านค้า" || shop === "อื่นๆ"
                           ? "⏳ รอผูกไฟล์ร้านค้า"
                           : shop}
-                  </strong>{" "}
+                  </strong>
+                  {channel !== "all" ? ` · ช่องทาง: ${channel === "LINE" ? "LINE OA" : channel}` : ""}
+                  {linkStatus !== "all"
+                    ? ` · สถานะ: ${
+                        linkStatus === "linked"
+                          ? "ข้อมูลครบ"
+                          : linkStatus === "compensation"
+                            ? "ชดเชยแพลตฟอร์ม"
+                            : linkStatus === "unlinked"
+                              ? "รอไฟล์ออเดอร์"
+                              : linkStatus === "oms_only"
+                                ? "รอไฟล์รายได้"
+                                : linkStatus === "no_price"
+                                  ? "เปลี่ยนไซส์ / ฿0"
+                                  : linkStatus
+                      }`
+                    : ""}{" "}
                   จำนวน {result.total.toLocaleString("th-TH")} รายการ
                 </span>
                 <Link
-                  href={buildHref({ nextShop: "all", nextPage: 1 })}
+                  href={buildHref({ nextShop: "all", nextLink: "all", nextPage: 1 })}
                   scroll={false}
                   className="font-extrabold text-primary underline underline-offset-2 hover:opacity-80"
                 >
@@ -973,7 +1042,13 @@ export default async function BillsPage({
                                   ? "shopee"
                                   : row.channel === "Facebook"
                                     ? "facebook"
-                                    : "default"
+                                    : row.channel === "Lazada"
+                                      ? "lazada"
+                                      : row.channel === "LINE"
+                                        ? "line"
+                                        : row.channel === "Other"
+                                          ? "other"
+                                          : "default"
                               }
                               size="sm"
                               className="shrink-0 px-1.5 py-0 text-[11px]"
@@ -982,8 +1057,23 @@ export default async function BillsPage({
                                 ? "Shopee"
                                 : row.channel === "Facebook"
                                   ? "Facebook"
-                                  : "TikTok"}
+                                  : row.channel === "Lazada"
+                                    ? "Lazada"
+                                    : row.channel === "LINE"
+                                      ? "LINE OA"
+                                      : row.channel === "Other"
+                                        ? "Other"
+                                        : "TikTok"}
                             </Badge>
+                            {row.isCompensationBill ? (
+                              <Badge
+                                variant="neutral"
+                                size="sm"
+                                className="shrink-0 border-violet-300 bg-violet-100 px-1.5 py-0 text-[11px] font-bold text-violet-950"
+                              >
+                                💸 ชดเชยแพลตฟอร์ม
+                              </Badge>
+                            ) : null}
                             {row.shopName && row.shopName !== "อื่นๆ" && row.shopName !== "รอผูกไฟล์ร้านค้า" ? (
                               <Badge
                                 variant="outline"
@@ -1084,6 +1174,31 @@ export default async function BillsPage({
                                 รอผูก ออเดอร์ใน shipnity
                               </Badge>
                             )}
+                            {row.channel === "LINE" && row.lineComparisonStatus === "matched" ? (
+                              <Badge
+                                variant="success"
+                                size="sm"
+                                className="shrink-0 border-emerald-300 bg-emerald-50 px-1.5 py-0 text-[10.5px] font-bold text-emerald-900"
+                              >
+                                ✅ ตรงกัน 2 ไฟล์
+                              </Badge>
+                            ) : row.channel === "LINE" && row.lineComparisonStatus === "amount_diff" ? (
+                              <Badge
+                                variant="warning"
+                                size="sm"
+                                className="shrink-0 border-amber-300 bg-amber-100 px-1.5 py-0 text-[10.5px] font-bold text-amber-950"
+                              >
+                                ⚠️ ยอดต่างกัน (ไฟล์สินค้า {formatTHB(row.omsItemsSalesAmount ?? 0)})
+                              </Badge>
+                            ) : row.channel === "LINE" && row.lineComparisonStatus === "orders_only" ? (
+                              <Badge
+                                variant="neutral"
+                                size="sm"
+                                className="shrink-0 border-sky-300 bg-sky-100 px-1.5 py-0 text-[10.5px] font-bold text-sky-950"
+                              >
+                                📄 มีเฉพาะไฟล์ออเดอร์
+                              </Badge>
+                            ) : null}
                             {row.customerName ? (
                               <span
                                 className="min-w-0 max-w-[120px] min-[1280px]:max-w-[170px] truncate text-[11.5px] font-medium text-[#475569] max-[767px]:max-w-[140px]"
@@ -1136,6 +1251,20 @@ export default async function BillsPage({
                               />
                             ) : null}
                           </div>
+                        ) : row.isCompensationBill ? (
+                          <div className="flex w-full flex-col gap-1 rounded-lg border border-violet-200 bg-violet-50/70 px-2.5 py-1.5 text-xs text-violet-950 max-[767px]:items-end">
+                            <div className="flex items-center gap-1.5 font-bold">
+                              <span className="mono rounded border border-violet-300 bg-white px-1.5 py-0.5 text-[10.5px] font-bold text-violet-900">
+                                COMP
+                              </span>
+                              <span>{row.transactionType}</span>
+                            </div>
+                            {row.relatedOrderId ? (
+                              <span className="mono text-[11px] text-violet-700">
+                                อ้างอิงออเดอร์ #{row.relatedOrderId}
+                              </span>
+                            ) : null}
+                          </div>
                         ) : !row.productDetail || row.productDetail.trim() === "/" ? (
                           <div className="mx-auto flex w-full flex-col items-center justify-center gap-0.5 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-2.5 py-1.5 text-center text-xs font-medium text-[#92400e] text-balance">
                             <span>รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity</span>
@@ -1164,15 +1293,29 @@ export default async function BillsPage({
                         className={cn(
                           colIncomeClass,
                           "font-semibold",
-                          row.income < 0
+                          (row.isCompensationBill ? row.payout : row.income) < 0
                             ? "danger"
-                            : row.income === 0
+                            : (row.isCompensationBill ? row.payout : row.income) === 0
                               ? "text-[#64748b]"
                               : "text-[#0f172a]",
                         )}
                       >
-                        <div className="min-[768px]:pt-1">
-                          {formatTHB(row.income)}
+                        <div className="flex flex-col items-end gap-0.5 min-[768px]:pt-1">
+                          <span>
+                            {formatTHB(row.isCompensationBill ? row.payout : row.income)}
+                          </span>
+                          {row.channel === "LINE" &&
+                          row.lineComparisonStatus === "amount_diff" &&
+                          row.omsItemsSalesAmount !== null &&
+                          row.omsItemsSalesAmount !== undefined ? (
+                            <span className="whitespace-nowrap rounded border border-amber-200 bg-amber-50 px-1 py-0.5 text-[10px] font-bold leading-none text-amber-900">
+                              ไฟล์สินค้า: {formatTHB(row.omsItemsSalesAmount)} (
+                              {row.lineSalesDiff && row.lineSalesDiff > 0
+                                ? `+${formatTHB(row.lineSalesDiff)}`
+                                : formatTHB(row.lineSalesDiff ?? 0)}
+                              )
+                            </span>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell
@@ -1249,7 +1392,11 @@ export default async function BillsPage({
                               <span className="max-w-[115px] whitespace-normal text-right text-[10px] leading-tight font-normal text-muted-foreground">
                                 {row.channel === "Shopee"
                                   ? "(ออเดอร์ Shopee จาก shipnity)"
-                                  : "(ยังไม่มีข้อมูลรายได้จาก TikTok)"}
+                                  : row.channel === "LINE"
+                                    ? "(ออเดอร์ LINE OA จาก shipnity)"
+                                    : row.channel === "Other"
+                                      ? "(ออเดอร์ Other จาก shipnity)"
+                                      : "(ยังไม่มีข้อมูลรายได้จาก TikTok)"}
                               </span>
                             ) : null}
                           </div>

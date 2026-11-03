@@ -94,10 +94,14 @@ export default async function BulkInvoicesPage({
   const resolvedSearchParams = await searchParams;
   const rawLink = (resolvedSearchParams.link ?? "linked").trim();
   const rawChannel = (resolvedSearchParams.channel ?? "all").trim();
-  const channelFilter: "all" | "TikTok" | "Shopee" | "Facebook" =
+  const channelFilter: "all" | "TikTok" | "Shopee" | "Facebook" | "Lazada" | "LINE" | "Other" | "Compensation" =
     rawChannel === "TikTok" ||
     rawChannel === "Shopee" ||
-    rawChannel === "Facebook"
+    rawChannel === "Facebook" ||
+    rawChannel === "Lazada" ||
+    rawChannel === "LINE" ||
+    rawChannel === "Other" ||
+    rawChannel === "Compensation"
       ? rawChannel
       : "all";
   const rawBatchSize = Number(resolvedSearchParams.batchSize);
@@ -145,6 +149,10 @@ export default async function BulkInvoicesPage({
     tiktokOrdersCount,
     shopeeOrdersCount,
     facebookOrdersCount,
+    lazadaOrdersCount,
+    lineOrdersCount,
+    otherOrdersCount,
+    compensationOrdersCount,
     channelFilteredCount,
     linkedOrdersCount,
     unlinkedOrdersCount,
@@ -165,7 +173,7 @@ export default async function BulkInvoicesPage({
     nextMode?: InvoiceMode;
     nextPaper?: InvoicePaperSize;
     nextLink?: "linked" | "all" | "unlinked";
-    nextChannel?: "all" | "TikTok" | "Shopee" | "Facebook";
+    nextChannel?: "all" | "TikTok" | "Shopee" | "Facebook" | "Lazada" | "LINE" | "Other" | "Compensation";
     nextBatch?: number;
     nextBatchSize?: 100 | 200 | 500;
   }) {
@@ -290,7 +298,7 @@ export default async function BulkInvoicesPage({
         </div>
 
         {/* ตัวกรองข้อมูล + ตั้งค่าการพิมพ์ (ป้ายกำกับคอลัมน์เดียวกัน จัดแนวตรงกัน) */}
-        <div className="grid gap-3 px-3.5 py-3 sm:px-5 min-[1440px]:grid-cols-2 min-[1440px]:gap-x-8">
+        <div className="grid gap-3 px-3.5 py-3 sm:px-5 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-start lg:gap-x-6">
           <div className="flex min-w-0 flex-col gap-3">
             <FieldRow label="รอบบิล">
               <DatePickerField
@@ -313,72 +321,52 @@ export default async function BulkInvoicesPage({
                 }}
               />
             </FieldRow>
-            <FieldRow label="ช่องทาง">
-              <div
-                role="group"
-                aria-label="กรองช่องทางพิมพ์ใบกำกับภาษี"
-                className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
-              >
-                {[
-                  { key: "all" as const, label: "ทุกช่องทาง", count: billableTotalCount },
-                  { key: "TikTok" as const, label: "TikTok", count: tiktokOrdersCount },
-                  { key: "Shopee" as const, label: "Shopee", count: shopeeOrdersCount },
-                  { key: "Facebook" as const, label: "Facebook", count: facebookOrdersCount },
-                ].map((ch) => {
-                  const active = channelFilter === ch.key;
-                  const brand =
-                    active && ch.key === "Shopee"
-                      ? " bg-[#ee4d2d] text-white hover:bg-[#d73211]"
-                      : active && ch.key === "Facebook"
-                        ? " bg-[#1877F2] text-white hover:bg-[#166fe5]"
-                        : "";
-                  return (
-                    <Button
-                      key={ch.key}
-                      asChild
-                      variant={active ? "default" : "ghost"}
-                      size="xs"
-                      className={(active ? SEGMENT_ON : SEGMENT_OFF) + brand}
-                    >
-                      <Link href={buildPrintHref({ nextChannel: ch.key })} scroll={false}>
-                        {ch.label}
-                        <span className={active ? "opacity-80" : "text-muted-foreground"}>
-                          {ch.count.toLocaleString("th-TH")}
-                        </span>
-                      </Link>
-                    </Button>
-                  );
-                })}
-              </div>
-            </FieldRow>
             {unlinkedOrdersCount > 0 ? (
               <FieldRow label="คัดกรองบิล">
                 <div
                   role="group"
-                  aria-label="คัดกรองสถานะการผูกไฟล์"
-                  className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
+                  aria-label="คัดกรองสถานะข้อมูล"
+                  className={`${SEGMENT_GROUP} grid grid-cols-3 sm:inline-flex`}
                 >
                   {[
-                    { key: "linked" as const, label: "ข้อมูลครบ", count: linkedOrdersCount, dot: "bg-[#059669]" },
-                    { key: "all" as const, label: "ทั้งหมด", count: channelFilteredCount, dot: "" },
-                    { key: "unlinked" as const, label: "รอไฟล์ ออเดอร์ใน shipnity", count: unlinkedOrdersCount, dot: "bg-[#d97706]" },
-                  ].map((opt) => {
-                    const active = effectiveLinkFilter === opt.key;
+                    {
+                      key: "linked" as const,
+                      label: "พร้อมพิมพ์",
+                      count: linkedOrdersCount,
+                    },
+                    {
+                      key: "unlinked" as const,
+                      label: "ขาดไฟล์",
+                      count: unlinkedOrdersCount,
+                    },
+                    {
+                      key: "all" as const,
+                      label: "ทั้งหมด",
+                      count: billableTotalCount,
+                    },
+                  ].map((lk) => {
+                    const active = effectiveLinkFilter === lk.key;
+                    const activeClass =
+                      lk.key === "linked"
+                        ? "bg-[#059669] text-white hover:bg-[#047857] hover:text-white shadow-xs"
+                        : lk.key === "unlinked"
+                          ? "bg-[#d97706] text-white hover:bg-[#b45309] hover:text-white shadow-xs"
+                          : SEGMENT_ON;
                     return (
                       <Button
-                        key={opt.key}
+                        key={lk.key}
                         asChild
                         variant={active ? "default" : "ghost"}
                         size="xs"
-                        className={`${active ? SEGMENT_ON : SEGMENT_OFF}${opt.key === "unlinked" ? " col-span-2 sm:col-span-1" : ""}`}
+                        className={active ? activeClass : SEGMENT_OFF}
                       >
-                        <Link href={buildPrintHref({ nextLink: opt.key })} scroll={false}>
-                          {opt.dot ? (
-                            <span className={`size-2 shrink-0 rounded-full ${active ? "bg-white" : opt.dot}`} />
-                          ) : null}
-                          {opt.label}
-                          <span className={active ? "opacity-80" : "text-muted-foreground"}>
-                            {opt.count.toLocaleString("th-TH")}
+                        <Link
+                          href={buildPrintHref({ nextLink: lk.key, nextBatch: 1 })}
+                          scroll={false}
+                        >
+                          {lk.label}{" "}
+                          <span className="ml-1 font-mono font-extrabold">
+                            {lk.count.toLocaleString("th-TH")}
                           </span>
                         </Link>
                       </Button>
@@ -388,8 +376,7 @@ export default async function BulkInvoicesPage({
               </FieldRow>
             ) : null}
           </div>
-
-          <div className="flex min-w-0 flex-col gap-3 border-t border-border/70 pt-3 min-[1440px]:border-t-0 min-[1440px]:border-l min-[1440px]:pt-0 min-[1440px]:pl-8">
+          <div className="flex min-w-0 flex-col gap-3 border-t border-border/70 pt-3 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
             {enableFullTaxInvoice ? (
               <FieldRow label="รูปแบบเอกสาร">
                 <div
@@ -463,6 +450,90 @@ export default async function BulkInvoicesPage({
                 <InvoiceZoomControl compact />
               </div>
             ) : null}
+          </div>
+        </div>
+
+        {/* แถวช่องทางจำหน่าย (แสดงครบทุกช่องทางเรียงเป็นระเบียบสัดส่วนเท่ากัน) */}
+        <div className="border-t border-border/80 bg-[#f8fafc]/80 px-3.5 py-2.5 sm:px-5">
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-foreground">
+                เลือกช่องทางจำหน่าย
+              </span>
+              {compensationOrdersCount > 0 ? (
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  * ยอด TikTok {tiktokOrdersCount.toLocaleString("th-TH")} ใบรวมรายการชดเชยแพลตฟอร์ม {compensationOrdersCount.toLocaleString("th-TH")} ใบแล้ว
+                </span>
+              ) : null}
+            </div>
+            <div
+              role="group"
+              aria-label="กรองช่องทางพิมพ์ใบกำกับภาษี"
+              className="grid grid-cols-2 gap-1.5 min-[540px]:grid-cols-4 min-[1440px]:grid-cols-8"
+            >
+              {[
+                { key: "all" as const, label: "ทุกช่องทาง", count: billableTotalCount, dot: "bg-slate-900" },
+                { key: "TikTok" as const, label: "TikTok Shop", count: tiktokOrdersCount, dot: "bg-[#fe2c55]" },
+                { key: "Shopee" as const, label: "Shopee", count: shopeeOrdersCount, dot: "bg-[#ee4d2d]" },
+                { key: "Facebook" as const, label: "Facebook", count: facebookOrdersCount, dot: "bg-[#1877F2]" },
+                { key: "Lazada" as const, label: "Lazada", count: lazadaOrdersCount, dot: "bg-[#0f146d]" },
+                { key: "LINE" as const, label: "LINE OA", count: lineOrdersCount, dot: "bg-[#06C755]" },
+                { key: "Compensation" as const, label: "ชดเชยแพลตฟอร์ม", count: compensationOrdersCount, dot: "bg-[#059669]" },
+                { key: "Other" as const, label: "อื่นๆ (Other)", count: otherOrdersCount, dot: "bg-[#475569]" },
+              ].map((ch) => {
+                const active = channelFilter === ch.key;
+                const activeClass =
+                  ch.key === "Shopee"
+                    ? "bg-[#ee4d2d] text-white border-[#ee4d2d] hover:bg-[#d73211] hover:text-white"
+                    : ch.key === "Facebook"
+                      ? "bg-[#1877F2] text-white border-[#1877F2] hover:bg-[#166fe5] hover:text-white"
+                      : ch.key === "Lazada"
+                        ? "bg-[#0f146d] text-white border-[#0f146d] hover:bg-[#0c1059] hover:text-white"
+                        : ch.key === "LINE"
+                          ? "bg-[#06C755] text-white border-[#06C755] hover:bg-[#05b34c] hover:text-white"
+                          : ch.key === "Compensation"
+                            ? "bg-[#059669] text-white border-[#059669] hover:bg-[#047857] hover:text-white"
+                            : ch.key === "Other"
+                              ? "bg-[#475569] text-white border-[#475569] hover:bg-[#334155] hover:text-white"
+                              : ch.key === "TikTok"
+                                ? "bg-[#fe2c55] text-white border-[#fe2c55] hover:bg-[#e0264b] hover:text-white"
+                                : "bg-[#0f172a] text-white border-[#0f172a] hover:bg-[#1e293b] hover:text-white";
+                return (
+                  <Link
+                    key={ch.key}
+                    href={buildPrintHref({ nextChannel: ch.key, nextBatch: 1 })}
+                    scroll={false}
+                    className={`flex h-10 min-h-[40px] items-center justify-between gap-1 rounded-xl border px-2 py-1.5 text-[11px] sm:gap-2 sm:px-3 sm:text-xs transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      active
+                        ? `${activeClass} font-extrabold shadow-xs`
+                        : "border-slate-200 bg-white font-bold text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                    }`}
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                      <span
+                        className={`size-2 shrink-0 rounded-full ${
+                          active ? "bg-white" : ch.dot
+                        }`}
+                      />
+                      <span className={`whitespace-nowrap leading-tight ${active ? "!text-white" : "text-slate-800"}`}>
+                        {ch.label}
+                      </span>
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[10px] sm:px-2 sm:text-[11px] font-extrabold tabular-nums ${
+                        active
+                          ? "bg-white/20 !text-white"
+                          : ch.count > 0
+                            ? "bg-slate-100 text-slate-800"
+                            : "bg-slate-50 text-slate-400"
+                      }`}
+                    >
+                      {ch.count.toLocaleString("th-TH")}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -550,7 +621,25 @@ export default async function BulkInvoicesPage({
         ) : null}
       </Card>
 
-      {mode === "abbreviated" && paper === "a4-4up" ? (
+      {invoices.length === 0 ? (
+        <Card className="no-print mx-auto mt-6 max-w-[680px] p-8 text-center">
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-base font-bold text-slate-900">
+              ไม่มีใบกำกับภาษีในช่องทางนี้สำหรับงวด{periodTitle}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              เลือกช่องทางอื่นด้านบน หรือเปลี่ยนรอบบิลเพื่อดูใบกำกับภาษีของงวดอื่น
+            </p>
+            {channelFilter !== "all" ? (
+              <Button asChild size="sm" variant="outline" className="mt-1">
+                <Link href={buildPrintHref({ nextChannel: "all", nextBatch: 1 })} scroll={false}>
+                  กลับไปดูทุกช่องทาง ({billableTotalCount.toLocaleString("th-TH")} ใบ)
+                </Link>
+              </Button>
+            ) : null}
+          </div>
+        </Card>
+      ) : mode === "abbreviated" && paper === "a4-4up" ? (
         <div className="space-y-6 print:space-y-0">
           {chunked4Up.map((sheetInvoices, sheetIdx) => (
             <div

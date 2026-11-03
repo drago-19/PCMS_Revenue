@@ -11,6 +11,9 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
         shopee: "bg-[#ee4d2d] text-white border-transparent [a&]:hover:bg-[#d73211]",
         facebook: "bg-[#1877F2] text-white border-transparent [a&]:hover:bg-[#166fe5]",
+        lazada: "bg-[#0f146d] text-white border-transparent [a&]:hover:bg-[#0c1059]",
+        line: "bg-[#06C755] text-white border-transparent [a&]:hover:bg-[#05b34c]",
+        other: "bg-[#475569] text-white border-transparent [a&]:hover:bg-[#334155]",
         secondary:
           "bg-[#e6fbf9] text-[#007a76] border-[#b2f2ec] [a&]:hover:bg-[#d5f8f5]",
         destructive:

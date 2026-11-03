@@ -28,6 +28,9 @@ export function BillDocument({
   omsNote,
   isNoProductPriceOrder,
   shopName,
+  omsItemsSalesAmount,
+  lineComparisonStatus,
+  lineSalesDiff,
 }: {
   bill: BillModel;
   source: { filename: string; importedAt: string; importId: number };
@@ -47,6 +50,9 @@ export function BillDocument({
   omsNote?: string | null;
   isNoProductPriceOrder?: boolean;
   shopName?: string | null;
+  omsItemsSalesAmount?: number | null;
+  lineComparisonStatus?: "matched" | "amount_diff" | "orders_only";
+  lineSalesDiff?: number;
 }) {
   const isOmsPlaceholder = bill.transactionType === "คำสั่งซื้อ (OMS)";
   const hasFees =
@@ -54,13 +60,24 @@ export function BillDocument({
     bill.feeExtraLines.length > 0 ||
     bill.feeTotal !== 0;
 
-  const isOmsChannel = channel === "Shopee" || channel === "Facebook";
+  const isOmsChannel =
+    channel === "Shopee" ||
+    channel === "Facebook" ||
+    channel === "Lazada" ||
+    channel === "LINE" ||
+    channel === "Other";
   const channelLabel =
     channel === "Shopee"
       ? "Shopee"
       : channel === "Facebook"
         ? "Facebook"
-        : "TikTok Shop";
+        : channel === "Lazada"
+          ? "Lazada"
+          : channel === "LINE"
+            ? "LINE OA"
+            : channel === "Other"
+              ? "Other"
+              : "TikTok Shop";
   const cpb = bill.customerPaymentBreakdown;
   const customerPaidTotal = cpb?.total ?? bill.customerPayment;
   const hasCustomerPaymentSection = customerPaidTotal > 0;
@@ -473,6 +490,106 @@ export function BillDocument({
               </p>
             ) : null}
           </div>
+        </section>
+      ) : null}
+
+      {channel === "LINE" && lineComparisonStatus ? (
+        <section
+          className={
+            lineComparisonStatus === "amount_diff"
+              ? "mx-4 mt-3.5 rounded-xl border border-amber-300 bg-amber-50/90 p-3.5 text-xs text-amber-950 sm:mx-6"
+              : lineComparisonStatus === "orders_only"
+                ? "mx-4 mt-3.5 rounded-xl border border-sky-300 bg-sky-50/90 p-3 text-xs text-sky-950 sm:mx-6"
+                : "mx-4 mt-3.5 rounded-xl border border-emerald-300 bg-emerald-50/80 p-3 text-xs text-emerald-950 sm:mx-6"
+          }
+        >
+          {lineComparisonStatus === "amount_diff" ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 pb-2">
+                <div className="flex items-center gap-1.5 font-extrabold text-[13px] text-amber-900">
+                  <IconAlert size={16} className="shrink-0 text-amber-600" />
+                  <span>
+                    เปรียบเทียบข้อมูล 2 ไฟล์ LINE OA: ยอดขายออเดอร์และไฟล์สินค้าไม่ตรงกัน
+                  </span>
+                </div>
+                <Badge
+                  variant="warning"
+                  size="sm"
+                  className="border-amber-300 bg-white font-bold text-amber-900"
+                >
+                  ส่วนต่าง{" "}
+                  {lineSalesDiff && lineSalesDiff > 0
+                    ? `+${formatTHB(lineSalesDiff)}`
+                    : formatTHB(lineSalesDiff ?? 0)}
+                </Badge>
+              </div>
+              <div className="mt-2.5 rounded-lg border border-amber-200 bg-white p-2.5 text-[#1e293b]">
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center justify-between gap-2 font-bold text-emerald-800">
+                    <span>
+                      1. ยอดขายที่ถูกต้อง (ยึดตามไฟล์ออเดอร์ LINE OA · ใช้ยื่นภาษี)
+                    </span>
+                    <span className="mono">{formatTHB(bill.incomeTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-[#475569]">
+                    <span>
+                      2. ยอดขายออเดอร์ในไฟล์สินค้า Shipnity เดิม (oms_items)
+                    </span>
+                    <span className="mono font-semibold">
+                      {formatTHB(omsItemsSalesAmount ?? 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 border-t border-dashed border-amber-200 pt-1 font-extrabold text-amber-900">
+                    <span>= ส่วนต่างระหว่างไฟล์ออเดอร์กับไฟล์สินค้า</span>
+                    <span className="mono">
+                      {lineSalesDiff && lineSalesDiff > 0
+                        ? `+${formatTHB(lineSalesDiff)}`
+                        : formatTHB(lineSalesDiff ?? 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {omsNote ? (
+                <p className="mt-2 text-[11.5px] text-amber-900">
+                  • <strong>หมายเหตุในไฟล์ Shipnity:</strong>{" "}
+                  <span className="rounded bg-white px-1.5 py-0.5 font-bold text-amber-950">
+                    {omsNote}
+                  </span>
+                </p>
+              ) : null}
+            </>
+          ) : lineComparisonStatus === "orders_only" ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-sky-900">
+                <span>
+                  📄 มีเฉพาะไฟล์ออเดอร์ LINE OA (ยอดขาย {formatTHB(bill.incomeTotal)}) · รออัปโหลดไฟล์สินค้า (SKU)
+                </span>
+              </div>
+              <Badge
+                variant="neutral"
+                size="sm"
+                className="border-sky-300 bg-white font-bold text-sky-900"
+              >
+                รอไฟล์สินค้า
+              </Badge>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                <IconCheckCircle size={15} className="shrink-0 text-emerald-600" />
+                <span>
+                  ข้อมูลตรงกันทั้ง 2 ไฟล์ (ไฟล์ออเดอร์ LINE OA และไฟล์สินค้า Shipnity มียอดขายตรงกัน {formatTHB(bill.incomeTotal)})
+                </span>
+              </div>
+              <Badge
+                variant="success"
+                size="sm"
+                className="border-emerald-300 bg-white font-bold text-emerald-900"
+              >
+                ตรงกัน 100%
+              </Badge>
+            </div>
+          )}
         </section>
       ) : null}
 

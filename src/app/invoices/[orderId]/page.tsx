@@ -88,11 +88,17 @@ export default async function InvoicePage({
                     ? "shopee"
                     : row.channel === "Facebook"
                       ? "facebook"
-                      : "default"
+                      : row.channel === "Lazada"
+                        ? "lazada"
+                        : row.channel === "LINE"
+                          ? "line"
+                          : row.channel === "Other"
+                            ? "other"
+                            : "default"
                 }
                 size="sm"
               >
-                {row.channel || "TikTok"}
+                {row.channel === "LINE" ? "LINE OA" : row.channel || "TikTok"}
               </Badge>
               {row.orderCode ? (
                 <span className="mono text-xs font-semibold text-slate-600">

@@ -404,7 +404,13 @@ export function BillPreviewModal({
                       ? "shopee"
                       : row.channel === "Facebook"
                         ? "facebook"
-                        : "default"
+                        : row.channel === "Lazada"
+                          ? "lazada"
+                          : row.channel === "LINE"
+                            ? "line"
+                            : row.channel === "Other"
+                              ? "other"
+                              : "default"
                   }
                   size="sm"
                 >
@@ -412,7 +418,13 @@ export function BillPreviewModal({
                     ? "Shopee"
                     : row.channel === "Facebook"
                       ? "Facebook"
-                      : "TikTok"}
+                      : row.channel === "Lazada"
+                        ? "Lazada"
+                        : row.channel === "LINE"
+                          ? "LINE OA"
+                          : row.channel === "Other"
+                            ? "Other"
+                            : "TikTok"}
                 </Badge>
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
@@ -698,6 +710,9 @@ export function BillPreviewModal({
                 omsItems={row.omsItems}
                 omsNote={row.omsNote}
                 isNoProductPriceOrder={row.isNoProductPriceOrder}
+                omsItemsSalesAmount={row.omsItemsSalesAmount}
+                lineComparisonStatus={row.lineComparisonStatus}
+                lineSalesDiff={row.lineSalesDiff}
                 source={{
                   filename: row.importFilename ?? "ไฟล์นำเข้าระบบ",
                   importedAt: row.importImportedAt ?? row.createdAt,

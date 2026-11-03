@@ -60,7 +60,11 @@ export function computeAbbreviatedSummary(
   }
 
   const isOmsChannel =
-    invoice.channel === "Shopee" || invoice.channel === "Facebook";
+    invoice.channel === "Shopee" ||
+    invoice.channel === "Facebook" ||
+    invoice.channel === "Lazada" ||
+    invoice.channel === "LINE" ||
+    invoice.channel === "Other";
 
   // แยก Logic ระหว่าง Shopee/Facebook (ข้อมูลจาก Shipnity เท่านั้น) กับ TikTok (ข้อมูลจากไฟล์รายได้ + Shipnity)
   const platformSubsidyAmount = isOmsChannel
@@ -193,7 +197,14 @@ export function getOrderedInvoiceBreakdownLines(
   options?: { useCustomerPaidBase?: boolean },
 ): { key: string; label: string; amount: number }[] {
   const isOmsChannel =
-    invoice.channel === "Shopee" || invoice.channel === "Facebook";
+    invoice.channel === "Shopee" ||
+    invoice.channel === "Facebook" ||
+    invoice.channel === "Lazada" ||
+    invoice.channel === "LINE" ||
+    invoice.channel === "Other";
+  if (invoice.channel === "Lazada") {
+    return (invoice.extraBreakdownLines ?? []).filter((line) => line.amount !== 0);
+  }
   if (isOmsChannel) {
     const custShippingFee = round2(
       invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
@@ -299,6 +310,8 @@ export function getOrderedInvoiceBreakdownLines(
       if (
         invoice.channel !== "Shopee" &&
         invoice.channel !== "Facebook" &&
+        invoice.channel !== "LINE" &&
+        invoice.channel !== "Other" &&
         invoice.shippingActual < 0
       ) {
         const platformDiscount = Math.max(
@@ -445,7 +458,13 @@ export function InvoiceDocument({
       ? "Shopee"
       : invoice.channel === "Facebook"
         ? "Facebook"
-        : "TikTok Shop";
+        : invoice.channel === "Lazada"
+          ? "Lazada"
+          : invoice.channel === "LINE"
+            ? "LINE OA"
+            : invoice.channel === "Other"
+              ? "Other"
+              : "TikTok Shop";
 
   const isFull = mode === "full";
   const hasRichItems = invoice.items.some((item) => item.unitPrice !== undefined);
