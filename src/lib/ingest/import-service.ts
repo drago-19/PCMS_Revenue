@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import {
+  detectAndParseLazadaInput,
+  isItemPriceTransactionName,
+  type LazadaNormalizedTransaction,
+} from "./lazada-parse";
+import {
   query,
   queryOne,
   withTransaction,
@@ -7,7 +12,10 @@ import {
 } from "../db";
 import { compressFileBlob } from "../file-blob";
 import { SELLER } from "../seller";
-import { INVOICE_ELIGIBLE_SQL } from "../invoice-eligibility";
+import {
+  BILLABLE_COMPENSATION_SQL,
+  INVOICE_ELIGIBLE_SQL,
+} from "../invoice-eligibility";
 import { round2 } from "../format";
 import {
   getReportTotal,
@@ -279,15 +287,27 @@ export async function saveOmsOrdersBatch(
         order_code = EXCLUDED.order_code,
         import_id = EXCLUDED.import_id,
         channel = EXCLUDED.channel,
-        customer_name = COALESCE(EXCLUDED.customer_name, oms_orders.customer_name),
+        customer_name = CASE
+          WHEN EXCLUDED.customer_name IS NOT NULL AND EXCLUDED.customer_name NOT IN ('', 'ลูกค้า Lazada') THEN EXCLUDED.customer_name
+          WHEN oms_orders.customer_name IS NOT NULL AND oms_orders.customer_name NOT IN ('', 'ลูกค้า Lazada') THEN oms_orders.customer_name
+          ELSE COALESCE(EXCLUDED.customer_name, oms_orders.customer_name)
+        END,
         customer_phone = COALESCE(EXCLUDED.customer_phone, oms_orders.customer_phone),
         contact_name = COALESCE(EXCLUDED.contact_name, oms_orders.contact_name),
-        courier = COALESCE(EXCLUDED.courier, oms_orders.courier),
+        courier = CASE
+          WHEN EXCLUDED.courier IS NOT NULL AND EXCLUDED.courier NOT IN ('', 'Lazada Logistics') THEN EXCLUDED.courier
+          WHEN oms_orders.courier IS NOT NULL AND oms_orders.courier NOT IN ('', 'Lazada Logistics') THEN oms_orders.courier
+          ELSE COALESCE(EXCLUDED.courier, oms_orders.courier)
+        END,
         shipping_fee_customer = EXCLUDED.shipping_fee_customer,
         shipping_fee_seller = EXCLUDED.shipping_fee_seller,
         province = COALESCE(EXCLUDED.province, oms_orders.province),
         bank = COALESCE(EXCLUDED.bank, oms_orders.bank),
-        tracking_no = COALESCE(EXCLUDED.tracking_no, oms_orders.tracking_no),
+        tracking_no = CASE
+          WHEN EXCLUDED.tracking_no IS NOT NULL AND EXCLUDED.tracking_no <> '' AND EXCLUDED.tracking_no NOT LIKE 'TH1JWSSKAK-%' THEN EXCLUDED.tracking_no
+          WHEN oms_orders.tracking_no IS NOT NULL AND oms_orders.tracking_no <> '' AND oms_orders.tracking_no NOT LIKE 'TH1JWSSKAK-%' THEN oms_orders.tracking_no
+          ELSE COALESCE(EXCLUDED.tracking_no, oms_orders.tracking_no)
+        END,
         note = COALESCE(EXCLUDED.note, oms_orders.note),
         created_by = COALESCE(EXCLUDED.created_by, oms_orders.created_by),
         created_date = CASE WHEN EXCLUDED.created_date <> '' THEN EXCLUDED.created_date ELSE oms_orders.created_date END,
@@ -303,7 +323,7 @@ export async function saveOmsOrdersBatch(
         sales_amount = EXCLUDED.sales_amount,
         profit_amount = EXCLUDED.profit_amount,
         matched_external_id = CASE
-          WHEN EXCLUDED.channel IN ('Shopee', 'Facebook') THEN NULL
+          WHEN EXCLUDED.channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') THEN NULL
           WHEN oms_orders.marketplace_order_norm IS DISTINCT FROM EXCLUDED.marketplace_order_norm THEN NULL
           ELSE oms_orders.matched_external_id
         END,
@@ -312,6 +332,27 @@ export async function saveOmsOrdersBatch(
       client,
     );
   }
+
+  // เติม shop_name อัตโนมัติสำหรับออเดอร์ที่ยังไม่มีไฟล์สินค้า แต่ระบุอีเมลผู้สร้างของร้านชัดเจน
+  await query(
+    `UPDATE oms_orders
+     SET shop_name = CASE
+       WHEN created_by ILIKE '%kissiestudio%' THEN 'Kissi Studio'
+       WHEN created_by ILIKE '%homepong%' OR created_by ILIKE '%plkshopee%' OR created_by ILIKE '%kukid%' THEN 'Kiddee Shop'
+       ELSE shop_name
+     END
+     WHERE import_id = $1
+       AND shop_name IS NULL
+       AND created_by IS NOT NULL
+       AND (
+         created_by ILIKE '%kissiestudio%'
+         OR created_by ILIKE '%homepong%'
+         OR created_by ILIKE '%plkshopee%'
+         OR created_by ILIKE '%kukid%'
+       )`,
+    [importId],
+    client,
+  );
 }
 
 export async function saveOmsItemsBatch(
@@ -489,30 +530,30 @@ export async function reconcileAndSyncThreeFiles(
   fallbackImportId: number,
   nowIso: string,
 ): Promise<{ matchedOrders: number; syncedOmsBills: number }> {
-  // 0. Enforce TikTok, Shopee & Facebook policy on newly imported rows (scoped by import_id to avoid full-table scans)
+  // 0. Enforce TikTok, Shopee, Facebook, LINE & Other policy on newly imported rows (scoped by import_id to avoid full-table scans)
   await query(
-    `DELETE FROM oms_order_items WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook')`,
+    `DELETE FROM oms_order_items WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')`,
     [fallbackImportId],
     client,
   );
   await query(
-    `DELETE FROM oms_orders WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook')`,
+    `DELETE FROM oms_orders WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')`,
     [fallbackImportId],
     client,
   );
   await query(
-    `DELETE FROM transactions WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook')`,
+    `DELETE FROM transactions WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')`,
     [fallbackImportId],
     client,
   );
 
-  // 0b. Never allow Shopee or Facebook OMS orders to hold a TikTok Settlement matched_external_id,
+  // 0b. Never allow Shopee, Facebook, LINE or Other OMS orders to hold a TikTok Settlement matched_external_id,
   //     and never allow TikTok Settlement rows to have channel <> 'TikTok'
   await query(
     `UPDATE oms_orders
      SET matched_external_id = NULL,
           updated_at = now()
-     WHERE channel IN ('Shopee', 'Facebook')
+     WHERE channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        AND matched_external_id IS NOT NULL`,
     [],
     client,
@@ -618,20 +659,32 @@ export async function reconcileAndSyncThreeFiles(
     .map((r) => String(r.paid_date ?? ""))
     .filter((d) => d && d !== "unknown");
 
-  // 4. For TikTok, Shopee & Facebook OMS orders that do NOT have a Settlement row (newly imported or not yet in transactions),
+  // 4. For TikTok, Shopee, Facebook, LINE & Other OMS orders that do NOT have a Settlement row (newly imported or not yet in transactions),
   //    create/upsert a bill row in transactions so they appear in /bills and can be tracked.
-  //    For Shopee & Facebook, filter out unpaid/unshipped/zero-sales orders so they are never taxed.
+  //    - Shopee & Facebook: filter out unpaid/unshipped/zero-sales orders so they are never taxed.
+  //    - LINE: require paid_date and sales_amount > 0.
+  //    - Other: allow orders with paid_date or created_date (including 0-baht internal sample orders).
   const unmatchedRows = await query<Record<string, unknown>>(
     `SELECT o.*
      FROM oms_orders o
      WHERE o.matched_external_id IS NULL
-       AND COALESCE(NULLIF(o.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+       AND COALESCE(NULLIF(o.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'LINE', 'Other')
        AND (
          COALESCE(NULLIF(o.channel, ''), 'TikTok') = 'TikTok'
          OR (
-           o.sales_amount > 0
+           o.channel IN ('Shopee', 'Facebook')
+           AND o.sales_amount > 0
            AND o.paid_date IS NOT NULL AND o.paid_date <> ''
            AND ((o.tracking_no IS NOT NULL AND o.tracking_no <> '') OR (o.printed_date IS NOT NULL AND o.printed_date <> ''))
+         )
+         OR (
+           o.channel = 'LINE'
+           AND o.sales_amount > 0
+           AND o.paid_date IS NOT NULL AND o.paid_date <> ''
+         )
+         OR (
+           o.channel = 'Other'
+           AND ((o.paid_date IS NOT NULL AND o.paid_date <> '') OR (o.created_date IS NOT NULL AND o.created_date <> ''))
          )
        )
        AND (
@@ -683,11 +736,30 @@ export async function reconcileAndSyncThreeFiles(
       const productBeforeDiscount = round2(productAfterDiscount + discountTotal);
       const incomeTotal = salesAmount;
       const feeTotal = round2(-shippingSeller);
-      // AGENTS.md Rule 3 & 4:
-      // - TikTok Settlement: uses Settlement file directly. For OMS temp row: salesAmount - shippingSeller
-      // - Shopee & Facebook: uses profit_amount from Shipnity directly 100% as payout
-      const payout = channel === "TikTok" ? netOmsPayout : profitAmount;
-      const cogs = channel === "TikTok" ? 0 : cogsAmount;
+      // AGENTS.md Rule 3 & 4 (Strict Platform Financial Isolation):
+      // - TikTok OMS temp row: payout = salesAmount - shippingSeller, cogs = 0
+      // - Shopee, Facebook, LINE, Other (Shipnity 2-file channels): payout = salesAmount - shippingSeller (net cash for tax), cogs = cogsAmount
+      let payout = netOmsPayout;
+      let cogs = 0;
+      if (channel === "TikTok") {
+        payout = netOmsPayout;
+        cogs = 0;
+      } else if (channel === "Shopee") {
+        payout = netOmsPayout;
+        cogs = cogsAmount;
+      } else if (channel === "Facebook") {
+        payout = netOmsPayout;
+        cogs = cogsAmount;
+      } else if (channel === "Lazada") {
+        payout = netOmsPayout;
+        cogs = 0;
+      } else if (channel === "LINE") {
+        payout = netOmsPayout;
+        cogs = cogsAmount;
+      } else if (channel === "Other") {
+        payout = netOmsPayout;
+        cogs = cogsAmount;
+      }
 
       const normalized: NormalizedTransaction = {
         externalId,
@@ -716,6 +788,7 @@ export async function reconcileAndSyncThreeFiles(
           adjustment: 0,
           payout,
           cogs,
+          shipnityProfit: profitAmount,
         },
         mappedFields: [
           "orderId",
@@ -869,9 +942,75 @@ export async function reconcileAndSyncThreeFiles(
      FROM oms_orders o
      WHERE i.order_uid = o.order_uid
        AND (i.import_id = $1 OR o.import_id = $1)
-       AND o.channel IN ('TikTok', 'Shopee', 'Facebook')
+       AND o.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        AND i.channel IS DISTINCT FROM o.channel`,
     [fallbackImportId],
+    client,
+  );
+
+  // 5c. Link TikTok Platform Compensation rows ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') to oms_orders and shop_name
+  await query(
+    `UPDATE transactions t
+     SET order_code = o.order_code,
+         oms_order_uid = o.order_uid,
+         shop_name = COALESCE(o.shop_name, t.shop_name),
+         channel = 'TikTok'
+     FROM oms_orders o
+     WHERE t.is_order = 0
+       AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+       AND (t.import_id = $1 OR o.import_id = $1 OR t.order_code IS NULL OR t.shop_name IS NULL)
+       AND o.marketplace_order_norm IS NOT NULL
+       AND o.marketplace_order_norm <> ''
+       AND (
+         COALESCE(NULLIF(t.related_order_id, ''), t.normalized_json->'fields'->>'relatedOrderId') = o.marketplace_order_norm
+         OR (
+           o.marketplace_order_prefix IS NOT NULL
+           AND LENGTH(o.marketplace_order_prefix) >= 14
+           AND LEFT(COALESCE(NULLIF(t.related_order_id, ''), t.normalized_json->'fields'->>'relatedOrderId', ''), 15) = o.marketplace_order_prefix
+         )
+       )
+       AND (
+         t.order_code IS DISTINCT FROM o.order_code
+         OR t.oms_order_uid IS DISTINCT FROM o.order_uid
+         OR t.shop_name IS NULL
+       )`,
+    [fallbackImportId],
+    client,
+  );
+
+  await query(
+    `UPDATE transactions t
+     SET shop_name = ord.shop_name
+     FROM transactions ord
+     WHERE t.is_order = 0
+       AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+       AND (t.shop_name IS NULL OR t.shop_name = '')
+       AND ord.is_order = 1
+       AND ord.shop_name IS NOT NULL AND ord.shop_name <> ''
+       AND ord.external_id = COALESCE(NULLIF(t.related_order_id, ''), t.normalized_json->'fields'->>'relatedOrderId')`,
+    [],
+    client,
+  );
+
+  await query(
+    `UPDATE transactions t
+     SET shop_name = COALESCE(
+       (
+         SELECT t2.shop_name
+         FROM transactions t2
+         WHERE t2.import_id = t.import_id
+           AND t2.shop_name IS NOT NULL AND t2.shop_name <> ''
+         GROUP BY t2.shop_name
+         ORDER BY COUNT(*) DESC
+         LIMIT 1
+       ),
+       'Kiddee Shop'
+     )
+     WHERE t.is_order = 0
+       AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+       AND t.payout > 0
+       AND (t.shop_name IS NULL OR t.shop_name = '')`,
+    [],
     client,
   );
 
@@ -884,7 +1023,7 @@ export async function reconcileAndSyncThreeFiles(
        UNION
        SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE import_id = $1 AND oms_order_uid IS NOT NULL AND oms_order_uid <> ''
        UNION
-       SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE is_order = 1 AND oms_order_uid IS NOT NULL AND oms_order_uid <> '' AND product_detail IS NULL
+       SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE (is_order = 1 OR transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')) AND oms_order_uid IS NOT NULL AND oms_order_uid <> '' AND product_detail IS NULL
      ),
      item_summary AS (
        SELECT
@@ -940,10 +1079,10 @@ export async function syncMonthlyInvoiceRegistry(
   const scoped = importId !== undefined && importId !== null;
   const candidatesSql = scoped
     ? `cand AS (
-         SELECT t.external_id FROM transactions t WHERE t.is_order = 1 AND t.import_id = $1
+         SELECT t.external_id FROM transactions t WHERE (t.is_order = 1 OR ${BILLABLE_COMPENSATION_SQL}) AND t.import_id = $1
          UNION
          SELECT t.external_id FROM oms_orders o
-         JOIN transactions t ON t.oms_order_uid = o.order_uid AND t.is_order = 1
+         JOIN transactions t ON t.oms_order_uid = o.order_uid AND (t.is_order = 1 OR ${BILLABLE_COMPENSATION_SQL})
          WHERE o.import_id = $1
          UNION
          SELECT t.external_id FROM oms_orders o
@@ -951,13 +1090,13 @@ export async function syncMonthlyInvoiceRegistry(
          WHERE o.import_id = $1
          UNION
          SELECT t.external_id FROM oms_order_items i
-         JOIN transactions t ON t.oms_order_uid = i.order_uid AND t.is_order = 1
+         JOIN transactions t ON t.oms_order_uid = i.order_uid AND (t.is_order = 1 OR ${BILLABLE_COMPENSATION_SQL})
          WHERE i.import_id = $1
          UNION
          SELECT r.order_id FROM invoice_registry r WHERE r.seq IS NULL
        )`
     : `cand AS (
-         SELECT t.external_id FROM transactions t WHERE t.is_order = 1 AND $1::int IS NULL
+         SELECT t.external_id FROM transactions t WHERE (t.is_order = 1 OR ${BILLABLE_COMPENSATION_SQL}) AND $1::int IS NULL
          UNION
          SELECT r.order_id FROM invoice_registry r WHERE $1::int IS NULL
        )`;
@@ -1043,7 +1182,7 @@ export async function syncMonthlyInvoiceRegistry(
        SELECT n.external_id, n.channel, n.yymm,
               COALESCE(mx.max_seq, 0) + ROW_NUMBER() OVER (
                 PARTITION BY n.yymm
-                ORDER BY CASE n.channel WHEN 'TikTok' THEN 1 WHEN 'Shopee' THEN 2 WHEN 'Facebook' THEN 3 ELSE 4 END ASC,
+                ORDER BY CASE n.channel WHEN 'TikTok' THEN 1 WHEN 'Shopee' THEN 2 WHEN 'Facebook' THEN 3 WHEN 'Lazada' THEN 4 WHEN 'LINE' THEN 5 WHEN 'Other' THEN 6 ELSE 7 END ASC,
                          n.eff_date ASC, n.external_id ASC
               ) AS seq
        FROM newo n
@@ -1120,7 +1259,7 @@ export async function refreshSummaryTables(
       `INSERT INTO daily_summaries (
          paid_date, transaction_count, order_count, order_payout, order_income,
          order_fees, other_count, other_payout, total_payout, adjustment,
-         tiktok_count, shopee_count, facebook_count,
+         tiktok_count, shopee_count, facebook_count, lazada_count, line_count, other_channel_count, compensation_count,
          linked_count, oms_only_count, unlinked_count, mismatch_count,
          shipping_positive, shipping_negative, updated_at
        )
@@ -1138,6 +1277,10 @@ export async function refreshSummaryTables(
          SUM(CASE WHEN is_order = 1 AND channel = 'TikTok' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'Lazada' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int,
@@ -1151,7 +1294,7 @@ export async function refreshSummaryTables(
          now()
        FROM transactions
        WHERE paid_date = ANY($1::text[])
-         AND channel IN ('TikTok', 'Shopee', 'Facebook')
+         AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        GROUP BY paid_date`,
       [targetDates],
       client,
@@ -1162,7 +1305,7 @@ export async function refreshSummaryTables(
       `INSERT INTO daily_summaries (
          paid_date, transaction_count, order_count, order_payout, order_income,
          order_fees, other_count, other_payout, total_payout, adjustment,
-         tiktok_count, shopee_count, facebook_count,
+         tiktok_count, shopee_count, facebook_count, lazada_count, line_count, other_channel_count, compensation_count,
          linked_count, oms_only_count, unlinked_count, mismatch_count,
          shipping_positive, shipping_negative, updated_at
        )
@@ -1180,6 +1323,10 @@ export async function refreshSummaryTables(
          SUM(CASE WHEN is_order = 1 AND channel = 'TikTok' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'Lazada' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int,
+         SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int,
          SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int,
@@ -1193,7 +1340,7 @@ export async function refreshSummaryTables(
          now()
        FROM transactions
        WHERE paid_date <> '' AND paid_date <> 'unknown'
-         AND channel IN ('TikTok', 'Shopee', 'Facebook')
+         AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        GROUP BY paid_date`,
       [],
       client,
@@ -1209,7 +1356,7 @@ export async function refreshSummaryTables(
     await query(
       `INSERT INTO sku_summaries (
          sku_code, product_name, total_qty, order_count, gross_amount,
-         net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, updated_at
+         net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, lazada_qty, line_qty, other_qty, updated_at
        )
        SELECT
          i.sku_code,
@@ -1221,10 +1368,13 @@ export async function refreshSummaryTables(
          COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
          COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
          COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(CASE WHEN i.channel = 'Lazada' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int,
          now()
        FROM oms_order_items i
        WHERE i.sku_code = ANY($1::text[])
-         AND COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+         AND COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        GROUP BY i.sku_code`,
       [targetSkus],
       client,
@@ -1234,7 +1384,7 @@ export async function refreshSummaryTables(
     await query(
       `INSERT INTO sku_summaries (
          sku_code, product_name, total_qty, order_count, gross_amount,
-         net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, updated_at
+         net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, lazada_qty, line_qty, other_qty, updated_at
        )
        SELECT
          i.sku_code,
@@ -1246,9 +1396,12 @@ export async function refreshSummaryTables(
          COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
          COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
          COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(CASE WHEN i.channel = 'Lazada' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int,
+         COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int,
          now()
        FROM oms_order_items i
-       WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+       WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        GROUP BY i.sku_code`,
       [],
       client,
@@ -1470,6 +1623,311 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       headerSignature: omsParsed.headerSignature,
       newFormat: false,
       warnings: omsParsed.warnings,
+      reconciliation: emptyReconciliation,
+    };
+  }
+
+  const lazadaParsed = await detectAndParseLazadaInput(
+    options.buffer,
+    preloadedSheets,
+  );
+  if (lazadaParsed) {
+    const now = new Date().toISOString();
+    const fileLabel = "ไฟล์คำสั่งซื้อและรายได้ Lazada";
+
+    if (lazadaParsed.lazadaSubtype === "balance_transactions") {
+      reportProgress?.({
+        stage: "done",
+        percent: 100,
+        message:
+          "ข้ามไฟล์ประวัติฝาก-ถอนเงินกระเป๋า Lazada (Balance Transactions) อัตโนมัติ (ไม่มีเลขคำสั่งซื้อ)",
+        current: lazadaParsed.dataRowCount,
+        total: lazadaParsed.dataRowCount,
+      });
+      const systemOrderCount = await readSystemOrderCount();
+      return {
+        importId: 0,
+        duplicate: true,
+        filename: options.filename,
+        fileType: lazadaParsed.fileType,
+        status: "ok",
+        rowCount: lazadaParsed.dataRowCount,
+        orderCount: 0,
+        transactionCount: 0,
+        systemOrderCount,
+        periodStart: lazadaParsed.periodStart,
+        periodEnd: lazadaParsed.periodEnd,
+        headerSignature: lazadaParsed.headerSignature,
+        newFormat: false,
+        warnings: lazadaParsed.warnings,
+        reconciliation: {
+          matched: null,
+          orderCheckFailures: 0,
+          metrics: [],
+          reportAvailable: false,
+        },
+      };
+    }
+
+    reportProgress?.({
+      stage: "reconciling",
+      percent: 45,
+      message: `ตรวจพบ${fileLabel} จำนวน ${lazadaParsed.dataRowCount.toLocaleString("th-TH")} แถว (${lazadaParsed.orders.length.toLocaleString("th-TH")} ออเดอร์) กำลังบันทึกเข้าสู่ระบบ...`,
+    });
+
+    const emptyReport: ReportSummary = {
+      found: false,
+      sheetName: lazadaParsed.sheetName,
+      periodStart: lazadaParsed.periodStart,
+      periodEnd: lazadaParsed.periodEnd,
+      timezone: "UTC+7",
+      currency: "THB",
+      totals: {},
+      raw: [],
+    };
+    const emptyReconciliation: Reconciliation = {
+      matched: null,
+      orderCheckFailures: 0,
+      metrics: [],
+      reportAvailable: false,
+    };
+
+    const effectiveOrders = lazadaParsed.orders.length;
+
+    const { importId } = await withTransaction(async (client) => {
+      const inserted = await queryOne<{ id: string | number }>(
+        `INSERT INTO imports (
+          filename, file_hash, file_size, imported_at, source, sheet_name, header_row,
+          period_start, period_end, timezone, currency, header_signature, status,
+          row_count, transaction_count, order_count, warnings_json, mapping_json,
+          unknown_columns_json, report_json, reconciliation_json, file_type, file_blob
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+        RETURNING id`,
+        [
+          options.filename,
+          hash,
+          options.buffer.length,
+          now,
+          options.source ?? "upload",
+          lazadaParsed.sheetName,
+          lazadaParsed.headerRow,
+          lazadaParsed.periodStart,
+          lazadaParsed.periodEnd,
+          "UTC+7",
+          "THB",
+          lazadaParsed.headerSignature,
+          "ok",
+          lazadaParsed.dataRowCount,
+          lazadaParsed.transactions.length,
+          effectiveOrders,
+          JSON.stringify(lazadaParsed.warnings),
+          JSON.stringify(lazadaParsed.mapping),
+          JSON.stringify([]),
+          JSON.stringify(emptyReport),
+          JSON.stringify(emptyReconciliation),
+          lazadaParsed.fileType,
+          compressFileBlob(options.buffer),
+        ],
+        client,
+      );
+      const id = Number(inserted!.id);
+
+      reportProgress?.({
+        stage: "saving",
+        percent: 70,
+        message: `กำลังบันทึก${fileLabel} และผูกข้อมูลร้าน Kiddee Shop...`,
+      });
+
+      if (lazadaParsed.orders.length > 0) {
+        await saveOmsOrdersBatch(lazadaParsed.orders, id, client);
+      }
+      if (lazadaParsed.items.length > 0) {
+        await saveOmsItemsBatch(lazadaParsed.items, id, client);
+      }
+
+      await query(
+        `UPDATE oms_orders SET shop_name = 'Kiddee Shop' WHERE import_id = $1 AND channel = 'Lazada'`,
+        [id],
+        client,
+      );
+
+      const touchedLazadaPaidDates = new Set<string>();
+      const BATCH_SIZE = 300;
+      for (let start = 0; start < lazadaParsed.transactions.length; start += BATCH_SIZE) {
+        const chunk = lazadaParsed.transactions.slice(start, start + BATCH_SIZE);
+        const extIds = chunk.map((t) => t.externalId);
+        const orderUidsInChunk = chunk.map((t) => t.omsOrderUid);
+
+        const existingRows = await query<{
+          external_id: string;
+          oms_order_uid: string | null;
+          paid_date: string | null;
+          income: string | number;
+          fee_total: string | number;
+          payout: string | number;
+          normalized_json: unknown;
+        }>(
+          `SELECT external_id, oms_order_uid, paid_date, income, fee_total, payout, normalized_json
+           FROM transactions
+           WHERE is_order = 1
+             AND channel = 'Lazada'
+             AND (
+               external_id = ANY($1::text[])
+               OR oms_order_uid = ANY($2::text[])
+             )`,
+          [extIds, orderUidsInChunk],
+          client,
+        );
+        for (const r of existingRows) {
+          if (r.paid_date) touchedLazadaPaidDates.add(String(r.paid_date));
+        }
+        const existingByExt = new Map(
+          existingRows.map((r) => [String(r.external_id), r]),
+        );
+
+        const params: unknown[] = [];
+        const placeholders: string[] = [];
+
+        for (let i = 0; i < chunk.length; i++) {
+          let tx: LazadaNormalizedTransaction = chunk[i]!;
+          const prev = existingByExt.get(tx.externalId);
+
+          if (prev) {
+            const prevNorm =
+              typeof prev.normalized_json === "string"
+                ? (JSON.parse(prev.normalized_json) as NormalizedTransaction)
+                : ((prev.normalized_json as NormalizedTransaction) ?? tx);
+            const prevHasFees =
+              Number(prev.fee_total ?? 0) < 0 ||
+              (prevNorm.unknownValues ?? []).some((u) => u.amount < 0);
+
+            if (lazadaParsed.lazadaSubtype === "order_export" && prevHasFees) {
+              // Keep existing financial statement breakdown; only update omsOrderUid & buyer metadata
+              tx = {
+                ...prevNorm,
+                omsOrderUid: tx.omsOrderUid,
+                raw: {
+                  ...prevNorm.raw,
+                  ...tx.raw,
+                },
+              };
+            } else {
+              // Check if new tx is a fee-refund-only supplement (no item price line) while prev had item price
+              const newRawKeys = Object.keys(tx.raw ?? {});
+              const newHasItemPrice = newRawKeys.some((k) =>
+                isItemPriceTransactionName(k),
+              );
+              const prevRawKeys = Object.keys(prevNorm.raw ?? {});
+              const prevHadItemPrice = prevRawKeys.some((k) =>
+                isItemPriceTransactionName(k),
+              );
+              if (
+                lazadaParsed.lazadaSubtype === "statement_detailed" &&
+                !newHasItemPrice &&
+                prevHadItemPrice
+              ) {
+                tx = {
+                  ...prevNorm,
+                  omsOrderUid: tx.omsOrderUid,
+                };
+              }
+            }
+          }
+
+          const income = round2(Number(tx.fields.incomeTotal ?? 0));
+          const feeTotal = round2(Number(tx.fields.feeTotal ?? 0));
+          const payout = round2(Number(tx.fields.payout ?? 0));
+          const base = i * 23;
+          placeholders.push(
+            `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16}::jsonb,$${base + 17}::jsonb,$${base + 18}::jsonb,$${base + 19},$${base + 20},$${base + 21},$${base + 22},$${base + 23})`,
+          );
+          params.push(
+            id,
+            tx.externalId,
+            tx.transactionType,
+            1,
+            tx.createdAt,
+            tx.paidAt,
+            "THB",
+            income,
+            feeTotal,
+            0,
+            payout,
+            tx.externalId,
+            null,
+            null,
+            null,
+            JSON.stringify(tx.checks),
+            JSON.stringify(tx.warnings),
+            JSON.stringify(tx),
+            now,
+            "Lazada",
+            tx.externalId,
+            tx.omsOrderUid,
+            "Kiddee Shop",
+          );
+        }
+
+        await query(
+          `DELETE FROM transactions
+           WHERE is_order = 1
+             AND (
+               external_id = ANY($1::text[])
+               OR oms_order_uid = ANY($2::text[])
+             )`,
+          [extIds, orderUidsInChunk],
+          client,
+        );
+
+        await query(
+          `INSERT INTO transactions (
+            import_id, external_id, transaction_type, is_order, created_date, paid_date,
+            currency, income, fee_total, adjustment, payout, related_order_id,
+            product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
+            normalized_json, created_at, channel, order_code, oms_order_uid, shop_name
+          ) VALUES ${placeholders.join(", ")}`,
+          params,
+          client,
+        );
+      }
+
+      if (lazadaParsed.transactions.length > 0) {
+        await reconcileAndSyncThreeFiles(client, id, now);
+        if (touchedLazadaPaidDates.size > 0) {
+          await refreshSummaryTables(client, {
+            dates: [...touchedLazadaPaidDates],
+          });
+        }
+      }
+
+      return { importId: id };
+    });
+
+    reportProgress?.({
+      stage: "done",
+      percent: 100,
+      message: `นำเข้า${fileLabel} สำเร็จ (${lazadaParsed.dataRowCount.toLocaleString("th-TH")} แถว · ${effectiveOrders.toLocaleString("th-TH")} ออเดอร์)`,
+      current: lazadaParsed.dataRowCount,
+      total: lazadaParsed.dataRowCount,
+    });
+
+    const systemOrderCount = await readSystemOrderCount();
+
+    return {
+      importId,
+      duplicate: false,
+      filename: options.filename,
+      fileType: lazadaParsed.fileType,
+      status: "ok",
+      rowCount: lazadaParsed.dataRowCount,
+      orderCount: effectiveOrders,
+      transactionCount: lazadaParsed.transactions.length,
+      systemOrderCount,
+      periodStart: lazadaParsed.periodStart,
+      periodEnd: lazadaParsed.periodEnd,
+      headerSignature: lazadaParsed.headerSignature,
+      newFormat: false,
+      warnings: lazadaParsed.warnings,
       reconciliation: emptyReconciliation,
     };
   }

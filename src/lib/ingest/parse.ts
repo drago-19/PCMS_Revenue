@@ -189,6 +189,13 @@ export function parseCsvToRows(buffer: Buffer): Primitive[][] {
   if (text.charCodeAt(0) === 0xfeff) {
     text = text.slice(1);
   }
+  // Auto-detect CSV delimiter (comma vs semicolon) from the first non-empty line
+  const firstLineEnd = text.search(/\r|\n/);
+  const firstLine = firstLineEnd >= 0 ? text.slice(0, firstLineEnd) : text;
+  const commaCount = (firstLine.match(/,/g) ?? []).length;
+  const semiCount = (firstLine.match(/;/g) ?? []).length;
+  const delimiter = semiCount > commaCount ? ";" : ",";
+
   const rows: Primitive[][] = [];
   let currentRow: Primitive[] = [];
   let currentField = "";
@@ -210,7 +217,7 @@ export function parseCsvToRows(buffer: Buffer): Primitive[][] {
     } else {
       if (ch === '"') {
         inQuotes = true;
-      } else if (ch === ",") {
+      } else if (ch === delimiter) {
         currentRow.push(currentField.trim());
         currentField = "";
       } else if (ch === "\r" || ch === "\n") {

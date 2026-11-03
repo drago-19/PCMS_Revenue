@@ -11,7 +11,7 @@ import {
 import { round2 } from "../format";
 import { lookupCustomFieldKey } from "../column-mapping-settings";
 
-export type DetectedFileType = "settlement" | "oms_orders" | "oms_items";
+export type DetectedFileType = "settlement" | "oms_orders" | "oms_items" | "lazada_orders";
 
 export function buildOmsOrderUid(
   orderCode: string,
@@ -132,7 +132,8 @@ export function normalizeChannel(raw: Primitive | undefined): string {
   }
   if (lower.includes("facebook") || lower === "fb" || lower.includes("เพจ")) return "Facebook";
   if (lower.includes("lazada")) return "Lazada";
-  if (lower.includes("line")) return "LINE";
+  if (lower.includes("line") || lower.includes("ไลน์")) return "LINE";
+  if (lower === "other" || lower.includes("อื่นๆ") || lower.includes("อื่น ๆ")) return "Other";
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
@@ -547,7 +548,16 @@ export async function detectAndParseOmsInput(
         if (!orderCode) continue;
 
         const channel = normalizeChannel(get("channel"));
-        if (channel !== "TikTok" && channel !== "Shopee" && channel !== "Facebook") continue;
+        if (
+          channel !== "TikTok" &&
+          channel !== "Shopee" &&
+          channel !== "Facebook" &&
+          channel !== "Lazada" &&
+          channel !== "LINE" &&
+          channel !== "Other"
+        ) {
+          continue;
+        }
 
         totalDataRows++;
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";
@@ -556,11 +566,43 @@ export async function detectAndParseOmsInput(
         const printedDate = parseDateValue(get("printedDate")).iso ?? "";
         const trackingNo = cleanText(get("trackingNo"));
 
-        // กฎการกรองบิล Shopee & Facebook:
-        // ตัดบิลที่ยังไม่ได้ชำระเงิน (วันที่โอนเงิน = '-') หรือยังไม่ได้ส่งของ/ไม่มียอดขาย (ไม่มีเลขพัสดุและไม่ได้พิมพ์ใบปะหน้า) ทิ้ง ไม่นำมาคำนวณรายได้หรือยื่นภาษี
-        if (channel === "Shopee" || channel === "Facebook") {
+        // กฎการกรองบิลแยกตามช่องทาง (Strict Platform Financial Isolation):
+        // - Shopee & Facebook: ตัดบิลที่ยังไม่ได้ชำระเงิน (วันที่โอนเงิน = '-') หรือยังไม่ได้ส่งของ/ไม่มียอดขาย (ไม่มีเลขพัสดุและไม่ได้พิมพ์ใบปะหน้า) ทิ้ง
+        // - LINE (LINE OA): ต้องชำระเงินแล้วและมียอดขาย > 0 (บางออเดอร์ค้าส่งจัดส่งตรงโดยไม่พิมพ์ใบปะหน้าใน Shipnity)
+        // - Other: นำเข้าออเดอร์ที่มีวันที่โอนเงินหรือวันที่สร้าง (รองรับทั้งออเดอร์ขายและออเดอร์เบิกส่งใช้งานภายใน 0 บาท)
+        if (channel === "Shopee") {
           const salesVal = round2(toNumber(get("salesAmount")));
           if (!parsedPaidDate || (!trackingNo && !printedDate) || salesVal <= 0) {
+            continue;
+          }
+        } else if (channel === "Facebook") {
+          const salesVal = round2(toNumber(get("salesAmount")));
+          if (!parsedPaidDate || (!trackingNo && !printedDate) || salesVal <= 0) {
+            continue;
+          }
+        } else if (channel === "Lazada") {
+          const salesVal = round2(toNumber(get("salesAmount")));
+          if (!parsedPaidDate || salesVal <= 0) {
+            continue;
+          }
+        } else if (channel === "LINE") {
+          const rawSalesVal = round2(toNumber(get("salesAmount")));
+          const profitCol = colByField.get("profitAmount");
+          const shiftedSalesVal =
+            rawSalesVal === 0 &&
+            profitCol !== undefined &&
+            round2(toNumber(row[profitCol])) > 0 &&
+            row.length > profitCol + 1 &&
+            row[profitCol + 1] !== null &&
+            row[profitCol + 1] !== undefined &&
+            cleanText(row[profitCol + 1]) !== ""
+              ? round2(toNumber(row[profitCol]))
+              : rawSalesVal;
+          if (!parsedPaidDate || shiftedSalesVal <= 0) {
+            continue;
+          }
+        } else if (channel === "Other") {
+          if (!parsedPaidDate && !createdDate) {
             continue;
           }
         }
@@ -572,6 +614,37 @@ export async function detectAndParseOmsInput(
           trackingNo,
         );
 
+        const rawSalesCell = get("salesAmount");
+        const rawProfitCell = get("profitAmount");
+        const profitCol = colByField.get("profitAmount");
+        const shippingSellerVal = round2(toNumber(get("shippingFeeSeller")));
+        let resolvedSalesVal = round2(toNumber(rawSalesCell));
+        let resolvedProfitVal: number;
+        let resolvedTotalQty = Math.max(0, Math.round(toNumber(get("totalQty"))));
+
+        if (
+          resolvedSalesVal === 0 &&
+          profitCol !== undefined &&
+          round2(toNumber(row[profitCol])) > 0 &&
+          row.length > profitCol + 1 &&
+          row[profitCol + 1] !== null &&
+          row[profitCol + 1] !== undefined &&
+          cleanText(row[profitCol + 1]) !== ""
+        ) {
+          resolvedSalesVal = round2(toNumber(row[profitCol]));
+          resolvedProfitVal = round2(toNumber(row[profitCol + 1]));
+          if (resolvedTotalQty === 0 && profitCol >= 2) {
+            resolvedTotalQty = Math.max(0, Math.round(toNumber(row[profitCol - 2])));
+          }
+        } else {
+          const profitRawText = cleanText(rawProfitCell);
+          if (!profitRawText || profitRawText === "-") {
+            resolvedProfitVal = round2(resolvedSalesVal - shippingSellerVal);
+          } else {
+            resolvedProfitVal = round2(toNumber(rawProfitCell));
+          }
+        }
+
         parsedOrders.push({
           orderUid,
           orderCode,
@@ -581,7 +654,7 @@ export async function detectAndParseOmsInput(
           contactName: cleanText(get("contactName")),
           courier: cleanText(get("courier")),
           shippingFeeCustomer: round2(toNumber(get("shippingFeeCustomer"))),
-          shippingFeeSeller: round2(toNumber(get("shippingFeeSeller"))),
+          shippingFeeSeller: shippingSellerVal,
           province: cleanText(get("province")),
           bank: cleanText(get("bank")),
           trackingNo,
@@ -596,9 +669,9 @@ export async function detectAndParseOmsInput(
           marketplaceOrderFloat: mp.floatVal,
           discountCode: cleanText(get("discountCode")),
           discountTotal: round2(Math.abs(toNumber(get("discountTotal")))),
-          totalQty: Math.max(0, Math.round(toNumber(get("totalQty")))),
-          salesAmount: round2(toNumber(get("salesAmount"))),
-          profitAmount: round2(toNumber(get("profitAmount"))),
+          totalQty: resolvedTotalQty,
+          salesAmount: resolvedSalesVal,
+          profitAmount: resolvedProfitVal,
         });
       }
     } else if (detectedSheetType === "oms_items") {
@@ -614,7 +687,16 @@ export async function detectAndParseOmsInput(
         if (!skuCode || !orderCode) continue;
 
         const channel = normalizeChannel(get("channel"));
-        if (channel !== "TikTok" && channel !== "Shopee" && channel !== "Facebook") continue;
+        if (
+          channel !== "TikTok" &&
+          channel !== "Shopee" &&
+          channel !== "Facebook" &&
+          channel !== "Lazada" &&
+          channel !== "LINE" &&
+          channel !== "Other"
+        ) {
+          continue;
+        }
 
         totalDataRows++;
         const createdDate = parseDateValue(get("createdDate")).iso ?? "";
