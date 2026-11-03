@@ -4,6 +4,7 @@ import {
   SELLER,
   type SellerInfo,
 } from "./seller";
+import { isCompensationTransactionType } from "./invoice-eligibility";
 import { bahtText, round2 } from "./format";
 import type { TransactionRow } from "./queries";
 
@@ -108,6 +109,19 @@ export function parseProductItems(detail: string | null): InvoiceItem[] {
   return items;
 }
 
+export function isPlatformCompensationRow(row: {
+  channel?: string | null;
+  transactionType?: string | null;
+  payout: number;
+}): boolean {
+  const ch = row.channel || "TikTok";
+  return (
+    ch === "TikTok" &&
+    isCompensationTransactionType(row.transactionType) &&
+    row.payout > 0
+  );
+}
+
 export function isOrderEligibleForInvoice(row: {
   channel?: string | null;
   transactionType?: string | null;
@@ -118,6 +132,11 @@ export function isOrderEligibleForInvoice(row: {
   omsItems?: unknown[] | null;
   isNoProductPriceOrder?: boolean;
 }): boolean {
+  // 0. รายการชดเชยจากแพลตฟอร์ม / โลจิสติกส์ ของ TikTok ที่มียอดรับสุทธิ > 0
+  if (isPlatformCompensationRow(row)) {
+    return true;
+  }
+
   // 1. ต้องเป็นบิลขายปกติ: มียอดขาย > 0 และยอดรับสุทธิ > 0 และไม่ใช่บิลเปลี่ยนสินค้า 0 บาท
   if (row.isNoProductPriceOrder) return false;
   if (row.income <= 0) return false;
@@ -128,11 +147,40 @@ export function isOrderEligibleForInvoice(row: {
   if (!hasOmsCode) return false;
 
   const ch = row.channel || "TikTok";
-  // สำหรับ TikTok: ต้องมีไฟล์ Settlement รายได้รอบโอนแล้วเท่านั้น (ไม่ใช่แถวชั่วคราว OMS)
+  // แยกเงื่อนไขตามช่องทางชัดเจน (Strict Platform Financial Isolation):
   if (ch === "TikTok") {
     if (row.transactionType === "คำสั่งซื้อ (OMS)") return false;
+  } else if (ch === "Shopee") {
+    const hasItems = Boolean(
+      (row.productDetail && row.productDetail.trim() !== "") ||
+        (row.omsItems && row.omsItems.length > 0),
+    );
+    if (!hasItems) return false;
+  } else if (ch === "Facebook") {
+    const hasItems = Boolean(
+      (row.productDetail && row.productDetail.trim() !== "") ||
+        (row.omsItems && row.omsItems.length > 0),
+    );
+    if (!hasItems) return false;
+  } else if (ch === "Lazada") {
+    const hasItems = Boolean(
+      (row.productDetail && row.productDetail.trim() !== "") ||
+        (row.omsItems && row.omsItems.length > 0),
+    );
+    if (!hasItems) return false;
+  } else if (ch === "LINE") {
+    const hasItems = Boolean(
+      (row.productDetail && row.productDetail.trim() !== "") ||
+        (row.omsItems && row.omsItems.length > 0),
+    );
+    if (!hasItems) return false;
+  } else if (ch === "Other") {
+    const hasItems = Boolean(
+      (row.productDetail && row.productDetail.trim() !== "") ||
+        (row.omsItems && row.omsItems.length > 0),
+    );
+    if (!hasItems) return false;
   } else {
-    // สำหรับ Shopee / Facebook: ต้องมีชื่อสินค้าหรือรายการสินค้าในออเดอร์
     const hasItems = Boolean(
       (row.productDetail && row.productDetail.trim() !== "") ||
         (row.omsItems && row.omsItems.length > 0),
@@ -156,14 +204,24 @@ export function buildInvoice(
   const rawIncome = Number(fields.incomeTotal ?? row.income ?? 0);
   const rawPayout = Number(fields.payout ?? row.payout ?? 0);
   const rawRefundAfter = Number(fields.refundAfterDiscount ?? 0);
+  const isPlatformCompensation = isPlatformCompensationRow({
+    channel: row.channel,
+    transactionType: row.transactionType,
+    payout: rawPayout,
+  });
+  const compAmount = isPlatformCompensation
+    ? round2(Math.max(rawPayout, Number(row.adjustment ?? fields.adjustment ?? 0)))
+    : 0;
   const isZeroRefundedOrder =
+    !isPlatformCompensation &&
     row.transactionType !== "คำสั่งซื้อ (OMS)" &&
     rawIncome <= 0 &&
     rawPayout <= 0 &&
     (rawRefundAfter < 0 || Number(fields.productAfterDiscount ?? 0) <= 0);
 
   const ch = row.channel || "TikTok";
-  const isOmsChannel = ch === "Shopee" || ch === "Facebook";
+  const isOmsChannel =
+    ch === "Shopee" || ch === "Facebook" || ch === "Lazada" || ch === "LINE" || ch === "Other";
   const rawProductAfter = Number(fields.productAfterDiscount ?? 0);
   const rawRefundAfterVal = Number(fields.refundAfterDiscount ?? 0);
   const productAfterWithRefund = round2(rawProductAfter + rawRefundAfterVal);
@@ -175,8 +233,9 @@ export function buildInvoice(
   // productAfterDiscount คือยอดรวมค่าสินค้าหลังหักส่วนลดร้านค้า (ไม่รวมค่าขนส่ง)
   // หากมี productAfterDiscount > 0 ให้บวก refundAfterDiscount (ถ้ามีคืนเงินบางส่วน) เป็นยอดขายสินค้า (salesAmount)
   // หากไม่มี ให้ใช้ rawIncome - Math.max(0, custShippingFee)
-  const productSalesAmount =
-    productAfterWithRefund > 0
+  const productSalesAmount = isPlatformCompensation
+    ? compAmount
+    : productAfterWithRefund > 0
       ? productAfterWithRefund
       : rawIncome > 0
         ? round2(Math.max(0, rawIncome - Math.max(0, custShippingFee)))
@@ -185,10 +244,29 @@ export function buildInvoice(
   const salesAmount = isZeroRefundedOrder
     ? 0
     : productSalesAmount;
-  const shippingFee = custShippingFee;
+  const shippingFee = isPlatformCompensation ? 0 : custShippingFee;
 
   let items: InvoiceItem[] = [];
-  if (row.omsItems && row.omsItems.length > 0) {
+  if (isPlatformCompensation) {
+    const relatedId = String(
+      row.relatedOrderId ?? fields.relatedOrderId ?? "",
+    ).trim();
+    const omsDesc =
+      row.omsItems && row.omsItems.length > 0
+        ? ` · ${row.omsItems.map((it) => `${it.productName} × ${it.quantity}`).join(", ")}`
+        : row.productDetail && row.productDetail !== "/"
+          ? ` · ${row.productDetail}`
+          : "";
+    items = [
+      {
+        sku: row.orderCode ? `COMP-${row.orderCode}` : "COMP-TIKTOK",
+        name: `${row.transactionType}${row.orderCode ? ` (อ้างอิงออเดอร์ #${row.orderCode})` : ""}${relatedId && relatedId !== "/" && relatedId !== "-" ? ` [คำสั่งซื้อ #${relatedId}]` : ""}${omsDesc}`,
+        unitPrice: compAmount,
+        qty: 1,
+        lineTotal: compAmount,
+      },
+    ];
+  } else if (row.omsItems && row.omsItems.length > 0) {
     items = row.omsItems.map((it) => ({
       sku: it.skuCode,
       name: it.productName,
@@ -335,7 +413,9 @@ export function buildInvoice(
         );
 
   const feeTotal = round2(Number(row.feeTotal ?? fields.feeTotal ?? 0));
-  const adjustment = round2(Number(row.adjustment ?? fields.adjustment ?? 0));
+  const adjustment = isPlatformCompensation
+    ? 0
+    : round2(Number(row.adjustment ?? fields.adjustment ?? 0));
   const payout = round2(Number(row.payout ?? fields.payout ?? 0));
 
   const useCustomerPaidBase =
@@ -379,15 +459,17 @@ export function buildInvoice(
   );
 
   // หน้าใบกำกับภาษีไม่นำค่าธรรมเนียมแพลตฟอร์มหรือค่าขนส่งที่ร้านค้าจ่ายเองมาหัก
-  // - Shopee / Facebook: แสดงค่าสินค้า + ค่าขนส่งลูกค้า (ตรงกับยอดรายได้ในไฟล์ Shipnity)
-  // - TikTok: แสดงยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย + ค่าขนส่งบวกเพิ่มที่เก็บจากลูกค้า
+  // - Shopee / Facebook / LINE / Other: แสดงค่าสินค้า + ค่าขนส่งลูกค้า (ตรงกับยอดรายได้ในไฟล์ Shipnity)
+  // - TikTok: แสดงยอดรวมค่าสินค้าหลังหักส่วนลดจากผู้ขาย + ค่าขนส่งบวกเพิ่มที่เก็บจากลูกค้า (หรือยอดชดเชยจากแพลตฟอร์ม)
   const receiptTotal = isZeroRefundedOrder
     ? 0
-    : isOmsChannel
-      ? omsReceiptTotal
-      : useCustomerPaidBase
-        ? customerFallbackTotal
-        : tiktokReceiptTotal;
+    : isPlatformCompensation
+      ? compAmount
+      : isOmsChannel
+        ? omsReceiptTotal
+        : useCustomerPaidBase
+          ? customerFallbackTotal
+          : tiktokReceiptTotal;
 
   const vatRate =
     typeof activeSeller.vatRate === "number" && activeSeller.vatRate >= 0

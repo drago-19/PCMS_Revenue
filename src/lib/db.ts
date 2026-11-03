@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-10-31-v24";
+const SCHEMA_VERSION = "2026-11-03-v33";
 
 export type { CompanyId };
 
@@ -209,7 +209,7 @@ export function buildOrderShippingPositiveSql(alias = "t"): string {
   return `(
     CASE
       WHEN ${p}is_order <> 1 THEN 0
-      WHEN ${p}channel IN ('Shopee', 'Facebook') THEN
+      WHEN ${p}channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') THEN
         GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingCustomerFee')::numeric, 0))
       ELSE
         GREATEST(0, COALESCE((${p}normalized_json->'fields'->>'shippingCustomerFee')::numeric, 0))
@@ -233,7 +233,7 @@ export function buildOrderShippingNegativeSql(alias = "t"): string {
   const p = alias ? `${alias}.` : "";
   return `(
     CASE
-      WHEN ${p}is_order <> 1 OR ${p}channel IN ('Shopee', 'Facebook') THEN 0
+      WHEN ${p}is_order <> 1 OR ${p}channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') THEN 0
       ELSE
         LEAST(0, COALESCE((${p}normalized_json->'fields'->>'shippingCustomerFee')::numeric, 0))
         + LEAST(0, COALESCE((${p}normalized_json->'fields'->>'shippingPlatformDiscount')::numeric, 0))
@@ -356,12 +356,25 @@ DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM transactions
-    WHERE is_order = 1
+    WHERE (
+      is_order = 1
       AND channel = 'Facebook'
       AND COALESCE((normalized_json->'fields'->>'productAfterDiscount')::numeric, 0) <= 0
       AND COALESCE((normalized_json->'fields'->>'productBeforeDiscount')::numeric, 0) <= 0
       AND link_priority = 0
+    ) OR (
+      is_order = 0
+      AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+      AND payout > 0
+      AND link_priority <> 0
+    )
     LIMIT 1
+  ) OR EXISTS (
+    SELECT 1 FROM pg_attribute a
+    JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+    WHERE a.attrelid = 'transactions'::regclass
+      AND a.attname = 'link_priority'
+      AND pg_get_expr(d.adbin, d.adrelid) NOT LIKE '%Lazada%'
   ) THEN
     ALTER TABLE transactions DROP COLUMN link_priority;
   END IF;
@@ -377,10 +390,15 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS link_priority SMALLINT GENERAT
       AND COALESCE((normalized_json->'fields'->>'productBeforeDiscount')::numeric, 0) <= 0
     ) THEN 3
     WHEN (
+      is_order = 0
+      AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+      AND payout > 0
+    ) THEN 0
+    WHEN (
       order_code IS NOT NULL AND order_code <> ''
       AND (
         transaction_type <> 'คำสั่งซื้อ (OMS)'
-        OR (channel IN ('Shopee', 'Facebook') AND NULLIF(product_detail, '') IS NOT NULL)
+        OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)
       )
     ) THEN 0
     WHEN (order_code IS NOT NULL AND order_code <> '') THEN 1
@@ -518,6 +536,10 @@ ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS unlinked_count INTEGER NOT 
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS mismatch_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS shipping_positive DOUBLE PRECISION NOT NULL DEFAULT 0;
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS shipping_negative DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS line_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS lazada_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS other_channel_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS compensation_count INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS sku_summaries (
   sku_code TEXT PRIMARY KEY,
@@ -529,8 +551,15 @@ CREATE TABLE IF NOT EXISTS sku_summaries (
   tiktok_qty INTEGER NOT NULL DEFAULT 0,
   shopee_qty INTEGER NOT NULL DEFAULT 0,
   facebook_qty INTEGER NOT NULL DEFAULT 0,
+  lazada_qty INTEGER NOT NULL DEFAULT 0,
+  line_qty INTEGER NOT NULL DEFAULT 0,
+  other_qty INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE sku_summaries ADD COLUMN IF NOT EXISTS lazada_qty INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sku_summaries ADD COLUMN IF NOT EXISTS line_qty INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sku_summaries ADD COLUMN IF NOT EXISTS other_qty INTEGER NOT NULL DEFAULT 0;
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
@@ -767,12 +796,13 @@ BEGIN
   -- Fast check on pre-aggregated summary tables only (never full-scan billion-row tables on startup)
   IF EXISTS (
     SELECT 1 FROM daily_summaries WHERE order_count > 0 AND linked_count = 0 AND oms_only_count = 0 AND unlinked_count = 0
-  ) OR EXISTS (
-    SELECT 1 FROM daily_summaries WHERE order_count > 0 AND shipping_positive = 0 AND shipping_negative = 0
+  ) OR (
+    EXISTS (SELECT 1 FROM daily_summaries WHERE order_count > 0)
+    AND NOT EXISTS (SELECT 1 FROM daily_summaries WHERE shipping_positive <> 0 OR shipping_negative <> 0)
   ) THEN
-    DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook');
-    DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook');
-    DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook');
+    DELETE FROM oms_order_items WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other');
+    DELETE FROM oms_orders WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other');
+    DELETE FROM transactions WHERE COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other');
 
     DELETE FROM products p
     WHERE NOT EXISTS (
@@ -784,14 +814,16 @@ BEGIN
     SET status = 'void', voided_at = now(), void_reason = 'ไม่พบออเดอร์ในระบบ'
     WHERE r.status = 'active'
       AND NOT EXISTS (
-        SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND t.is_order = 1
+        SELECT 1 FROM transactions t
+        WHERE t.external_id = r.order_id
+          AND (t.is_order = 1 OR (t.is_order = 0 AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND t.payout > 0))
       );
 
     DELETE FROM daily_summaries;
     INSERT INTO daily_summaries (
       paid_date, transaction_count, order_count, order_payout, order_income,
       order_fees, other_count, other_payout, total_payout, adjustment,
-      tiktok_count, shopee_count, facebook_count,
+      tiktok_count, shopee_count, facebook_count, lazada_count, line_count, other_channel_count, compensation_count,
       linked_count, oms_only_count, unlinked_count, mismatch_count,
       shipping_positive, shipping_negative, updated_at
     )
@@ -809,8 +841,12 @@ BEGIN
       SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Lazada' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND (
         ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
@@ -822,13 +858,13 @@ BEGIN
       now()
     FROM transactions
     WHERE paid_date <> '' AND paid_date <> 'unknown'
-      AND COALESCE(NULLIF(channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+      AND COALESCE(NULLIF(channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
     GROUP BY paid_date;
 
     DELETE FROM sku_summaries;
     INSERT INTO sku_summaries (
       sku_code, product_name, total_qty, order_count, gross_amount,
-      net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, updated_at
+      net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, lazada_qty, line_qty, other_qty, updated_at
     )
     SELECT
       i.sku_code,
@@ -840,16 +876,20 @@ BEGIN
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
       COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
       COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'Lazada' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int,
       now()
     FROM oms_order_items i
-    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
     GROUP BY i.sku_code;
   END IF;
 
   -- invoice_registry: เลขที่ใบกำกับฯ ถูกล็อกแล้ว (ห้ามลบ/เรียงใหม่) — การ void/ออกเลขใหม่ทำใน syncMonthlyInvoiceRegistry เท่านั้น
   -- และเติม channel ให้แถวเก่าที่ยังไม่มี (ทำครั้งเดียว)
   UPDATE invoice_registry r SET channel = t.channel FROM transactions t
-  WHERE r.channel IS NULL AND t.external_id = r.order_id AND t.is_order = 1;
+  WHERE r.channel IS NULL AND t.external_id = r.order_id
+    AND (t.is_order = 1 OR (t.is_order = 0 AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND t.payout > 0));
 
   -- Platform Financial Isolation (AGENTS.md Rule 3 & 4):
   -- 1. TikTok OMS placeholder rows (before Settlement): payout = income + fee_total (sales_amount - shipping_fee_seller), cogs = 0
@@ -943,36 +983,220 @@ BEGIN
       AND (d.order_payout IS DISTINCT FROM s.order_payout OR d.total_payout IS DISTINCT FROM s.total_payout);
   END IF;
 
-  -- Backfill shop_name from oms_order_items (sender_name)
+  -- Backfill shop_name from oms_order_items (sender_name) by order_uid first, then order_code
   IF EXISTS (
-    SELECT 1 FROM oms_orders WHERE shop_name IS NULL LIMIT 1
+    SELECT 1 FROM oms_orders WHERE shop_name IS NULL OR shop_name = '' LIMIT 1
   ) OR EXISTS (
-    SELECT 1 FROM transactions WHERE shop_name IS NULL AND order_code IS NOT NULL AND order_code <> '' LIMIT 1
+    SELECT 1 FROM transactions WHERE (shop_name IS NULL OR shop_name = '') AND order_code IS NOT NULL AND order_code <> '' LIMIT 1
   ) THEN
     UPDATE oms_orders o
     SET shop_name = sub.sender_name
     FROM (
-      SELECT DISTINCT order_code, created_date, sender_name
+      SELECT DISTINCT ON (order_uid) order_uid, sender_name
+      FROM oms_order_items
+      WHERE order_uid IS NOT NULL AND order_uid <> '' AND sender_name IS NOT NULL AND sender_name <> ''
+      ORDER BY order_uid, line_no ASC
+    ) sub
+    WHERE o.order_uid = sub.order_uid AND (o.shop_name IS NULL OR o.shop_name = '');
+
+    UPDATE oms_orders o
+    SET shop_name = sub.sender_name
+    FROM (
+      SELECT DISTINCT ON (order_code) order_code, sender_name
       FROM oms_order_items
       WHERE sender_name IS NOT NULL AND sender_name <> ''
+      ORDER BY order_code, line_no ASC
     ) sub
-    WHERE o.order_code = sub.order_code AND o.created_date = sub.created_date AND o.shop_name IS NULL;
+    WHERE o.order_code = sub.order_code AND (o.shop_name IS NULL OR o.shop_name = '');
 
     UPDATE transactions t
     SET shop_name = sub.sender_name
     FROM (
-      SELECT DISTINCT order_code, created_date, sender_name
+      SELECT DISTINCT ON (order_uid) order_uid, sender_name
+      FROM oms_order_items
+      WHERE order_uid IS NOT NULL AND order_uid <> '' AND sender_name IS NOT NULL AND sender_name <> ''
+      ORDER BY order_uid, line_no ASC
+    ) sub
+    WHERE t.oms_order_uid = sub.order_uid AND (t.shop_name IS NULL OR t.shop_name = '');
+
+    UPDATE transactions t
+    SET shop_name = sub.sender_name
+    FROM (
+      SELECT DISTINCT ON (order_code) order_code, sender_name
       FROM oms_order_items
       WHERE sender_name IS NOT NULL AND sender_name <> ''
+      ORDER BY order_code, line_no ASC
     ) sub
-    WHERE t.order_code = sub.order_code AND t.created_date = sub.created_date AND t.shop_name IS NULL;
+    WHERE t.order_code = sub.order_code AND (t.shop_name IS NULL OR t.shop_name = '');
 
     UPDATE transactions t
     SET shop_name = o.shop_name
     FROM oms_orders o
     WHERE (t.oms_order_uid = o.order_uid OR t.order_code = o.order_code OR t.related_order_id = o.marketplace_order_norm)
-      AND t.shop_name IS NULL
-      AND o.shop_name IS NOT NULL;
+      AND (t.shop_name IS NULL OR t.shop_name = '')
+      AND o.shop_name IS NOT NULL AND o.shop_name <> '';
+  END IF;
+
+  -- Link Platform Compensation rows ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') to oms_orders and shop_name
+  IF EXISTS (
+    SELECT 1 FROM transactions t
+    WHERE t.is_order = 0
+      AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+      AND t.payout > 0
+      AND (t.order_code IS NULL OR t.shop_name IS NULL OR t.shop_name = '')
+    LIMIT 1
+  ) THEN
+    UPDATE transactions t
+    SET order_code = o.order_code,
+        oms_order_uid = o.order_uid,
+        shop_name = COALESCE(NULLIF(o.shop_name, ''), t.shop_name)
+    FROM oms_orders o
+    WHERE t.is_order = 0
+      AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+      AND o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> ''
+      AND (
+        COALESCE(NULLIF(t.related_order_id, ''), t.normalized_json->'fields'->>'relatedOrderId') = o.marketplace_order_norm
+        OR (
+          o.marketplace_order_prefix IS NOT NULL AND LENGTH(o.marketplace_order_prefix) >= 14
+          AND LEFT(COALESCE(NULLIF(t.related_order_id, ''), t.normalized_json->'fields'->>'relatedOrderId', ''), 15) = o.marketplace_order_prefix
+        )
+      )
+      AND (t.order_code IS DISTINCT FROM o.order_code OR t.oms_order_uid IS DISTINCT FROM o.order_uid OR t.shop_name IS NULL OR t.shop_name = '');
+
+    UPDATE transactions t
+    SET shop_name = ord.shop_name
+    FROM transactions ord
+    WHERE t.is_order = 0
+      AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+      AND (t.shop_name IS NULL OR t.shop_name = '')
+      AND ord.is_order = 1
+      AND ord.shop_name IS NOT NULL AND ord.shop_name <> ''
+      AND ord.external_id = COALESCE(NULLIF(t.related_order_id, ''), t.normalized_json->'fields'->>'relatedOrderId');
+
+    -- Fallback for compensation rows in settlement workbooks where the related order has no OMS row:
+    -- inherit the dominant shop_name of that settlement import workbook (or Kiddee Shop for early Kiddee files)
+    UPDATE transactions t
+    SET shop_name = COALESCE(
+      (
+        SELECT t2.shop_name
+        FROM transactions t2
+        WHERE t2.import_id = t.import_id
+          AND t2.shop_name IS NOT NULL AND t2.shop_name <> ''
+        GROUP BY t2.shop_name
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+      ),
+      'Kiddee Shop'
+    )
+    WHERE t.is_order = 0
+      AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+      AND t.payout > 0
+      AND (t.shop_name IS NULL OR t.shop_name = '');
+
+    UPDATE transactions t
+    SET product_detail = s.summary_text
+    FROM (
+      SELECT i.order_uid,
+             STRING_AGG(i.sku_code || ' · ' || i.product_name || ' × ' || i.quantity::text, '; ' ORDER BY i.line_no) AS summary_text
+      FROM oms_order_items i
+      GROUP BY i.order_uid
+    ) s
+    WHERE t.is_order = 0
+      AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+      AND t.oms_order_uid = s.order_uid
+      AND t.product_detail IS DISTINCT FROM s.summary_text;
+
+    UPDATE daily_summaries d
+    SET compensation_count = s.comp_count
+    FROM (
+      SELECT paid_date,
+             SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int AS comp_count
+      FROM transactions
+      WHERE paid_date <> '' AND paid_date <> 'unknown'
+      GROUP BY paid_date
+    ) s
+    WHERE d.paid_date = s.paid_date
+      AND d.compensation_count IS DISTINCT FROM s.comp_count;
+  END IF;
+
+  -- Ensure daily_summaries lazada_count & order_count stay in sync if Lazada paid_date was updated across files
+  IF (SELECT COALESCE(SUM(lazada_count), 0) FROM daily_summaries) IS DISTINCT FROM (SELECT COUNT(*)::int FROM transactions WHERE is_order = 1 AND channel = 'Lazada') THEN
+    DELETE FROM daily_summaries d
+    WHERE d.lazada_count > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM transactions t
+        WHERE t.paid_date = d.paid_date
+          AND t.paid_date <> ''
+          AND t.paid_date <> 'unknown'
+      );
+
+    INSERT INTO daily_summaries (
+      paid_date, transaction_count, order_count, order_payout, order_income,
+      order_fees, other_count, other_payout, total_payout, adjustment,
+      tiktok_count, shopee_count, facebook_count, lazada_count, line_count, other_channel_count, compensation_count,
+      linked_count, oms_only_count, unlinked_count, mismatch_count,
+      shipping_positive, shipping_negative, updated_at
+    )
+    SELECT
+      paid_date,
+      COUNT(*)::int AS tx_count,
+      SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int AS ord_count,
+      ROUND(SUM(CASE WHEN is_order = 1 THEN payout ELSE 0 END)::numeric, 2) AS ord_payout,
+      ROUND(SUM(CASE WHEN is_order = 1 THEN income ELSE 0 END)::numeric, 2) AS ord_income,
+      ROUND(SUM(CASE WHEN is_order = 1 THEN fee_total ELSE 0 END)::numeric, 2) AS ord_fees,
+      SUM(CASE WHEN is_order = 0 THEN 1 ELSE 0 END)::int AS oth_count,
+      ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2) AS oth_payout,
+      ROUND(SUM(payout)::numeric, 2) AS tot_payout,
+      ROUND(SUM(adjustment)::numeric, 2) AS adj_amount,
+      SUM(CASE WHEN is_order = 1 AND COALESCE(NULLIF(channel, ''), 'TikTok') = 'TikTok' THEN 1 ELSE 0 END)::int AS tik_count,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int AS shp_count,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int AS fb_count,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Lazada' THEN 1 ELSE 0 END)::int AS laz_count,
+      SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int AS ln_count,
+      SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int AS oth_ch_count,
+      SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int AS cmp_count,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int AS lnk_count,
+      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int AS oms_count,
+      SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int AS unlnk_count,
+      SUM(CASE WHEN is_order = 1 AND (
+        ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
+        OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
+        OR ABS(COALESCE((checks_json->>'payoutDiff')::numeric, 0)) >= 0.01
+      ) THEN 1 ELSE 0 END)::int AS mis_count,
+      ROUND(COALESCE(SUM(${buildOrderShippingPositiveSql("")}), 0)::numeric, 2) AS shp_pos,
+      ROUND(COALESCE(SUM(${buildOrderShippingNegativeSql("")}), 0)::numeric, 2) AS shp_neg,
+      now()
+    FROM transactions
+    WHERE paid_date IN (
+      SELECT paid_date FROM daily_summaries WHERE lazada_count > 0
+      UNION
+      SELECT DISTINCT paid_date FROM transactions WHERE is_order = 1 AND channel = 'Lazada' AND paid_date <> '' AND paid_date <> 'unknown'
+    )
+    GROUP BY paid_date
+    ON CONFLICT (paid_date) DO UPDATE SET
+      transaction_count = EXCLUDED.transaction_count,
+      order_count = EXCLUDED.order_count,
+      order_payout = EXCLUDED.order_payout,
+      order_income = EXCLUDED.order_income,
+      order_fees = EXCLUDED.order_fees,
+      other_count = EXCLUDED.other_count,
+      other_payout = EXCLUDED.other_payout,
+      total_payout = EXCLUDED.total_payout,
+      adjustment = EXCLUDED.adjustment,
+      tiktok_count = EXCLUDED.tiktok_count,
+      shopee_count = EXCLUDED.shopee_count,
+      facebook_count = EXCLUDED.facebook_count,
+      lazada_count = EXCLUDED.lazada_count,
+      line_count = EXCLUDED.line_count,
+      other_channel_count = EXCLUDED.other_channel_count,
+      compensation_count = EXCLUDED.compensation_count,
+      linked_count = EXCLUDED.linked_count,
+      oms_only_count = EXCLUDED.oms_only_count,
+      unlinked_count = EXCLUDED.unlinked_count,
+      mismatch_count = EXCLUDED.mismatch_count,
+      shipping_positive = EXCLUDED.shipping_positive,
+      shipping_negative = EXCLUDED.shipping_negative,
+      updated_at = now();
   END IF;
 END $$;
 

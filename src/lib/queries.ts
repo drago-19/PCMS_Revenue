@@ -6,7 +6,12 @@ import {
 } from "./db";
 import { decompressFileBlob } from "./file-blob";
 import { formatInvoiceNoWithPrefix, type SellerInfo } from "./seller";
-import { INVOICE_ELIGIBLE_SQL } from "./invoice-eligibility";
+import {
+  BILLABLE_COMPENSATION_SQL,
+  BILLABLE_ORDER_OR_COMPENSATION_SQL,
+  INVOICE_ELIGIBLE_SQL,
+  isCompensationTransactionType,
+} from "./invoice-eligibility";
 import { getDocumentSettings } from "./settings";
 import {
   readInputSheets,
@@ -100,6 +105,7 @@ export interface TransactionRow {
   importFilename?: string;
   importImportedAt?: string;
   channel: string;
+  relatedOrderId?: string | null;
   orderCode: string | null;
   omsOrderUid?: string | null;
   shopName?: string | null;
@@ -120,7 +126,12 @@ export interface TransactionRow {
   marketplaceOrderRaw?: string | null;
   omsNote?: string | null;
   isNoProductPriceOrder?: boolean;
+  isCompensationBill?: boolean;
   omsItems?: OmsLineItem[];
+  omsItemsSalesAmount?: number | null;
+  omsItemsListTotal?: number | null;
+  lineComparisonStatus?: "matched" | "amount_diff" | "orders_only";
+  lineSalesDiff?: number;
   sellerSettings?: SellerInfo;
 }
 
@@ -131,19 +142,28 @@ export type BillLinkStatusKey =
   | "linked"
   | "unlinked"
   | "oms_only"
+  | "compensation"
   | "no_price"
   | "all_fb"
   | "shopee_negative"
-  | "shopee_zero";
+  | "shopee_zero"
+  | "line_mismatch";
 
 export function getOrderLinkStatus(row: TransactionRow): OrderLinkStatus {
+  if (isCompensationTransactionType(row.transactionType) && row.payout > 0) {
+    return "linked";
+  }
   const hasOmsCode = Boolean(row.orderCode && row.orderCode.trim() !== "");
   if (!hasOmsCode) {
     return "unlinked";
   }
   if (row.transactionType === "คำสั่งซื้อ (OMS)") {
     if (
-      (row.channel === "Shopee" || row.channel === "Facebook") &&
+      (row.channel === "Shopee" ||
+        row.channel === "Facebook" ||
+        row.channel === "Lazada" ||
+        row.channel === "LINE" ||
+        row.channel === "Other") &&
       Boolean(
         (row.productDetail && row.productDetail.trim() !== "") ||
           (row.omsItems && row.omsItems.length > 0),
@@ -161,11 +181,14 @@ export interface BillLinkCounts {
   linked: number;
   unlinked: number;
   omsOnly: number;
+  compensation: number;
   noPrice: number;
   allWithNoPrice: number;
   shopeeNormal: number;
   shopeeNegative: number;
   shopeeZero: number;
+  lineMatched?: number;
+  lineMismatch?: number;
   missingOmsCreatedDates: string[];
 }
 
@@ -350,7 +373,12 @@ export function mapTransaction(row: Record<string, unknown>): TransactionRow {
     resolvedTxChannel === "Facebook" &&
     Number(normalized.fields.productAfterDiscount ?? 0) <= 0 &&
     Number(normalized.fields.productBeforeDiscount ?? 0) <= 0;
+  const isCompensationBill =
+    Number(row.is_order ?? 0) === 0 &&
+    isCompensationTransactionType(txType) &&
+    txPayout > 0;
   const isZeroRevenueSettlement =
+    !isCompensationBill &&
     Number(row.is_order ?? 0) === 1 &&
     ((txType !== "คำสั่งซื้อ (OMS)" && txIncome <= 0 && txPayout <= 0) ||
       isNoProductPriceOrder);
@@ -389,6 +417,12 @@ export function mapTransaction(row: Record<string, unknown>): TransactionRow {
     importFilename: row.import_filename ? String(row.import_filename) : undefined,
     importImportedAt: row.import_imported_at ? String(row.import_imported_at) : undefined,
     channel: resolvedTxChannel,
+    relatedOrderId: row.related_order_id
+      ? String(row.related_order_id)
+      : normalized.fields.relatedOrderId
+        ? String(normalized.fields.relatedOrderId)
+        : null,
+    isCompensationBill,
     isNoProductPriceOrder,
     orderCode: row.order_code ? String(row.order_code) : null,
     shopName: row.shop_name ? String(row.shop_name) : null,
@@ -473,6 +507,8 @@ async function enrichTransactionsWithOms(
     trackingNo: string | null;
     courier: string | null;
     note: string | null;
+    orderSalesAmount: number | null;
+    listTotal: number;
   };
   const itemByUid = new Map<string, ItemBucket>();
   const itemByCode = new Map<string, ItemBucket>();
@@ -493,18 +529,32 @@ async function enrichTransactionsWithOms(
         trackingNo: null,
         courier: null,
         note: null,
+        orderSalesAmount: null,
+        listTotal: 0,
       };
       targetMap.set(key, entry);
       if (uid && !itemByCode.has(code)) {
         itemByCode.set(code, entry);
       }
     }
+    const unitPrice = Number(it.unit_price ?? 0);
+    const quantity = Number(it.quantity ?? 1);
     entry.items.push({
       skuCode: String(it.sku_code ?? ""),
       productName: String(it.product_name ?? ""),
-      unitPrice: Number(it.unit_price ?? 0),
-      quantity: Number(it.quantity ?? 1),
+      unitPrice,
+      quantity,
     });
+    entry.listTotal = round2(entry.listTotal + unitPrice * quantity);
+    if (it.order_sales_amount !== null && it.order_sales_amount !== undefined) {
+      const salesNum = round2(Number(it.order_sales_amount));
+      if (salesNum > 0 || entry.orderSalesAmount === null) {
+        entry.orderSalesAmount =
+          entry.orderSalesAmount !== null
+            ? Math.max(entry.orderSalesAmount, salesNum)
+            : salesNum;
+      }
+    }
     if (!entry.address && it.customer_address) entry.address = String(it.customer_address);
     if (!entry.postalCode && it.postal_code) entry.postalCode = String(it.postal_code);
     if (!entry.phone && it.customer_phone) entry.phone = String(it.customer_phone);
@@ -543,16 +593,21 @@ async function enrichTransactionsWithOms(
       o?.shipping_fee_seller !== undefined
         ? Math.abs(Number(o.shipping_fee_seller))
         : Math.abs(Number(tx.feeTotal ?? 0));
-    const effectiveFeeTotal = shipSellerAbs > 0 ? -shipSellerAbs : Number(tx.feeTotal ?? 0);
+    const effectiveFeeTotal =
+      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada"
+        ? shipSellerAbs > 0
+          ? -shipSellerAbs
+          : Number(tx.feeTotal ?? 0)
+        : Number(tx.feeTotal ?? 0);
     // Platform Isolation & Exact Values Display (AGENTS.md Rule 3 & 4):
     // - TikTok Settlement: uses tx.payout directly from TikTok Settlement (or income + feeTotal for OMS placeholder)
     // - Shopee & Facebook: uses cash received: sales_amount - shipping_fee_seller (income + effectiveFeeTotal).
     //   Shipnity stock profit and COGS are computed for internal reference.
     const isShipnityChannel =
-      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "TikTok";
+      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada" && resolvedChannel !== "TikTok" && resolvedChannel !== "Lazada";
     const effectivePayout =
-      tx.transactionType === "คำสั่งซื้อ (OMS)"
-        ? Math.round((Number(tx.income ?? 0) + effectiveFeeTotal) * 100) / 100
+      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada"
+        ? resolvedChannel === "Lazada" ? Number(tx.payout ?? 0) : Math.round((Number(tx.income ?? 0) + effectiveFeeTotal) * 100) / 100
         : Number(tx.payout ?? 0);
     const shipnityStockProfit =
       isShipnityChannel && o?.profit_amount !== undefined && o?.profit_amount !== null
@@ -568,7 +623,7 @@ async function enrichTransactionsWithOms(
           )
         : 0;
     const enrichedNormalized =
-      tx.transactionType === "คำสั่งซื้อ (OMS)"
+      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada"
         ? {
             ...tx.normalized,
             fields: {
@@ -640,6 +695,24 @@ async function enrichTransactionsWithOms(
         it?.note ??
         null,
       omsItems: it?.items ?? [],
+      omsItemsSalesAmount: it ? it.orderSalesAmount : null,
+      omsItemsListTotal: it ? it.listTotal : null,
+      lineComparisonStatus:
+        resolvedChannel === "LINE"
+          ? it && it.items.length > 0
+            ? it.orderSalesAmount !== null &&
+              Math.abs(round2(Number(tx.income ?? 0) - it.orderSalesAmount)) >= 0.01
+              ? "amount_diff"
+              : "matched"
+            : "orders_only"
+          : undefined,
+      lineSalesDiff:
+        resolvedChannel === "LINE" &&
+        it &&
+        it.items.length > 0 &&
+        it.orderSalesAmount !== null
+          ? round2(Number(tx.income ?? 0) - it.orderSalesAmount)
+          : 0,
     };
   });
 }
@@ -1145,7 +1218,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
           `INSERT INTO daily_summaries (
              paid_date, transaction_count, order_count, order_payout, order_income,
              order_fees, other_count, other_payout, total_payout, adjustment,
-             tiktok_count, shopee_count, facebook_count,
+             tiktok_count, shopee_count, facebook_count, lazada_count, line_count, other_channel_count, compensation_count,
              linked_count, oms_only_count, unlinked_count, mismatch_count,
              shipping_positive, shipping_negative, updated_at
            )
@@ -1163,6 +1236,10 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
              SUM(CASE WHEN is_order = 1 AND channel = 'TikTok' THEN 1 ELSE 0 END)::int,
              SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
              SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+             SUM(CASE WHEN is_order = 1 AND channel = 'Lazada' THEN 1 ELSE 0 END)::int,
+             SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int,
+             SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int,
+             SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int,
              SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int,
              SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int,
              SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int,
@@ -1176,7 +1253,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
              now()
            FROM transactions
            WHERE paid_date = ANY($1::text[])
-             AND channel IN ('TikTok', 'Shopee', 'Facebook')
+             AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
            GROUP BY paid_date`,
           [affectedDates],
           target,
@@ -1191,7 +1268,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
         await query(
           `INSERT INTO sku_summaries (
              sku_code, product_name, total_qty, order_count, gross_amount,
-             net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, updated_at
+             net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, lazada_qty, line_qty, other_qty, updated_at
            )
            SELECT
              i.sku_code,
@@ -1203,10 +1280,13 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
              COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
              COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
              COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+             COALESCE(SUM(CASE WHEN i.channel = 'Lazada' THEN i.quantity ELSE 0 END), 0)::int,
+             COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int,
+             COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int,
              now()
            FROM oms_order_items i
            WHERE i.sku_code = ANY($1::text[])
-             AND COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+             AND COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
            GROUP BY i.sku_code`,
           [affectedSkus],
           target,
@@ -1222,7 +1302,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
          WHERE r.status = 'active'
            AND NOT EXISTS (
              SELECT 1 FROM transactions t
-             WHERE t.external_id = r.order_id AND t.is_order = 1
+             WHERE t.external_id = r.order_id AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
            )
            AND ($1::text[] IS NULL OR r.order_id = ANY($1::text[]))
          RETURNING r.order_id, r.invoice_no, r.void_reason
@@ -1684,7 +1764,7 @@ export async function getDailyBatch(
         ROUND(SUM(adjustment)::numeric, 2) AS adjustment
       FROM transactions
       WHERE ${dateWhere}
-        AND channel IN ('TikTok', 'Shopee', 'Facebook')`,
+        AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')`,
       [date],
       db,
     );
@@ -1697,7 +1777,7 @@ export async function getDailyBatch(
      LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
      LEFT JOIN imports i ON i.id = t.import_id
      WHERE ${txDateWhere}
-       AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
+       AND t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
      ORDER BY t.is_order DESC, t.paid_date DESC, ${ORDER_LINK_PRIORITY_SQL} ASC, t.external_id ASC`,
     [date],
     db,
@@ -1793,7 +1873,7 @@ export async function getDailyBatchPaged(
         ROUND(SUM(adjustment)::numeric, 2) AS adjustment
       FROM transactions
       WHERE paid_date = $1
-        AND channel IN ('TikTok', 'Shopee', 'Facebook')`,
+        AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')`,
       [date],
       db,
     );
@@ -1814,7 +1894,7 @@ export async function getDailyBatchPaged(
      FROM transactions t
      WHERE t.paid_date = $1
        AND t.is_order = 1
-       AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
+       AND t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        AND (t.income <= 0 OR t.payout <= 0)`,
     [date],
     db,
@@ -1885,7 +1965,7 @@ export async function getDailyBatchPaged(
          FROM transactions t
          WHERE t.paid_date = $1
            AND t.is_order = 1
-           AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
+           AND t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
            AND ${BILL_CATEGORY_SQL[category]}
          ORDER BY ${orderBySql}
          LIMIT $2 OFFSET $3
@@ -1907,7 +1987,7 @@ export async function getDailyBatchPaged(
            LEFT JOIN imports i ON i.id = t.import_id
            WHERE t.paid_date = $1
              AND t.is_order = 0
-             AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
+             AND t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
            ORDER BY t.external_id ASC`,
           [date],
           db,
@@ -1954,6 +2034,10 @@ export interface BulkInvoicesBatchResult {
   tiktokOrdersCount: number;
   shopeeOrdersCount: number;
   facebookOrdersCount: number;
+  lazadaOrdersCount: number;
+  lineOrdersCount: number;
+  otherOrdersCount: number;
+  compensationOrdersCount: number;
   channelFilteredCount: number;
   linkedOrdersCount: number;
   unlinkedOrdersCount: number;
@@ -1971,7 +2055,7 @@ export interface BulkInvoicesBatchResult {
 export async function getBulkInvoicesBatch(
   options: {
     date: string;
-    channelFilter?: "all" | "TikTok" | "Shopee" | "Facebook";
+    channelFilter?: "all" | "TikTok" | "Shopee" | "Facebook" | "Lazada" | "LINE" | "Other" | "Compensation";
     rawLink?: string;
     batch?: number;
     batchSize?: 100 | 200 | 500;
@@ -1989,7 +2073,7 @@ export async function getBulkInvoicesBatch(
   const txDateWhere = isMonth ? "t.paid_date LIKE $1" : "t.paid_date = $1";
   const dateParam = isMonth ? `${date}-%` : date;
 
-  // ออกใบกำกับภาษีเฉพาะ "บิลขายปกติ" (ไม่รวมคืนเงิน/ตีกลับ/ยกเลิก/เปลี่ยนสินค้า) — แยกเงื่อนไขตามช่องทาง
+  // ออกใบกำกับภาษีเฉพาะ "บิลขายปกติ" และ "ชดเชยจากแพลตฟอร์ม/โลจิสติกส์ที่เป็นบวก" — แยกเงื่อนไขตามช่องทาง
   const billableClause = `(${INVOICE_ELIGIBLE_SQL})`;
   const isLinkedSql = `(${ORDER_LINK_PRIORITY_SQL} = 0)`;
   const chMatchSql =
@@ -1997,9 +2081,17 @@ export async function getBulkInvoicesBatch(
       ? `t.channel = 'Shopee'`
       : channelFilter === "Facebook"
         ? `t.channel = 'Facebook'`
-        : channelFilter === "TikTok"
-          ? `t.channel = 'TikTok'`
-          : `TRUE`;
+        : channelFilter === "Lazada"
+          ? `t.channel = 'Lazada'`
+          : channelFilter === "LINE"
+            ? `t.channel = 'LINE'`
+            : channelFilter === "Other"
+              ? `t.channel = 'Other'`
+              : channelFilter === "Compensation"
+                ? `${BILLABLE_COMPENSATION_SQL}`
+                : channelFilter === "TikTok"
+                  ? `t.channel = 'TikTok'`
+                  : `TRUE`;
 
   const countsRow = await queryOne<Record<string, unknown>>(
     `SELECT
@@ -2007,13 +2099,17 @@ export async function getBulkInvoicesBatch(
        SUM(CASE WHEN t.channel = 'TikTok' THEN 1 ELSE 0 END) AS tiktok_count,
        SUM(CASE WHEN t.channel = 'Shopee' THEN 1 ELSE 0 END) AS shopee_count,
        SUM(CASE WHEN t.channel = 'Facebook' THEN 1 ELSE 0 END) AS facebook_count,
+       SUM(CASE WHEN t.channel = 'Lazada' THEN 1 ELSE 0 END) AS lazada_count,
+       SUM(CASE WHEN t.channel = 'LINE' THEN 1 ELSE 0 END) AS line_count,
+       SUM(CASE WHEN t.channel = 'Other' THEN 1 ELSE 0 END) AS other_count,
+       SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN 1 ELSE 0 END) AS compensation_count,
        SUM(CASE WHEN ${chMatchSql} THEN 1 ELSE 0 END) AS channel_filtered_count,
        SUM(CASE WHEN (${chMatchSql}) AND ${isLinkedSql} THEN 1 ELSE 0 END) AS linked_count,
        SUM(CASE WHEN (${chMatchSql}) AND NOT ${isLinkedSql} THEN 1 ELSE 0 END) AS unlinked_count
      FROM transactions t
      WHERE ${txDateWhere}
-       AND t.is_order = 1
-       AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
+       AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+       AND t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        AND ${billableClause}`,
     [dateParam],
     db,
@@ -2025,6 +2121,10 @@ export async function getBulkInvoicesBatch(
   const tiktokOrdersCount = Number(countsRow?.tiktok_count ?? 0);
   const shopeeOrdersCount = Number(countsRow?.shopee_count ?? 0);
   const facebookOrdersCount = Number(countsRow?.facebook_count ?? 0);
+  const lazadaOrdersCount = Number(countsRow?.lazada_count ?? 0);
+  const lineOrdersCount = Number(countsRow?.line_count ?? 0);
+  const otherOrdersCount = Number(countsRow?.other_count ?? 0);
+  const compensationOrdersCount = Number(countsRow?.compensation_count ?? 0);
   const channelFilteredCount = Number(countsRow?.channel_filtered_count ?? 0);
   const linkedOrdersCount = Number(countsRow?.linked_count ?? 0);
   const unlinkedOrdersCount = Number(countsRow?.unlinked_count ?? 0);
@@ -2065,13 +2165,12 @@ export async function getBulkInvoicesBatch(
     totalFilteredCount > 0
       ? query<Record<string, unknown>>(
           // เรียงตามเลขที่ใบกำกับฯ จากน้อยไปมาก เพื่อให้ "ชุดที่ N" ตรงกับลำดับเลขที่เอกสารที่รันต่อเนื่อง
-          // (LENGTH ก่อน แล้วค่อยเทียบข้อความ → เรียงเชิงตัวเลขได้แม้เลขเกิน 99999)
           `WITH page_ids AS (
              SELECT t.id FROM transactions t
              LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
              WHERE ${txDateWhere}
-               AND t.is_order = 1
-               AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
+               AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+               AND t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
                AND ${billableClause}
                AND (${chMatchSql})
                ${linkClause}
@@ -2093,8 +2192,8 @@ export async function getBulkInvoicesBatch(
           `SELECT DISTINCT t.created_date
            FROM transactions t
            WHERE ${txDateWhere}
-             AND t.is_order = 1
-             AND t.channel IN ('TikTok', 'Shopee', 'Facebook')
+             AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+             AND t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
              AND ${billableClause}
              AND (${chMatchSql})
              AND NOT ${isLinkedSql}
@@ -2116,6 +2215,10 @@ export async function getBulkInvoicesBatch(
     tiktokOrdersCount,
     shopeeOrdersCount,
     facebookOrdersCount,
+    lazadaOrdersCount,
+    lineOrdersCount,
+    otherOrdersCount,
+    compensationOrdersCount,
     channelFilteredCount,
     linkedOrdersCount,
     unlinkedOrdersCount,
@@ -2139,7 +2242,7 @@ export async function getBulkInvoicesBatch(
 async function getMonthlyInvoicesBatchKeyset(
   options: {
     date: string;
-    channelFilter: "all" | "TikTok" | "Shopee" | "Facebook";
+    channelFilter: "all" | "TikTok" | "Shopee" | "Facebook" | "Lazada" | "LINE" | "Other" | "Compensation";
     batch?: number;
     batchSize: 100 | 200 | 500;
   },
@@ -2154,13 +2257,25 @@ async function getMonthlyInvoicesBatchKeyset(
         ? `AND r.channel = 'Shopee'`
         : channelFilter === "Facebook"
           ? `AND r.channel = 'Facebook'`
-          : "";
+          : channelFilter === "Lazada"
+            ? `AND r.channel = 'Lazada'`
+            : channelFilter === "LINE"
+              ? `AND r.channel = 'LINE'`
+              : channelFilter === "Other"
+                ? `AND r.channel = 'Other'`
+                : channelFilter === "Compensation"
+                  ? `AND EXISTS (SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND ${BILLABLE_COMPENSATION_SQL})`
+                  : "";
 
   const countsRow = await queryOne<Record<string, unknown>>(
     `SELECT COUNT(*) AS total,
             COUNT(*) FILTER (WHERE r.channel = 'TikTok') AS tiktok_count,
             COUNT(*) FILTER (WHERE r.channel = 'Shopee') AS shopee_count,
-            COUNT(*) FILTER (WHERE r.channel = 'Facebook') AS facebook_count
+            COUNT(*) FILTER (WHERE r.channel = 'Facebook') AS facebook_count,
+            COUNT(*) FILTER (WHERE r.channel = 'Lazada') AS lazada_count,
+            COUNT(*) FILTER (WHERE r.channel = 'LINE') AS line_count,
+            COUNT(*) FILTER (WHERE r.channel = 'Other') AS other_count,
+            COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND ${BILLABLE_COMPENSATION_SQL})) AS compensation_count
      FROM invoice_registry r
      WHERE r.yymm = $1 AND r.status = 'active'`,
     [yymm],
@@ -2171,6 +2286,10 @@ async function getMonthlyInvoicesBatchKeyset(
   const tiktokOrdersCount = Number(countsRow?.tiktok_count ?? 0);
   const shopeeOrdersCount = Number(countsRow?.shopee_count ?? 0);
   const facebookOrdersCount = Number(countsRow?.facebook_count ?? 0);
+  const lazadaOrdersCount = Number(countsRow?.lazada_count ?? 0);
+  const lineOrdersCount = Number(countsRow?.line_count ?? 0);
+  const otherOrdersCount = Number(countsRow?.other_count ?? 0);
+  const compensationOrdersCount = Number(countsRow?.compensation_count ?? 0);
   const channelFilteredCount =
     channelFilter === "TikTok"
       ? tiktokOrdersCount
@@ -2178,7 +2297,15 @@ async function getMonthlyInvoicesBatchKeyset(
         ? shopeeOrdersCount
         : channelFilter === "Facebook"
           ? facebookOrdersCount
-          : billableTotalCount;
+          : channelFilter === "Lazada"
+            ? lazadaOrdersCount
+            : channelFilter === "LINE"
+              ? lineOrdersCount
+              : channelFilter === "Other"
+                ? otherOrdersCount
+                : channelFilter === "Compensation"
+                  ? compensationOrdersCount
+                  : billableTotalCount;
 
   const batchCount = Math.max(1, Math.ceil(channelFilteredCount / batchSize));
   const rawBatch = Number(options.batch ?? 1);
@@ -2209,7 +2336,7 @@ async function getMonthlyInvoicesBatchKeyset(
            SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
            FROM page p
            JOIN invoice_registry r ON r.order_id = p.order_id
-           JOIN transactions t ON t.external_id = p.order_id AND t.is_order = 1
+           JOIN transactions t ON t.external_id = p.order_id AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
            LEFT JOIN imports i ON i.id = t.import_id
            ORDER BY p.seq`,
           [yymm, batchStartIdx + 1, batchSize],
@@ -2225,6 +2352,10 @@ async function getMonthlyInvoicesBatchKeyset(
     tiktokOrdersCount,
     shopeeOrdersCount,
     facebookOrdersCount,
+    lazadaOrdersCount,
+    lineOrdersCount,
+    otherOrdersCount,
+    compensationOrdersCount,
     channelFilteredCount,
     linkedOrdersCount: channelFilteredCount,
     unlinkedOrdersCount: 0,
@@ -2276,9 +2407,9 @@ const BILL_SORT_SQL: Record<BillSortKey, string> = {
 };
 
 const BILL_CATEGORY_SQL: Record<BillCategoryKey, string> = {
-  normal: `(t.income > 0 AND t.payout > 0)`,
-  refund_fee: `(t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
-  zero: `(NOT (t.income > 0 AND t.payout > 0) AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0))) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
+  normal: `((t.is_order = 1 AND t.income > 0 AND t.payout > 0) OR ${BILLABLE_COMPENSATION_SQL})`,
+  refund_fee: `t.is_order = 1 AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
+  zero: `t.is_order = 1 AND (NOT (t.income > 0 AND t.payout > 0) AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0))) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
 };
 
 export async function listBills(
@@ -2319,8 +2450,8 @@ export async function listBills(
   const pageSize = Math.min(500, Math.max(10, options.pageSize ?? 20));
   const page = Math.max(1, options.page ?? 1);
   const baseClausesWithoutShop = [
-    "t.is_order = 1",
-    "t.channel IN ('TikTok', 'Shopee', 'Facebook')",
+    BILLABLE_ORDER_OR_COMPENSATION_SQL,
+    "t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')",
   ];
   const baseParamsWithoutShop: unknown[] = [];
   const isMonthFilter = /^\d{4}-\d{2}$/.test(date);
@@ -2382,7 +2513,14 @@ export async function listBills(
   const baseWhere = baseClauses.join(" AND ");
   const clausesWithoutLinkAndCat = [...baseClauses];
   const paramsWithoutLink = [...baseParams];
-  if (channel === "TikTok" || channel === "Shopee" || channel === "Facebook") {
+  if (
+    channel === "TikTok" ||
+    channel === "Shopee" ||
+    channel === "Facebook" ||
+    channel === "Lazada" ||
+    channel === "LINE" ||
+    channel === "Other"
+  ) {
     clausesWithoutLinkAndCat.push(
       `t.channel = $${paramsWithoutLink.length + 1}`,
     );
@@ -2395,30 +2533,47 @@ export async function listBills(
       ? "t.channel = 'Shopee'"
       : channel === "Facebook"
         ? "t.channel = 'Facebook'"
-        : channel === "TikTok"
-          ? "t.channel = 'TikTok'"
-          : "TRUE";
+        : channel === "Lazada" ? "t.channel = 'Lazada'" : channel === "LINE"
+          ? "t.channel = 'LINE'"
+          : channel === "Other"
+            ? "t.channel = 'Other'"
+            : channel === "TikTok"
+              ? "t.channel = 'TikTok'"
+              : "TRUE";
+
+  const LINE_MISMATCH_SQL = `(t.channel = 'LINE' AND ${ORDER_LINK_PRIORITY_SQL} = 0 AND EXISTS (
+    SELECT 1 FROM oms_order_items oi
+    WHERE oi.order_uid = t.oms_order_uid
+    GROUP BY oi.order_uid
+    HAVING ABS(t.income - MAX(oi.order_sales_amount)) >= 0.01
+  ))`;
 
   const linkConditionSql =
     linkStatus === "no_price"
       ? `${ORDER_LINK_PRIORITY_SQL} = 3`
       : linkStatus === "all_fb"
         ? "TRUE"
-        : linkStatus === "shopee_negative"
-          ? `t.channel = 'Shopee' AND t.payout < 0`
-          : linkStatus === "shopee_zero"
-            ? `t.channel = 'Shopee' AND t.payout = 0`
-            : linkStatus === "linked"
-              ? channel === "Shopee"
-                ? `${ORDER_LINK_PRIORITY_SQL} = 0 AND t.payout > 0`
-                : `${ORDER_LINK_PRIORITY_SQL} = 0`
-              : linkStatus === "oms_only"
-                ? `${ORDER_LINK_PRIORITY_SQL} = 1`
-                : linkStatus === "unlinked"
-                  ? `${ORDER_LINK_PRIORITY_SQL} = 2`
-                  : q || category === "refund_fee"
-                    ? "TRUE"
-                    : `${ORDER_LINK_PRIORITY_SQL} <> 3`;
+        : linkStatus === "compensation"
+          ? BILLABLE_COMPENSATION_SQL
+          : linkStatus === "shopee_negative"
+            ? `t.channel = 'Shopee' AND t.payout < 0`
+            : linkStatus === "shopee_zero"
+              ? `t.channel = 'Shopee' AND t.payout = 0`
+              : linkStatus === "line_mismatch"
+                ? LINE_MISMATCH_SQL
+                : linkStatus === "linked"
+                  ? channel === "Shopee"
+                    ? `${ORDER_LINK_PRIORITY_SQL} = 0 AND t.payout > 0`
+                    : channel === "LINE"
+                      ? `${ORDER_LINK_PRIORITY_SQL} = 0 AND NOT ${LINE_MISMATCH_SQL}`
+                      : `${ORDER_LINK_PRIORITY_SQL} = 0`
+                  : linkStatus === "oms_only"
+                    ? `${ORDER_LINK_PRIORITY_SQL} = 1`
+                    : linkStatus === "unlinked"
+                      ? `${ORDER_LINK_PRIORITY_SQL} = 2`
+                      : q || category === "refund_fee"
+                        ? "TRUE"
+                        : `${ORDER_LINK_PRIORITY_SQL} <> 3`;
 
   const dsParams: unknown[] = [];
   let dsWhere = "";
@@ -2454,6 +2609,10 @@ export async function listBills(
          COALESCE(SUM(tiktok_count), 0) AS tiktok_count,
          COALESCE(SUM(shopee_count), 0) AS shopee_count,
          COALESCE(SUM(facebook_count), 0) AS facebook_count,
+         COALESCE(SUM(lazada_count), 0) AS lazada_count,
+         COALESCE(SUM(line_count), 0) AS line_count,
+         COALESCE(SUM(other_channel_count), 0) AS other_channel_count,
+         COALESCE(SUM(compensation_count), 0) AS compensation_count,
          MIN(paid_date) AS min_paid_date,
          MAX(paid_date) AS max_paid_date,
          COUNT(*) AS distinct_dates
@@ -2474,6 +2633,9 @@ export async function listBills(
          SUM(CASE WHEN t.channel = 'TikTok' THEN 1 ELSE 0 END) AS non_pos_tiktok,
          SUM(CASE WHEN t.channel = 'Shopee' THEN 1 ELSE 0 END) AS non_pos_shopee,
          SUM(CASE WHEN t.channel = 'Facebook' THEN 1 ELSE 0 END) AS non_pos_fb,
+         SUM(CASE WHEN t.channel = 'Lazada' THEN 1 ELSE 0 END) AS non_pos_lazada,
+         SUM(CASE WHEN t.channel = 'LINE' THEN 1 ELSE 0 END) AS non_pos_line,
+         SUM(CASE WHEN t.channel = 'Other' THEN 1 ELSE 0 END) AS non_pos_other,
          SUM(CASE WHEN (${chMatchSql}) AND ${ORDER_LINK_PRIORITY_SQL} = 0 THEN 1 ELSE 0 END) AS non_pos_linked,
          SUM(CASE WHEN (${chMatchSql}) AND ${ORDER_LINK_PRIORITY_SQL} = 1 THEN 1 ELSE 0 END) AS non_pos_oms_only,
          SUM(CASE WHEN (${chMatchSql}) AND ${ORDER_LINK_PRIORITY_SQL} = 2 THEN 1 ELSE 0 END) AS non_pos_unlinked,
@@ -2484,12 +2646,19 @@ export async function listBills(
          SUM(CASE WHEN t.channel = 'TikTok' AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS refund_fee_tiktok,
          SUM(CASE WHEN t.channel = 'Shopee' AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS refund_fee_shopee,
          SUM(CASE WHEN t.channel = 'Facebook' AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS refund_fee_fb,
+         SUM(CASE WHEN t.channel = 'Lazada' AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS refund_fee_lazada,
+         SUM(CASE WHEN t.channel = 'LINE' AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS refund_fee_line,
+         SUM(CASE WHEN t.channel = 'Other' AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS refund_fee_other,
          SUM(CASE WHEN NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_all_channels,
          SUM(CASE WHEN t.channel = 'TikTok' AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_tiktok,
          SUM(CASE WHEN t.channel = 'Shopee' AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_shopee,
-         SUM(CASE WHEN t.channel = 'Facebook' AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_fb
+         SUM(CASE WHEN t.channel = 'Facebook' AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_fb,
+         SUM(CASE WHEN t.channel = 'Lazada' AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_lazada,
+         SUM(CASE WHEN t.channel = 'LINE' AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_line,
+         SUM(CASE WHEN t.channel = 'Other' AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) THEN 1 ELSE 0 END) AS zero_other
        FROM transactions t
        WHERE ${baseWhere}
+         AND t.is_order = 1
          AND (t.income <= 0 OR t.payout <= 0)
          AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
       baseParams,
@@ -2531,6 +2700,7 @@ export async function listBills(
     ...(shipping !== "all" ? [BILL_SHIPPING_SQL[shipping]] : []),
   ];
   const whereWithoutLink = clausesWithoutLink.join(" AND ");
+  const dsCompensationCount = Number(dsRow?.compensation_count ?? 0);
   const canUseFastLinkCounts =
     category === "normal" &&
     !q &&
@@ -2538,7 +2708,8 @@ export async function listBills(
     status === "all" &&
     channel === "all" &&
     shipping === "all" &&
-    activeShop === "all";
+    activeShop === "all" &&
+    dsCompensationCount === 0;
   let fastLinkStatsRow: Record<string, unknown> | null = null;
   if (canUseFastLinkCounts && dsRow) {
     const allCountFromDs = Number(dsRow.all_count ?? dsRow.order_count ?? 0);
@@ -2572,6 +2743,7 @@ export async function listBills(
           Number(dsRow.unlinked_count ?? 0) - nonPosUnlinked,
         ),
         no_price_count: noPriceAll,
+        compensation_count: 0,
       };
     }
   }
@@ -2605,7 +2777,8 @@ export async function listBills(
     isUnfilteredBase &&
     linkStatus === "all" &&
     shipping === "all" &&
-    activeShop === "all";
+    activeShop === "all" &&
+    dsCompensationCount === 0;
   let fastSummaryUsed = false;
   let total = 0;
   let summaryIncome = 0;
@@ -2621,6 +2794,9 @@ export async function listBills(
     TikTok: 0,
     Shopee: 0,
     Facebook: 0,
+    Lazada: 0,
+    LINE: 0,
+    Other: 0,
   };
   let channelCountsResolved = false;
 
@@ -2628,18 +2804,19 @@ export async function listBills(
   const dsTikTokCount = Number(dsRow?.tiktok_count ?? 0);
   const dsShopeeCount = Number(dsRow?.shopee_count ?? 0);
   const dsFacebookCount = Number(dsRow?.facebook_count ?? 0);
+  const dsLazadaCount = Number(dsRow?.lazada_count ?? 0);
+  const dsLineCount = Number(dsRow?.line_count ?? 0);
+  const dsOtherChannelCount = Number(dsRow?.other_channel_count ?? 0);
   const rawTikTokFromDs =
-    dsTikTokCount > 0 || dsShopeeCount > 0 || dsFacebookCount > 0
+    dsTikTokCount > 0 || dsShopeeCount > 0 || dsFacebookCount > 0 || dsLazadaCount > 0 || dsLineCount > 0 || dsOtherChannelCount > 0
       ? dsTikTokCount
       : dsOrderCount;
-  const normalAllFromDs = Math.max(
-    0,
-    dsOrderCount - nonPosAllChannels - noPriceAllChannels,
-  );
-  const normalTikTokFromDs = Math.max(
-    0,
-    rawTikTokFromDs - Number(nonPosRow?.non_pos_tiktok ?? 0),
-  );
+  const normalAllFromDs =
+    Math.max(0, dsOrderCount - nonPosAllChannels - noPriceAllChannels) +
+    dsCompensationCount;
+  const normalTikTokFromDs =
+    Math.max(0, rawTikTokFromDs - Number(nonPosRow?.non_pos_tiktok ?? 0)) +
+    dsCompensationCount;
   const normalShopeeFromDs = Math.max(
     0,
     dsShopeeCount - Number(nonPosRow?.non_pos_shopee ?? 0),
@@ -2647,6 +2824,15 @@ export async function listBills(
   const normalFacebookFromDs = Math.max(
     0,
     dsFacebookCount - Number(nonPosRow?.non_pos_fb ?? 0) - noPriceFb,
+  );
+  const normalLazadaFromDs = Math.max(0, dsLazadaCount - Number(nonPosRow?.non_pos_lazada ?? 0));
+  const normalLineFromDs = Math.max(
+    0,
+    dsLineCount - Number(nonPosRow?.non_pos_line ?? 0),
+  );
+  const normalOtherFromDs = Math.max(
+    0,
+    dsOtherChannelCount - Number(nonPosRow?.non_pos_other ?? 0),
   );
 
   // Channel counts belong to the parent hierarchy (Category + Date/Search/Status)
@@ -2656,18 +2842,27 @@ export async function listBills(
     channelCounts.TikTok = Number(nonPosRow?.refund_fee_tiktok ?? 0);
     channelCounts.Shopee = Number(nonPosRow?.refund_fee_shopee ?? 0);
     channelCounts.Facebook = Number(nonPosRow?.refund_fee_fb ?? 0);
+    channelCounts.Lazada = Number(nonPosRow?.refund_fee_lazada ?? 0);
+    channelCounts.LINE = Number(nonPosRow?.refund_fee_line ?? 0);
+    channelCounts.Other = Number(nonPosRow?.refund_fee_other ?? 0);
     channelCountsResolved = true;
   } else if (category === "zero") {
     channelCounts.all = Number(nonPosRow?.zero_all_channels ?? 0);
     channelCounts.TikTok = Number(nonPosRow?.zero_tiktok ?? 0);
     channelCounts.Shopee = Number(nonPosRow?.zero_shopee ?? 0);
     channelCounts.Facebook = Number(nonPosRow?.zero_fb ?? 0);
+    channelCounts.Lazada = Number(nonPosRow?.zero_lazada ?? 0);
+    channelCounts.LINE = Number(nonPosRow?.zero_line ?? 0);
+    channelCounts.Other = Number(nonPosRow?.zero_other ?? 0);
     channelCountsResolved = true;
   } else if (isUnfilteredBase && dsOrderCount > 0) {
     channelCounts.all = normalAllFromDs;
     channelCounts.TikTok = normalTikTokFromDs;
     channelCounts.Shopee = normalShopeeFromDs;
     channelCounts.Facebook = normalFacebookFromDs;
+    channelCounts.Lazada = normalLazadaFromDs;
+    channelCounts.LINE = normalLineFromDs;
+    channelCounts.Other = normalOtherFromDs;
     channelCountsResolved = true;
   }
 
@@ -2736,9 +2931,11 @@ export async function listBills(
                  SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 1 THEN 1 ELSE 0 END) AS oms_only_count,
                  SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 2 THEN 1 ELSE 0 END) AS unlinked_count,
                  SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 3 THEN 1 ELSE 0 END) AS no_price_count,
+                 SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN 1 ELSE 0 END) AS compensation_count,
                  SUM(CASE WHEN t.channel = 'Shopee' AND t.payout > 0 THEN 1 ELSE 0 END) AS shopee_normal_count,
                  SUM(CASE WHEN t.channel = 'Shopee' AND t.payout < 0 THEN 1 ELSE 0 END) AS shopee_neg_count,
-                 SUM(CASE WHEN t.channel = 'Shopee' AND t.payout = 0 THEN 1 ELSE 0 END) AS shopee_zero_count
+                 SUM(CASE WHEN t.channel = 'Shopee' AND t.payout = 0 THEN 1 ELSE 0 END) AS shopee_zero_count,
+                 SUM(CASE WHEN ${LINE_MISMATCH_SQL} THEN 1 ELSE 0 END) AS line_mismatch_count
                FROM transactions t
                WHERE ${whereWithoutLink}`,
               paramsWithoutLink,
@@ -2768,10 +2965,12 @@ export async function listBills(
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 1 THEN 1 ELSE 0 END) AS oms_only_count,
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 2 THEN 1 ELSE 0 END) AS unlinked_count,
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 3 THEN 1 ELSE 0 END) AS no_price_count,
+                    SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN 1 ELSE 0 END) AS compensation_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout > 0 THEN 1 ELSE 0 END) AS shopee_normal_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout < 0 THEN 1 ELSE 0 END) AS shopee_neg_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout = 0 THEN 1 ELSE 0 END) AS shopee_zero_count,
-                    ROUND(SUM(t.income)::numeric, 2) AS income,
+                    SUM(CASE WHEN ${LINE_MISMATCH_SQL} THEN 1 ELSE 0 END) AS line_mismatch_count,
+                    ROUND(SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN t.payout ELSE t.income END)::numeric, 2) AS income,
                     ROUND(SUM(t.fee_total)::numeric, 2) AS fees,
                     ROUND(SUM(t.payout)::numeric, 2) AS payout,
                     ROUND(COALESCE(SUM(t.shipping_positive), 0)::numeric, 2) AS shipping_positive,
@@ -2779,6 +2978,9 @@ export async function listBills(
                     SUM(CASE WHEN t.channel = 'TikTok' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS tiktok_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS shopee_count,
                     SUM(CASE WHEN t.channel = 'Facebook' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS facebook_count,
+                    SUM(CASE WHEN t.channel = 'Lazada' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS lazada_count,
+                    SUM(CASE WHEN t.channel = 'LINE' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS line_count,
+                    SUM(CASE WHEN t.channel = 'Other' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS other_count,
                     MIN(NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS min_paid_date,
                     MAX(NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS max_paid_date,
                     COUNT(DISTINCT NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS distinct_dates
@@ -2792,7 +2994,10 @@ export async function listBills(
             `SELECT COUNT(*) AS all_count,
                     SUM(CASE WHEN t.channel = 'TikTok' THEN 1 ELSE 0 END) AS tiktok_count,
                     SUM(CASE WHEN t.channel = 'Shopee' THEN 1 ELSE 0 END) AS shopee_count,
-                    SUM(CASE WHEN t.channel = 'Facebook' THEN 1 ELSE 0 END) AS facebook_count
+                    SUM(CASE WHEN t.channel = 'Facebook' THEN 1 ELSE 0 END) AS facebook_count,
+                    SUM(CASE WHEN t.channel = 'Lazada' THEN 1 ELSE 0 END) AS lazada_count,
+       SUM(CASE WHEN t.channel = 'LINE' THEN 1 ELSE 0 END) AS line_count,
+                    SUM(CASE WHEN t.channel = 'Other' THEN 1 ELSE 0 END) AS other_count
              FROM transactions t WHERE ${whereForChannelCounts}`,
             baseParams,
             db,
@@ -2809,16 +3014,23 @@ export async function listBills(
       : 0;
   const resolvedAllWithNoPriceCount =
     resolvedAllCount + resolvedNoPriceCount;
+  const resolvedLinkedCount = Number(effectiveLinkStatsRow?.linked_count ?? 0);
+  const resolvedLineMismatchCount = Number(
+    effectiveLinkStatsRow?.line_mismatch_count ?? 0,
+  );
   const linkCounts: BillLinkCounts = {
     all: resolvedAllCount,
-    linked: Number(effectiveLinkStatsRow?.linked_count ?? 0),
+    linked: resolvedLinkedCount,
     omsOnly: Number(effectiveLinkStatsRow?.oms_only_count ?? 0),
     unlinked: Number(effectiveLinkStatsRow?.unlinked_count ?? 0),
     noPrice: resolvedNoPriceCount,
     allWithNoPrice: resolvedAllWithNoPriceCount,
+    compensation: Number(effectiveLinkStatsRow?.compensation_count ?? dsCompensationCount ?? 0),
     shopeeNormal: Number(effectiveLinkStatsRow?.shopee_normal_count ?? 0),
     shopeeNegative: Number(effectiveLinkStatsRow?.shopee_neg_count ?? 0),
     shopeeZero: Number(effectiveLinkStatsRow?.shopee_zero_count ?? 0),
+    lineMatched: Math.max(0, resolvedLinkedCount - resolvedLineMismatchCount),
+    lineMismatch: resolvedLineMismatchCount,
     missingOmsCreatedDates: missingDatesRows.map((r) => String(r.created_date)),
   };
 
@@ -2838,11 +3050,17 @@ export async function listBills(
         channelCounts.TikTok = Number(chStatsRow.tiktok_count ?? 0);
         channelCounts.Shopee = Number(chStatsRow.shopee_count ?? 0);
         channelCounts.Facebook = Number(chStatsRow.facebook_count ?? 0);
+        channelCounts.Lazada = Number(chStatsRow.lazada_count ?? 0);
+        channelCounts.LINE = Number(chStatsRow.line_count ?? 0);
+        channelCounts.Other = Number(chStatsRow.other_count ?? 0);
       } else {
         channelCounts.all = Number(summaryRow?.all_count ?? total);
         channelCounts.TikTok = Number(summaryRow?.tiktok_count ?? total);
         channelCounts.Shopee = Number(summaryRow?.shopee_count ?? 0);
         channelCounts.Facebook = Number(summaryRow?.facebook_count ?? 0);
+        channelCounts.Lazada = Number(summaryRow?.lazada_count ?? 0);
+        channelCounts.LINE = Number(summaryRow?.line_count ?? 0);
+        channelCounts.Other = Number(summaryRow?.other_count ?? 0);
       }
     }
   }
@@ -2856,6 +3074,12 @@ export async function listBills(
       normalCategoryCount = normalShopeeFromDs;
     } else if (channel === "Facebook") {
       normalCategoryCount = normalFacebookFromDs;
+    } else if (channel === "Lazada") {
+      normalCategoryCount = normalLazadaFromDs;
+    } else if (channel === "LINE") {
+      normalCategoryCount = normalLineFromDs;
+    } else if (channel === "Other") {
+      normalCategoryCount = normalOtherFromDs;
     } else {
       normalCategoryCount = normalAllFromDs;
     }
@@ -2952,12 +3176,17 @@ export async function listBills(
 
   const enrichedRows = await enrichTransactionsWithOms(rows.map(mapTransaction), db);
 
-  // Compute shopCounts across all shops for the current date/filter scope (independent of activeShop)
-  const shopCountWhere = baseClausesWithoutShop.join(" AND ");
+  // Compute shopCounts across all shops for the current date/category/filter scope (independent of activeShop)
+  const shopCountWhere = [
+    ...baseClausesWithoutShop,
+    BILL_CATEGORY_SQL[category],
+    `${ORDER_LINK_PRIORITY_SQL} <> 3`,
+    ...(shipping !== "all" ? [BILL_SHIPPING_SQL[shipping]] : []),
+  ].join(" AND ");
   const shopCountRows = await query<Record<string, unknown>>(
     `SELECT COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop, COUNT(*)::int AS cnt
      FROM transactions t
-     WHERE ${shopCountWhere} AND t.income > 0 AND ${ORDER_LINK_PRIORITY_SQL} <> 3
+     WHERE ${shopCountWhere}
      GROUP BY COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า')`,
     baseParamsWithoutShop,
     db,
@@ -3019,8 +3248,8 @@ export async function getBill(
      LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
      LEFT JOIN imports i ON i.id = t.import_id
      WHERE (t.external_id = $1 OR t.order_code = $1)
-       AND t.is_order = 1
-       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+       AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
      ORDER BY t.paid_date DESC LIMIT 1`,
     [orderId],
     db,
@@ -3074,7 +3303,7 @@ export async function updateOrderBuyerInfo(
          buyer_tax_id = $3,
          buyer_address = $4
      WHERE (external_id = $1 OR order_code = $1)
-       AND is_order = 1
+       AND (is_order = 1 OR (is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0))
      RETURNING external_id, buyer_name, buyer_tax_id, buyer_address`,
     [cleanOrderId, cleanName, cleanTaxId, cleanAddress],
     db,
@@ -3101,6 +3330,9 @@ export interface SkuSummaryRow {
   tiktokQty: number;
   shopeeQty: number;
   facebookQty: number;
+  lazadaQty: number;
+  lineQty: number;
+  otherQty: number;
 }
 
 export type SkuSortKey =
@@ -3156,32 +3388,34 @@ export async function listSkuSummariesPaged(
     options.sort && options.sort in SKU_SORT_SQL ? options.sort : "qty_desc";
   const orderBySql = SKU_SORT_SQL[sortKey];
 
-  if (date) {
+  if (date || channel !== "all") {
     const isMonthFilter = /^\d{4}-\d{2}$/.test(date);
     const isYearFilter = /^\d{4}$/.test(date);
     const isDayFilter = /^\d{4}-\d{2}-\d{2}$/.test(date);
 
     const itemClauses: string[] = [
-      "COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')",
+      "COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')",
     ];
     const itemParams: unknown[] = [];
 
-    if (isDayFilter) {
-      itemClauses.push(
-        `COALESCE(NULLIF(i.paid_date, ''), i.created_date) = $${itemParams.length + 1}`,
-      );
-      itemParams.push(date);
-    } else if (isMonthFilter || isYearFilter) {
-      itemClauses.push(
-        `COALESCE(NULLIF(i.paid_date, ''), i.created_date) LIKE $${itemParams.length + 1}`,
-      );
-      itemParams.push(`${date}-%`);
-    } else {
-      const safeDate = escapeLikePattern(date);
-      itemClauses.push(
-        `COALESCE(NULLIF(i.paid_date, ''), i.created_date) LIKE $${itemParams.length + 1} ESCAPE '\\'`,
-      );
-      itemParams.push(`%${safeDate}%`);
+    if (date) {
+      if (isDayFilter) {
+        itemClauses.push(
+          `COALESCE(NULLIF(i.paid_date, ''), i.created_date) = $${itemParams.length + 1}`,
+        );
+        itemParams.push(date);
+      } else if (isMonthFilter || isYearFilter) {
+        itemClauses.push(
+          `COALESCE(NULLIF(i.paid_date, ''), i.created_date) LIKE $${itemParams.length + 1}`,
+        );
+        itemParams.push(`${date}-%`);
+      } else {
+        const safeDate = escapeLikePattern(date);
+        itemClauses.push(
+          `COALESCE(NULLIF(i.paid_date, ''), i.created_date) LIKE $${itemParams.length + 1} ESCAPE '\\'`,
+        );
+        itemParams.push(`%${safeDate}%`);
+      }
     }
 
     if (channel === "TikTok") {
@@ -3190,6 +3424,12 @@ export async function listSkuSummariesPaged(
       itemClauses.push("i.channel = 'Shopee'");
     } else if (channel === "Facebook") {
       itemClauses.push("i.channel = 'Facebook'");
+    } else if (channel === "Lazada") {
+      itemClauses.push("i.channel = 'Lazada'");
+    } else if (channel === "LINE") {
+      itemClauses.push("i.channel = 'LINE'");
+    } else if (channel === "Other") {
+      itemClauses.push("i.channel = 'Other'");
     }
 
     if (q) {
@@ -3211,7 +3451,10 @@ export async function listSkuSummariesPaged(
           ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2) AS net_sales_amount,
           COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int AS tiktok_qty,
           COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int AS shopee_qty,
-          COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int AS facebook_qty
+          COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int AS facebook_qty,
+          COALESCE(SUM(CASE WHEN i.channel = 'Lazada' THEN i.quantity ELSE 0 END), 0)::int AS lazada_qty,
+          COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int AS line_qty,
+          COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int AS other_qty
         FROM oms_order_items i
         ${itemWhere}
         GROUP BY i.sku_code
@@ -3259,6 +3502,9 @@ export async function listSkuSummariesPaged(
         tiktokQty: Number(r.tiktok_qty ?? 0),
         shopeeQty: Number(r.shopee_qty ?? 0),
         facebookQty: Number(r.facebook_qty ?? 0),
+        lazadaQty: Number(r.lazada_qty ?? 0),
+        lineQty: Number(r.line_qty ?? 0),
+        otherQty: Number(r.other_qty ?? 0),
       })),
       total,
       page,
@@ -3274,16 +3520,9 @@ export async function listSkuSummariesPaged(
   }
 
   const clauses: string[] = [
-    "(s.tiktok_qty > 0 OR s.shopee_qty > 0 OR s.facebook_qty > 0)",
+    "(s.tiktok_qty > 0 OR s.shopee_qty > 0 OR s.facebook_qty > 0 OR COALESCE(s.lazada_qty, 0) > 0 OR COALESCE(s.line_qty, 0) > 0 OR COALESCE(s.other_qty, 0) > 0)",
   ];
   const params: unknown[] = [];
-  if (channel === "TikTok") {
-    clauses.push("s.tiktok_qty > 0");
-  } else if (channel === "Shopee") {
-    clauses.push("s.shopee_qty > 0");
-  } else if (channel === "Facebook") {
-    clauses.push("s.facebook_qty > 0");
-  }
   if (q) {
     clauses.push(
       `(s.sku_code || ' ' || s.product_name) ILIKE $${params.length + 1} ESCAPE '\\'`,
@@ -3333,6 +3572,9 @@ export async function listSkuSummariesPaged(
       tiktokQty: Number(r.tiktok_qty ?? 0),
       shopeeQty: Number(r.shopee_qty ?? 0),
       facebookQty: Number(r.facebook_qty ?? 0),
+      lazadaQty: Number(r.lazada_qty ?? 0),
+      lineQty: Number(r.line_qty ?? 0),
+      otherQty: Number(r.other_qty ?? 0),
     })),
     total,
     page,
@@ -3360,14 +3602,14 @@ export async function getOverallStats(
     ),
     query<Record<string, unknown>>(
       `SELECT 
-         COALESCE(NULLIF(shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name,
+         COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name,
          COUNT(*)::int AS order_count,
-         ROUND(SUM(payout)::numeric, 2) AS total_payout,
-         ROUND(SUM(income)::numeric, 2) AS total_income,
-         ROUND(SUM(fee_total)::numeric, 2) AS total_fees
-       FROM transactions
-       WHERE is_order = 1
-       GROUP BY COALESCE(NULLIF(shop_name, ''), 'รอผูกไฟล์ร้านค้า')
+         ROUND(SUM(t.payout)::numeric, 2) AS total_payout,
+         ROUND(SUM(t.income)::numeric, 2) AS total_income,
+         ROUND(SUM(t.fee_total)::numeric, 2) AS total_fees
+       FROM transactions t
+       WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+       GROUP BY COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า')
        ORDER BY order_count DESC`,
       [],
       db,
@@ -3391,12 +3633,12 @@ export async function getOverallStats(
     );
     const latestRow = isUnlinked
       ? await queryOne<{ latest_paid_date: string | null }>(
-          `SELECT MAX(paid_date) AS latest_paid_date FROM transactions WHERE is_order = 1 AND (shop_name IS NULL OR shop_name = '' OR shop_name = 'อื่นๆ' OR shop_name = 'รอผูกไฟล์ร้านค้า')`,
+          `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND (t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')`,
           [],
           db,
         )
       : await queryOne<{ latest_paid_date: string | null }>(
-          `SELECT MAX(paid_date) AS latest_paid_date FROM transactions WHERE is_order = 1 AND shop_name = $1`,
+          `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND t.shop_name = $1`,
           [activeShop],
           db,
         );
@@ -3424,7 +3666,7 @@ export async function getOverallStats(
   }
 
   const latestRow = await queryOne<{ latest_paid_date: string | null }>(
-    `SELECT MAX(paid_date) AS latest_paid_date FROM transactions WHERE is_order = 1`,
+    `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}`,
     [],
     db,
   );
@@ -3449,6 +3691,9 @@ export interface DailyUploadCompletenessRow {
   tiktokOrders: number;
   shopeeOrders: number;
   facebookOrders: number;
+  lazadaOrders: number;
+  lineOrders: number;
+  otherOrders: number;
   completeCount: number;
   missingFile1Count: number;
   missingFile2Count: number;
@@ -3474,6 +3719,9 @@ export interface MonthlyCompletenessOverview {
   totalTiktokOrders: number;
   totalShopeeOrders: number;
   totalFacebookOrders: number;
+  totalLazadaOrders: number;
+  totalLineOrders: number;
+  totalOtherOrders: number;
   totalCompleteOrders: number;
   missingFile1: number;
   missingFile2: number;
@@ -3499,6 +3747,9 @@ export interface DailyUploadCompletenessReport {
     totalTiktokOrders: number;
     totalShopeeOrders: number;
     totalFacebookOrders: number;
+    totalLazadaOrders: number;
+    totalLineOrders: number;
+    totalOtherOrders: number;
     totalCompleteOrders: number;
     totalMissingFile1: number;
     totalMissingFile2: number;
@@ -3627,6 +3878,27 @@ export async function getDailyUploadCompleteness(
          )::int AS facebook_orders,
          SUM(
            CASE
+             WHEN t.channel = 'Lazada'
+             THEN 1
+             ELSE 0
+           END
+         )::int AS lazada_orders,
+         SUM(
+           CASE
+             WHEN t.channel = 'LINE'
+             THEN 1
+             ELSE 0
+           END
+         )::int AS line_orders,
+         SUM(
+           CASE
+             WHEN t.channel = 'Other'
+             THEN 1
+             ELSE 0
+           END
+         )::int AS other_orders,
+         SUM(
+           CASE
              WHEN t.order_code IS NOT NULL
               AND t.order_code <> ''
               AND ${hasItemsSql}
@@ -3687,7 +3959,7 @@ export async function getDailyUploadCompleteness(
          }
          AND ${dateCol} LIKE $1 || '-%'
          AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-         AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook')
+         AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
        GROUP BY ${dateCol}
        ORDER BY ${dateCol} ASC`,
       [String(selectedYear)],
@@ -3760,8 +4032,20 @@ export async function getDailyUploadCompleteness(
     const normalOrders = Number(r.normal_orders ?? 0);
     const shopeeOrders = Number(r.shopee_orders ?? 0);
     const facebookOrders = Number(r.facebook_orders ?? 0);
+    const lazadaOrders = Number(r.lazada_orders ?? 0);
+    const lineOrders = Number(r.line_orders ?? 0);
+    const otherOrders = Number(r.other_orders ?? 0);
     const tiktokOrders = Number(
-      r.tiktok_orders ?? Math.max(0, normalOrders - shopeeOrders - facebookOrders),
+      r.tiktok_orders ??
+        Math.max(
+          0,
+          normalOrders -
+            shopeeOrders -
+            facebookOrders -
+            lazadaOrders -
+            lineOrders -
+            otherOrders,
+        ),
     );
     const rawMissingFile1 = Number(r.missing_file1_count ?? 0);
     const rawMissingFile2 = Number(r.missing_file2_count ?? 0);
@@ -3811,6 +4095,9 @@ export async function getDailyUploadCompleteness(
       tiktokOrders,
       shopeeOrders,
       facebookOrders,
+      lazadaOrders,
+      lineOrders,
+      otherOrders,
       completeCount,
       missingFile1Count,
       missingFile2Count,
@@ -3848,6 +4135,9 @@ export async function getDailyUploadCompleteness(
     let totalTiktokOrders = 0;
     let totalShopeeOrders = 0;
     let totalFacebookOrders = 0;
+    let totalLazadaOrders = 0;
+    let totalLineOrders = 0;
+    let totalOtherOrders = 0;
     let totalCompleteOrders = 0;
     let missingFile1 = 0;
     let missingFile2 = 0;
@@ -3863,6 +4153,9 @@ export async function getDailyUploadCompleteness(
         tiktokOrders: 0,
         shopeeOrders: 0,
         facebookOrders: 0,
+        lazadaOrders: 0,
+        lineOrders: 0,
+        otherOrders: 0,
         completeCount: 0,
         missingFile1Count: 0,
         missingFile2Count: 0,
@@ -3883,6 +4176,9 @@ export async function getDailyUploadCompleteness(
       totalTiktokOrders += row.tiktokOrders;
       totalShopeeOrders += row.shopeeOrders;
       totalFacebookOrders += row.facebookOrders;
+      totalLazadaOrders += row.lazadaOrders;
+      totalLineOrders += row.lineOrders;
+      totalOtherOrders += row.otherOrders;
       totalCompleteOrders += row.completeCount;
       missingFile1 += row.missingFile1Count;
       missingFile2 += row.missingFile2Count;
@@ -3947,6 +4243,9 @@ export async function getDailyUploadCompleteness(
       totalTiktokOrders,
       totalShopeeOrders,
       totalFacebookOrders,
+      totalLazadaOrders,
+      totalLineOrders,
+      totalOtherOrders,
       totalCompleteOrders,
       missingFile1,
       missingFile2,
@@ -3971,6 +4270,9 @@ export async function getDailyUploadCompleteness(
       acc.totalTiktokOrders += r.tiktokOrders;
       acc.totalShopeeOrders += r.shopeeOrders;
       acc.totalFacebookOrders += r.facebookOrders;
+      acc.totalLazadaOrders += r.lazadaOrders;
+      acc.totalLineOrders += r.lineOrders;
+      acc.totalOtherOrders += r.otherOrders;
       acc.totalCompleteOrders += r.completeCount;
       acc.totalMissingFile1 += r.missingFile1Count;
       acc.totalMissingFile2 += r.missingFile2Count;
@@ -3986,6 +4288,9 @@ export async function getDailyUploadCompleteness(
       totalTiktokOrders: 0,
       totalShopeeOrders: 0,
       totalFacebookOrders: 0,
+      totalLazadaOrders: 0,
+      totalLineOrders: 0,
+      totalOtherOrders: 0,
       totalCompleteOrders: 0,
       totalMissingFile1: 0,
       totalMissingFile2: 0,

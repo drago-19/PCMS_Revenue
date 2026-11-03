@@ -1,4 +1,5 @@
 import { query, queryOne, withTransaction, type Queryable } from "./db";
+import { BILLABLE_ORDER_OR_COMPENSATION_SQL } from "./invoice-eligibility";
 
 export interface ExpenseCategory {
   id: number;
@@ -26,6 +27,9 @@ export interface MonthlyPlatformRevenue {
   tiktokPayout: number;
   shopeePayout: number;
   facebookPayout: number;
+  lazadaPayout: number;
+  linePayout: number;
+  otherPayout: number;
   totalPlatformPayout: number;
   totalIncome: number;
 }
@@ -36,6 +40,9 @@ export interface MonthlyExpenseRow {
   tiktokPayout: number;
   shopeePayout: number;
   facebookPayout: number;
+  lazadaPayout: number;
+  linePayout: number;
+  otherPayout: number;
   totalPlatformPayout: number;
   totalIncome: number;
   // Category amounts: mapping from categoryId to effective total amount (direct + itemized)
@@ -176,11 +183,14 @@ export async function getMonthlyPlatformRevenues(db?: Queryable): Promise<Monthl
        ROUND(COALESCE(SUM(CASE WHEN channel = 'TikTok' THEN payout ELSE 0 END), 0)::numeric, 2) AS tiktok_payout,
        ROUND(COALESCE(SUM(CASE WHEN channel = 'Shopee' THEN payout ELSE 0 END), 0)::numeric, 2) AS shopee_payout,
        ROUND(COALESCE(SUM(CASE WHEN channel = 'Facebook' THEN payout ELSE 0 END), 0)::numeric, 2) AS facebook_payout,
+       ROUND(COALESCE(SUM(CASE WHEN channel = 'Lazada' THEN payout ELSE 0 END), 0)::numeric, 2) AS lazada_payout,
+       ROUND(COALESCE(SUM(CASE WHEN channel = 'LINE' THEN payout ELSE 0 END), 0)::numeric, 2) AS line_payout,
+       ROUND(COALESCE(SUM(CASE WHEN channel = 'Other' THEN payout ELSE 0 END), 0)::numeric, 2) AS other_payout,
        ROUND(COALESCE(SUM(payout), 0)::numeric, 2) AS total_payout,
        ROUND(COALESCE(SUM(income), 0)::numeric, 2) AS total_income,
        COUNT(*)::int AS order_count
-     FROM transactions
-     WHERE is_order = 1 AND paid_date <> '' AND paid_date <> 'unknown'
+     FROM transactions t
+     WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND t.paid_date <> '' AND t.paid_date <> 'unknown'
      GROUP BY ym
      ORDER BY ym DESC`,
     [],
@@ -193,6 +203,9 @@ export async function getMonthlyPlatformRevenues(db?: Queryable): Promise<Monthl
     tiktokPayout: Number(r.tiktok_payout || 0),
     shopeePayout: Number(r.shopee_payout || 0),
     facebookPayout: Number(r.facebook_payout || 0),
+    lazadaPayout: Number(r.lazada_payout || 0),
+    linePayout: Number(r.line_payout || 0),
+    otherPayout: Number(r.other_payout || 0),
     totalPlatformPayout: Number(r.total_payout || 0),
     totalIncome: Number(r.total_income || 0),
   }));
@@ -276,6 +289,9 @@ export async function getExpensesOverview(
       tiktokPayout: 0,
       shopeePayout: 0,
       facebookPayout: 0,
+      lazadaPayout: 0,
+      linePayout: 0,
+      otherPayout: 0,
       totalPlatformPayout: 0,
       totalIncome: 0,
     };
@@ -317,6 +333,9 @@ export async function getExpensesOverview(
       tiktokPayout: platform.tiktokPayout,
       shopeePayout: platform.shopeePayout,
       facebookPayout: platform.facebookPayout,
+      lazadaPayout: platform.lazadaPayout,
+      linePayout: platform.linePayout,
+      otherPayout: platform.otherPayout,
       totalPlatformPayout: platform.totalPlatformPayout,
       totalIncome: platform.totalIncome,
       categoryAmounts,

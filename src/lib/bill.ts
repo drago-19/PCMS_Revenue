@@ -365,7 +365,11 @@ export function buildBill(normalized: NormalizedTransaction): BillModel {
   const isOmsChannel =
     normalized.transactionType === "คำสั่งซื้อ (OMS)" ||
     normalized.raw["ช่องทางติดต่อ"] === "Shopee" ||
-    normalized.raw["ช่องทางติดต่อ"] === "Facebook";
+    normalized.raw["ช่องทางติดต่อ"] === "Facebook" ||
+    normalized.raw["ช่องทางติดต่อ"] === "Lazada" ||
+    normalized.raw["ช่องทาง"] === "Lazada" ||
+    normalized.raw["ช่องทางติดต่อ"] === "LINE" ||
+    normalized.raw["ช่องทางติดต่อ"] === "Other";
 
   const directCashDiff = round2(incomeTotal + feeTotal + adjustment - payout);
   const cogsAdjustedDiff = round2(
@@ -493,7 +497,8 @@ export function getRowShippingSummary(row: {
   normalized: NormalizedTransaction;
 }): RowShippingSummary {
   const ch = row.channel || "TikTok";
-  const isOmsChannel = ch === "Shopee" || ch === "Facebook";
+  const isOmsChannel =
+    ch === "Shopee" || ch === "Facebook" || ch === "Lazada" || ch === "LINE" || ch === "Other";
   const fields = row.normalized?.fields ?? {};
 
   if (isOmsChannel) {
