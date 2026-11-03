@@ -70,12 +70,26 @@ function formatYearMonthLabel(ym: string): string {
   return `${THAI_MONTHS_SHORT[monthIdx] ?? m[2]} ${m[1]}`;
 }
 
+const VALID_CHANNELS = ["all", "TikTok", "Shopee", "Facebook", "Lazada", "LINE", "Other"] as const;
+type ProductChannelFilter = (typeof VALID_CHANNELS)[number];
+
+const CHANNEL_LABELS: Record<ProductChannelFilter, string> = {
+  all: "ทุกช่องทาง",
+  TikTok: "TikTok Shop",
+  Shopee: "Shopee",
+  Facebook: "Facebook",
+  Lazada: "Lazada",
+  LINE: "LINE OA",
+  Other: "Other",
+};
+
 export default async function ProductsPage({
   searchParams,
 }: {
   searchParams: Promise<{
     q?: string;
     date?: string;
+    channel?: string;
     sort?: string;
     page?: string;
   }>;
@@ -83,6 +97,10 @@ export default async function ProductsPage({
   const params = await searchParams;
   const q = (params.q ?? "").trim();
   const date = (params.date ?? "").trim();
+  const rawChannel = (params.channel ?? "all").trim();
+  const channel: ProductChannelFilter = (VALID_CHANNELS as readonly string[]).includes(rawChannel)
+    ? (rawChannel as ProductChannelFilter)
+    : "all";
   const rawSort = (params.sort ?? "qty_desc").trim() as SkuSortKey;
   const sort: SkuSortKey = VALID_SKU_SORTS.includes(rawSort)
     ? rawSort
@@ -93,12 +111,18 @@ export default async function ProductsPage({
     nextSort?: SkuSortKey;
     nextPage?: number;
     nextDate?: string;
+    nextChannel?: ProductChannelFilter;
   }) {
     const search = new URLSearchParams();
     if (q) search.set("q", q);
     const targetDate =
       overrides.nextDate !== undefined ? overrides.nextDate : date;
     if (targetDate) search.set("date", targetDate);
+    const targetChannel =
+      overrides.nextChannel !== undefined ? overrides.nextChannel : channel;
+    if (targetChannel && targetChannel !== "all") {
+      search.set("channel", targetChannel);
+    }
     const targetSort = overrides.nextSort ?? sort;
     if (targetSort !== "qty_desc") search.set("sort", targetSort);
     const targetPage = overrides.nextPage ?? 1;
@@ -111,6 +135,7 @@ export default async function ProductsPage({
     listSkuSummariesPaged({
       q,
       date,
+      channel,
       sort,
       page,
       pageSize: 20,
@@ -126,7 +151,7 @@ export default async function ProductsPage({
   const isMonthSelected = /^\d{4}-\d{2}$/.test(date);
   const isDaySelected = /^\d{4}-\d{2}-\d{2}$/.test(date);
   const isYearSelected = /^\d{4}$/.test(date);
-  const scopeHintLabel = date
+  const dateScopeLabel = date
     ? isMonthSelected
       ? `เฉพาะเดือน ${formatYearMonthLabel(date)}`
       : isDaySelected
@@ -135,18 +160,24 @@ export default async function ProductsPage({
           ? `เฉพาะปี ${date}`
           : `ตามวันที่ "${date}"`
     : null;
+  const channelScopeLabel =
+    channel !== "all" ? `ช่องทาง ${CHANNEL_LABELS[channel]}` : null;
+  const scopeHintLabel =
+    dateScopeLabel && channelScopeLabel
+      ? `${channelScopeLabel} · ${dateScopeLabel}`
+      : channelScopeLabel ?? dateScopeLabel;
 
-  const hasFilters = Boolean(q || date || sort !== "qty_desc");
+  const hasFilters = Boolean(q || date || channel !== "all" || sort !== "qty_desc");
 
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop, Shopee & Facebook · SKU Summary Table"
+        eyebrow="TikTok Shop, Shopee, Facebook, Lazada & LINE OA · SKU Summary Table"
         title="หมวดสรุปยอดขายตามรหัสสินค้า (SKU)"
         description={
           scopeHintLabel
-            ? `กำลังแสดงข้อมูล: ${scopeHintLabel} · ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop, Shopee และ Facebook`
-            : "ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop, Shopee และ Facebook ที่คำนวณเก็บไว้ล่วงหน้า (Pre-computed Summary Table)"
+            ? `กำลังแสดงข้อมูล: ${scopeHintLabel} · ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจากทุกช่องทางจำหน่าย`
+            : "ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจาก TikTok Shop, Shopee, Facebook, Lazada และ LINE OA ที่คำนวณเก็บไว้ล่วงหน้า"
         }
         actions={
           <Button asChild variant="default">
@@ -207,22 +238,52 @@ export default async function ProductsPage({
         <div className="shrink-0 rounded-t-2xl border-b border-border bg-[#f8fafc] px-4 py-2.5 min-[640px]:px-5">
           <div className="flex flex-col gap-2 min-[980px]:flex-row min-[980px]:items-center min-[980px]:justify-between">
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-[980px]:w-auto">
-              <div className="inline-flex flex-wrap items-center gap-1.5">
-                <Badge variant="default" size="default" className="font-bold">
-                  TikTok Shop
-                </Badge>
-                <Badge variant="shopee" size="default" className="font-bold">
-                  Shopee
-                </Badge>
-                <Badge variant="facebook" size="default" className="font-bold">
-                  Facebook
-                </Badge>
+              <div className="inline-flex flex-wrap items-center gap-1.5" role="group" aria-label="กรองตามช่องทางจำหน่าย">
+                {(
+                  [
+                    { key: "all", label: "ทุกช่องทาง", variant: "neutral" },
+                    { key: "TikTok", label: "TikTok Shop", variant: "default" },
+                    { key: "Shopee", label: "Shopee", variant: "shopee" },
+                    { key: "Facebook", label: "Facebook", variant: "facebook" },
+                    { key: "Lazada", label: "Lazada", variant: "lazada" },
+                    { key: "LINE", label: "LINE OA", variant: "line" },
+                    { key: "Other", label: "Other", variant: "other" },
+                  ] as const
+                ).map((item) => {
+                  const active = channel === item.key;
+                  return (
+                    <Link
+                      key={item.key}
+                      href={buildProductsHref({
+                        nextChannel: item.key,
+                        nextPage: 1,
+                      })}
+                      scroll={false}
+                      className="inline-flex min-h-[36px] items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <Badge
+                        variant={item.variant}
+                        size="default"
+                        className={
+                          active
+                            ? "font-extrabold ring-2 ring-slate-900 ring-offset-1 shadow-2xs"
+                            : "font-bold opacity-80 hover:opacity-100 transition-opacity"
+                        }
+                      >
+                        {active ? `✓ ${item.label}` : item.label}
+                      </Badge>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
 
             <FilterForm autoSubmitDelay={400} className="flex flex-1 flex-wrap items-center gap-2 min-[980px]:justify-end">
               {sort !== "qty_desc" ? (
                 <input type="hidden" name="sort" value={sort} />
+              ) : null}
+              {channel !== "all" ? (
+                <input type="hidden" name="channel" value={channel} />
               ) : null}
               <div className="field h-10 w-full bg-white min-[640px]:min-w-[200px] min-[640px]:max-w-[340px] min-[640px]:flex-1">
                 <IconSearch size={16} className="shrink-0" />
@@ -244,6 +305,7 @@ export default async function ProductsPage({
                 className="w-full sm:w-auto"
                 extraParams={{
                   q: q || undefined,
+                  channel: channel !== "all" ? channel : undefined,
                   sort: sort !== "qty_desc" ? sort : undefined,
                 }}
               />
@@ -449,11 +511,13 @@ export default async function ProductsPage({
                       <TableCell data-label="ดูบิล" className="num">
                         <Button asChild variant="outline" size="xs">
                           <Link
-                            href={
-                              date
-                                ? `/bills?q=${encodeURIComponent(row.skuCode)}&date=${encodeURIComponent(date)}`
-                                : `/bills?q=${encodeURIComponent(row.skuCode)}`
-                            }
+                            href={(() => {
+                              const billQs = new URLSearchParams();
+                              billQs.set("q", row.skuCode);
+                              if (date) billQs.set("date", date);
+                              if (channel !== "all") billQs.set("channel", channel);
+                              return `/bills?${billQs.toString()}`;
+                            })()}
                           >
                             ดูบิลสินค้านี้
                           </Link>
@@ -509,6 +573,7 @@ export default async function ProductsPage({
               extraParams={{
                 q: q || undefined,
                 date: date || undefined,
+                channel: channel !== "all" ? channel : undefined,
                 sort: sort !== "qty_desc" ? sort : undefined,
               }}
             />

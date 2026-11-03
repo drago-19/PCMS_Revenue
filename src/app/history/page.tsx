@@ -88,9 +88,9 @@ export default async function ImportHistoryPage({
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop · Import History"
+        eyebrow="TikTok Shop, Shopee, Facebook, Lazada & LINE OA · Import History"
         title="หมวดประวัติการนำเข้าไฟล์"
-        description="ตรวจสอบไฟล์ Excel ที่นำเข้าทั้งหมด ดูรายงานการจับคู่คอลัมน์ ผลตรวจยอดกับชีตสรุป หรือลบการนำเข้า"
+        description="ตรวจสอบไฟล์ Excel / CSV ที่นำเข้าทั้งหมด ดูรายงานการจับคู่คอลัมน์ ผลตรวจยอดกับชีตสรุป หรือลบการนำเข้า"
         actions={
           <>
             <ClearAllImportsButton totalFiles={result.total} />
@@ -268,7 +268,9 @@ export default async function ImportHistoryPage({
                                 ? "info"
                                 : item.fileType === "oms_items"
                                   ? "warning"
-                                  : "default"
+                                  : item.fileType === "lazada_orders"
+                                    ? "lazada"
+                                    : "default"
                             }
                             size="sm"
                             className="shrink-0 max-w-full"
@@ -277,7 +279,9 @@ export default async function ImportHistoryPage({
                               ? "1. ออเดอร์ใน shipnity"
                               : item.fileType === "oms_items"
                                 ? "3. สินค้าในออเดอร์ shipnity"
-                                : "2. รายได้ TikTok"}
+                                : item.fileType === "lazada_orders"
+                                  ? "Lazada Seller Center"
+                                  : "2. รายได้ TikTok"}
                           </Badge>
                           <span className="font-medium text-[#64748b]">
                             {formatFileSize(item.fileSize)} ·{" "}

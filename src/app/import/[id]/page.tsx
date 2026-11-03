@@ -103,7 +103,13 @@ export default async function ImportReportPage({
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop · รายงานการนำเข้า"
+        eyebrow={
+          importRow.fileType === "lazada_orders"
+            ? "Lazada Seller Center · รายงานการนำเข้า"
+            : importRow.fileType === "oms_orders" || importRow.fileType === "oms_items"
+              ? "Shipnity OMS (TikTok, Shopee, Facebook, LINE OA) · รายงานการนำเข้า"
+              : "TikTok Shop · รายงานการนำเข้า"
+        }
         title={importRow.filename}
         description={`นำเข้า ${formatDateTime(importRow.importedAt)} · รอบชำระ ${
           importRow.periodStart ? formatDate(importRow.periodStart) : "-"

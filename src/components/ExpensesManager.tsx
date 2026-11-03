@@ -508,7 +508,7 @@ export function ExpensesManager({
         <StatCard
           label="ยอดรับจากแพลตฟอร์มรวม"
           value={formatTHB(stats.totalPlatformPayout)}
-          hint="ยอดรับจริงสุทธิ (TikTok + Shopee + Facebook)"
+          hint="ยอดรับจริงสุทธิ (TikTok + Shopee + Facebook + LINE OA)"
           tone="positive"
           icon={<WalletIcon className="size-5" />}
         />
@@ -648,7 +648,7 @@ export function ExpensesManager({
           {/* Table Container - Fixed, readable width, will never overflow sideways */}
           <Card className="overflow-hidden border border-slate-200 bg-white shadow-2xs rounded-xl">
             <div className="overflow-x-auto">
-              <Table className="min-w-[760px] text-xs">
+              <Table className="min-w-[920px] text-xs">
                 <TableHeader sticky={false} className="bg-[#f8fafc] border-b border-slate-200">
                   <TableRow className="border-b border-slate-200">
                     <TableHead sticky={false} className="w-[130px] font-bold text-slate-800">
@@ -662,6 +662,12 @@ export function ExpensesManager({
                     </TableHead>
                     <TableHead sticky={false} className="w-[100px] text-right font-medium text-slate-600">
                       รับ Facebook
+                    </TableHead>
+                    <TableHead sticky={false} className="w-[95px] text-right font-medium text-slate-600">
+                      รับ Lazada
+                    </TableHead>
+                    <TableHead sticky={false} className="w-[95px] text-right font-medium text-slate-600">
+                      รับ LINE OA
                     </TableHead>
                     <TableHead sticky={false} className="w-[125px] bg-[#f1f5f9] text-right font-bold text-slate-900">
                       รวมรับทุกแฟลตฟอร์ม
@@ -685,7 +691,7 @@ export function ExpensesManager({
                   {rows.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={9}
+                        colSpan={11}
                         className="h-28 text-center text-slate-500"
                       >
                         ไม่พบข้อมูลบิลหรือรายได้ในช่วงเวลาที่เลือก
@@ -739,6 +745,16 @@ export function ExpensesManager({
                             {/* Facebook */}
                             <TableCell className="text-right font-mono text-slate-600">
                               {formatTHB(row.facebookPayout)}
+                            </TableCell>
+
+                            {/* Lazada */}
+                            <TableCell className="text-right font-mono text-slate-600">
+                              {formatTHB(row.lazadaPayout ?? 0)}
+                            </TableCell>
+
+                            {/* LINE OA */}
+                            <TableCell className="text-right font-mono text-slate-600">
+                              {formatTHB(row.linePayout ?? 0)}
                             </TableCell>
 
                             {/* Total Platform */}
@@ -801,7 +817,7 @@ export function ExpensesManager({
                           {/* Expanded Section: Category Cards Grid (Never overflows sideways!) */}
                           {isExpanded && (
                             <TableRow className="border-b-2 border-slate-200 bg-[#fafbfc]">
-                              <TableCell colSpan={9} className="p-4 sm:p-5">
+                              <TableCell colSpan={11} className="p-4 sm:p-5">
                                 <div className="flex flex-col gap-3.5">
                                   {/* Sub-header inside expanded month */}
                                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
@@ -1031,6 +1047,12 @@ export function ExpensesManager({
                       <TableCell className="text-right font-mono">
                         {formatTHB(rows.reduce((sum, r) => sum + r.facebookPayout, 0))}
                       </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {formatTHB(rows.reduce((sum, r) => sum + (r.lazadaPayout ?? 0), 0))}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {formatTHB(rows.reduce((sum, r) => sum + (r.linePayout ?? 0), 0))}
+                      </TableCell>
                       <TableCell className="bg-slate-100 text-right font-mono font-bold text-slate-900">
                         {formatTHB(stats.totalPlatformPayout)}
                       </TableCell>
@@ -1156,6 +1178,29 @@ export function ExpensesManager({
                       {formatTHB(statementRow.facebookPayout)}
                     </span>
                   </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600">Lazada (เงินโอนสุทธิ)</span>
+                    <span className="font-mono font-semibold text-slate-900">
+                      {formatTHB(statementRow.lazadaPayout ?? 0)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600">LINE OA (ยอดขายหักค่าส่ง)</span>
+                    <span className="font-mono font-semibold text-slate-900">
+                      {formatTHB(statementRow.linePayout ?? 0)}
+                    </span>
+                  </div>
+
+                  {(statementRow.otherPayout ?? 0) !== 0 && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-600">อื่นๆ (Other)</span>
+                      <span className="font-mono font-semibold text-slate-900">
+                        {formatTHB(statementRow.otherPayout ?? 0)}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-auto flex items-center justify-between border-t border-slate-200 pt-3">
@@ -2019,30 +2064,52 @@ export function ExpensesManager({
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td className="border border-slate-300 p-2 text-center font-mono">1</td>
-                      <td className="border border-slate-300 p-2 font-bold text-slate-900">TikTok Shop</td>
-                      <td className="border border-slate-300 p-2 text-slate-600">ยอดเงินโอนสุทธิตามรายงาน Settlement (หักค่าธรรมเนียม/ค่าส่ง)</td>
-                      <td className="border border-slate-300 p-2 text-right font-mono font-bold text-slate-900">
-                        {formatTHB(printRow.tiktokPayout)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="border border-slate-300 p-2 text-center font-mono">2</td>
-                      <td className="border border-slate-300 p-2 font-bold text-slate-900">Shopee</td>
-                      <td className="border border-slate-300 p-2 text-slate-600">ยอดรับเงินสดสุทธิตามบิลขายจริง (ยอดขายหักค่าส่งที่ร้านจ่าย)</td>
-                      <td className="border border-slate-300 p-2 text-right font-mono font-bold text-slate-900">
-                        {formatTHB(printRow.shopeePayout)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="border border-slate-300 p-2 text-center font-mono">3</td>
-                      <td className="border border-slate-300 p-2 font-bold text-slate-900">Facebook</td>
-                      <td className="border border-slate-300 p-2 text-slate-600">ยอดรับเงินสดสุทธิตามบิลขายจริง (ยอดขายหักค่าส่งที่ร้านจ่าย)</td>
-                      <td className="border border-slate-300 p-2 text-right font-mono font-bold text-slate-900">
-                        {formatTHB(printRow.facebookPayout)}
-                      </td>
-                    </tr>
+                    {(() => {
+                      const inflowRows: { channel: string; desc: string; amount: number }[] = [
+                        {
+                          channel: "TikTok Shop",
+                          desc: "ยอดเงินโอนสุทธิตามรายงาน Settlement (รวมเงินชดเชยจากแพลตฟอร์ม/โลจิสติกส์)",
+                          amount: printRow.tiktokPayout,
+                        },
+                        {
+                          channel: "Shopee",
+                          desc: "ยอดรับเงินสดสุทธิตามบิลขายจริง (ยอดขายหักค่าส่งที่ร้านจ่าย)",
+                          amount: printRow.shopeePayout,
+                        },
+                        {
+                          channel: "Facebook",
+                          desc: "ยอดรับเงินสดสุทธิตามบิลขายจริง (ยอดขายหักค่าส่งที่ร้านจ่าย)",
+                          amount: printRow.facebookPayout,
+                        },
+                        {
+                          channel: "Lazada",
+                          desc: "ยอดเงินโอนสุทธิตามรายงาน Lazada",
+                          amount: printRow.lazadaPayout ?? 0,
+                        },
+                        {
+                          channel: "LINE OA",
+                          desc: "ยอดรับเงินสดสุทธิตามบิลขายจริง (ยอดขายหักค่าส่งที่ร้านจ่าย)",
+                          amount: printRow.linePayout ?? 0,
+                        },
+                      ];
+                      if ((printRow.otherPayout ?? 0) !== 0) {
+                        inflowRows.push({
+                          channel: "อื่นๆ (Other)",
+                          desc: "ยอดรับเงินสดสุทธิจากช่องทางจำหน่ายอื่น",
+                          amount: printRow.otherPayout ?? 0,
+                        });
+                      }
+                      return inflowRows.map((item, idx) => (
+                        <tr key={item.channel}>
+                          <td className="border border-slate-300 p-2 text-center font-mono">{idx + 1}</td>
+                          <td className="border border-slate-300 p-2 font-bold text-slate-900">{item.channel}</td>
+                          <td className="border border-slate-300 p-2 text-slate-600">{item.desc}</td>
+                          <td className="border border-slate-300 p-2 text-right font-mono font-bold text-slate-900">
+                            {formatTHB(item.amount)}
+                          </td>
+                        </tr>
+                      ));
+                    })()}
                     <tr className="bg-emerald-50/70 font-bold">
                       <td colSpan={3} className="border border-slate-300 p-2.5 text-right text-emerald-950 font-extrabold">
                         รวมรายรับจากทุกช่องทางจำหน่าย (A)

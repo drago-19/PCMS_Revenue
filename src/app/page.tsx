@@ -45,7 +45,7 @@ export default async function DashboardPage({
   return (
     <div className="flex flex-col gap-[14px]">
       <PageHeader
-        eyebrow="TikTok Shop, Shopee & Facebook · Multi-Shop Finance Overview"
+        eyebrow="TikTok Shop, Shopee, Facebook, Lazada & LINE OA · Multi-Shop Finance Overview"
         title="หมวดภาพรวมสรุปยอดรายได้"
         description="สรุปยอดชำระสะสม รอบโอนเงินล่าสุด และแยกดูผลประกอบการรายร้านค้าได้ทันที"
         actions={
@@ -276,7 +276,7 @@ export default async function DashboardPage({
                   หมวดอัปโหลดไฟล์รายได้
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  อัปโหลดไฟล์ .xlsx จาก TikTok Shop, Shopee และ Shipnity พร้อมปฏิทินตรวจความครบของแต่ละร้าน
+                  อัปโหลดไฟล์จาก TikTok Shop, Shopee, Facebook, Lazada, LINE OA และ Shipnity พร้อมปฏิทินตรวจความครบของแต่ละร้าน
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-border">

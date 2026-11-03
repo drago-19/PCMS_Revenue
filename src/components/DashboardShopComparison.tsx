@@ -58,7 +58,7 @@ export function DashboardShopComparison({
                       Kiddee Shop
                     </h4>
                     <p className="text-xs text-muted-foreground">
-                      ร้านหลัก (TikTok, Shopee, Facebook)
+                      ร้านหลัก (TikTok, Shopee, Facebook, Lazada, LINE OA)
                     </p>
                   </div>
                 </div>
@@ -128,7 +128,7 @@ export function DashboardShopComparison({
                       Kissi Studio
                     </h4>
                     <p className="text-xs text-muted-foreground">
-                      ร้านแฟชั่น (TikTok, Shopee, Facebook)
+                      ร้านแฟชั่น (TikTok, Shopee, Facebook, LINE OA)
                     </p>
                   </div>
                 </div>

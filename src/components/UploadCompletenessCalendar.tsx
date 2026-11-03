@@ -524,9 +524,11 @@ export function UploadCompletenessCalendar({
                     <div className="text-[11px] font-bold leading-tight text-emerald-800 dark:text-emerald-300">
                       {row.normalOrders === 0
                         ? "ไม่มีคำสั่งซื้อ (0 บิล)"
-                        : (row.shopeeOrders > 0 || row.facebookOrders > 0) && row.tiktokOrders === 0
-                          ? `ครบ 2 ไฟล์ Shipnity (${formatNumber(row.normalOrders)} บิล)`
-                          : `ครบ 3 ไฟล์ (${formatNumber(row.normalOrders)} บิล)`}
+                        : row.tiktokOrders === 0 && (row.lazadaOrders ?? 0) > 0 && row.shopeeOrders === 0 && row.facebookOrders === 0 && (row.lineOrders ?? 0) === 0
+                          ? `ครบตามไฟล์ Lazada (${formatNumber(row.normalOrders)} บิล)`
+                          : row.tiktokOrders === 0
+                            ? `ครบ 2 ไฟล์ Shipnity (${formatNumber(row.normalOrders)} บิล)`
+                            : `ครบ 3 ไฟล์ (${formatNumber(row.normalOrders)} บิล)`}
                     </div>
                   ) : (
                     <div className="space-y-0.5">
@@ -744,7 +746,23 @@ export function UploadCompletenessCalendar({
                     : selectedDay.hasFile3
                       ? "ในไฟล์ TikTok ที่อัปโหลดแล้ว ไม่มีบิลในวันนี้ (0 บิล) · ยังขาดไฟล์ Shipnity ของเดือนนี้"
                       : "ยังไม่มีข้อมูลคำสั่งซื้อในวันนี้ (0 บิล)"
-                  : `บิลขายปกติทั้งหมด ${formatNumber(selectedDay.normalOrders)} บิล (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล · Shopee ${formatNumber(selectedDay.shopeeOrders)} บิล · Facebook ${formatNumber(selectedDay.facebookOrders)} บิล)`}
+                  : (() => {
+                      const parts = [
+                        `TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล`,
+                        `Shopee ${formatNumber(selectedDay.shopeeOrders)} บิล`,
+                        `Facebook ${formatNumber(selectedDay.facebookOrders)} บิล`,
+                      ];
+                      if ((selectedDay.lazadaOrders ?? 0) > 0) {
+                        parts.push(`Lazada ${formatNumber(selectedDay.lazadaOrders ?? 0)} บิล`);
+                      }
+                      if ((selectedDay.lineOrders ?? 0) > 0) {
+                        parts.push(`LINE OA ${formatNumber(selectedDay.lineOrders ?? 0)} บิล`);
+                      }
+                      if ((selectedDay.otherOrders ?? 0) > 0) {
+                        parts.push(`อื่นๆ ${formatNumber(selectedDay.otherOrders ?? 0)} บิล`);
+                      }
+                      return `บิลขายปกติทั้งหมด ${formatNumber(selectedDay.normalOrders)} บิล (${parts.join(" · ")})`;
+                    })()}
               </DialogDescription>
             </DialogHeader>
 
@@ -759,7 +777,7 @@ export function UploadCompletenessCalendar({
                 )}
               >
                 <span className="text-xs font-bold text-foreground">
-                  1. ไฟล์ออเดอร์ Shipnity (TikTok, Shopee & Facebook)
+                  1. ไฟล์ออเดอร์ (Shipnity / Lazada)
                 </span>
                 <span
                   className={cn(
@@ -789,7 +807,7 @@ export function UploadCompletenessCalendar({
                 )}
               >
                 <span className="text-xs font-bold text-foreground">
-                  2. ไฟล์สินค้า Shipnity (TikTok, Shopee & Facebook)
+                  2. ไฟล์รายการสินค้า (Shipnity / Lazada)
                 </span>
                 <span
                   className={cn(
@@ -834,7 +852,7 @@ export function UploadCompletenessCalendar({
                       ? "✓ อัปโหลดแล้ว (ไม่มีบิลในวันนี้)"
                       : "ยังไม่อัปโหลด"
                     : selectedDay.tiktokOrders === 0
-                      ? `✓ ไม่ต้องใช้ (มีเฉพาะ Shopee/Facebook ${formatNumber(selectedDay.shopeeOrders + selectedDay.facebookOrders)} บิล)`
+                      ? `✓ ไม่ต้องใช้ (มีเฉพาะช่องทางอื่น ${formatNumber(selectedDay.normalOrders)} บิล)`
                       : selectedDay.hasFile3
                         ? `✓ ครบ (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล)`
                         : `✕ ขาด ${formatNumber(selectedDay.missingFile3Count)} จาก ${formatNumber(selectedDay.tiktokOrders)} บิล TikTok`}
@@ -908,18 +926,39 @@ export function UploadCompletenessCalendar({
                       </Badge>
                     </div>
 
-                    {/* Shopee & Facebook */}
-                    {selectedDay.shopeeOrders > 0 || selectedDay.facebookOrders > 0 ? (
+                    {/* Shopee, Facebook & LINE OA */}
+                    {selectedDay.shopeeOrders > 0 || selectedDay.facebookOrders > 0 || (selectedDay.lineOrders ?? 0) > 0 || (selectedDay.otherOrders ?? 0) > 0 ? (
                       <div className="flex items-center justify-between gap-2 text-xs">
                         <span className="flex items-center gap-1.5 font-bold text-foreground">
                           <span>🛒</span>
-                          <span>Shopee & Facebook:</span>
+                          <span>Shopee, Facebook & LINE OA:</span>
                           <span className="font-normal text-muted-foreground">
-                            {formatNumber(selectedDay.shopeeOrders + selectedDay.facebookOrders)} บิล
+                            {formatNumber(
+                              selectedDay.shopeeOrders +
+                                selectedDay.facebookOrders +
+                                (selectedDay.lineOrders ?? 0) +
+                                (selectedDay.otherOrders ?? 0),
+                            )} บิล
                           </span>
                         </span>
                         <Badge variant="success" size="sm">
                           ✓ ครบตามไฟล์ Shipnity
+                        </Badge>
+                      </div>
+                    ) : null}
+
+                    {/* Lazada */}
+                    {(selectedDay.lazadaOrders ?? 0) > 0 ? (
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="flex items-center gap-1.5 font-bold text-foreground">
+                          <span>🛍️</span>
+                          <span>Lazada:</span>
+                          <span className="font-normal text-muted-foreground">
+                            {formatNumber(selectedDay.lazadaOrders ?? 0)} บิล
+                          </span>
+                        </span>
+                        <Badge variant="success" size="sm">
+                          ✓ ครบตามไฟล์ Lazada
                         </Badge>
                       </div>
                     ) : null}
