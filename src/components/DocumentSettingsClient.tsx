@@ -24,13 +24,123 @@ import { buildInvoice } from "@/lib/invoice";
 import type { TransactionRow } from "@/lib/queries";
 import {
   buildDocumentPatternFromLead,
+  DEFAULT_CHANNEL_INVOICE_PREFIXES,
   DEFAULT_SELLER,
   extractDocumentLeadPrefix,
+  formatReceiptNoWithPrefix,
   formatRunningDocumentNo,
+  resolveChannelInvoicePrefix,
+  type ChannelInvoicePrefixes,
   type DefaultInvoicePaperSize,
+  type InvoiceChannelKey,
   type SellerInfo,
   type VatCalculationBase,
 } from "@/lib/seller";
+
+const PLATFORM_PREFIX_FIELDS: {
+  key: InvoiceChannelKey;
+  label: string;
+  badge: string;
+  defaultLead: string;
+  badgeVariant: "default" | "shopee" | "facebook" | "lazada" | "line" | "other";
+  dotClass: string;
+  titleColorClass: string;
+  headerBgClass: string;
+  cardBorderClass: string;
+  activeCardClass: string;
+  activePreviewBtnClass: string;
+}[] = [
+  {
+    key: "TikTok",
+    label: "TikTok Shop",
+    badge: "TikTok",
+    defaultLead: "TT",
+    badgeVariant: "default",
+    dotClass: "bg-[#ff2c55]",
+    titleColorClass: "text-[#be123c]",
+    headerBgClass: "bg-[#fff1f3] border-[#fecdd3]",
+    cardBorderClass: "border-[#fecdd3] bg-[#fff1f3]/25 hover:bg-[#fff1f3]/45",
+    activeCardClass:
+      "border-[#ff2c55] bg-[#fff1f3]/55 ring-2 ring-[#ff2c55]/25 shadow-xs",
+    activePreviewBtnClass:
+      "border-[#ff2c55] bg-[#ff2c55] text-white hover:bg-[#e0244a] hover:text-white",
+  },
+  {
+    key: "Shopee",
+    label: "Shopee",
+    badge: "Shopee",
+    defaultLead: "SP",
+    badgeVariant: "shopee",
+    dotClass: "bg-[#ee4d2d]",
+    titleColorClass: "text-[#c23315]",
+    headerBgClass: "bg-[#fff2ee] border-[#fed7aa]",
+    cardBorderClass: "border-[#fed7aa] bg-[#fff2ee]/25 hover:bg-[#fff2ee]/45",
+    activeCardClass:
+      "border-[#ee4d2d] bg-[#fff2ee]/60 ring-2 ring-[#ee4d2d]/25 shadow-xs",
+    activePreviewBtnClass:
+      "border-[#ee4d2d] bg-[#ee4d2d] text-white hover:bg-[#d73211] hover:text-white",
+  },
+  {
+    key: "Facebook",
+    label: "Facebook",
+    badge: "Facebook",
+    defaultLead: "FB",
+    badgeVariant: "facebook",
+    dotClass: "bg-[#1877F2]",
+    titleColorClass: "text-[#1d4ed8]",
+    headerBgClass: "bg-[#eff6ff] border-[#bfdbfe]",
+    cardBorderClass: "border-[#bfdbfe] bg-[#eff6ff]/30 hover:bg-[#eff6ff]/55",
+    activeCardClass:
+      "border-[#1877F2] bg-[#eff6ff]/65 ring-2 ring-[#1877F2]/25 shadow-xs",
+    activePreviewBtnClass:
+      "border-[#1877F2] bg-[#1877F2] text-white hover:bg-[#166fe5] hover:text-white",
+  },
+  {
+    key: "Lazada",
+    label: "Lazada",
+    badge: "Lazada",
+    defaultLead: "LZ",
+    badgeVariant: "lazada",
+    dotClass: "bg-[#0f146d]",
+    titleColorClass: "text-[#0f146d]",
+    headerBgClass: "bg-[#eef2ff] border-[#c7d2fe]",
+    cardBorderClass: "border-[#c7d2fe] bg-[#eef2ff]/30 hover:bg-[#eef2ff]/55",
+    activeCardClass:
+      "border-[#0f146d] bg-[#eef2ff]/65 ring-2 ring-[#0f146d]/25 shadow-xs",
+    activePreviewBtnClass:
+      "border-[#0f146d] bg-[#0f146d] text-white hover:bg-[#0c1059] hover:text-white",
+  },
+  {
+    key: "LINE",
+    label: "LINE OA",
+    badge: "LINE OA",
+    defaultLead: "LN",
+    badgeVariant: "line",
+    dotClass: "bg-[#06C755]",
+    titleColorClass: "text-[#047857]",
+    headerBgClass: "bg-[#ecfdf5] border-[#a7f3d0]",
+    cardBorderClass: "border-[#a7f3d0] bg-[#ecfdf5]/30 hover:bg-[#ecfdf5]/55",
+    activeCardClass:
+      "border-[#06C755] bg-[#ecfdf5]/65 ring-2 ring-[#06C755]/25 shadow-xs",
+    activePreviewBtnClass:
+      "border-[#06C755] bg-[#06C755] text-white hover:bg-[#05b34c] hover:text-white",
+  },
+  {
+    key: "Other",
+    label: "อื่นๆ (Other)",
+    badge: "Other",
+    defaultLead: "OT",
+    badgeVariant: "other",
+    dotClass: "bg-[#475569]",
+    titleColorClass: "text-[#334155]",
+    headerBgClass: "bg-[#f1f5f9] border-[#cbd5e1]",
+    cardBorderClass: "border-[#cbd5e1] bg-[#f8fafc] hover:bg-[#f1f5f9]/70",
+    activeCardClass:
+      "border-[#475569] bg-[#f1f5f9]/85 ring-2 ring-[#475569]/25 shadow-xs",
+    activePreviewBtnClass:
+      "border-[#475569] bg-[#475569] text-white hover:bg-[#334155] hover:text-white",
+  },
+];
 
 const SAMPLE_TRANSACTION: TransactionRow = {
   id: 1,
@@ -156,6 +266,8 @@ export function DocumentSettingsClient({
   );
   const [saving, setSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState<InvoiceMode>("abbreviated");
+  const [previewChannel, setPreviewChannel] =
+    useState<InvoiceChannelKey>("TikTok");
   const [previewPaper, setPreviewPaper] = useState<InvoicePaperSize>(
     initialSettings.defaultPaperSize ?? "a6",
   );
@@ -181,10 +293,25 @@ export function DocumentSettingsClient({
     const rawRecLead = formEl.elements.namedItem(
       "receiptLeadPrefix",
     ) as HTMLInputElement | null;
+    const nextChannelPrefixes: ChannelInvoicePrefixes = {
+      ...(base.channelInvoicePrefixes ?? DEFAULT_CHANNEL_INVOICE_PREFIXES),
+    };
+    for (const pf of PLATFORM_PREFIX_FIELDS) {
+      const fieldName =
+        pf.key === "TikTok"
+          ? "invoiceLeadPrefix"
+          : `channelLeadPrefix_${pf.key}`;
+      const el = formEl.elements.namedItem(fieldName) as HTMLInputElement | null;
+      if (el && typeof el.value === "string") {
+        nextChannelPrefixes[pf.key] = buildDocumentPatternFromLead(el.value);
+      }
+    }
     const nextInvoicePrefix =
       rawInvLead && typeof rawInvLead.value === "string"
         ? buildDocumentPatternFromLead(rawInvLead.value)
-        : getInputVal("invoicePrefix", base.invoicePrefix).toUpperCase();
+        : nextChannelPrefixes.TikTok ||
+          getInputVal("invoicePrefix", base.invoicePrefix).toUpperCase();
+    nextChannelPrefixes.TikTok = nextInvoicePrefix;
     const nextReceiptPrefix =
       rawRecLead && typeof rawRecLead.value === "string"
         ? buildDocumentPatternFromLead(rawRecLead.value)
@@ -199,6 +326,7 @@ export function DocumentSettingsClient({
       email: getInputVal("email", base.email),
       vatRate: Number.isFinite(rawVat) ? rawVat : base.vatRate,
       invoicePrefix: nextInvoicePrefix,
+      channelInvoicePrefixes: nextChannelPrefixes,
       receiptPrefix: nextReceiptPrefix,
       footerNote: getInputVal("footerNote", base.footerNote),
       showInvoiceNo: getCheckVal("showInvoiceNo", base.showInvoiceNo),
@@ -255,8 +383,13 @@ export function DocumentSettingsClient({
   }
 
   const previewInvoice = useMemo(() => {
+    const activeChannelPattern = resolveChannelInvoicePrefix(
+      form.invoicePrefix,
+      previewChannel,
+      form.channelInvoicePrefixes,
+    );
     const prefixYmMatch = /(\d{2})(0[1-9]|1[0-2])(?=\D*\d+\D*$)/.exec(
-      form.invoicePrefix || form.receiptPrefix || "",
+      activeChannelPattern || form.invoicePrefix || form.receiptPrefix || "",
     );
     const previewPaidDate = prefixYmMatch
       ? `20${prefixYmMatch[1]}-${prefixYmMatch[2]}-26`
@@ -264,11 +397,12 @@ export function DocumentSettingsClient({
     return buildInvoice(
       {
         ...SAMPLE_TRANSACTION,
+        channel: previewChannel,
         paidDate: previewPaidDate,
       },
       form,
     );
-  }, [form]);
+  }, [form, previewChannel]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -457,11 +591,14 @@ export function DocumentSettingsClient({
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-bold">
-              2. การคำนวณภาษีและรหัสเอกสาร (Tax & Numbering)
-            </CardTitle>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base font-bold">
+                2. การคำนวณภาษีและรหัสเอกสารแยกตามแพลตฟอร์ม (Tax &amp; Platform Numbering)
+              </CardTitle>
+              <Badge variant="secondary">รันแยกแต่ละแพลตฟอร์ม (00001 ใหม่ทุกเดือน)</Badge>
+            </div>
             <CardDescription>
-              กำหนดเฉพาะอักษรนำหน้า (เช่น TT, RC หรือเว้นว่าง) ส่วนปี-เดือน (YYMM) จะดึงตามวันที่ของบิลจริง และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ
+              กำหนดอักษรนำหน้าแยกตามแพลตฟอร์ม (เช่น TikTok = TT, Shopee = SP, Facebook = FB) ส่วนปี-เดือน (YYMM) จะดึงตามวันที่บิลจริง และเริ่มนับ 00001 แยกกันในแต่ละแพลตฟอร์มทุกเดือนอัตโนมัติ
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-12">
@@ -487,81 +624,18 @@ export function DocumentSettingsClient({
                       }));
                     }
                   }}
-                  className="mono max-w-[160px]"
+                  className="mono max-w-[140px]"
                 />
                 <span className="text-xs font-normal text-muted-foreground">
-                  % (ใช้คำนวณมูลค่าก่อนภาษีและภาษีมูลค่าเพิ่มบนใบกำกับภาษี)
+                  % (ใช้คำนวณ VAT บนใบกำกับภาษี)
                 </span>
               </div>
             </label>
 
-            <div className="flex flex-col gap-2 sm:col-span-6">
+            <div className="flex flex-col gap-2 sm:col-span-12">
               <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
-                <span>อักษรนำหน้าใบกำกับภาษี (Prefix)</span>
-                <div className="flex items-stretch gap-1.5">
-                  <Input
-                    name="invoiceLeadPrefix"
-                    value={extractDocumentLeadPrefix(form.invoicePrefix)}
-                    onChange={(e) =>
-                      updateForm((prev) => ({
-                        ...prev,
-                        invoicePrefix: buildDocumentPatternFromLead(
-                          e.target.value,
-                        ),
-                      }))
-                    }
-                    placeholder="เช่น TT (หรือเว้นว่าง)"
-                    className="mono w-28 shrink-0 font-bold uppercase"
-                    maxLength={12}
-                    aria-label="อักษรนำหน้าใบกำกับภาษี"
-                  />
-                  <div
-                    className="mono flex flex-1 items-center justify-center rounded-[10px] border border-dashed border-border bg-muted/50 px-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap"
-                    title="ระบบเติมรหัสปี-เดือน (YYMM) ตามวันที่บิล และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ"
-                  >
-                    + YYMM/00001
-                  </div>
-                </div>
-              </label>
-              <div className="flex flex-col gap-1 rounded-lg border border-border/80 bg-muted/25 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                <div className="flex flex-wrap items-center justify-between gap-1">
-                  <span>รันในเดือน (เช่น ต.ค.):</span>
-                  <span className="mono font-semibold text-foreground whitespace-nowrap">
-                    {formatRunningDocumentNo(
-                      form.invoicePrefix,
-                      1,
-                      DEFAULT_SELLER.invoicePrefix,
-                      "2026-10-01",
-                    )}{" "}
-                    →{" "}
-                    {formatRunningDocumentNo(
-                      form.invoicePrefix,
-                      2,
-                      DEFAULT_SELLER.invoicePrefix,
-                      "2026-10-01",
-                    )}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-1">
-                  <span>เปลี่ยนเดือน (เช่น พ.ย.):</span>
-                  <span className="mono font-semibold text-emerald-700 whitespace-nowrap">
-                    เริ่ม{" "}
-                    {formatRunningDocumentNo(
-                      form.invoicePrefix,
-                      1,
-                      DEFAULT_SELLER.invoicePrefix,
-                      "2026-11-01",
-                    )}{" "}
-                    ใหม่
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 sm:col-span-6">
-              <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
-                <span>อักษรนำหน้าใบเสร็จรับเงิน (Prefix)</span>
-                <div className="flex items-stretch gap-1.5">
+                <span>อักษรนำหน้าใบเสร็จรับเงิน (Receipt Prefix)</span>
+                <div className="flex flex-wrap items-stretch gap-2">
                   <Input
                     name="receiptLeadPrefix"
                     value={extractDocumentLeadPrefix(form.receiptPrefix)}
@@ -573,51 +647,191 @@ export function DocumentSettingsClient({
                         ),
                       }))
                     }
-                    placeholder="เช่น RC (หรือเว้นว่าง)"
-                    className="mono w-28 shrink-0 font-bold uppercase"
+                    placeholder="เช่น INV หรือ RC"
+                    className="mono w-24 shrink-0 font-bold uppercase"
                     maxLength={12}
                     aria-label="อักษรนำหน้าใบเสร็จรับเงิน"
                   />
                   <div
-                    className="mono flex flex-1 items-center justify-center rounded-[10px] border border-dashed border-border bg-muted/50 px-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap"
-                    title="ระบบเติมรหัสปี-เดือน (YYMM) ตามวันที่บิล และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ"
+                    className="mono flex items-center justify-center rounded-[10px] border border-dashed border-border bg-muted/50 px-3 text-xs font-semibold text-muted-foreground whitespace-nowrap"
+                    title="ระบบเติมรหัสแพลตฟอร์มและปี-เดือน (YYMM) ตามวันที่บิล และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ"
                   >
-                    + YYMM/00001
+                    + -แพลตฟอร์ม + YYMM/00001
+                  </div>
+                  <div className="flex flex-1 flex-wrap items-center justify-between gap-1.5 rounded-lg border border-border/80 bg-muted/25 px-3 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                    <span>ตัวอย่างแยกแพลตฟอร์ม:</span>
+                    <span className="mono font-semibold text-foreground break-all">
+                      {formatReceiptNoWithPrefix(
+                        "SEQ/2610/00001",
+                        form.receiptPrefix,
+                        "2026-10-01",
+                        "TikTok",
+                        form.channelInvoicePrefixes,
+                        form.invoicePrefix,
+                      )}{" "}
+                      ·{" "}
+                      {formatReceiptNoWithPrefix(
+                        "SEQ/SHOPEE/2610/00001",
+                        form.receiptPrefix,
+                        "2026-10-01",
+                        "Shopee",
+                        form.channelInvoicePrefixes,
+                        form.invoicePrefix,
+                      )}
+                    </span>
                   </div>
                 </div>
               </label>
-              <div className="flex flex-col gap-1 rounded-lg border border-border/80 bg-muted/25 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                <div className="flex flex-wrap items-center justify-between gap-1">
-                  <span>รันในเดือน (เช่น ต.ค.):</span>
-                  <span className="mono font-semibold text-foreground whitespace-nowrap">
-                    {formatRunningDocumentNo(
-                      form.receiptPrefix,
-                      1,
-                      DEFAULT_SELLER.receiptPrefix,
-                      "2026-10-01",
-                    )}{" "}
-                    →{" "}
-                    {formatRunningDocumentNo(
-                      form.receiptPrefix,
-                      2,
-                      DEFAULT_SELLER.receiptPrefix,
-                      "2026-10-01",
-                    )}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-1">
-                  <span>เปลี่ยนเดือน (เช่น พ.ย.):</span>
-                  <span className="mono font-semibold text-emerald-700 whitespace-nowrap">
-                    เริ่ม{" "}
-                    {formatRunningDocumentNo(
-                      form.receiptPrefix,
-                      1,
-                      DEFAULT_SELLER.receiptPrefix,
-                      "2026-11-01",
-                    )}{" "}
-                    ใหม่
-                  </span>
-                </div>
+            </div>
+
+            <div className="sm:col-span-12 border-t border-border pt-3">
+              <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-foreground">
+                  ตั้งค่าคำนำหน้าใบกำกับภาษีแยกตามแพลตฟอร์ม (คลิกเลือกเพื่อดูตัวอย่างด้านขวา)
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  แต่ละแพลตฟอร์มรันเลข 00001 แยกกันไม่ปนกัน
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {PLATFORM_PREFIX_FIELDS.map((pf) => {
+                  const currentPattern = resolveChannelInvoicePrefix(
+                    form.invoicePrefix,
+                    pf.key,
+                    form.channelInvoicePrefixes,
+                  );
+                  const currentLead = extractDocumentLeadPrefix(currentPattern);
+                  const inputName =
+                    pf.key === "TikTok"
+                      ? "invoiceLeadPrefix"
+                      : `channelLeadPrefix_${pf.key}`;
+                  const isPreviewActive = previewChannel === pf.key;
+                  return (
+                    <div
+                      key={pf.key}
+                      onClick={() => setPreviewChannel(pf.key)}
+                      className={`flex flex-col gap-2 rounded-xl border p-3 transition-colors cursor-pointer ${
+                        isPreviewActive
+                          ? pf.activeCardClass
+                          : pf.cardBorderClass
+                      }`}
+                    >
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-foreground cursor-pointer">
+                        <div
+                          className={`flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1.5 ${pf.headerBgClass}`}
+                        >
+                          <span
+                            className={`inline-flex items-center gap-1.5 text-xs font-extrabold ${pf.titleColorClass}`}
+                          >
+                            <span
+                              className={`size-2.5 shrink-0 rounded-full ${pf.dotClass}`}
+                              aria-hidden="true"
+                            />
+                            {pf.label}
+                          </span>
+                          <Badge
+                            variant={pf.badgeVariant}
+                            size="sm"
+                            className="text-[10px] shadow-2xs"
+                          >
+                            {isPreviewActive
+                              ? `${pf.badge} · กำลังดูตัวอย่าง`
+                              : pf.badge}
+                          </Badge>
+                        </div>
+                        <div className="flex items-stretch gap-1.5">
+                          <Input
+                            name={inputName}
+                            value={currentLead}
+                            onFocus={() => setPreviewChannel(pf.key)}
+                            onChange={(e) => {
+                              const nextPattern = buildDocumentPatternFromLead(
+                                e.target.value,
+                              );
+                              updateForm((prev) => ({
+                                ...prev,
+                                ...(pf.key === "TikTok"
+                                  ? { invoicePrefix: nextPattern }
+                                  : {}),
+                                channelInvoicePrefixes: {
+                                  ...(prev.channelInvoicePrefixes ??
+                                    DEFAULT_CHANNEL_INVOICE_PREFIXES),
+                                  [pf.key]: nextPattern,
+                                },
+                              }));
+                            }}
+                            placeholder={`เช่น ${pf.defaultLead}`}
+                            className="mono w-24 shrink-0 bg-background font-bold uppercase"
+                            maxLength={12}
+                            aria-label={
+                              pf.key === "TikTok"
+                                ? "อักษรนำหน้าใบกำกับภาษี"
+                                : `อักษรนำหน้าใบกำกับภาษี ${pf.label}`
+                            }
+                          />
+                          <div className="mono flex flex-1 items-center justify-center rounded-[10px] border border-dashed border-border bg-muted/50 px-2 text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+                            + YYMM/00001
+                          </div>
+                        </div>
+                      </label>
+                      <div className="flex flex-col gap-0.5 rounded-lg border border-border/60 bg-background/80 px-2.5 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                        <div className="flex flex-wrap items-center justify-between gap-1">
+                          <span>ใบกำกับฯ ต.ค.:</span>
+                          <span className="mono text-[10.5px] font-semibold text-foreground break-all">
+                            {formatRunningDocumentNo(
+                              currentPattern,
+                              1,
+                              DEFAULT_CHANNEL_INVOICE_PREFIXES[pf.key],
+                              "2026-10-01",
+                            )}{" "}
+                            →{" "}
+                            {formatRunningDocumentNo(
+                              currentPattern,
+                              2,
+                              DEFAULT_CHANNEL_INVOICE_PREFIXES[pf.key],
+                              "2026-10-01",
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-1">
+                          <span>ใบเสร็จ ต.ค.:</span>
+                          <span className="mono text-[10.5px] font-semibold text-slate-700 break-all">
+                            {formatReceiptNoWithPrefix(
+                              "SEQ/2610/00001",
+                              form.receiptPrefix,
+                              "2026-10-01",
+                              pf.key,
+                              form.channelInvoicePrefixes,
+                              form.invoicePrefix,
+                            )}{" "}
+                            →{" "}
+                            {formatReceiptNoWithPrefix(
+                              "SEQ/2610/00002",
+                              form.receiptPrefix,
+                              "2026-10-01",
+                              pf.key,
+                              form.channelInvoicePrefixes,
+                              form.invoicePrefix,
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-1">
+                          <span>พ.ย.:</span>
+                          <span className="mono text-[10.5px] font-semibold text-emerald-700 break-all">
+                            เริ่ม{" "}
+                            {formatRunningDocumentNo(
+                              currentPattern,
+                              1,
+                              DEFAULT_CHANNEL_INVOICE_PREFIXES[pf.key],
+                              "2026-11-01",
+                            )}{" "}
+                            ใหม่
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </CardContent>
@@ -855,6 +1069,47 @@ export function DocumentSettingsClient({
                   ใบกำกับฯ (อย่างย่อ)
                 </Badge>
               )}
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2.5">
+              <span className="text-xs font-semibold text-muted-foreground">
+                แพลตฟอร์มตัวอย่าง:
+              </span>
+              <div className="flex flex-wrap items-center gap-1">
+                {PLATFORM_PREFIX_FIELDS.map((pf) => {
+                  const active = previewChannel === pf.key;
+                  return (
+                    <Button
+                      key={pf.key}
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      className={
+                        active
+                          ? pf.activePreviewBtnClass
+                          : "bg-white text-foreground hover:bg-muted"
+                      }
+                      onClick={() => setPreviewChannel(pf.key)}
+                    >
+                      <span
+                        className={`size-2 shrink-0 rounded-full ${
+                          active ? "bg-white" : pf.dotClass
+                        }`}
+                        aria-hidden="true"
+                      />
+                      {pf.badge} (
+                      {extractDocumentLeadPrefix(
+                        resolveChannelInvoicePrefix(
+                          form.invoicePrefix,
+                          pf.key,
+                          form.channelInvoicePrefixes,
+                        ),
+                      ) || "ไม่มี"}
+                      )
+                    </Button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="mt-2 flex min-h-[54px] flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5">

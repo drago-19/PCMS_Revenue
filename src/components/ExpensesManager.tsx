@@ -124,6 +124,7 @@ function formatThaiYearMonthShort(ym: string): string {
 interface ExpensesManagerProps {
   initialData: ExpensesOverviewData;
   initialYear: string;
+  initialShop?: string;
   seller?: {
     name?: string;
     taxId?: string;
