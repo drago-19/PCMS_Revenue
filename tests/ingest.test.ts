@@ -489,7 +489,7 @@ test("detects and parses OMS orders, OMS items, and CSV settlement with 15-digit
     orderCode: null,
   });
 
-  assert.equal(receipt29.receiptNo, "RC2610/00010");
+  assert.equal(receipt29.receiptNo, "RC-TT2610/00010");
   assert.equal(receipt29.createdDate, "2026-09-27");
   assert.equal(receipt29.grossItemsTotal, 690);
   assert.equal(receipt29.storeDiscount, 240);
@@ -814,7 +814,7 @@ test("normalizeSellerSettings, buildInvoice VAT base toggle, and getOrderLinkSta
   // Default salesAmount base (693.00) without deducting platform feeTotal - exact values and signs from file
   const invDefault = buildInvoice(sampleRow as never);
   assert.equal(invDefault.invoiceNo, "TT2610/00422");
-  assert.equal(invDefault.receiptNo, "RC2610/00422");
+  assert.equal(invDefault.receiptNo, "RC-TT2610/00422");
   assert.equal(invDefault.salesAmount, 693);
   assert.equal(invDefault.shippingActual, -57);
   assert.equal(invDefault.shippingPlatformDiscount, 55);
@@ -837,6 +837,37 @@ test("normalizeSellerSettings, buildInvoice VAT base toggle, and getOrderLinkSta
   const invFirstSeq = buildInvoice({ ...sampleRow, invoiceNo: "SEQ/00001" } as never, normalized);
   assert.equal(invFirstSeq.invoiceNo, "INV-0001");
   assert.equal(invFirstSeq.receiptNo, "RC-0001");
+
+  // Verify per-channel prefix formatting (e.g., TT2610/00001 & RC-TT2610/00001 for TikTok, SP2610/00001 & RC-SP2610/00001 for Shopee)
+  const multiChannelSettings = normalizeSellerSettings({
+    receiptPrefix: "INV2610/00001",
+    channelInvoicePrefixes: {
+      TikTok: "TT2610/00001",
+      Shopee: "SP2610/00001",
+      Facebook: "FB2610/00001",
+      Lazada: "LZ2610/00001",
+      LINE: "LN2610/00001",
+      Other: "OT2610/00001",
+    },
+  });
+  const invTikTokSeq1 = buildInvoice(
+    { ...sampleRow, channel: "TikTok", invoiceNo: "SEQ/2610/00001", paidDate: "2026-10-01" } as never,
+    multiChannelSettings,
+  );
+  const invShopeeSeq1 = buildInvoice(
+    { ...sampleRow, channel: "Shopee", invoiceNo: "SEQ/SHOPEE/2610/00001", paidDate: "2026-10-01" } as never,
+    multiChannelSettings,
+  );
+  const invFacebookSeq2 = buildInvoice(
+    { ...sampleRow, channel: "Facebook", invoiceNo: "SEQ/FACEBOOK/2610/00002", paidDate: "2026-10-01" } as never,
+    multiChannelSettings,
+  );
+  assert.equal(invTikTokSeq1.invoiceNo, "TT2610/00001");
+  assert.equal(invTikTokSeq1.receiptNo, "INV-TT2610/00001");
+  assert.equal(invShopeeSeq1.invoiceNo, "SP2610/00001");
+  assert.equal(invShopeeSeq1.receiptNo, "INV-SP2610/00001");
+  assert.equal(invFacebookSeq2.invoiceNo, "FB2610/00002");
+  assert.equal(invFacebookSeq2.receiptNo, "INV-FB2610/00002");
 
   // Zero-revenue refunded order (income = 0, payout = 0, productAfterDiscount = 129, refundAfterDiscount = -129)
   const invZeroRefunded = buildInvoice({
@@ -2330,7 +2361,7 @@ test("formatInvoiceNoWithPrefix, formatReceiptNoWithPrefix, and buildInvoice rep
     orderCode: "NV01",
   });
   assert.equal(novInvoice.invoiceNo, "TT2611/00001");
-  assert.equal(novInvoice.receiptNo, "RC2611/00001");
+  assert.equal(novInvoice.receiptNo, "RC-TT2611/00001");
 });
 
 test("listDailyBatchesPaged, listSkuSummariesPaged, and listImportsPaged return month/day-filtered totals when date is selected and all-time totals when date is omitted", async () => {
