@@ -261,9 +261,6 @@ export function DocumentSettingsClient({
   const formRef = useRef<HTMLFormElement | null>(null);
   const isDirtyRef = useRef(false);
   const [form, setForm] = useState<Required<SellerInfo>>(initialSettings);
-  const [vatRateInput, setVatRateInput] = useState<string>(
-    String(initialSettings.vatRate),
-  );
   const [saving, setSaving] = useState(false);
   const [previewMode, setPreviewMode] = useState<InvoiceMode>("abbreviated");
   const [previewChannel, setPreviewChannel] =
@@ -285,8 +282,6 @@ export function DocumentSettingsClient({
       const el = formEl.elements.namedItem(fieldName) as HTMLInputElement | null;
       return el && typeof el.checked === "boolean" ? el.checked : fallback;
     };
-    const rawVatStr = getInputVal("vatRate", String(base.vatRate));
-    const rawVat = rawVatStr.trim() !== "" ? Number(rawVatStr) : Number.NaN;
     const rawInvLead = formEl.elements.namedItem(
       "invoiceLeadPrefix",
     ) as HTMLInputElement | null;
@@ -324,7 +319,7 @@ export function DocumentSettingsClient({
       address: getInputVal("address", base.address),
       phone: getInputVal("phone", base.phone),
       email: getInputVal("email", base.email),
-      vatRate: Number.isFinite(rawVat) ? rawVat : base.vatRate,
+      vatRate: 7,
       invoicePrefix: nextInvoicePrefix,
       channelInvoicePrefixes: nextChannelPrefixes,
       receiptPrefix: nextReceiptPrefix,
@@ -359,18 +354,13 @@ export function DocumentSettingsClient({
     } catch {
       // ignore storage errors
     }
-    setForm((prev) => {
-      const next = readDomFormOverrides(formRef.current, prev);
-      setVatRateInput(String(next.vatRate));
-      return next;
-    });
+    setForm((prev) => readDomFormOverrides(formRef.current, prev));
   }, []);
 
   // ซิงก์ค่าจาก Server เมื่อ initialSettings เปลี่ยน (เฉพาะเมื่อผู้ใช้ไม่ได้กำลังแก้ไขค้างอยู่)
   useEffect(() => {
     if (!isDirtyRef.current) {
       setForm(initialSettings);
-      setVatRateInput(String(initialSettings.vatRate));
       setPreviewPaper(initialSettings.defaultPaperSize ?? "a6");
     }
   }, [initialSettings]);
@@ -406,17 +396,12 @@ export function DocumentSettingsClient({
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const parsedVat =
-      vatRateInput.trim() !== "" && Number.isFinite(Number(vatRateInput))
-        ? Number(vatRateInput)
-        : form.vatRate;
     const basePayload: Required<SellerInfo> = {
       ...form,
-      vatRate: parsedVat,
+      vatRate: 7,
     };
     const payload = readDomFormOverrides(e.currentTarget, basePayload);
     setForm(payload);
-    setVatRateInput(String(payload.vatRate));
     if (!payload.name.trim() || !payload.address.trim() || !payload.taxId.trim()) {
       toast.error("กรุณากรอกชื่อบริษัท ที่อยู่ และเลขผู้เสียภาษีให้ครบถ้วน");
       return;
@@ -449,7 +434,6 @@ export function DocumentSettingsClient({
       }
       isDirtyRef.current = false;
       setForm(data.settings);
-      setVatRateInput(String(data.settings.vatRate));
       setPreviewPaper(data.settings.defaultPaperSize);
       if (typeof window !== "undefined") {
         window.dispatchEvent(
@@ -470,7 +454,6 @@ export function DocumentSettingsClient({
   function handleResetDefault() {
     isDirtyRef.current = true;
     setForm({ ...defaultSettings });
-    setVatRateInput(String(defaultSettings.vatRate));
     setPreviewPaper(defaultSettings.defaultPaperSize);
     if (typeof window !== "undefined") {
       window.dispatchEvent(
@@ -593,7 +576,7 @@ export function DocumentSettingsClient({
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle className="text-base font-bold">
-                2. การคำนวณภาษีและรหัสเอกสารแยกตามแพลตฟอร์ม (Tax &amp; Platform Numbering)
+                2. รหัสเอกสารและคำนำหน้าแยกตามแพลตฟอร์ม (Platform Document Numbering)
               </CardTitle>
               <Badge variant="secondary">รันแยกแต่ละแพลตฟอร์ม (00001 ใหม่ทุกเดือน)</Badge>
             </div>
@@ -602,36 +585,6 @@ export function DocumentSettingsClient({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-12">
-            <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground sm:col-span-12">
-              <span>อัตราภาษีมูลค่าเพิ่ม (VAT %)</span>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <Input
-                  name="vatRate"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="30"
-                  value={vatRateInput}
-                  onWheel={(e) => e.currentTarget.blur()}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setVatRateInput(val);
-                    const num = Number(val);
-                    if (val.trim() !== "" && Number.isFinite(num)) {
-                      updateForm((prev) => ({
-                        ...prev,
-                        vatRate: num,
-                      }));
-                    }
-                  }}
-                  className="mono max-w-[140px]"
-                />
-                <span className="text-xs font-normal text-muted-foreground">
-                  % (ใช้คำนวณ VAT บนใบกำกับภาษี)
-                </span>
-              </div>
-            </label>
-
             <div className="flex flex-col gap-2 sm:col-span-12">
               <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
                 <span>อักษรนำหน้าใบเสร็จรับเงิน (Receipt Prefix)</span>

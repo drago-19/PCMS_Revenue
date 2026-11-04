@@ -6,6 +6,26 @@
 ## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-04)
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **เพิ่มระบบติดตั้งแอปลงบนหน้าจอ Desktop และมือถือ/แท็บเล็ตแบบ PWA (Progressive Web App) เต็มรูปแบบ รองรับทั้ง Windows, macOS, Android และ iOS (iPhone / iPad) (`src/app/manifest.ts`, `public/sw.js`, `public/icon-192.png`, `public/icon-512.png`, `public/icon-maskable-512.png`, `public/apple-touch-icon.png`, `src/components/PwaInstallControl.tsx`, `src/components/Sidebar.tsx`, `src/app/layout.tsx`, `src/proxy.ts`, `tests/security.test.ts`)**:
+    - [x] **1. สร้าง Web App Manifest (`src/app/manifest.ts`), Service Worker (`public/sw.js`), และชุดไอคอนความละเอียดสูง**:
+      - สร้าง `/manifest.webmanifest` (`display: "standalone"`, `start_url: "/"`, `theme_color: "#0f1117"`, `background_color: "#0f1117"`) พร้อมไอคอนครบทุกขนาด (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`, `icon.svg`)
+      - สร้าง `public/sw.js` ที่แคชเฉพาะไฟล์ไอคอน/Manifest แบบ Network-First และปล่อยผ่าน `/api/*`, `/_next/*`, และ `_rsc` 100% เพื่อไม่ให้กระทบข้อมูลการเงินหรือการอัปโหลดไฟล์ Excel ขนาดใหญ่
+      - ตั้งค่า `appleWebApp` (`capable: true`, `statusBarStyle: "black-translucent"`, `title: "PCMS Revenue"`) ใน `src/app/layout.tsx` และเปิดสิทธิ์เข้าถึงไฟล์ PWA ใน `src/proxy.ts`
+    - [x] **2. เพิ่มปุ่ม `"ติดตั้งแอปลงเครื่อง (App)"` (`src/components/PwaInstallControl.tsx`) ใน `Sidebar.tsx`**:
+      - แสดงปุ่มในกล่องด้านล่างของ `Sidebar` (เหนือปุ่ม `เปลี่ยนรหัสผ่าน`) และปุ่มด่วนมุมขวาบนของ `mobile-topbar` (`>= 40x40px`)
+      - รองรับการกดติดตั้งในคลิกเดียวผ่าน `beforeinstallprompt` บน Chrome/Edge/Android พร้อม `Dialog` แนะนำขั้นตอนการติดตั้งทั้งสำหรับ Desktop และสำหรับ **iOS (iPhone / iPad: แชร์ → เพิ่มไปยังหน้าจอโฮม)** และซ่อนปุ่มอัตโนมัติเมื่อเปิดใช้งานจากตัวแอปที่ติดตั้งแล้ว (`standalone mode`)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`67 pass, 0 fail, 2 skipped`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบที่ความกว้าง `360px`, `390px`, `768px`, `1280px` ครบทั้งโหมด `beforeinstallprompt`, โหมด Desktop Guide Dialog, โหมด iOS Guide Dialog, และโหมดซ่อนปุ่มอัตโนมัติเมื่อติดตั้งแล้ว (`childOverflows: 0`, `overlapClose: false`, `pageOverflow: false`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **นำช่องกรอก `อัตราภาษีมูลค่าเพิ่ม (VAT %)` ออกจากหน้าตั้งค่าเอกสาร (`/settings`) และปรับหัวข้อการ์ดที่ 2 เป็น `"2. รหัสเอกสารและคำนำหน้าแยกตามแพลตฟอร์ม (Platform Document Numbering)"` (`src/components/DocumentSettingsClient.tsx`, `src/app/settings/page.tsx`)**:
+    - [x] ถอดช่อง `<Input name="vatRate" />` ที่ไม่ได้ใช้ในใบกำกับภาษีอย่างย่อออก และล็อกค่ามาตรฐาน `vatRate = 7` ตามกฎหมายสรรพากรไทย
+    - [x] ผ่าน `npx.cmd tsc --noEmit` (0 error), `pnpm.cmd test` (66 pass, 0 fail), `pnpm.cmd build` และทดสอบหน้า `/settings` ด้วย Playwright MCP (`360px` และ `1280px`) เรียบร้อย
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
   - **ออกแบบและปรับปรุงป๊อปอัปตัวเลือกปฏิทิน (`DatePickerField.tsx` และ `src/components/ui/calendar.tsx`) ใหม่ทั้งหมดให้รองรับการเลือก ปี · เดือน · วัน อย่างชัดเจน ไร้ Scrollbar ซ้อนกวนใจ (`src/components/DatePickerField.tsx`, `src/components/ui/calendar.tsx`, `src/app/history/page.tsx`)**:
     - [x] **1. เพิ่มแถบเลือกปี (`Year Selector Bar`) และปุ่มลัด `"ดูทั้งปี YYYY"`**:
       - แสดงปุ่มสลับปีที่มีข้อมูลจริงพร้อมจำนวนบิลรวมของแต่ละปี และปุ่มลัด **"ดูทั้งปี YYYY (รวม X,XXX บิล)"** ให้กรองดูข้อมูลรายปีได้ในคลิกเดียว (ซ่อนปุ่มดูทั้งปีอัตโนมัติในหน้าที่ใช้ `routePattern` เฉพาะวัน/เดือน เช่น `/days/[date]/invoices`)

@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { NextRequest } from "next/server";
+import manifest from "../src/app/manifest";
 import {
   BCRYPT_COST,
   BLOCK_DURATION_MS,
@@ -210,4 +213,48 @@ test("Next.js proxy blocks unauthenticated pages/APIs and attaches security head
   });
   const authedRes = proxy(authedReq);
   assert.equal(authedRes.status, 200);
+});
+
+test("PWA manifest, service worker, and icons are valid and publicly accessible via proxy", () => {
+  const m = manifest();
+  assert.equal(m.name, "PCMS Revenue");
+  assert.equal(m.short_name, "PCMS Revenue");
+  assert.equal(m.display, "standalone");
+  assert.equal(m.start_url, "/");
+  assert.equal(m.theme_color, "#0f1117");
+  assert.ok(Array.isArray(m.icons) && m.icons.length >= 4);
+
+  const requiredPngs = [
+    "public/icon-192.png",
+    "public/icon-512.png",
+    "public/icon-maskable-512.png",
+    "public/apple-touch-icon.png",
+  ];
+  for (const relPath of requiredPngs) {
+    const absPath = path.resolve(process.cwd(), relPath);
+    assert.ok(fs.existsSync(absPath), `${relPath} must exist`);
+    const buf = fs.readFileSync(absPath);
+    // Verify PNG header bytes: 89 50 4E 47 0D 0A 1A 0A
+    assert.equal(buf[0], 0x89);
+    assert.equal(buf[1], 0x50);
+    assert.equal(buf[2], 0x4e);
+    assert.equal(buf[3], 0x47);
+  }
+
+  const swPath = path.resolve(process.cwd(), "public/sw.js");
+  assert.ok(fs.existsSync(swPath), "public/sw.js must exist");
+
+  const pwaPaths = [
+    "/manifest.webmanifest",
+    "/sw.js",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-maskable-512.png",
+    "/apple-touch-icon.png",
+  ];
+  for (const p of pwaPaths) {
+    const req = new NextRequest(`http://localhost:3001${p}`);
+    const res = proxy(req);
+    assert.equal(res.status, 200, `PWA asset ${p} must not redirect to /login`);
+  }
 });

@@ -17,7 +17,7 @@ export default async function SettingsPage() {
       <PageHeader
         eyebrow="PCMS Revenue · Document & Company Settings"
         title="ตั้งค่าเอกสาร / ข้อมูลบริษัท"
-        description="ปรับชื่อบริษัท ที่อยู่ เลขผู้เสียภาษี อัตรา VAT ขนาดกระดาษเริ่มต้น และหัวข้อที่แสดงบนใบกำกับภาษี"
+        description="ปรับชื่อบริษัท ที่อยู่ เลขผู้เสียภาษี รหัสคำนำหน้าแยกตามแพลตฟอร์ม ขนาดกระดาษเริ่มต้น และหัวข้อที่แสดงบนใบกำกับภาษี"
       />
       <DocumentSettingsClient
         initialSettings={settings}

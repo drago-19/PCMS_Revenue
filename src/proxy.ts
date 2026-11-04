@@ -20,14 +20,21 @@ export function proxy(request: NextRequest) {
   const requestId =
     request.headers.get("x-request-id")?.trim() || crypto.randomUUID();
 
-  // Allow Next.js static assets and icons
+  // Allow Next.js static assets, PWA manifest, service worker, and icons
   if (
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
     pathname === "/icon.svg" ||
+    pathname === "/icon-192.png" ||
+    pathname === "/icon-512.png" ||
+    pathname === "/icon-maskable-512.png" ||
+    pathname === "/apple-touch-icon.png" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/manifest.json" ||
+    pathname === "/sw.js" ||
     pathname === "/robots.txt"
   ) {
-    return NextResponse.next();
+    return applySecurityHeaders(NextResponse.next(), requestId);
   }
 
   // Public health check endpoint (Observability standard)
@@ -128,6 +135,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icon.svg|api/imports).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.svg|icon-192.png|icon-512.png|icon-maskable-512.png|apple-touch-icon.png|manifest.webmanifest|manifest.json|sw.js|api/imports).*)",
   ],
 };

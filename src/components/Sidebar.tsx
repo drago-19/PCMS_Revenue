@@ -12,6 +12,7 @@ import {
   ShieldCheckIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PwaInstallControl } from "@/components/PwaInstallControl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -268,6 +269,8 @@ function AccountControls({
       </span>
 
       <div className="mt-2.5 flex flex-col gap-2">
+        <PwaInstallControl variant="sidebar" />
+
         <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
           <DialogTrigger asChild>
             <Button
@@ -475,6 +478,8 @@ export function Sidebar({
             <small className="truncate">{companySubLabel}</small>
           </span>
         </Link>
+
+        <PwaInstallControl variant="topbar" />
       </div>
 
       <aside className="sidebar no-print hidden min-[1100px]:flex">
