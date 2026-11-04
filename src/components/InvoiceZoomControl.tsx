@@ -50,18 +50,10 @@ function findMeasureContainer(anchor: HTMLElement | null): HTMLElement | null {
   );
 }
 
-function resetZoomForPrint(anchor: HTMLElement | null) {
-  if (typeof document === "undefined") return;
-  const container = findMeasureContainer(anchor);
-  if (!container) return;
-  container.style.setProperty("--invoice-zoom", "1");
-  container.style.setProperty("--invoice-4up-zoom", "1");
-  container.dataset.invoice4upCols = "2";
-}
-
 function applyResponsiveZoom(
   zoom: InvoicePreviewZoom,
   anchor: HTMLElement | null,
+  measuredBorderBoxWidth?: number,
 ) {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.invoiceZoom = zoom;
@@ -71,17 +63,21 @@ function applyResponsiveZoom(
     window.matchMedia &&
     window.matchMedia("print").matches
   ) {
-    resetZoomForPrint(anchor);
     return;
   }
 
   const container = findMeasureContainer(anchor);
   if (!container) return;
 
-  const style = window.getComputedStyle(container);
-  const padLeft = Number.parseFloat(style.paddingLeft) || 0;
-  const padRight = Number.parseFloat(style.paddingRight) || 0;
-  const innerWidth = Math.max(0, container.clientWidth - padLeft - padRight);
+  let innerWidth: number;
+  if (typeof measuredBorderBoxWidth === "number" && measuredBorderBoxWidth > 0) {
+    innerWidth = Math.max(0, measuredBorderBoxWidth - 32);
+  } else {
+    const style = window.getComputedStyle(container);
+    const padLeft = Number.parseFloat(style.paddingLeft) || 0;
+    const padRight = Number.parseFloat(style.paddingRight) || 0;
+    innerWidth = Math.max(0, container.clientWidth - padLeft - padRight);
+  }
 
   // คำนวณเพดานซูมสูงสุดที่ไม่ทำให้กระดาษ 356px ล้นกรอบหรือถูกบีบความกว้างภายในต่ำกว่า 356px
   const safeAvailableWidth = Math.max(PAPER_BASE_WIDTH_PX, innerWidth - 12);
@@ -116,9 +112,17 @@ function applyResponsiveZoom(
     effective4UpZoom = effectiveZoom;
   }
 
-  container.style.setProperty("--invoice-zoom", String(effectiveZoom));
-  container.style.setProperty("--invoice-4up-zoom", String(effective4UpZoom));
-  container.dataset.invoice4upCols = cols4Up;
+  const nextZoomStr = String(effectiveZoom);
+  const next4UpZoomStr = String(effective4UpZoom);
+  if (container.style.getPropertyValue("--invoice-zoom") !== nextZoomStr) {
+    container.style.setProperty("--invoice-zoom", nextZoomStr);
+  }
+  if (container.style.getPropertyValue("--invoice-4up-zoom") !== next4UpZoomStr) {
+    container.style.setProperty("--invoice-4up-zoom", next4UpZoomStr);
+  }
+  if (container.dataset.invoice4upCols !== cols4Up) {
+    container.dataset.invoice4upCols = cols4Up;
+  }
 }
 
 export function InvoiceZoomControl({
@@ -142,11 +146,19 @@ export function InvoiceZoomControl({
     const container = findMeasureContainer(rootRef.current);
     let ro: ResizeObserver | null = null;
     if (container && typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(() => {
+      ro = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        const contentWidth = entry?.contentRect?.width;
         const current = normalizeZoom(
           document.documentElement.dataset.invoiceZoom ?? initial,
         );
-        applyResponsiveZoom(current, rootRef.current);
+        applyResponsiveZoom(
+          current,
+          rootRef.current,
+          typeof contentWidth === "number" && contentWidth > 0
+            ? contentWidth + 32
+            : undefined,
+        );
       });
       ro.observe(container);
     }
@@ -160,7 +172,6 @@ export function InvoiceZoomControl({
 
     function handleWindowResize() {
       if (window.matchMedia && window.matchMedia("print").matches) {
-        resetZoomForPrint(rootRef.current);
         return;
       }
       const current = normalizeZoom(
@@ -169,26 +180,11 @@ export function InvoiceZoomControl({
       applyResponsiveZoom(current, rootRef.current);
     }
 
-    function handleBeforePrint() {
-      resetZoomForPrint(rootRef.current);
-    }
-
-    function handleAfterPrint() {
-      const current = normalizeZoom(
-        document.documentElement.dataset.invoiceZoom ?? initial,
-      );
-      applyResponsiveZoom(current, rootRef.current);
-    }
-
     window.addEventListener(SYNC_EVENT, handleSync);
-    window.addEventListener("resize", handleWindowResize);
-    window.addEventListener("beforeprint", handleBeforePrint);
-    window.addEventListener("afterprint", handleAfterPrint);
+    window.addEventListener("resize", handleWindowResize, { passive: true });
     return () => {
       window.removeEventListener(SYNC_EVENT, handleSync);
       window.removeEventListener("resize", handleWindowResize);
-      window.removeEventListener("beforeprint", handleBeforePrint);
-      window.removeEventListener("afterprint", handleAfterPrint);
       ro?.disconnect();
     };
   }, []);

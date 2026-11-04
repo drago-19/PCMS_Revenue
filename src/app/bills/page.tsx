@@ -942,9 +942,16 @@ export default async function BillsPage({
             <BillsShopTabs
               activeShop={shop}
               shopCounts={result.shopCounts}
-              buildShopHref={(nextShop) =>
-                buildHref({ nextShop, nextLink: "all", nextPage: 1 })
-              }
+              shopHrefs={Object.fromEntries(
+                [
+                  "all",
+                  "รอผูกไฟล์ร้านค้า",
+                  ...Object.keys(result.shopCounts),
+                ].map((nextShop) => [
+                  nextShop,
+                  buildHref({ nextShop, nextLink: "all", nextPage: 1 }),
+                ]),
+              )}
               hrefs={{
                 all: buildHref({ nextShop: "all", nextLink: "all", nextPage: 1 }),
                 kiddee: buildHref({

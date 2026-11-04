@@ -77,7 +77,7 @@ export function formatAnimatedNumberFrame(
 
 export function AnimatedValueText({
   value,
-  duration = 650,
+  duration = 200,
   className,
 }: {
   value: string;
@@ -86,12 +86,22 @@ export function AnimatedValueText({
 }) {
   const [displayValue, setDisplayValue] = useState<string>(value);
   const rafRef = useRef<number | null>(null);
+  const prevValueRef = useRef<string>(value);
 
   useEffect(() => {
     if (rafRef.current !== null) {
       window.cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+
+    // ตอนเปิดหน้าครั้งแรก (Initial Mount) หรือค่าไม่เปลี่ยน: แสดงค่าจริงทันทีเพื่อไม่ให้หน่วง LCP และไม่บล็อก Main Thread
+    if (prevValueRef.current === value) {
+      setDisplayValue(value);
+      return;
+    }
+
+    const prevParsed = parseAnimatedValueString(prevValueRef.current);
+    prevValueRef.current = value;
 
     const parsed = parseAnimatedValueString(value);
     if (!parsed || parsed.targetNumber === 0) {
@@ -107,21 +117,23 @@ export function AnimatedValueText({
       return;
     }
 
+    const startNumber =
+      prevParsed && prevParsed.suffix === parsed.suffix ? prevParsed.targetNumber : 0;
+    const effectiveDuration = Math.min(300, Math.max(150, duration));
     let startTime: number | null = null;
-    // แสดงเฟรมเริ่มต้นจาก 0 ทันทีที่ mount หรือเมื่อค่าเปลี่ยน
-    setDisplayValue(formatAnimatedNumberFrame(0, parsed));
 
     const step = (timestamp: number) => {
       if (startTime === null) {
         startTime = timestamp;
       }
       const elapsed = timestamp - startTime;
-      const progress = Math.min(1, elapsed / duration);
-      // easeOutQuart: วิ่งขึ้นอย่างลื่นไหลและชะลอเข้าสู่ค่าจริงอย่างนุ่มนวล
+      const progress = Math.min(1, elapsed / effectiveDuration);
+      // easeOutQuart: วิ่งเข้าสู่ค่าจริงอย่างนุ่มนวลภายใน 200ms
       const eased = 1 - Math.pow(1 - progress, 4);
 
       if (progress < 1) {
-        const currentVal = parsed.targetNumber * eased;
+        const currentVal =
+          startNumber + (parsed.targetNumber - startNumber) * eased;
         setDisplayValue(formatAnimatedNumberFrame(currentVal, parsed));
         rafRef.current = window.requestAnimationFrame(step);
       } else {

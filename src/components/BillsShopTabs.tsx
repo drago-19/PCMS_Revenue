@@ -12,14 +12,14 @@ interface BillsShopTabsProps {
     kiddee: string;
     kissi: string;
   };
-  buildShopHref?: (shop: string) => string;
+  shopHrefs?: Record<string, string>;
 }
 
 export function BillsShopTabs({
   activeShop,
   shopCounts,
   hrefs,
-  buildShopHref,
+  shopHrefs,
 }: BillsShopTabsProps) {
   const rawShopKeys = Object.keys(shopCounts).filter(
     (k) => k !== "all" && k !== "อื่นๆ" && k !== "รอผูกไฟล์ร้านค้า",
@@ -27,7 +27,7 @@ export function BillsShopTabs({
   const namedShopKeys = rawShopKeys.sort();
 
   const getShopHref = (key: string) => {
-    if (buildShopHref) return buildShopHref(key);
+    if (shopHrefs && shopHrefs[key]) return shopHrefs[key];
     if (key === "all") return hrefs?.all ?? "/bills";
     if (key === "Kiddee Shop") return hrefs?.kiddee ?? "/bills?shop=Kiddee+Shop";
     if (key === "Kissi Studio") return hrefs?.kissi ?? "/bills?shop=Kissi+Studio";

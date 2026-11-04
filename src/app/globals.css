@@ -2910,6 +2910,18 @@ table.data {
   margin-bottom: 24px;
 }
 
+@media screen {
+  .invoice-stack > .invoice {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 420px;
+  }
+
+  .invoice-4up-sheet {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 760px;
+  }
+}
+
 .invoice-4up-sheet {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2983,6 +2995,12 @@ table.data {
 }
 
 @media print {
+  .invoice-stack > .invoice,
+  .invoice-4up-sheet {
+    content-visibility: visible !important;
+    contain-intrinsic-size: none !important;
+  }
+
   .invoice,
   .invoice * {
     print-color-adjust: exact;
