@@ -1,4 +1,5 @@
 import {
+  getActiveCompanyId,
   query,
   queryOne,
   withTransaction,
@@ -381,8 +382,15 @@ function mapImport(row: Record<string, unknown>): ImportRow {
   };
 }
 
-export function mapTransaction(row: Record<string, unknown>): TransactionRow {
-  const normalized = parseJson<NormalizedTransaction>(row.normalized_json, {
+export function mapTransaction(
+  row: Record<string, unknown>,
+  optionsOrIndex?: { keepRaw?: boolean } | number,
+): TransactionRow {
+  const keepRaw =
+    typeof optionsOrIndex === "object" && optionsOrIndex !== null
+      ? Boolean(optionsOrIndex.keepRaw)
+      : false;
+  const parsedNorm = parseJson<NormalizedTransaction>(row.normalized_json, {
     externalId: String(row.external_id ?? ""),
     transactionType: String(row.transaction_type ?? ""),
     isOrder: Number(row.is_order ?? 0) === 1,
@@ -400,6 +408,18 @@ export function mapTransaction(row: Record<string, unknown>): TransactionRow {
     firstRow: 0,
     rowIndexes: [],
   });
+  const rawContactChannel =
+    parsedNorm.raw?.["ช่องทางติดต่อ"] ?? parsedNorm.raw?.["ช่องทาง"];
+  const normalized: NormalizedTransaction = keepRaw
+    ? parsedNorm
+    : {
+        ...parsedNorm,
+        mappedFields: [],
+        rowIndexes: [],
+        raw: rawContactChannel
+          ? { ช่องทางติดต่อ: rawContactChannel }
+          : {},
+      };
   const txType = String(row.transaction_type ?? "");
   const txIncome = Number(row.income ?? 0);
   const txPayout = Number(row.payout ?? 0);
@@ -1123,7 +1143,7 @@ export async function getImportSpreadsheetData(
       [id],
       db,
     );
-    const mappedTx = txRows.map(mapTransaction);
+    const mappedTx = txRows.map((r) => mapTransaction(r, { keepRaw: true }));
     const activeMapping =
       importRow.mapping.length > 0
         ? importRow.mapping
@@ -1379,6 +1399,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
       );
     }
 
+    clearDailyBatchesCache();
     return true;
   };
 
@@ -1413,10 +1434,24 @@ export async function deleteAllImports(db?: Queryable): Promise<number> {
       [],
       target,
     );
+    clearDailyBatchesCache();
     return deleted.length;
   };
   if (db) return runClear(db);
   return withTransaction((client) => runClear(client));
+}
+
+const globalForDailyBatchesCache = globalThis as unknown as {
+  __pcmsDailyBatchesCache?: Record<
+    string,
+    { rows: DailyBatchRow[]; cachedAtMs: number }
+  >;
+};
+
+const DAILY_BATCHES_CACHE_TTL_MS = 30_000;
+
+export function clearDailyBatchesCache(): void {
+  globalForDailyBatchesCache.__pcmsDailyBatchesCache = {};
 }
 
 export async function listDailyBatches(
@@ -1425,6 +1460,17 @@ export async function listDailyBatches(
   db?: Queryable,
 ): Promise<DailyBatchRow[]> {
   const activeShop = (options?.shop ?? "all").trim();
+  const canUseCache = !db && (!activeShop || activeShop === "all");
+  let cacheKey = "";
+  if (canUseCache) {
+    const companyId = await getActiveCompanyId();
+    cacheKey = `${companyId}:all:${limit}`;
+    const hit = globalForDailyBatchesCache.__pcmsDailyBatchesCache?.[cacheKey];
+    if (hit && Date.now() - hit.cachedAtMs < DAILY_BATCHES_CACHE_TTL_MS) {
+      return hit.rows;
+    }
+  }
+
   if (activeShop && activeShop !== "all") {
     const isUnlinked = activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ";
     const shopBatches = isUnlinked
@@ -1501,7 +1547,7 @@ export async function listDailyBatches(
     db,
   );
   if (precomputed.length > 0) {
-    return precomputed.map((row) => ({
+    const mapped = precomputed.map((row) => ({
       date: String(row.date),
       transactionCount: Number(row.transaction_count ?? 0),
       orderCount: Number(row.order_count ?? 0),
@@ -1513,6 +1559,16 @@ export async function listDailyBatches(
       totalPayout: Number(row.total_payout ?? 0),
       adjustment: Number(row.adjustment ?? 0),
     }));
+    if (canUseCache && cacheKey) {
+      if (!globalForDailyBatchesCache.__pcmsDailyBatchesCache) {
+        globalForDailyBatchesCache.__pcmsDailyBatchesCache = {};
+      }
+      globalForDailyBatchesCache.__pcmsDailyBatchesCache[cacheKey] = {
+        rows: mapped,
+        cachedAtMs: Date.now(),
+      };
+    }
+    return mapped;
   }
 
   const rows = await query<Record<string, unknown>>(
@@ -1535,7 +1591,7 @@ export async function listDailyBatches(
     [limit],
     db,
   );
-  return rows.map((row) => ({
+  const mappedFallback = rows.map((row) => ({
     date: String(row.date),
     transactionCount: Number(row.transaction_count ?? 0),
     orderCount: Number(row.order_count ?? 0),
@@ -1547,6 +1603,16 @@ export async function listDailyBatches(
     totalPayout: Number(row.total_payout ?? 0),
     adjustment: Number(row.adjustment ?? 0),
   }));
+  if (canUseCache && cacheKey) {
+    if (!globalForDailyBatchesCache.__pcmsDailyBatchesCache) {
+      globalForDailyBatchesCache.__pcmsDailyBatchesCache = {};
+    }
+    globalForDailyBatchesCache.__pcmsDailyBatchesCache[cacheKey] = {
+      rows: mappedFallback,
+      cachedAtMs: Date.now(),
+    };
+  }
+  return mappedFallback;
 }
 
 export function escapeLikePattern(raw: string): string {
@@ -2321,20 +2387,28 @@ async function getMonthlyInvoicesBatchKeyset(
                   ? `AND EXISTS (SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND ${BILLABLE_COMPENSATION_SQL})`
                   : "";
 
-  const countsRow = await queryOne<Record<string, unknown>>(
-    `SELECT COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE r.channel = 'TikTok') AS tiktok_count,
-            COUNT(*) FILTER (WHERE r.channel = 'Shopee') AS shopee_count,
-            COUNT(*) FILTER (WHERE r.channel = 'Facebook') AS facebook_count,
-            COUNT(*) FILTER (WHERE r.channel = 'Lazada') AS lazada_count,
-            COUNT(*) FILTER (WHERE r.channel = 'LINE') AS line_count,
-            COUNT(*) FILTER (WHERE r.channel = 'Other') AS other_count,
-            COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM transactions t WHERE t.external_id = r.order_id AND ${BILLABLE_COMPENSATION_SQL})) AS compensation_count
-     FROM invoice_registry r
-     WHERE r.yymm = $1 AND r.status = 'active'`,
-    [yymm],
-    db,
-  );
+  const [countsRow, dsCompRow] = await Promise.all([
+    queryOne<Record<string, unknown>>(
+      `SELECT COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE r.channel = 'TikTok') AS tiktok_count,
+              COUNT(*) FILTER (WHERE r.channel = 'Shopee') AS shopee_count,
+              COUNT(*) FILTER (WHERE r.channel = 'Facebook') AS facebook_count,
+              COUNT(*) FILTER (WHERE r.channel = 'Lazada') AS lazada_count,
+              COUNT(*) FILTER (WHERE r.channel = 'LINE') AS line_count,
+              COUNT(*) FILTER (WHERE r.channel = 'Other') AS other_count
+       FROM invoice_registry r
+       WHERE r.yymm = $1 AND r.status = 'active'`,
+      [yymm],
+      db,
+    ),
+    queryOne<{ comp_count: string | number }>(
+      `SELECT COALESCE(SUM(compensation_count), 0) AS comp_count
+       FROM daily_summaries
+       WHERE paid_date LIKE $1`,
+      [`${date}-%`],
+      db,
+    ),
+  ]);
   const billableTotalCount = Number(countsRow?.total ?? 0);
   if (billableTotalCount === 0) return null;
   const tiktokOrdersCount = Number(countsRow?.tiktok_count ?? 0);
@@ -2343,7 +2417,7 @@ async function getMonthlyInvoicesBatchKeyset(
   const lazadaOrdersCount = Number(countsRow?.lazada_count ?? 0);
   const lineOrdersCount = Number(countsRow?.line_count ?? 0);
   const otherOrdersCount = Number(countsRow?.other_count ?? 0);
-  const compensationOrdersCount = Number(countsRow?.compensation_count ?? 0);
+  const compensationOrdersCount = Number(dsCompRow?.comp_count ?? 0);
   const channelFilteredCount =
     channelFilter === "TikTok"
       ? tiktokOrdersCount
@@ -2648,10 +2722,33 @@ export async function listBills(
     }
   }
 
-  // Run daily_summaries, non-positive covering index scan, and no-price exchange order scan in parallel.
+  // Breakdown of non-order transactions (is_order = 0: platform/logistics compensations vs GMV ad deductions & adjustments)
+  const nonOrderClauses: string[] = ["t.is_order = 0"];
+  const nonOrderParams: unknown[] = [];
+  if (date) {
+    if (isMonthFilter || isYearFilter) {
+      nonOrderClauses.push(`t.paid_date LIKE $${nonOrderParams.length + 1}`);
+      nonOrderParams.push(`${date}-%`);
+    } else {
+      nonOrderClauses.push(`t.paid_date = $${nonOrderParams.length + 1}`);
+      nonOrderParams.push(date);
+    }
+  }
+  if (activeShop && activeShop !== "all") {
+    if (activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ") {
+      nonOrderClauses.push(
+        `(t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')`,
+      );
+    } else {
+      nonOrderClauses.push(`t.shop_name = $${nonOrderParams.length + 1}`);
+      nonOrderParams.push(activeShop);
+    }
+  }
+
+  // Run daily_summaries, non-positive covering index scan, no-price exchange order scan, and nonOrderRows in parallel.
   // Importantly, nonPosRow and noPriceRow query baseWhere (across all channels) so channel counts
   // are never zeroed out when a single channel tab is selected.
-  const [dsRow, nonPosRow, noPriceRow] = await Promise.all([
+  const [dsRow, nonPosRow, noPriceRow, nonOrderRows] = await Promise.all([
     queryOne<Record<string, unknown>>(
       `SELECT
          COALESCE(SUM(order_count), 0) AS order_count,
@@ -2742,7 +2839,42 @@ export async function listBills(
       baseParams,
       db,
     ),
+    channel === "all" || channel === "TikTok"
+      ? query<Record<string, unknown>>(
+          `SELECT t.transaction_type, COUNT(*)::int AS cnt, ROUND(SUM(t.payout)::numeric, 2) AS sum_payout, ROUND(SUM(t.fee_total)::numeric, 2) AS sum_fees
+           FROM transactions t
+           WHERE ${nonOrderClauses.join(" AND ")}
+           GROUP BY t.transaction_type
+           ORDER BY sum_payout DESC`,
+          nonOrderParams,
+          db,
+        )
+      : Promise.resolve([]),
   ]);
+
+  const nonOrderBreakdown: NonOrderTransactionBreakdownItem[] = nonOrderRows.map((r) => ({
+    transactionType: String(r.transaction_type ?? ""),
+    count: Number(r.cnt ?? 0),
+    payout: Number(r.sum_payout ?? 0),
+  }));
+  let compensationCountFromBreakdown = 0;
+  let compensationPayoutFromBreakdown = 0;
+  let compensationFeesFromBreakdown = 0;
+  let otherDeductionCountFromBreakdown = 0;
+  let otherDeductionPayoutFromBreakdown = 0;
+  for (let idx = 0; idx < nonOrderBreakdown.length; idx++) {
+    const item = nonOrderBreakdown[idx]!;
+    const rawRow = nonOrderRows[idx];
+    const itemFees = Number(rawRow?.sum_fees ?? 0);
+    if (isCompensationTransactionType(item.transactionType) && item.payout > 0) {
+      compensationCountFromBreakdown += item.count;
+      compensationPayoutFromBreakdown = round2(compensationPayoutFromBreakdown + item.payout);
+      compensationFeesFromBreakdown = round2(compensationFeesFromBreakdown + itemFees);
+    } else {
+      otherDeductionCountFromBreakdown += item.count;
+      otherDeductionPayoutFromBreakdown = round2(otherDeductionPayoutFromBreakdown + item.payout);
+    }
+  }
 
   const nonPosAll = Number(nonPosRow?.non_pos_all ?? 0);
   const nonPosAllChannels = Number(
@@ -2762,6 +2894,8 @@ export async function listBills(
   ];
   const whereWithoutLink = clausesWithoutLink.join(" AND ");
   const dsCompensationCount = Number(dsRow?.compensation_count ?? 0);
+  const effectiveCompensationCount =
+    compensationCountFromBreakdown || dsCompensationCount;
   const canUseFastLinkCounts =
     category === "normal" &&
     !q &&
@@ -2769,8 +2903,7 @@ export async function listBills(
     status === "all" &&
     channel === "all" &&
     shipping === "all" &&
-    activeShop === "all" &&
-    dsCompensationCount === 0;
+    activeShop === "all";
   let fastLinkStatsRow: Record<string, unknown> | null = null;
   if (canUseFastLinkCounts && dsRow) {
     const allCountFromDs = Number(dsRow.all_count ?? dsRow.order_count ?? 0);
@@ -2792,9 +2925,9 @@ export async function listBills(
           ? Number(dsRow.linked_count ?? 0)
           : Number(dsRow.linked_count ?? 0) - noPriceAllChannels;
       fastLinkStatsRow = {
-        all_count: Math.max(0, effectiveBillableCount - nonPosAll),
-        all_with_no_price_count: Math.max(0, allCountFromDs - nonPosAll),
-        linked_count: Math.max(0, effectiveLinkedFromDs - nonPosLinked),
+        all_count: Math.max(0, effectiveBillableCount - nonPosAll) + effectiveCompensationCount,
+        all_with_no_price_count: Math.max(0, allCountFromDs - nonPosAll) + effectiveCompensationCount,
+        linked_count: Math.max(0, effectiveLinkedFromDs - nonPosLinked) + effectiveCompensationCount,
         oms_only_count: Math.max(
           0,
           Number(dsRow.oms_only_count ?? 0) - nonPosOmsOnly,
@@ -2804,7 +2937,8 @@ export async function listBills(
           Number(dsRow.unlinked_count ?? 0) - nonPosUnlinked,
         ),
         no_price_count: noPriceAll,
-        compensation_count: 0,
+        missing_items_count: 0,
+        compensation_count: effectiveCompensationCount,
       };
     }
   }
@@ -2838,8 +2972,7 @@ export async function listBills(
     isUnfilteredBase &&
     linkStatus === "all" &&
     shipping === "all" &&
-    activeShop === "all" &&
-    dsCompensationCount === 0;
+    activeShop === "all";
   let fastSummaryUsed = false;
   let total = 0;
   let summaryIncome = 0;
@@ -2874,10 +3007,10 @@ export async function listBills(
       : dsOrderCount;
   const normalAllFromDs =
     Math.max(0, dsOrderCount - nonPosAllChannels - noPriceAllChannels) +
-    dsCompensationCount;
+    effectiveCompensationCount;
   const normalTikTokFromDs =
     Math.max(0, rawTikTokFromDs - Number(nonPosRow?.non_pos_tiktok ?? 0)) +
-    dsCompensationCount;
+    effectiveCompensationCount;
   const normalShopeeFromDs = Math.max(
     0,
     dsShopeeCount - Number(nonPosRow?.non_pos_shopee ?? 0),
@@ -2937,21 +3070,24 @@ export async function listBills(
       (
         Number(dsRow?.order_income ?? 0) -
         Number(nonPosRow?.non_pos_income ?? 0) -
-        Number(noPriceRow?.no_price_income ?? 0)
+        Number(noPriceRow?.no_price_income ?? 0) +
+        compensationPayoutFromBreakdown
       ).toFixed(2),
     );
     summaryFees = Number(
       (
         Number(dsRow?.order_fees ?? 0) -
         Number(nonPosRow?.non_pos_fees ?? 0) -
-        Number(noPriceRow?.no_price_fees ?? 0)
+        Number(noPriceRow?.no_price_fees ?? 0) +
+        compensationFeesFromBreakdown
       ).toFixed(2),
     );
     summaryPayout = Number(
       (
         Number(dsRow?.order_payout ?? 0) -
         Number(nonPosRow?.non_pos_payout ?? 0) -
-        Number(noPriceRow?.no_price_payout ?? 0)
+        Number(noPriceRow?.no_price_payout ?? 0) +
+        compensationPayoutFromBreakdown
       ).toFixed(2),
     );
     summaryShippingPositive = Number(
@@ -2977,6 +3113,54 @@ export async function listBills(
     `${ORDER_LINK_PRIORITY_SQL} <> 3`,
   ];
   const whereForChannelCounts = clausesForChannelCounts.join(" AND ");
+  const lineMismatchSelectSql =
+    channel === "LINE" || linkStatus === "line_mismatch"
+      ? `SUM(CASE WHEN ${LINE_MISMATCH_SQL} THEN 1 ELSE 0 END) AS line_mismatch_count`
+      : `0 AS line_mismatch_count`;
+  const distinctDatesSelectSql =
+    isUnfilteredBase && channel === "all" && dsOrderCount > 0
+      ? `${Number(dsRow?.distinct_dates ?? 0)} AS distinct_dates`
+      : `COUNT(DISTINCT NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS distinct_dates`;
+
+  const shopCountWhere = [
+    ...baseClausesWithoutShop,
+    BILL_CATEGORY_SQL[category],
+    `${ORDER_LINK_PRIORITY_SQL} <> 3`,
+    ...(shipping !== "all" ? [BILL_SHIPPING_SQL[shipping]] : []),
+  ].join(" AND ");
+  const shopCountRowsPromise = query<Record<string, unknown>>(
+    `SELECT COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop, COUNT(*)::int AS cnt
+     FROM transactions t
+     WHERE ${shopCountWhere}
+     GROUP BY COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า')`,
+    baseParamsWithoutShop,
+    db,
+  );
+  const pageIdsOrderBySql =
+    q.length >= 3
+      ? orderBySql.replace(/^t\.paid_date\b/, "(t.paid_date || '')")
+      : orderBySql;
+  const fetchPageRows = (targetPage: number) =>
+    query<Record<string, unknown>>(
+      `WITH page_ids AS (
+         SELECT t.id
+         FROM transactions t
+         WHERE ${where}
+         ORDER BY ${pageIdsOrderBySql}
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+       )
+       SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
+       FROM page_ids p
+       JOIN transactions t ON t.id = p.id
+       LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
+       LEFT JOIN imports i ON i.id = t.import_id
+       ORDER BY ${orderBySql}`,
+      [...params, pageSize, (targetPage - 1) * pageSize],
+      db,
+    ).then((rows) => enrichTransactionsWithOms(rows.map(mapTransaction), db));
+  const earlyEnrichedRowsPromise = fastSummaryUsed
+    ? fetchPageRows(Math.min(page, Math.max(1, Math.ceil(total / pageSize))))
+    : null;
 
   const [linkStatsRow, missingDatesRows, summaryRow, chStatsRow] =
     await Promise.all([
@@ -2997,7 +3181,7 @@ export async function listBills(
                  SUM(CASE WHEN t.channel = 'Shopee' AND t.payout > 0 THEN 1 ELSE 0 END) AS shopee_normal_count,
                  SUM(CASE WHEN t.channel = 'Shopee' AND t.payout < 0 THEN 1 ELSE 0 END) AS shopee_neg_count,
                  SUM(CASE WHEN t.channel = 'Shopee' AND t.payout = 0 THEN 1 ELSE 0 END) AS shopee_zero_count,
-                 SUM(CASE WHEN ${LINE_MISMATCH_SQL} THEN 1 ELSE 0 END) AS line_mismatch_count
+                 ${lineMismatchSelectSql}
                FROM transactions t
                WHERE ${whereWithoutLink}`,
               paramsWithoutLink,
@@ -3032,7 +3216,7 @@ export async function listBills(
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout > 0 THEN 1 ELSE 0 END) AS shopee_normal_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout < 0 THEN 1 ELSE 0 END) AS shopee_neg_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout = 0 THEN 1 ELSE 0 END) AS shopee_zero_count,
-                    SUM(CASE WHEN ${LINE_MISMATCH_SQL} THEN 1 ELSE 0 END) AS line_mismatch_count,
+                    ${lineMismatchSelectSql},
                     ROUND(SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN t.payout ELSE t.income END)::numeric, 2) AS income,
                     ROUND(SUM(t.fee_total)::numeric, 2) AS fees,
                     ROUND(SUM(t.payout)::numeric, 2) AS payout,
@@ -3046,7 +3230,7 @@ export async function listBills(
                     SUM(CASE WHEN t.channel = 'Other' AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END) AS other_count,
                     MIN(NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS min_paid_date,
                     MAX(NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS max_paid_date,
-                    COUNT(DISTINCT NULLIF(NULLIF(t.paid_date, ''), 'unknown')) AS distinct_dates
+                    ${distinctDatesSelectSql}
              FROM transactions t WHERE ${where}`,
             params,
             db,
@@ -3059,7 +3243,7 @@ export async function listBills(
                     SUM(CASE WHEN t.channel = 'Shopee' THEN 1 ELSE 0 END) AS shopee_count,
                     SUM(CASE WHEN t.channel = 'Facebook' THEN 1 ELSE 0 END) AS facebook_count,
                     SUM(CASE WHEN t.channel = 'Lazada' THEN 1 ELSE 0 END) AS lazada_count,
-       SUM(CASE WHEN t.channel = 'LINE' THEN 1 ELSE 0 END) AS line_count,
+                    SUM(CASE WHEN t.channel = 'LINE' THEN 1 ELSE 0 END) AS line_count,
                     SUM(CASE WHEN t.channel = 'Other' THEN 1 ELSE 0 END) AS other_count
              FROM transactions t WHERE ${whereForChannelCounts}`,
             baseParams,
@@ -3091,7 +3275,7 @@ export async function listBills(
     allWithNoPrice: resolvedAllWithNoPriceCount,
     compensation:
       category === "normal" && (channel === "all" || channel === "TikTok")
-        ? Number(effectiveLinkStatsRow?.compensation_count ?? dsCompensationCount ?? 0)
+        ? Number(effectiveLinkStatsRow?.compensation_count ?? effectiveCompensationCount ?? 0)
         : 0,
     shopeeNormal: Number(effectiveLinkStatsRow?.shopee_normal_count ?? 0),
     shopeeNegative: Number(effectiveLinkStatsRow?.shopee_neg_count ?? 0),
@@ -3171,59 +3355,6 @@ export async function listBills(
     refundFeePayout: Number(nonPosRow?.refund_fee_payout ?? 0),
   };
 
-  // Breakdown of non-order transactions (is_order = 0: platform/logistics compensations vs GMV ad deductions & adjustments)
-  const nonOrderClauses: string[] = ["t.is_order = 0"];
-  const nonOrderParams: unknown[] = [];
-  if (date) {
-    if (isMonthFilter || isYearFilter) {
-      nonOrderClauses.push(`t.paid_date LIKE $${nonOrderParams.length + 1}`);
-      nonOrderParams.push(`${date}-%`);
-    } else {
-      nonOrderClauses.push(`t.paid_date = $${nonOrderParams.length + 1}`);
-      nonOrderParams.push(date);
-    }
-  }
-  if (activeShop && activeShop !== "all") {
-    if (activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ") {
-      nonOrderClauses.push(
-        `(t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')`,
-      );
-    } else {
-      nonOrderClauses.push(`t.shop_name = $${nonOrderParams.length + 1}`);
-      nonOrderParams.push(activeShop);
-    }
-  }
-  const nonOrderRows =
-    channel === "all" || channel === "TikTok"
-      ? await query<Record<string, unknown>>(
-          `SELECT t.transaction_type, COUNT(*)::int AS cnt, ROUND(SUM(t.payout)::numeric, 2) AS sum_payout
-           FROM transactions t
-           WHERE ${nonOrderClauses.join(" AND ")}
-           GROUP BY t.transaction_type
-           ORDER BY sum_payout DESC`,
-          nonOrderParams,
-          db,
-        )
-      : [];
-  const nonOrderBreakdown: NonOrderTransactionBreakdownItem[] = nonOrderRows.map((r) => ({
-    transactionType: String(r.transaction_type ?? ""),
-    count: Number(r.cnt ?? 0),
-    payout: Number(r.sum_payout ?? 0),
-  }));
-  let compensationCountFromBreakdown = 0;
-  let compensationPayoutFromBreakdown = 0;
-  let otherDeductionCountFromBreakdown = 0;
-  let otherDeductionPayoutFromBreakdown = 0;
-  for (const item of nonOrderBreakdown) {
-    if (isCompensationTransactionType(item.transactionType) && item.payout > 0) {
-      compensationCountFromBreakdown += item.count;
-      compensationPayoutFromBreakdown = round2(compensationPayoutFromBreakdown + item.payout);
-    } else {
-      otherDeductionCountFromBreakdown += item.count;
-      otherDeductionPayoutFromBreakdown = round2(otherDeductionPayoutFromBreakdown + item.payout);
-    }
-  }
-
   // Period net summary across all 3 categories for the selected channel
   const channelTotalOrderCount =
     categoryCounts.normal + categoryCounts.refundFee + categoryCounts.zero;
@@ -3285,45 +3416,13 @@ export async function listBills(
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, pageCount);
-  const pageIdsOrderBySql =
-    q.length >= 3
-      ? orderBySql.replace(/^t\.paid_date\b/, "(t.paid_date || '')")
-      : orderBySql;
-  const rows = await query<Record<string, unknown>>(
-    `WITH page_ids AS (
-       SELECT t.id
-       FROM transactions t
-       WHERE ${where}
-       ORDER BY ${pageIdsOrderBySql}
-       LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-     )
-     SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
-     FROM page_ids p
-     JOIN transactions t ON t.id = p.id
-     LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
-     LEFT JOIN imports i ON i.id = t.import_id
-     ORDER BY ${orderBySql}`,
-    [...params, pageSize, (safePage - 1) * pageSize],
-    db,
-  );
 
-  const enrichedRows = await enrichTransactionsWithOms(rows.map(mapTransaction), db);
+  // Run page rows fetch+enrichment and shopCounts query in parallel
+  const [enrichedRows, shopCountRows] = await Promise.all([
+    earlyEnrichedRowsPromise ?? fetchPageRows(safePage),
+    shopCountRowsPromise,
+  ]);
 
-  // Compute shopCounts across all shops for the current date/category/filter scope (independent of activeShop)
-  const shopCountWhere = [
-    ...baseClausesWithoutShop,
-    BILL_CATEGORY_SQL[category],
-    `${ORDER_LINK_PRIORITY_SQL} <> 3`,
-    ...(shipping !== "all" ? [BILL_SHIPPING_SQL[shipping]] : []),
-  ].join(" AND ");
-  const shopCountRows = await query<Record<string, unknown>>(
-    `SELECT COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop, COUNT(*)::int AS cnt
-     FROM transactions t
-     WHERE ${shopCountWhere}
-     GROUP BY COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า')`,
-    baseParamsWithoutShop,
-    db,
-  );
   let allShopsCount = 0;
   const shopCounts: Record<string, number> = {
     all: 0,

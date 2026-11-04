@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-04-v38";
+const SCHEMA_VERSION = "2026-11-04-v39";
 
 export type { CompanyId };
 
@@ -666,6 +666,16 @@ CREATE INDEX IF NOT EXISTS ix_transactions_non_positive_cover
   ON transactions(paid_date, channel, link_priority)
   INCLUDE (income, fee_total, payout, shipping_positive, shipping_negative)
   WHERE is_order = 1 AND income <= 0;
+
+CREATE INDEX IF NOT EXISTS ix_transactions_non_pos_or_payout_cover
+  ON transactions(paid_date, channel, link_priority)
+  INCLUDE (income, fee_total, payout, shipping_positive, shipping_negative)
+  WHERE is_order = 1 AND (income <= 0 OR payout <= 0);
+
+CREATE INDEX IF NOT EXISTS ix_transactions_shop_paid_cover
+  ON transactions(paid_date, shop_name, link_priority)
+  INCLUDE (income, payout, fee_total)
+  WHERE (is_order = 1) OR (is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0);
 
 CREATE INDEX IF NOT EXISTS ix_transactions_order_fee
   ON transactions(ABS(fee_total) DESC, external_id DESC)

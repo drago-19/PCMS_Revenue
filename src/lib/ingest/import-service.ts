@@ -1578,6 +1578,8 @@ export async function refreshSummaryTables(
   client: Queryable,
   scope?: { importId?: number; dates?: string[]; skus?: string[] },
 ): Promise<void> {
+  const { clearDailyBatchesCache } = await import("../queries");
+  clearDailyBatchesCache();
   let targetDates = (scope?.dates ?? []).filter((d) => d && d !== "unknown");
   let targetSkus = (scope?.skus ?? []).filter(Boolean);
 
