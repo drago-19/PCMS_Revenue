@@ -24,7 +24,7 @@ export function BillsShopTabs({
   const rawShopKeys = Object.keys(shopCounts).filter(
     (k) => k !== "all" && k !== "อื่นๆ" && k !== "รอผูกไฟล์ร้านค้า",
   );
-  const namedShopKeys = rawShopKeys.length > 0 ? rawShopKeys.sort() : ["Kiddee Shop", "Kissi Studio"];
+  const namedShopKeys = rawShopKeys.sort();
 
   const getShopHref = (key: string) => {
     if (buildShopHref) return buildShopHref(key);

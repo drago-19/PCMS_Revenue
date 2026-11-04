@@ -573,8 +573,22 @@ export function BillsSubFilters({
               count: linkCounts.linked,
               dotColor: "bg-[#059669]",
               activeClass: channelActiveClass,
-              isActive: (cur) => cur === "all" || cur === "linked",
+              isActive: (cur) =>
+                (cur === "all" && linkCounts.missingItems === 0) ||
+                cur === "linked",
             },
+            ...(linkCounts.missingItems > 0
+              ? [
+                  {
+                    key: "missing_items" as const,
+                    label: "รอไฟล์สินค้า",
+                    subLabel: "ขาดสินค้า Shipnity",
+                    count: linkCounts.missingItems,
+                    dotColor: "bg-[#ea580c]",
+                    activeClass: channelActiveClass,
+                  },
+                ]
+              : []),
             {
               key: "no_price",
               label: "เปลี่ยนไซส์ / ฿0",
@@ -590,6 +604,9 @@ export function BillsSubFilters({
               count: linkCounts.allWithNoPrice,
               dotColor: "bg-[#64748b]",
               activeClass: channelActiveClass,
+              isActive: (cur) =>
+                cur === "all_fb" ||
+                (cur === "all" && linkCounts.missingItems > 0),
             },
           ]
         : [
@@ -653,32 +670,64 @@ export function BillsSubFilters({
         : activeChannel === "Shopee" ||
             activeChannel === "Lazada" ||
             activeChannel === "Other"
-          ? [
-              {
-                key: "all",
-                label:
-                  activeCategory === "normal"
-                    ? "ข้อมูลครบ"
-                    : "ทั้งหมดในหมวดนี้",
-                subLabel:
-                  activeCategory === "normal"
-                    ? activeChannel === "Lazada"
-                      ? "ออกใบกำกับฯ ได้ · Lazada 100%"
-                      : "ออกใบกำกับฯ ได้ · Shipnity 100%"
-                    : activeChannel === "Lazada"
-                      ? "รายการจากไฟล์ Lazada"
-                      : "รายการจากไฟล์ Shipnity",
-                count: linkCounts.all,
-                dotColor:
-                  activeChannel === "Lazada"
-                    ? "bg-[#0f146d]"
-                    : activeChannel === "Other"
-                      ? "bg-[#475569]"
-                      : "bg-[#ee4d2d]",
-                activeClass: channelActiveClass,
-                isActive: () => true,
-              },
-            ]
+          ? activeCategory === "normal" && linkCounts.missingItems > 0
+            ? [
+                {
+                  key: "all",
+                  label: `ทั้งหมดใน ${activeChannel}`,
+                  subLabel: "รวมทุกสถานะในช่องทางนี้",
+                  count: linkCounts.all,
+                  dotColor:
+                    activeChannel === "Lazada"
+                      ? "bg-[#0f146d]"
+                      : activeChannel === "Other"
+                        ? "bg-[#475569]"
+                        : "bg-[#ee4d2d]",
+                  activeClass: channelActiveClass,
+                },
+                {
+                  key: "linked",
+                  label: "ข้อมูลครบ",
+                  subLabel: "ออกใบกำกับฯ ได้",
+                  count: linkCounts.linked,
+                  dotColor: "bg-[#059669]",
+                  activeClass: channelActiveClass,
+                },
+                {
+                  key: "missing_items",
+                  label: "รอไฟล์สินค้า",
+                  subLabel: "ขาดสินค้า Shipnity",
+                  count: linkCounts.missingItems,
+                  dotColor: "bg-[#ea580c]",
+                  activeClass: channelActiveClass,
+                },
+              ]
+            : [
+                {
+                  key: "all",
+                  label:
+                    activeCategory === "normal"
+                      ? "ข้อมูลครบ"
+                      : "ทั้งหมดในหมวดนี้",
+                  subLabel:
+                    activeCategory === "normal"
+                      ? activeChannel === "Lazada"
+                        ? "ออกใบกำกับฯ ได้ · Lazada 100%"
+                        : "ออกใบกำกับฯ ได้ · Shipnity 100%"
+                      : activeChannel === "Lazada"
+                        ? "รายการจากไฟล์ Lazada"
+                        : "รายการจากไฟล์ Shipnity",
+                  count: linkCounts.all,
+                  dotColor:
+                    activeChannel === "Lazada"
+                      ? "bg-[#0f146d]"
+                      : activeChannel === "Other"
+                        ? "bg-[#475569]"
+                        : "bg-[#ee4d2d]",
+                  activeClass: channelActiveClass,
+                  isActive: () => true,
+                },
+              ]
         : activeChannel === "TikTok"
           ? activeCategory === "normal"
             ? [
@@ -704,6 +753,17 @@ export function BillsSubFilters({
                         subLabel: "ออกใบกำกับฯ ได้",
                         count: linkCounts.compensation,
                         dotColor: "bg-[#7c3aed]",
+                      },
+                    ]
+                  : []),
+                ...(linkCounts.missingItems > 0
+                  ? [
+                      {
+                        key: "missing_items" as const,
+                        label: "รอไฟล์สินค้า",
+                        subLabel: "ขาดสินค้า Shipnity",
+                        count: linkCounts.missingItems,
+                        dotColor: "bg-[#ea580c]",
                       },
                     ]
                   : []),
@@ -744,6 +804,17 @@ export function BillsSubFilters({
                   count: linkCounts.linked,
                   dotColor: "bg-[#059669]",
                 },
+                ...(linkCounts.missingItems > 0
+                  ? [
+                      {
+                        key: "missing_items" as const,
+                        label: "รอไฟล์สินค้า",
+                        subLabel: "ขาดสินค้า Shipnity",
+                        count: linkCounts.missingItems,
+                        dotColor: "bg-[#ea580c]",
+                      },
+                    ]
+                  : []),
                 {
                   key: "unlinked",
                   label: "รอไฟล์ออเดอร์",
@@ -779,13 +850,28 @@ export function BillsSubFilters({
                       },
                     ]
                   : []),
-                {
-                  key: "no_price",
-                  label: "เปลี่ยนไซส์ / ฿0",
-                  subLabel: "เฉพาะค่าส่ง",
-                  count: linkCounts.noPrice,
-                  dotColor: "bg-[#7c3aed]",
-                },
+                ...(linkCounts.missingItems > 0
+                  ? [
+                      {
+                        key: "missing_items" as const,
+                        label: "รอไฟล์สินค้า",
+                        subLabel: "ขาดสินค้า Shipnity",
+                        count: linkCounts.missingItems,
+                        dotColor: "bg-[#ea580c]",
+                      },
+                    ]
+                  : []),
+                ...(linkCounts.noPrice > 0 || linkCounts.missingItems === 0
+                  ? [
+                      {
+                        key: "no_price" as const,
+                        label: "เปลี่ยนไซส์ / ฿0",
+                        subLabel: "เฉพาะค่าส่ง",
+                        count: linkCounts.noPrice,
+                        dotColor: "bg-[#7c3aed]",
+                      },
+                    ]
+                  : []),
                 {
                   key: "unlinked",
                   label: "รอไฟล์ออเดอร์",
@@ -823,6 +909,17 @@ export function BillsSubFilters({
                   count: linkCounts.linked,
                   dotColor: "bg-[#059669]",
                 },
+                ...(linkCounts.missingItems > 0
+                  ? [
+                      {
+                        key: "missing_items" as const,
+                        label: "รอไฟล์สินค้า",
+                        subLabel: "ขาดสินค้า Shipnity",
+                        count: linkCounts.missingItems,
+                        dotColor: "bg-[#ea580c]",
+                      },
+                    ]
+                  : []),
                 {
                   key: "unlinked",
                   label: "รอไฟล์ออเดอร์",

@@ -18,6 +18,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { DatePickerField } from "@/components/DatePickerField";
 import { FilterForm } from "@/components/FilterForm";
 import { EmptyState, PageHeader, StatCard } from "@/components/PageHeader";
+import type { StatBreakdownConfig } from "@/components/StatBreakdownDialog";
 import { PaginationBar } from "@/components/PaginationBar";
 import { TableLoadingBoundary } from "@/components/TableLoadingBoundary";
 import {
@@ -154,6 +155,7 @@ export default async function BillsPage({
     rawLink === "linked" ||
     rawLink === "unlinked" ||
     rawLink === "oms_only" ||
+    rawLink === "missing_items" ||
     rawLink === "no_price" ||
     rawLink === "all_fb" ||
     rawLink === "compensation" ||
@@ -297,152 +299,636 @@ export default async function BillsPage({
         }
       />
 
-      <div className="stats [&>.stat]:p-[14px]">
-        <StatCard
-          label={
+      {(() => {
+        const categoryDisplayLabel =
+          category === "refund_fee"
+            ? "หมวดออเดอร์คืนเงิน / ตีกลับ / ขาดทุน"
+            : category === "zero"
+              ? "หมวดออเดอร์ยกเลิก / ยอด 0 บาท"
+              : "หมวดบิลขายปกติ (+ ชดเชยแพลตฟอร์ม)";
+        const refundIncomeDiff = Number(
+          (result.periodNetSummary.orderIncome - result.summary.income).toFixed(2),
+        );
+        const refundFeeDiff = Number(
+          (result.periodNetSummary.orderFees - result.summary.fees).toFixed(2),
+        );
+        const compCount = result.periodNetSummary.compensationCount ?? 0;
+        const compPayout = result.periodNetSummary.compensationPayout ?? 0;
+        const otherDedCount = result.periodNetSummary.otherDeductionCount ?? 0;
+        const otherDedPayout = result.periodNetSummary.otherDeductionPayout ?? 0;
+        const normalOrderOnlyPayout =
+          category === "normal"
+            ? Number((result.summary.payout - compPayout).toFixed(2))
+            : result.summary.payout;
+        const normalOrderOnlyCount =
+          category === "normal"
+            ? Math.max(0, result.total - compCount)
+            : result.total;
+        const nonOrderItems = result.periodNetSummary.nonOrderBreakdown ?? [];
+
+        const incomeBreakdown: StatBreakdownConfig = {
+          title:
             category === "refund_fee"
-              ? "ยอดหักเงินคืนค่าสินค้า"
-              : "รายได้รวมก่อนหัก"
-          }
-          value={formatTHB(result.summary.income)}
-          hint={
+              ? "รายละเอียดที่มา: ยอดหักเงินคืนค่าสินค้า"
+              : "รายละเอียดที่มา: รายได้รวมก่อนหัก",
+          subtitle: `ขอบเขตข้อมูล: ${dateScopeText} · ${categoryDisplayLabel}`,
+          heroLabel:
             category === "refund_fee"
-              ? "ยอดเงินคืนค่าสินค้าหลังโอน"
-              : category === "zero"
-                ? "ออเดอร์ยกเลิก / หักล้างเป็น 0"
-                : "ยอดขายรวมก่อนหักค่าธรรมเนียม"
-          }
-          tone={result.summary.income < 0 ? "negative" : "brand"}
-          icon={<IconTrend size={19} />}
-        />
-        <StatCard
-          label="สรุปค่าขนส่ง (ยอดสุทธิ)"
-          value={
+              ? "ยอดหักเงินคืนค่าสินค้าในหมวดที่เลือก"
+              : "รายได้รวมก่อนหักค่าธรรมเนียม (ตามตัวกรองปัจจุบัน)",
+          heroValue: formatTHB(result.summary.income),
+          heroTone: result.summary.income < 0 ? "negative" : "brand",
+          formulaNote:
+            "ดึงตรงจากช่อง ยอดขาย (รวมส่วนลดร้านค้า/แพลตฟอร์ม) ในไฟล์ Excel ของรายการที่แสดงอยู่",
+          sections: [
+            {
+              title: "1. ยอดรายได้ตามหมวดที่กำลังเปิดดู",
+              rows: [
+                {
+                  label: categoryDisplayLabel,
+                  countText: `${result.total.toLocaleString("th-TH")} รายการ`,
+                  valueText: formatTHB(result.summary.income),
+                  tone: result.summary.income < 0 ? "negative" : "brand",
+                  isTotal: true,
+                },
+              ],
+            },
+            {
+              title: "2. ภาพรวมรายได้คำสั่งซื้อทุกหมวดรวมกัน (ในช่วงเวลานี้)",
+              description:
+                "เปรียบเทียบยอดขายปกติ กับยอดหักคืนเงินค่าสินค้าในหมวดตีกลับ",
+              rows: [
+                ...(category === "normal"
+                  ? [
+                      {
+                        label: "รายได้จากหมวดบิลขายปกติ",
+                        countText: `${result.categoryCounts.normal.toLocaleString("th-TH")} ใบ`,
+                        valueText: formatTHB(result.summary.income),
+                        tone: "default" as const,
+                      },
+                      ...(result.categoryCounts.refundFee > 0 || refundIncomeDiff !== 0
+                        ? [
+                            {
+                              label: "หักเงินคืนค่าสินค้า (หมวดคืนเงิน / ตีกลับ)",
+                              countText: `${result.categoryCounts.refundFee.toLocaleString("th-TH")} ใบ`,
+                              valueText: formatTHB(refundIncomeDiff),
+                              tone: "negative" as const,
+                            },
+                          ]
+                        : []),
+                    ]
+                  : []),
+                {
+                  label: "รายได้คำสั่งซื้อสุทธิรวมทุกหมวด",
+                  countText: `${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(result.periodNetSummary.orderIncome),
+                  tone:
+                    result.periodNetSummary.orderIncome < 0
+                      ? "negative"
+                      : "positive",
+                  isSubtotal: true,
+                },
+              ],
+            },
+          ],
+        };
+
+        const shippingBreakdown: StatBreakdownConfig = {
+          title: "รายละเอียดที่มา: สรุปค่าขนส่ง (ยอดสุทธิ)",
+          subtitle: `ขอบเขตข้อมูล: ${dateScopeText} · ${categoryDisplayLabel}`,
+          heroLabel: "ส่วนต่างค่าขนส่งสุทธิ (รับมา + จ่ายจริง)",
+          heroValue:
             result.summary.shippingNet > 0
               ? `+${formatTHB(result.summary.shippingNet)}`
-              : formatTHB(result.summary.shippingNet)
-          }
-          hint={
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-tight font-medium">
-              <span className="inline-flex items-center gap-1 whitespace-nowrap text-emerald-700">
-                <span>รับมา:</span>
-                <strong className="font-bold">
-                  <CompactValueToggle
-                    value={`+${formatTHB(result.summary.shippingPositive)}`}
-                  />
-                </strong>
-              </span>
-              <span className="inline-flex items-center gap-1 whitespace-nowrap text-rose-600">
-                <span>จ่ายจริง:</span>
-                <strong className="font-bold">
-                  <CompactValueToggle
-                    value={formatTHB(result.summary.shippingNegative)}
-                  />
-                </strong>
-              </span>
-            </div>
-          }
-          tone={
+              : formatTHB(result.summary.shippingNet),
+          heroTone:
             result.summary.shippingNet < 0
               ? "negative"
               : result.summary.shippingNet > 0
                 ? "positive"
-                : "default"
-          }
-          icon={<IconTruck size={19} />}
-        />
-        <StatCard
-          label={
-            channel === "Facebook"
-              ? "หักค่าธรรมเนียม (ไม่มี)"
-              : category === "refund_fee"
-                ? "ค่าขนส่งตีกลับ / ค่าธรรมเนียม"
-                : "หักค่าธรรมเนียมรวม"
-          }
-          value={formatTHB(result.summary.fees)}
-          hint={
-            channel === "Facebook"
-              ? "ช่องทาง Facebook ไม่มีหักค่าธรรมเนียมแพลตฟอร์ม"
-              : category === "refund_fee"
-                ? "ค่าส่งขาไป-ขากลับและค่าธรรมเนียมที่ถูกหัก"
-                : category === "normal" &&
-                    !q &&
-                    !createdDate &&
-                    channel === "all" &&
-                    status === "all" &&
-                    linkStatus === "all" &&
-                    result.categoryCounts.refundFee > 0
-                  ? (
+                : "default",
+          formulaNote:
+            "คำนวณจากผลรวมค่าส่งที่ได้รับ/ชดเชย (ฝั่งบวก) หักด้วยค่าจัดส่งที่ร้านจ่ายจริง (ฝั่งลบ)",
+          sections: [
+            {
+              title: "องค์ประกอบค่าขนส่งของรายการที่แสดง",
+              rows: [
+                {
+                  label: "ค่าขนส่งที่ได้รับจากลูกค้า / แพลตฟอร์มชดเชย (รับมา)",
+                  subLabel: "รวมยอดค่าส่งฝั่งบวกทั้งหมดในหมวดนี้",
+                  valueText: `+${formatTHB(result.summary.shippingPositive)}`,
+                  tone: "positive",
+                },
+                {
+                  label: "ค่าขนส่งที่ร้านค้าถูกหักจ่ายจริง (จ่ายจริง)",
+                  subLabel: "รวมยอดค่าส่งฝั่งลบทั้งหมดในหมวดนี้",
+                  valueText: formatTHB(result.summary.shippingNegative),
+                  tone: "negative",
+                },
+                {
+                  label: "ส่วนต่างค่าขนส่งสุทธิ",
+                  countText: `${result.total.toLocaleString("th-TH")} รายการ`,
+                  valueText:
+                    result.summary.shippingNet > 0
+                      ? `+${formatTHB(result.summary.shippingNet)}`
+                      : formatTHB(result.summary.shippingNet),
+                  isTotal: true,
+                },
+              ],
+            },
+          ],
+        };
+
+        const feesBreakdown: StatBreakdownConfig = {
+          title: "รายละเอียดที่มา: หักค่าธรรมเนียมรวม",
+          subtitle: `ขอบเขตข้อมูล: ${dateScopeText} · ${categoryDisplayLabel}`,
+          heroLabel: "ค่าธรรมเนียมรวมของหมวดที่กำลังแสดง",
+          heroValue: formatTHB(result.summary.fees),
+          heroTone: result.summary.fees < 0 ? "negative" : "default",
+          formulaNote:
+            "รวมค่าคอมมิชชั่นแพลตฟอร์ม + ค่าธรรมเนียมการชำระเงิน + ค่าบริการและค่าขนส่งสุทธิ",
+          sections: [
+            {
+              title: "1. ค่าธรรมเนียมตามหมวดที่กำลังเปิดดู",
+              rows: [
+                {
+                  label: categoryDisplayLabel,
+                  countText: `${result.total.toLocaleString("th-TH")} รายการ`,
+                  valueText: formatTHB(result.summary.fees),
+                  tone: result.summary.fees < 0 ? "negative" : "default",
+                  isTotal: true,
+                },
+              ],
+            },
+            {
+              title: "2. เมื่อรวมค่าส่งตีกลับ / หมวดคืนเงินทั้งหมด",
+              description:
+                "แสดงยอดค่าธรรมเนียมเมื่อนับรวมออเดอร์ที่ถูกตีกลับหรือหักค่าส่งย้อนหลัง",
+              rows: [
+                ...(category === "normal" &&
+                (result.categoryCounts.refundFee > 0 || refundFeeDiff !== 0)
+                  ? [
+                      {
+                        label: "ค่าธรรมเนียมในหมวดบิลขายปกติ",
+                        countText: `${result.categoryCounts.normal.toLocaleString("th-TH")} ใบ`,
+                        valueText: formatTHB(result.summary.fees),
+                        tone: "negative" as const,
+                      },
+                      {
+                        label: "บวกเพิ่ม: ค่าส่งตีกลับและค่าธรรมเนียมในหมวดคืนเงิน",
+                        countText: `${result.categoryCounts.refundFee.toLocaleString("th-TH")} ใบ`,
+                        valueText: formatTHB(refundFeeDiff),
+                        tone: "negative" as const,
+                      },
+                    ]
+                  : []),
+                {
+                  label: "รวมค่าธรรมเนียมคำสั่งซื้อทุกหมวด",
+                  countText: `${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(result.periodNetSummary.orderFees),
+                  tone: "negative",
+                  isSubtotal: true,
+                },
+              ],
+            },
+          ],
+        };
+
+        const payoutBreakdown: StatBreakdownConfig = {
+          title: "รายละเอียดที่มา: ยอดชำระสุทธิ (รับจริง)",
+          subtitle: `ขอบเขตข้อมูล: ${dateScopeText}`,
+          heroLabel: `ยอดชำระสุทธิใน${categoryDisplayLabel}`,
+          heroValue: formatTHB(result.summary.payout),
+          heroTone: result.summary.payout < 0 ? "negative" : "positive",
+          formulaNote:
+            "ด้านล่างแจกแจงว่าตัวเลขแต่ละส่วนบวกลบกันอย่างไร ตั้งแต่บิลขายปกติ → หักตีกลับ → หักค่าโฆษณา GMV / ปรับยอด จนถึงยอดโอนเข้าบัญชีจริง",
+          sections: [
+            {
+              title: "1. ที่มาของตัวเลขหลักบนการ์ดนี้ (หมวดที่กำลังเลือก)",
+              rows: [
+                ...(category === "normal" && compCount > 0
+                  ? [
+                      {
+                        label: "ยอดโอนจากบิลคำสั่งซื้อขายปกติ (ไม่รวมชดเชย)",
+                        countText: `${normalOrderOnlyCount.toLocaleString("th-TH")} ใบ`,
+                        valueText: formatTHB(normalOrderOnlyPayout),
+                        tone: "positive" as const,
+                      },
+                      {
+                        label: "บวก: เงินชดเชยแพลตฟอร์ม / โลจิสติกส์",
+                        countText: `${compCount.toLocaleString("th-TH")} รายการ`,
+                        valueText: `+${formatTHB(compPayout)}`,
+                        tone: "positive" as const,
+                      },
+                    ]
+                  : []),
+                {
+                  label: `รวมยอดชำระสุทธิ (${categoryDisplayLabel})`,
+                  countText: `${result.total.toLocaleString("th-TH")} รายการ`,
+                  valueText: formatTHB(result.summary.payout),
+                  tone: result.summary.payout < 0 ? "negative" : "positive",
+                  isTotal: true,
+                },
+              ],
+            },
+            {
+              title: "2. คำนวณยอดสุทธิหลังหักออเดอร์ตีกลับ / คืนเงิน",
+              description:
+                "นำยอดบิลขายปกติ มาหักลบออเดอร์ที่ถูกหักเงินคืนหรือค่าส่งตีกลับภายหลัง",
+              rows: [
+                {
+                  label: "ยอดจากคำสั่งซื้อขายปกติ (เฉพาะออเดอร์)",
+                  countText: `${Math.max(0, result.categoryCounts.normal - compCount).toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(
+                    Number(
+                      (
+                        result.periodNetSummary.orderPayout -
+                        result.categoryCounts.refundFeePayout
+                      ).toFixed(2),
+                    ),
+                  ),
+                  tone: "positive",
+                },
+                {
+                  label: "หัก: ออเดอร์คืนเงิน / ตีกลับ / ขาดทุนค่าส่ง",
+                  countText: `${result.categoryCounts.refundFee.toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(result.categoryCounts.refundFeePayout),
+                  tone:
+                    result.categoryCounts.refundFeePayout < 0
+                      ? "negative"
+                      : "muted",
+                },
+                ...(result.categoryCounts.zero > 0
+                  ? [
+                      {
+                        label: "ออเดอร์ยกเลิก / หักล้างเป็น 0 บาท",
+                        countText: `${result.categoryCounts.zero.toLocaleString("th-TH")} ใบ`,
+                        valueText: formatTHB(0),
+                        tone: "muted" as const,
+                      },
+                    ]
+                  : []),
+                {
+                  label: "= สุทธิหลังหักตีกลับ (เฉพาะคำสั่งซื้อ)",
+                  countText: `${(result.periodNetSummary.orderCount - compCount + result.linkCounts.noPrice).toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(result.periodNetSummary.orderPayout),
+                  tone:
+                    result.periodNetSummary.orderPayout < 0
+                      ? "negative"
+                      : "positive",
+                  isSubtotal: true,
+                },
+              ],
+            },
+            ...(nonOrderItems.length > 0 || result.periodNetSummary.otherPayout !== 0
+              ? [
+                  {
+                    title:
+                      "3. รายการนอกคำสั่งซื้อ (ชดเชยแพลตฟอร์ม & หักค่าโฆษณา GMV / ปรับยอด)",
+                    description:
+                      "สาเหตุที่ยอดโอนสุทธิรวมทั้งไฟล์ต่างจากยอดเฉพาะคำสั่งซื้อ เพราะมีรายการหักค่าโฆษณา/ปรับยอดในไฟล์ Settlement ดังนี้",
+                    rows: [
+                      ...nonOrderItems.map((item) => ({
+                        label: item.transactionType || "รายการปรับยอดอื่นๆ",
+                        subLabel:
+                          item.payout > 0
+                            ? "เงินชดเชยเพิ่มจากแพลตฟอร์ม/ขนส่ง"
+                            : "รายการหักจากยอดโอนในไฟล์ Settlement (ไม่ใช่บิลคำสั่งซื้อ)",
+                        countText: `${item.count.toLocaleString("th-TH")} รายการ`,
+                        valueText:
+                          item.payout > 0
+                            ? `+${formatTHB(item.payout)}`
+                            : formatTHB(item.payout),
+                        tone:
+                          item.payout > 0
+                            ? ("positive" as const)
+                            : ("negative" as const),
+                      })),
+                      {
+                        label: "รวมรายการนอกคำสั่งซื้อสุทธิ (ชดเชย - หักโฆษณา/ปรับยอด)",
+                        countText: `${result.periodNetSummary.otherCount.toLocaleString("th-TH")} รายการ`,
+                        valueText:
+                          result.periodNetSummary.otherPayout > 0
+                            ? `+${formatTHB(result.periodNetSummary.otherPayout)}`
+                            : formatTHB(result.periodNetSummary.otherPayout),
+                        tone:
+                          result.periodNetSummary.otherPayout < 0
+                            ? ("negative" as const)
+                            : ("positive" as const),
+                        isSubtotal: true,
+                      },
+                      {
+                        label: "ยอดโอนสุทธิรวมทุกรายการในไฟล์ Settlement",
+                        subLabel: "สุทธิหลังหักตีกลับ + ชดเชยแพลตฟอร์ม - หักค่าโฆษณา GMV/ปรับยอด",
+                        valueText: formatTHB(result.periodNetSummary.totalPayout),
+                        isTotal: true,
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        };
+
+        const countBreakdown: StatBreakdownConfig = {
+          title: "รายละเอียดที่มา: จำนวนรายการที่แสดง",
+          subtitle: `ขอบเขตข้อมูล: ${dateScopeText}`,
+          heroLabel: `จำนวนรายการใน${categoryDisplayLabel}`,
+          heroValue: `${result.total.toLocaleString("th-TH")} รายการ`,
+          heroTone: "default",
+          formulaNote: `กำลังแสดงข้อมูลจากทั้งหมด ${distinctDates.toLocaleString("th-TH")} วันชำระ (รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`,
+          sections: [
+            {
+              title: "1. แยกตามหมวดหมู่บิลทั้ง 3 หมวด",
+              rows: [
+                {
+                  label: "หมวดบิลขายปกติ (+ ชดเชยแพลตฟอร์ม)",
+                  valueText: `${result.categoryCounts.normal.toLocaleString("th-TH")} รายการ`,
+                  tone: "positive",
+                  badgeText: category === "normal" ? "กำลังเลือก" : undefined,
+                  badgeVariant: "success",
+                },
+                {
+                  label: "หมวดคืนเงิน / ตีกลับ / ขาดทุน (ติดลบ)",
+                  valueText: `${result.categoryCounts.refundFee.toLocaleString("th-TH")} รายการ`,
+                  tone: "negative",
+                  badgeText: category === "refund_fee" ? "กำลังเลือก" : undefined,
+                  badgeVariant: "destructive",
+                },
+                {
+                  label: "หมวดยกเลิก / หักล้างเป็น 0 บาท",
+                  valueText: `${result.categoryCounts.zero.toLocaleString("th-TH")} รายการ`,
+                  tone: "muted",
+                  badgeText: category === "zero" ? "กำลังเลือก" : undefined,
+                  badgeVariant: "neutral",
+                },
+                {
+                  label: "รวมบิลทุกหมวดทั้งหมด",
+                  valueText: `${result.periodNetSummary.orderCount.toLocaleString("th-TH")} รายการ`,
+                  isTotal: true,
+                },
+                ...(result.linkCounts.noPrice > 0 || compCount > 0
+                  ? [
+                      ...(result.linkCounts.noPrice > 0
+                        ? [
+                            {
+                              label: "บิลเปลี่ยนสินค้า / ไม่มีราคาสินค้า (Facebook · แยกนอกหมวดปกติ)",
+                              valueText: `+${result.linkCounts.noPrice.toLocaleString("th-TH")} ใบ`,
+                              tone: "muted" as const,
+                            },
+                          ]
+                        : []),
+                      {
+                        label: "รวมเฉพาะคำสั่งซื้อ (is_order = 1 · ตรงกับหน้าสรุปรายวัน)",
+                        valueText: `${(result.periodNetSummary.orderCount - compCount + result.linkCounts.noPrice).toLocaleString("th-TH")} ใบ`,
+                        isSubtotal: true,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+            {
+              title: `2. แยกตามช่องทางจำหน่าย (ใน${categoryDisplayLabel})`,
+              rows: [
+                {
+                  label: "TikTok Shop",
+                  valueText: `${(result.channelCounts.TikTok ?? 0).toLocaleString("th-TH")} รายการ`,
+                  tone: "brand",
+                },
+                {
+                  label: "Shopee",
+                  valueText: `${(result.channelCounts.Shopee ?? 0).toLocaleString("th-TH")} รายการ`,
+                },
+                {
+                  label: "Facebook",
+                  valueText: `${(result.channelCounts.Facebook ?? 0).toLocaleString("th-TH")} รายการ`,
+                },
+                ...((result.channelCounts.Lazada ?? 0) > 0
+                  ? [
+                      {
+                        label: "Lazada",
+                        valueText: `${(result.channelCounts.Lazada ?? 0).toLocaleString("th-TH")} รายการ`,
+                      },
+                    ]
+                  : []),
+                ...((result.channelCounts.LINE ?? 0) > 0
+                  ? [
+                      {
+                        label: "LINE OA",
+                        valueText: `${(result.channelCounts.LINE ?? 0).toLocaleString("th-TH")} รายการ`,
+                      },
+                    ]
+                  : []),
+                {
+                  label: "รวมทุกช่องทางในหมวดนี้",
+                  valueText: `${(result.channelCounts.all ?? result.total).toLocaleString("th-TH")} รายการ`,
+                  isSubtotal: true,
+                },
+              ],
+            },
+            {
+              title: "3. แยกตามสถานะการผูกไฟล์ (ในหมวดที่เลือก)",
+              rows: [
+                {
+                  label: "ข้อมูลครบ · พร้อมออกใบกำกับภาษี",
+                  valueText: `${result.linkCounts.linked.toLocaleString("th-TH")} รายการ`,
+                  tone: "positive",
+                },
+                ...(result.linkCounts.compensation > 0
+                  ? [
+                      {
+                        label: "เงินชดเชยแพลตฟอร์ม / โลจิสติกส์",
+                        valueText: `${result.linkCounts.compensation.toLocaleString("th-TH")} รายการ`,
+                        tone: "positive" as const,
+                      },
+                    ]
+                  : []),
+                ...(result.linkCounts.missingItems > 0
+                  ? [
+                      {
+                        label: "รออัปโหลดไฟล์สินค้า (ขาด SKU)",
+                        valueText: `${result.linkCounts.missingItems.toLocaleString("th-TH")} รายการ`,
+                        tone: "negative" as const,
+                      },
+                    ]
+                  : []),
+                ...(result.linkCounts.unlinked > 0
+                  ? [
+                      {
+                        label: "รออัปโหลดไฟล์ออเดอร์ Shipnity",
+                        valueText: `${result.linkCounts.unlinked.toLocaleString("th-TH")} รายการ`,
+                        tone: "negative" as const,
+                      },
+                    ]
+                  : []),
+                ...(result.linkCounts.omsOnly > 0
+                  ? [
+                      {
+                        label: "มีเฉพาะไฟล์ออเดอร์ (รอไฟล์รายได้ Settlement)",
+                        valueText: `${result.linkCounts.omsOnly.toLocaleString("th-TH")} รายการ`,
+                        tone: "muted" as const,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ],
+        };
+
+        return (
+          <div className="stats [&>.stat]:p-[14px]">
+            <StatCard
+              label={
+                category === "refund_fee"
+                  ? "ยอดหักเงินคืนค่าสินค้า"
+                  : "รายได้รวมก่อนหัก"
+              }
+              value={formatTHB(result.summary.income)}
+              hint={
+                category === "refund_fee"
+                  ? "ยอดเงินคืนค่าสินค้าหลังโอน"
+                  : category === "zero"
+                    ? "ออเดอร์ยกเลิก / หักล้างเป็น 0"
+                    : "ยอดขายรวมก่อนหักค่าธรรมเนียม"
+              }
+              tone={result.summary.income < 0 ? "negative" : "brand"}
+              icon={<IconTrend size={19} />}
+              breakdown={incomeBreakdown}
+            />
+            <StatCard
+              label="สรุปค่าขนส่ง (ยอดสุทธิ)"
+              value={
+                result.summary.shippingNet > 0
+                  ? `+${formatTHB(result.summary.shippingNet)}`
+                  : formatTHB(result.summary.shippingNet)
+              }
+              hint={
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-tight font-medium">
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap text-emerald-700">
+                    <span>รับมา:</span>
+                    <strong className="font-bold">
+                      <CompactValueToggle
+                        value={`+${formatTHB(result.summary.shippingPositive)}`}
+                      />
+                    </strong>
+                  </span>
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap text-rose-600">
+                    <span>จ่ายจริง:</span>
+                    <strong className="font-bold">
+                      <CompactValueToggle
+                        value={formatTHB(result.summary.shippingNegative)}
+                      />
+                    </strong>
+                  </span>
+                </div>
+              }
+              tone={
+                result.summary.shippingNet < 0
+                  ? "negative"
+                  : result.summary.shippingNet > 0
+                    ? "positive"
+                    : "default"
+              }
+              icon={<IconTruck size={19} />}
+              breakdown={shippingBreakdown}
+            />
+            <StatCard
+              label={
+                channel === "Facebook"
+                  ? "หักค่าธรรมเนียม (ไม่มี)"
+                  : category === "refund_fee"
+                    ? "ค่าขนส่งตีกลับ / ค่าธรรมเนียม"
+                    : "หักค่าธรรมเนียมรวม"
+              }
+              value={formatTHB(result.summary.fees)}
+              hint={
+                channel === "Facebook"
+                  ? "ช่องทาง Facebook ไม่มีหักค่าธรรมเนียมแพลตฟอร์ม"
+                  : category === "refund_fee"
+                    ? "ค่าส่งขาไป-ขากลับและค่าธรรมเนียมที่ถูกหัก"
+                    : category === "normal" &&
+                        !q &&
+                        !createdDate &&
+                        channel === "all" &&
+                        status === "all" &&
+                        linkStatus === "all" &&
+                        result.categoryCounts.refundFee > 0
+                      ? (
+                          <>
+                            รวมค่าส่งตีกลับ ({result.categoryCounts.refundFee} ใบ) ={" "}
+                            <CompactValueToggle
+                              value={formatTHB(result.periodNetSummary.orderFees)}
+                            />
+                          </>
+                        )
+                      : "ค่าธรรมเนียมแพลตฟอร์มทั้งหมด"
+              }
+              tone={result.summary.fees < 0 ? "negative" : "default"}
+              icon={<IconAlert size={19} />}
+              breakdown={feesBreakdown}
+            />
+            <StatCard
+              label={
+                category === "refund_fee"
+                  ? "ยอดถูกหักสุทธิ (คืนเงิน/ตีกลับ)"
+                  : "ยอดชำระสุทธิ (รับจริง)"
+              }
+              value={formatTHB(result.summary.payout)}
+              hint={
+                category === "normal" &&
+                !q &&
+                !createdDate &&
+                channel === "all" &&
+                status === "all" &&
+                linkStatus === "all" &&
+                (result.categoryCounts.refundFeePayout !== 0 ||
+                  result.periodNetSummary.otherPayout !== 0) ? (
+                  <>
+                    สุทธิหลังหักตีกลับ{" "}
+                    <CompactValueToggle
+                      value={formatTHB(result.periodNetSummary.orderPayout)}
+                    />
+                    {result.periodNetSummary.otherPayout !== 0 ? (
                       <>
-                        รวมค่าส่งตีกลับ ({result.categoryCounts.refundFee} ใบ) ={" "}
+                        {" "}
+                        · {otherDedCount > 0 ? "สุทธิรวมหัก GMV/ชดเชย " : "รวมชดเชย "}
                         <CompactValueToggle
-                          value={formatTHB(result.periodNetSummary.orderFees)}
+                          value={formatTHB(result.periodNetSummary.totalPayout)}
                         />
                       </>
-                    )
-                  : "ค่าธรรมเนียมแพลตฟอร์มทั้งหมด"
-          }
-          tone={result.summary.fees < 0 ? "negative" : "default"}
-          icon={<IconAlert size={19} />}
-        />
-        <StatCard
-          label={
-            category === "refund_fee"
-              ? "ยอดถูกหักสุทธิ (คืนเงิน/ตีกลับ)"
-              : "ยอดชำระสุทธิ (รับจริง)"
-          }
-          value={formatTHB(result.summary.payout)}
-          hint={
-            category === "normal" &&
-            !q &&
-            !createdDate &&
-            channel === "all" &&
-            status === "all" &&
-            linkStatus === "all" &&
-            (result.categoryCounts.refundFeePayout !== 0 ||
-              result.periodNetSummary.otherPayout !== 0) ? (
-              <>
-                สุทธิหลังหักตีกลับ{" "}
-                <CompactValueToggle
-                  value={formatTHB(result.periodNetSummary.orderPayout)}
-                />
-                {result.periodNetSummary.otherPayout !== 0 ? (
-                  <>
-                    {" "}
-                    · รวมชดเชย{" "}
-                    <CompactValueToggle
-                      value={formatTHB(result.periodNetSummary.totalPayout)}
-                    />
+                    ) : null}
                   </>
-                ) : null}
-              </>
-            ) : (
-              dateScopeText
-            )
-          }
-          tone={result.summary.payout < 0 ? "negative" : "positive"}
-          icon={<IconWallet size={19} />}
-        />
-        <StatCard
-          label="จำนวนรายการที่แสดง"
-          value={`${result.total.toLocaleString("th-TH")} รายการ`}
-          hint={
-            isMonthSelected
-              ? `ของเดือน ${formatYearMonthLabel(date)} (${distinctDates} วัน · รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
-              : isYearSelected
-                ? `ของปี ${date} (${distinctDates} วัน · รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
-                : date
-                  ? `ของวันที่ ${formatDate(date)} (รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
-                  : createdDate
-                    ? `ของวันสั่งซื้อ ${formatDate(createdDate)}`
-                    : distinctDates > 0
-                      ? `รวมทั้งหมดจาก ${distinctDates} วันชำระ (รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
-                      : "แสดงหน้าละ 20 รายการ"
-          }
-          tone="default"
-          icon={<IconReceipt size={19} />}
-        />
-      </div>
+                ) : (
+                  dateScopeText
+                )
+              }
+              tone={result.summary.payout < 0 ? "negative" : "positive"}
+              icon={<IconWallet size={19} />}
+              breakdown={payoutBreakdown}
+            />
+            <StatCard
+              label="จำนวนรายการที่แสดง"
+              value={`${result.total.toLocaleString("th-TH")} รายการ`}
+              hint={
+                isMonthSelected
+                  ? `ของเดือน ${formatYearMonthLabel(date)} (${distinctDates} วัน · รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+                  : isYearSelected
+                    ? `ของปี ${date} (${distinctDates} วัน · รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+                    : date
+                      ? `ของวันที่ ${formatDate(date)} (รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+                      : createdDate
+                        ? `ของวันสั่งซื้อ ${formatDate(createdDate)}`
+                        : distinctDates > 0
+                          ? `รวมทั้งหมดจาก ${distinctDates} วันชำระ (รวมทุกหมวด ${result.periodNetSummary.orderCount.toLocaleString("th-TH")} ใบ)`
+                          : "แสดงหน้าละ 20 รายการ"
+              }
+              tone="default"
+              icon={<IconReceipt size={19} />}
+              breakdown={countBreakdown}
+            />
+          </div>
+        );
+      })()}
 
       <Card className="workspace-table-card">
         <BillsFilterProvider
@@ -548,21 +1034,23 @@ export default async function BillsPage({
                     ? "ยอด 2 ไฟล์ไม่ตรงกัน"
                     : linkStatus === "compensation"
                       ? "ชดเชยแพลตฟอร์ม"
-                      : linkStatus === "unlinked"
-                        ? "รอไฟล์ออเดอร์"
-                        : linkStatus === "oms_only"
-                          ? channel === "LINE"
-                            ? "มีเฉพาะไฟล์ออเดอร์"
-                            : "รอไฟล์รายได้"
-                          : linkStatus === "no_price"
-                            ? "เปลี่ยนสินค้า 0 บาท"
-                            : linkStatus === "all_fb"
-                              ? "รวมทั้งหมดใน FB"
-                              : linkStatus === "shopee_negative"
-                                ? "ขาดทุน/ติดลบ"
-                                : linkStatus === "shopee_zero"
-                                  ? "ตีกลับ 100%"
-                                  : "ทั้งหมด"
+                      : linkStatus === "missing_items"
+                        ? "รอไฟล์สินค้า"
+                        : linkStatus === "unlinked"
+                          ? "รอไฟล์ออเดอร์"
+                          : linkStatus === "oms_only"
+                            ? channel === "LINE"
+                              ? "มีเฉพาะไฟล์ออเดอร์"
+                              : "รอไฟล์รายได้"
+                            : linkStatus === "no_price"
+                              ? "เปลี่ยนสินค้า 0 บาท"
+                              : linkStatus === "all_fb"
+                                ? "รวมทั้งหมดใน FB"
+                                : linkStatus === "shopee_negative"
+                                  ? "ขาดทุน/ติดลบ"
+                                  : linkStatus === "shopee_zero"
+                                    ? "ตีกลับ 100%"
+                                    : "ทั้งหมด"
               }
             >
               {/* ชั้นที่ 2: เลือกประเภทบิลหลัก 3 หมวด: บิลขายปกติ | คืนเงิน/ตีกลับ/ขาดทุน (ติดลบ) | ยกเลิก/ยอด 0 บาท */}
@@ -595,6 +1083,10 @@ export default async function BillsPage({
                   linked: buildHref({ nextLink: "linked", nextPage: 1 }),
                   unlinked: buildHref({ nextLink: "unlinked", nextPage: 1 }),
                   oms_only: buildHref({ nextLink: "oms_only", nextPage: 1 }),
+                  missing_items: buildHref({
+                    nextLink: "missing_items",
+                    nextPage: 1,
+                  }),
                   no_price: buildHref({ nextLink: "no_price", nextPage: 1 }),
                   all_fb: buildHref({ nextLink: "all_fb", nextPage: 1 }),
                   compensation: buildHref({
@@ -790,13 +1282,15 @@ export default async function BillsPage({
                           ? "ข้อมูลครบ"
                           : linkStatus === "compensation"
                             ? "ชดเชยแพลตฟอร์ม"
-                            : linkStatus === "unlinked"
-                              ? "รอไฟล์ออเดอร์"
-                              : linkStatus === "oms_only"
-                                ? "รอไฟล์รายได้"
-                                : linkStatus === "no_price"
-                                  ? "เปลี่ยนไซส์ / ฿0"
-                                  : linkStatus
+                            : linkStatus === "missing_items"
+                              ? "รอไฟล์สินค้า"
+                              : linkStatus === "unlinked"
+                                ? "รอไฟล์ออเดอร์"
+                                : linkStatus === "oms_only"
+                                  ? "รอไฟล์รายได้"
+                                  : linkStatus === "no_price"
+                                    ? "เปลี่ยนไซส์ / ฿0"
+                                    : linkStatus
                       }`
                     : ""}{" "}
                   จำนวน {result.total.toLocaleString("th-TH")} รายการ
