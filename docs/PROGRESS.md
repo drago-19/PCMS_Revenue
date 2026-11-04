@@ -6,6 +6,21 @@
 ## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-04)
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **ออกแบบและปรับปรุงป๊อปอัปตัวเลือกปฏิทิน (`DatePickerField.tsx` และ `src/components/ui/calendar.tsx`) ใหม่ทั้งหมดให้รองรับการเลือก ปี · เดือน · วัน อย่างชัดเจน ไร้ Scrollbar ซ้อนกวนใจ (`src/components/DatePickerField.tsx`, `src/components/ui/calendar.tsx`, `src/app/history/page.tsx`)**:
+    - [x] **1. เพิ่มแถบเลือกปี (`Year Selector Bar`) และปุ่มลัด `"ดูทั้งปี YYYY"`**:
+      - แสดงปุ่มสลับปีที่มีข้อมูลจริงพร้อมจำนวนบิลรวมของแต่ละปี และปุ่มลัด **"ดูทั้งปี YYYY (รวม X,XXX บิล)"** ให้กรองดูข้อมูลรายปีได้ในคลิกเดียว (ซ่อนปุ่มดูทั้งปีอัตโนมัติในหน้าที่ใช้ `routePattern` เฉพาะวัน/เดือน เช่น `/days/[date]/invoices`)
+    - [x] **2. แยกโหมดด้วยแท็บสลับ `"เลือกรายเดือน"` กับ `"เลือกวันที่ (ปฏิทิน)"` — ตัด Scrollbar ซ้อนทั้ง 2 จุดทิ้ง 100%**:
+      - **แท็บ `เลือกรายเดือน` (ค่าเริ่มต้นเมื่อยังไม่ได้กรองรายวัน)**: แสดงตาราง Grid 12 เดือน (`3×4`, ม.ค.–ธ.ค.) ของปีที่เลือก เห็นครบทุกเดือนพร้อมจำนวนบิลในหน้าเดียวโดยไม่มี Scrollbar
+      - **แท็บ `เลือกวันที่ (ปฏิทิน)` (เปิดอัตโนมัติเมื่อมีการกรองรายวันอยู่)**:
+        - เปลี่ยนตัวเลือก **เดือน** และ **ปี** บนหัวปฏิทินจาก `<select>` พื้นฐานของเบราว์เซอร์ เป็น `DropdownMenu` ของ `shadcn/ui` (`rounded-xl shadow-xl`) โดยเมนูเลือกเดือนจัดเรียงเป็นตาราง 2 คอลัมน์ (`grid-cols-2`) พร้อมแสดง Badge จำนวนบิลของแต่ละเดือนและเครื่องหมายถูกสีชมพู (`bg-primary text-white`) ไม่มีกรอบสี่เหลี่ยม/แถบสีน้ำเงินของ Windows พื้นฐานอีกต่อไป (`nativeSelectCount = 0`)
+        - แสดงตัวเลข **จำนวนบิล** ใต้เลขวันที่ในช่องปฏิทินโดยตรง และปรับสีวันของเดือนก่อนหน้า/ถัดไป (`outside days`) ให้เป็นสีเทาจางไม่อมชมพู เพื่อแยกแยะวันในเดือนปัจจุบันได้ทันทีโดยไม่ต้องมีกล่อง Scrollbar รายวันด้านล่างอีกต่อไป
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`67 pass, 0 fail, 1 skipped`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบเปิดป๊อปอัป กดสลับปี กด `"ดูทั้งปี 2026"` สลับแท็บ `"เลือกรายเดือน"` / `"เลือกวันที่ (ปฏิทิน)"` บน `/bills`, `/products`, `/history` ที่ความกว้าง `360px`, `390px`, `768px`, `1280px` (`scrollableChildren: 0`, `childOverflows: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
   - **แก้ไขปัญหาแถบขาวด้านขวาและหน้าจอกระตุกตอนเปิดป๊อปอัป + แก้ไขปัญหาตัวหนังสือหนาแล้วค่อยบางตอนรีโหลดหน้า + เพิ่มอนิเมชั่นตัวเลขวิ่ง (`AnimatedValueText.tsx`) บนการ์ดสรุปยอด (`StatCard`), การ์ดยอดใหญ่หน้าแรก (`Hero Amount`), การ์ดเปรียบเทียบร้านค้า และป๊อปอัปสรุปที่มา (`src/app/globals.css`, `src/components/NavigationProgress.tsx`, `src/components/AnimatedValueText.tsx`, `src/components/CompactValueToggle.tsx`, `src/components/PageHeader.tsx`, `src/components/StatBreakdownDialog.tsx`, `src/components/DashboardShopComparison.tsx`, `src/app/page.tsx`, `tests/invoice-eligibility.test.ts`)**:
     - [x] **1. แก้ไขอาการแถบขาวด้านขวาและหน้าจอขยับกระตุกเวลาเปิดป๊อปอัป (`Dialog` / `Sheet`)**:
       - บันทึกความกว้างสกอร์บาร์จริงของหน้าต่างเบราว์เซอร์ลงตัวแปร `--app-scrollbar-width` ใน `src/components/NavigationProgress.tsx`

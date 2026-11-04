@@ -78,9 +78,11 @@ export default async function ImportHistoryPage({
   const datePeriodLabel = isFilteredByDate
     ? /^\d{4}-\d{2}$/.test(date)
       ? `เดือน ${formatYearMonthLabel(date)}`
-      : /^\d{4}-\d{2}-\d{2}$/.test(date)
-        ? `วันที่ ${formatDate(date)}`
-        : `ช่วง "${date}"`
+      : /^\d{4}$/.test(date)
+        ? `ทั้งปี ${date}`
+        : /^\d{4}-\d{2}-\d{2}$/.test(date)
+          ? `วันที่ ${formatDate(date)}`
+          : `ช่วง "${date}"`
     : "";
 
   const warningCount = result.rows.filter((item) => item.status === "warning").length;
