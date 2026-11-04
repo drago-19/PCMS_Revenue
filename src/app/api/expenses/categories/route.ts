@@ -1,6 +1,10 @@
 import { revalidatePath } from "next/cache";
 import { requireApiAuth } from "@/lib/auth";
-import { createExpenseCategory, listExpenseCategories } from "@/lib/expenses";
+import {
+  createExpenseCategory,
+  listExpenseCategories,
+  seedDefaultExpenseCategories,
+} from "@/lib/expenses";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +38,7 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try {
     const raw = await request.text();
-    if (raw.length > 4096) {
+    if (raw.length > 8192) {
       return Response.json(
         { error: "ข้อมูลคำขอมีขนาดใหญ่เกินกำหนด", requestId: auth.requestId },
         { status: 413, headers: { "x-request-id": auth.requestId } },
@@ -48,8 +52,32 @@ export async function POST(request: Request) {
     );
   }
 
+  if (body.action === "seed_defaults") {
+    try {
+      const categories = await seedDefaultExpenseCategories();
+      revalidatePath("/expenses");
+      return Response.json(
+        { ok: true, categories, requestId: auth.requestId },
+        { status: 200, headers: { "x-request-id": auth.requestId } },
+      );
+    } catch (err) {
+      return Response.json(
+        {
+          error:
+            err instanceof Error
+              ? err.message
+              : "ไม่สามารถเติมผังบัญชีมาตรฐานได้",
+          requestId: auth.requestId,
+        },
+        { status: 500, headers: { "x-request-id": auth.requestId } },
+      );
+    }
+  }
+
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const color = typeof body.color === "string" ? body.color.trim() : "slate";
+  const accountCode =
+    typeof body.accountCode === "string" ? body.accountCode.trim() : "";
 
   if (!name) {
     return Response.json(
@@ -59,7 +87,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const created = await createExpenseCategory(name, color);
+    const created = await createExpenseCategory(name, color, accountCode);
     revalidatePath("/expenses");
 
     return Response.json(
@@ -74,7 +102,10 @@ export async function POST(request: Request) {
         error: isDuplicate ? "มีชื่อคอลัมน์รายจ่ายนี้อยู่ในระบบแล้ว" : msg,
         requestId: auth.requestId,
       },
-      { status: isDuplicate ? 409 : 500, headers: { "x-request-id": auth.requestId } },
+      {
+        status: isDuplicate ? 409 : 500,
+        headers: { "x-request-id": auth.requestId },
+      },
     );
   }
 }

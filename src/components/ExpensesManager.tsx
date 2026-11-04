@@ -19,12 +19,22 @@ import {
   PrinterIcon,
   ReceiptIcon,
   Settings2Icon,
+  SparklesIcon,
   Trash2Icon,
   TrendingDownIcon,
   TrendingUpIcon,
   WalletIcon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ExpenseLedgerTab } from "@/components/ExpenseLedgerTab";
+import {
+  ExpenseRecordFormDialog,
+  type ExpenseRecordFormValues,
+} from "@/components/ExpenseRecordFormDialog";
+import {
+  ExpenseReceiptPreviewDialog,
+  ExpenseVoucherDialog,
+} from "@/components/ExpenseVoucherDialog";
 import { StatCard } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +80,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type {
   ExpenseCategory,
+  ExpensePaymentStatus,
   ExpenseRecord,
   ExpensesOverviewData,
   MonthlyExpenseRow,
@@ -143,11 +154,10 @@ export function ExpensesManager({
 
   const [data, setData] = useState<ExpensesOverviewData>(initialData);
   const [selectedYear, setSelectedYear] = useState<string>(initialYear);
-  const [activeTab, setActiveTab] = useState<string>("table");
+  const [activeTab, setActiveTab] = useState<string>("ledger");
 
   // Track expanded rows in table view
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>(() => {
-    // Default expand the latest month
     const latestYm = initialData.rows[0]?.yearMonth;
     return latestYm ? { [latestYm]: true } : {};
   });
@@ -158,13 +168,18 @@ export function ExpensesManager({
   });
 
   // Category Modals
+  const [manageCategoriesOpen, setManageCategoriesOpen] = useState(false);
   const [addCategoryOpen, setAddCategoryOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryAccountCode, setNewCategoryAccountCode] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState("rose");
   const [savingCategory, setSavingCategory] = useState(false);
 
   const [editCategoryOpen, setEditCategoryOpen] = useState(false);
   const [categoryToEdit, setCategoryToEdit] = useState<ExpenseCategory | null>(null);
   const [editCategoryName, setEditCategoryName] = useState("");
+  const [editCategoryAccountCode, setEditCategoryAccountCode] = useState("");
+  const [editCategoryColor, setEditCategoryColor] = useState("slate");
   const [updatingCategory, setUpdatingCategory] = useState(false);
 
   const [deleteCategoryOpen, setDeleteCategoryOpen] = useState(false);
@@ -184,19 +199,33 @@ export function ExpensesManager({
   const [cellNoteInput, setCellNoteInput] = useState("");
   const [savingCell, setSavingCell] = useState(false);
 
-  // Add Itemized Record Dialog
+  // Full Accounting Expense Record Form Dialog (Create / Edit / Duplicate)
   const [addRecordOpen, setAddRecordOpen] = useState(false);
-  const [recordDate, setRecordDate] = useState(() => {
-    const now = new Date();
-    return now.toISOString().slice(0, 10);
-  });
-  const [recordCategoryId, setRecordCategoryId] = useState<number>(() => {
-    return initialData.categories[0]?.id ?? 0;
-  });
-  const [recordAmount, setRecordAmount] = useState("");
-  const [recordTitle, setRecordTitle] = useState("");
-  const [recordNote, setRecordNote] = useState("");
+  const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
+  const [recordFormInitial, setRecordFormInitial] = useState<ExpenseRecordFormValues>(() => ({
+    entryDate: new Date().toISOString().slice(0, 10),
+    categoryId: initialData.categories[0]?.id ?? 0,
+    amount: "",
+    vendorName: "",
+    vendorTaxId: "",
+    taxInvoiceNo: "",
+    title: "",
+    note: "",
+    vatType: "none",
+    whtRate: "0",
+    paymentStatus: "paid",
+    paymentMethod: "transfer",
+    attachmentUrl: null,
+    attachmentName: null,
+  }));
   const [savingRecord, setSavingRecord] = useState(false);
+  const [updatingStatusId, setUpdatingStatusId] = useState<number | null>(null);
+
+  // Receipt Image Preview & Payment Voucher Print Dialogs
+  const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
+  const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(null);
+  const [voucherOpen, setVoucherOpen] = useState(false);
+  const [voucherRecord, setVoucherRecord] = useState<ExpenseRecord | null>(null);
 
   // Month Detail Sheet
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
@@ -212,6 +241,96 @@ export function ExpensesManager({
   const [printMonth, setPrintMonth] = useState<string | null>(null);
   const [printRecords, setPrintRecords] = useState<ExpenseRecord[]>([]);
   const [, setLoadingPrint] = useState(false);
+
+  const openCreateRecordModal = (preset?: Partial<ExpenseRecordFormValues>) => {
+    setEditingRecord(null);
+    setRecordFormInitial({
+      entryDate: preset?.entryDate ?? new Date().toISOString().slice(0, 10),
+      categoryId: preset?.categoryId ?? (data.categories[0]?.id ?? 0),
+      amount: preset?.amount ?? "",
+      vendorName: preset?.vendorName ?? "",
+      vendorTaxId: preset?.vendorTaxId ?? "",
+      taxInvoiceNo: preset?.taxInvoiceNo ?? "",
+      title: preset?.title ?? "",
+      note: preset?.note ?? "",
+      vatType: preset?.vatType ?? "none",
+      whtRate: preset?.whtRate ?? "0",
+      paymentStatus: preset?.paymentStatus ?? "paid",
+      paymentMethod: preset?.paymentMethod ?? "transfer",
+      attachmentUrl: preset?.attachmentUrl ?? null,
+      attachmentName: preset?.attachmentName ?? null,
+    });
+    setAddRecordOpen(true);
+  };
+
+  const openEditRecordModal = (rec: ExpenseRecord) => {
+    setEditingRecord(rec);
+    const inputAmt = rec.vatType === "exclude" ? rec.subtotalAmount : rec.amount;
+    setRecordFormInitial({
+      id: rec.id,
+      entryDate: rec.entryDate,
+      categoryId: rec.categoryId,
+      amount: String(inputAmt),
+      vendorName: rec.vendorName,
+      vendorTaxId: rec.vendorTaxId,
+      taxInvoiceNo: rec.taxInvoiceNo,
+      title: rec.title,
+      note: rec.note || "",
+      vatType: rec.vatType,
+      whtRate: String(rec.whtRate || 0),
+      paymentStatus: rec.paymentStatus,
+      paymentMethod: rec.paymentMethod,
+      attachmentUrl: rec.attachmentUrl,
+      attachmentName: rec.attachmentName,
+    });
+    setAddRecordOpen(true);
+  };
+
+  const openDuplicateRecordModal = (rec: ExpenseRecord) => {
+    const inputAmt = rec.vatType === "exclude" ? rec.subtotalAmount : rec.amount;
+    openCreateRecordModal({
+      entryDate: new Date().toISOString().slice(0, 10),
+      categoryId: rec.categoryId,
+      amount: String(inputAmt),
+      vendorName: rec.vendorName,
+      vendorTaxId: rec.vendorTaxId,
+      taxInvoiceNo: "",
+      title: rec.title,
+      note: rec.note || "",
+      vatType: rec.vatType,
+      whtRate: String(rec.whtRate || 0),
+      paymentStatus: "paid",
+      paymentMethod: rec.paymentMethod,
+    });
+  };
+
+  const handleQuickCreateCategory = async (
+    name: string,
+    accountCode: string,
+  ): Promise<ExpenseCategory | null> => {
+    try {
+      const res = await fetch("/api/expenses/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          accountCode: accountCode.trim(),
+          color: "rose",
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "ไม่สามารถเพิ่มหมวดหมู่ได้");
+      }
+      toast.success(`เพิ่มหมวดหมู่ "${name}" สำเร็จ`);
+      await refreshData(selectedYear);
+      router.refresh();
+      return json.category || null;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เกิดข้อผิดพลาด");
+      return null;
+    }
+  };
 
   const handleOpenPrint = async (ym: string) => {
     setPrintMonth(ym);
@@ -272,7 +391,11 @@ export function ExpensesManager({
       const res = await fetch("/api/expenses/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          accountCode: newCategoryAccountCode.trim(),
+          color: newCategoryColor,
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -280,6 +403,7 @@ export function ExpensesManager({
       }
       toast.success(`เพิ่มหมวดหมู่ "${name}" สำเร็จ`);
       setNewCategoryName("");
+      setNewCategoryAccountCode("");
       setAddCategoryOpen(false);
       await refreshData(selectedYear);
       router.refresh();
@@ -304,13 +428,17 @@ export function ExpensesManager({
       const res = await fetch(`/api/expenses/categories/${categoryToEdit.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          accountCode: editCategoryAccountCode.trim(),
+          color: editCategoryColor,
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
         throw new Error(json.error || "ไม่สามารถแก้ไขหมวดหมู่ได้");
       }
-      toast.success(`แก้ไขชื่อหมวดหมู่เป็น "${name}" สำเร็จ`);
+      toast.success(`แก้ไขหมวดหมู่ "${name}" สำเร็จ`);
       setEditCategoryOpen(false);
       setCategoryToEdit(null);
       await refreshData(selectedYear);
@@ -386,19 +514,19 @@ export function ExpensesManager({
     }
   };
 
-  // Add Itemized Record Handler
-  const handleAddRecord = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amountNum = parseFloat(recordAmount);
+  // Submit Full Expense Record (Create or Update)
+  const handleSubmitExpenseRecord = async (values: ExpenseRecordFormValues) => {
+    const amountNum = parseFloat(values.amount);
     if (isNaN(amountNum) || amountNum <= 0) {
       toast.error("กรุณาระบุยอดเงินที่มากกว่า 0");
       return;
     }
-    if (!recordTitle.trim()) {
-      toast.error("กรุณาระบุรายละเอียดหรือชื่อรายการ");
+    const cleanTitle = values.title.trim() || values.vendorName.trim();
+    if (!cleanTitle) {
+      toast.error("กรุณาระบุรายละเอียดรายการ หรือชื่อผู้จำหน่าย");
       return;
     }
-    const catId = recordCategoryId || categories[0]?.id || 0;
+    const catId = values.categoryId || categories[0]?.id || 0;
     if (!catId) {
       toast.error("กรุณาเลือกหมวดหมู่รายจ่าย");
       return;
@@ -406,28 +534,45 @@ export function ExpensesManager({
 
     setSavingRecord(true);
     try {
-      const res = await fetch("/api/expenses/records", {
-        method: "POST",
+      const isEdit = Boolean(editingRecord && values.id);
+      const url = isEdit
+        ? `/api/expenses/records/${values.id}`
+        : "/api/expenses/records";
+      const method = isEdit ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          entryDate: recordDate,
+          entryDate: values.entryDate,
           categoryId: catId,
           amount: amountNum,
-          title: recordTitle.trim(),
-          note: recordNote.trim(),
+          vendorName: values.vendorName.trim(),
+          vendorTaxId: values.vendorTaxId.trim(),
+          taxInvoiceNo: values.taxInvoiceNo.trim(),
+          title: cleanTitle,
+          note: values.note.trim(),
+          vatType: values.vatType,
+          whtRate: parseFloat(values.whtRate) || 0,
+          paymentStatus: values.paymentStatus,
+          paymentMethod: values.paymentMethod,
+          attachmentUrl: values.attachmentUrl,
+          attachmentName: values.attachmentName,
         }),
       });
       const json = await res.json();
       if (!res.ok) {
-        throw new Error(json.error || "ไม่สามารถบันทึกรายการได้");
+        throw new Error(json.error || "ไม่สามารถบันทึกเอกสารได้");
       }
-      toast.success("บันทึกรายการรายจ่ายสำเร็จ");
-      setRecordAmount("");
-      setRecordTitle("");
-      setRecordNote("");
+      toast.success(
+        isEdit
+          ? `แก้ไขเอกสาร ${json.record?.documentNo || ""} สำเร็จ`
+          : `สร้างเอกสาร ${json.record?.documentNo || ""} สำเร็จ`,
+      );
       setAddRecordOpen(false);
+      setEditingRecord(null);
       await refreshData(selectedYear);
-      if (detailSheetOpen && sheetYearMonth === recordDate.slice(0, 7)) {
+      if (detailSheetOpen && sheetYearMonth === values.entryDate.slice(0, 7)) {
         await loadMonthRecords(sheetYearMonth, sheetCategoryId ?? undefined);
       }
       router.refresh();
@@ -435,6 +580,40 @@ export function ExpensesManager({
       toast.error(err instanceof Error ? err.message : "เกิดข้อผิดพลาด");
     } finally {
       setSavingRecord(false);
+    }
+  };
+
+  // Quick Status Change Handler in Ledger Table
+  const handleStatusChange = async (
+    id: number,
+    paymentStatus: ExpensePaymentStatus,
+  ) => {
+    setUpdatingStatusId(id);
+    try {
+      const res = await fetch(`/api/expenses/records/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentStatus }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "ไม่สามารถเปลี่ยนสถานะได้");
+      }
+      const statusLabel =
+        paymentStatus === "paid"
+          ? "ชำระเงินแล้ว"
+          : paymentStatus === "pending"
+            ? "รอชำระ"
+            : "ยกเลิกเอกสาร";
+      toast.success(
+        `อัปเดตสถานะ ${json.record?.documentNo || ""} เป็น "${statusLabel}"`,
+      );
+      await refreshData(selectedYear);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "เกิดข้อผิดพลาด");
+    } finally {
+      setUpdatingStatusId(null);
     }
   };
 
@@ -492,7 +671,14 @@ export function ExpensesManager({
 
   const categories = data.categories;
   const rows = data.rows;
+  const records = data.records ?? [];
   const stats = data.totalStats;
+  const availableMonths = Array.from(
+    new Set([
+      ...rows.map((r) => r.yearMonth),
+      ...records.map((r) => r.yearMonth),
+    ]),
+  ).sort((a, b) => b.localeCompare(a));
 
   // Selected row for statement view
   const statementRow =
@@ -516,7 +702,7 @@ export function ExpensesManager({
         <StatCard
           label="รายจ่ายบริษัทรวม"
           value={formatTHB(stats.totalExpenses)}
-          hint={`รวมจาก ${categories.length} หมวดหมู่รายจ่าย`}
+          hint={`รวมจาก ${categories.length} หมวดหมู่ · บิลรายจ่าย ${records.filter((r) => r.paymentStatus !== "void").length} ใบ`}
           tone="negative"
           icon={<TrendingDownIcon className="size-5" />}
         />
@@ -546,31 +732,24 @@ export function ExpensesManager({
         />
       </div>
 
-      {/* Main Tabs Navigation & Global Actions */}
+      {/* Main Tabs Navigation & Global Actions (Single Clean Header Row) */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full gap-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="max-w-full overflow-x-auto pb-0.5 scrollbar-none">
             <TabsList className="h-10 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
               <TabsTrigger
+                value="ledger"
+                className="gap-1.5 text-xs font-semibold data-[state=active]:bg-[#fe2c55] data-[state=active]:text-white data-[state=active]:shadow-xs text-slate-600 rounded-lg px-3.5 py-1.5 transition-all"
+              >
+                <FileTextIcon className="size-3.5" />
+                รายการบิลค่าใช้จ่าย ({records.filter((r) => r.paymentStatus !== "void").length})
+              </TabsTrigger>
+              <TabsTrigger
                 value="table"
-                className="gap-1.5 text-xs font-semibold data-[state=active]:bg-[#fe2c55] data-[state=active]:text-white data-[state=active]:shadow-xs text-slate-600 rounded-lg px-3 py-1.5 transition-all"
+                className="gap-1.5 text-xs font-semibold data-[state=active]:bg-[#fe2c55] data-[state=active]:text-white data-[state=active]:shadow-xs text-slate-600 rounded-lg px-3.5 py-1.5 transition-all"
               >
                 <FileSpreadsheetIcon className="size-3.5" />
-                ตารางสรุปรายเดือน
-              </TabsTrigger>
-              <TabsTrigger
-                value="statement"
-                className="gap-1.5 text-xs font-semibold data-[state=active]:bg-[#fe2c55] data-[state=active]:text-white data-[state=active]:shadow-xs text-slate-600 rounded-lg px-3 py-1.5 transition-all"
-              >
-                <ReceiptIcon className="size-3.5" />
-                งบรายจ่าย (P&L)
-              </TabsTrigger>
-              <TabsTrigger
-                value="categories"
-                className="gap-1.5 text-xs font-semibold data-[state=active]:bg-[#fe2c55] data-[state=active]:text-white data-[state=active]:shadow-xs text-slate-600 rounded-lg px-3 py-1.5 transition-all"
-              >
-                <Settings2Icon className="size-3.5" />
-                หมวดหมู่ ({categories.length})
+                สรุปกำไรสุทธิรายเดือน
               </TabsTrigger>
             </TabsList>
           </div>
@@ -580,25 +759,50 @@ export function ExpensesManager({
               type="button"
               variant="outline"
               size="sm"
-              className="h-9 gap-1.5 px-3.5 text-xs font-semibold bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-2xs"
-              onClick={() => setAddRecordOpen(true)}
-              disabled={categories.length === 0}
+              className="h-9 gap-1.5 px-3.5 text-xs font-semibold bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-2xs rounded-lg"
+              onClick={() => setManageCategoriesOpen(true)}
             >
-              <PlusIcon className="size-4 text-[#fe2c55]" />
-              บันทึกรายการย่อย
+              <Settings2Icon className="size-3.5 text-slate-500" />
+              จัดการหมวดหมู่ ({categories.length})
             </Button>
 
             <Button
               type="button"
               size="sm"
-              className="h-9 gap-1.5 px-3.5 text-xs font-bold bg-[#fe2c55] hover:bg-[#e0264b] text-white shadow-xs"
-              onClick={() => setAddCategoryOpen(true)}
+              className="h-9 gap-1.5 px-4 text-xs font-bold bg-[#fe2c55] hover:bg-[#e0264b] text-white shadow-xs rounded-lg"
+              onClick={() => openCreateRecordModal()}
             >
               <PlusIcon className="size-4" />
-              เพิ่มหมวดหมู่รายจ่าย
+              สร้างบิลรายจ่ายใหม่
             </Button>
           </div>
         </div>
+
+        {/* TAB 0 (Default): Accounting Expense Ledger (FlowAccount functions adapted) */}
+        <TabsContent value="ledger" className="mt-2 flex flex-col gap-3">
+          <ExpenseLedgerTab
+            records={records}
+            categories={categories}
+            availableMonths={availableMonths}
+            formatThaiYearMonth={formatThaiYearMonth}
+            onCreateNew={() => openCreateRecordModal()}
+            onEditRecord={openEditRecordModal}
+            onDuplicateRecord={openDuplicateRecordModal}
+            onDeleteRecord={handleDeleteRecord}
+            onStatusChange={handleStatusChange}
+            onPreviewReceipt={(rec) => {
+              setPreviewRecord(rec);
+              setReceiptPreviewOpen(true);
+            }}
+            onPrintVoucher={(rec) => {
+              setVoucherRecord(rec);
+              setVoucherOpen(true);
+            }}
+            onAddCategory={() => setAddCategoryOpen(true)}
+            deletingRecordId={deletingRecordId}
+            updatingStatusId={updatingStatusId}
+          />
+        </TabsContent>
 
         {/* TAB 1: Monthly Overview Table (Compact, fixed columns, expandable rows) */}
         <TabsContent value="table" className="mt-2 flex flex-col gap-3">
@@ -839,8 +1043,9 @@ export function ExpensesManager({
                                         size="sm"
                                         className="h-7.5 gap-1.5 px-3 text-[11px] font-semibold bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs"
                                         onClick={() => {
-                                          setRecordDate(`${row.yearMonth}-01`);
-                                          setAddRecordOpen(true);
+                                          openCreateRecordModal({
+                                            entryDate: `${row.yearMonth}-01`,
+                                          });
                                         }}
                                         disabled={categories.length === 0}
                                       >
@@ -1083,420 +1288,178 @@ export function ExpensesManager({
             </div>
           </Card>
         </TabsContent>
+      </Tabs>
 
-        {/* TAB 2: Monthly P&L / Statement View (Vertical layout, unlimited categories) */}
-        <TabsContent value="statement" className="mt-2 flex flex-col gap-4">
-          {/* Month Selector Bar */}
-          <Card className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-white border border-slate-200 shadow-2xs rounded-xl">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <span className="text-xs font-bold text-slate-700">
-                เลือกเดือนที่ต้องการดูงบ:
-              </span>
-              <Select value={statementMonth} onValueChange={setStatementMonth}>
-                <SelectTrigger className="h-9 w-fit min-w-[210px] rounded-lg border-slate-200 bg-white px-3 text-xs font-semibold shadow-2xs hover:bg-slate-50 focus-visible:ring-1 focus-visible:ring-[#fe2c55]">
-                  <SelectValue placeholder="เลือกเดือน" />
-                </SelectTrigger>
-                <SelectContent className="bg-white border-slate-200 text-slate-800 shadow-xl rounded-lg z-50">
-                  {rows.map((r) => (
-                    <SelectItem
-                      key={r.yearMonth}
-                      value={r.yearMonth}
-                      className="text-xs font-medium cursor-pointer"
-                    >
-                      {formatThaiYearMonth(r.yearMonth)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* Dialog: Manage Categories & Chart of Accounts */}
+      <Dialog open={manageCategoriesOpen} onOpenChange={setManageCategoriesOpen}>
+        <DialogContent className="sm:max-w-[680px] max-w-[calc(100%-1.5rem)] w-full max-h-[88dvh] overflow-y-auto bg-white border border-slate-200 shadow-2xl">
+          <DialogHeader className="pr-12">
+            <DialogTitle className="text-slate-900 font-bold text-base">
+              จัดการหมวดหมู่รายจ่ายและรหัสผังบัญชี ({categories.length})
+            </DialogTitle>
+            <DialogDescription className="text-slate-500 text-xs">
+              กำหนดรหัสผังบัญชี (ถ้ามี) และชื่อหมวดหมู่รายจ่ายสำหรับใช้ในบิลค่าใช้จ่ายและงบกำไรสุทธิรายเดือน
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8.5 gap-1.5 px-3.5 text-xs font-bold bg-[#fe2c55] hover:bg-[#e0264b] text-white shadow-xs rounded-lg"
+                onClick={() => setAddCategoryOpen(true)}
+              >
+                <PlusIcon className="size-4" />
+                เพิ่มหมวดหมู่ใหม่
+              </Button>
             </div>
 
-            {statementRow && (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 px-3 text-xs font-semibold bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs"
-                  onClick={() => handleOpenPrint(statementRow.yearMonth)}
-                >
-                  <PrinterIcon className="size-3.5 text-[#fe2c55]" />
-                  พิมพ์รายงานประจำเดือน
-                </Button>
-
-                <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-                  <span className="text-xs font-medium text-slate-500">
-                    กำไรคงเหลือสุทธิ:
-                  </span>
-                  <span
-                    className={cn(
-                      "font-mono text-base font-bold",
-                      statementRow.netRemaining >= 0
-                        ? "text-emerald-600"
-                        : "text-rose-600",
-                    )}
-                  >
-                    {formatTHB(statementRow.netRemaining)}
-                  </span>
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+              {categories.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2.5 p-8 text-center">
+                  <div className="flex size-11 items-center justify-center rounded-full bg-rose-50 text-[#fe2c55]">
+                    <FolderPlusIcon className="size-5 stroke-[1.75]" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-800">
+                    ยังไม่มีหมวดหมู่รายจ่าย
+                  </p>
+                  <p className="text-xs text-slate-500 max-w-xs">
+                    กดปุ่ม &ldquo;เพิ่มหมวดหมู่ใหม่&rdquo; เพื่อสร้างหมวดหมู่แรกของคุณ (หรือพิมพ์สร้างสดในหน้าต่างสร้างบิลได้เลย)
+                  </p>
                 </div>
-              </div>
-            )}
-          </Card>
-
-          {statementRow ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {/* Box 1: Platform Inflows */}
-              <Card className="flex flex-col gap-3 p-5 border border-slate-200 bg-white shadow-2xs rounded-xl">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                  <div className="flex items-center gap-2">
-                    <WalletIcon className="size-5 text-emerald-600" />
-                    <h3 className="text-sm font-bold text-slate-900">
-                      1. รายรับจากแพลตฟอร์ม (Platform Payout)
-                    </h3>
-                  </div>
-                  <Badge variant="outline" className="font-mono text-xs bg-slate-50 text-slate-700 border-slate-200">
-                    {statementRow.orderCount.toLocaleString()} ออเดอร์
-                  </Badge>
-                </div>
-
-                <div className="flex flex-col gap-2.5 py-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">TikTok Shop (เงินโอนสุทธิ)</span>
-                    <span className="font-mono font-semibold text-slate-900">
-                      {formatTHB(statementRow.tiktokPayout)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">Shopee (ยอดขายหักค่าส่ง)</span>
-                    <span className="font-mono font-semibold text-slate-900">
-                      {formatTHB(statementRow.shopeePayout)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">Facebook (ยอดขายหักค่าส่ง)</span>
-                    <span className="font-mono font-semibold text-slate-900">
-                      {formatTHB(statementRow.facebookPayout)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">Lazada (เงินโอนสุทธิ)</span>
-                    <span className="font-mono font-semibold text-slate-900">
-                      {formatTHB(statementRow.lazadaPayout ?? 0)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">LINE OA (ยอดขายหักค่าส่ง)</span>
-                    <span className="font-mono font-semibold text-slate-900">
-                      {formatTHB(statementRow.linePayout ?? 0)}
-                    </span>
-                  </div>
-
-                  {(statementRow.otherPayout ?? 0) !== 0 && (
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-600">อื่นๆ (Other)</span>
-                      <span className="font-mono font-semibold text-slate-900">
-                        {formatTHB(statementRow.otherPayout ?? 0)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-auto flex items-center justify-between border-t border-slate-200 pt-3">
-                  <span className="text-xs font-bold text-slate-900">
-                    รวมรายรับจากทุกแพลตฟอร์ม
-                  </span>
-                  <span className="font-mono text-base font-bold text-slate-900">
-                    {formatTHB(statementRow.totalPlatformPayout)}
-                  </span>
-                </div>
-              </Card>
-
-              {/* Box 2: Company Expenses (Vertical list - unlimited items!) */}
-              <Card className="flex flex-col gap-3 p-5 border border-slate-200 bg-white shadow-2xs rounded-xl">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                  <div className="flex items-center gap-2">
-                    <TrendingDownIcon className="size-5 text-rose-600" />
-                    <h3 className="text-sm font-bold text-slate-900">
-                      2. รายจ่ายบริษัท (Company Expenses)
-                    </h3>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7.5 gap-1 px-2.5 text-xs font-semibold bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs"
-                    onClick={() => setAddCategoryOpen(true)}
-                  >
-                    <PlusIcon className="size-3 text-[#fe2c55]" />
-                    เพิ่มหมวด
-                  </Button>
-                </div>
-
-                {categories.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
-                    <p className="text-xs font-medium text-slate-500">
-                      ยังไม่มีหมวดหมู่รายจ่ายในระบบ
-                    </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="h-7.5 gap-1 px-3 text-xs font-bold bg-[#fe2c55] hover:bg-[#e0264b] text-white shadow-2xs"
-                      onClick={() => setAddCategoryOpen(true)}
-                    >
-                      <PlusIcon className="size-3.5" />
-                      เพิ่มหมวดหมู่แรก
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2 max-h-[360px] overflow-y-auto pr-1">
-                    {categories.map((cat) => {
-                      const amt = statementRow.categoryAmounts[cat.id] ?? 0;
-                      const direct = statementRow.directAmounts[cat.id] ?? 0;
-                      const count = statementRow.categoryItemCounts[cat.id] ?? 0;
-
-                      return (
-                        <div
-                          key={cat.id}
-                          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200/90 bg-[#f8fafc] hover:bg-white p-2.5 text-xs transition-colors"
-                        >
-                          <div className="flex flex-col gap-0.5">
-                            <span className="font-bold text-slate-800">
-                              {cat.name}
-                            </span>
-                            {count > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenMonthDetail(statementRow.yearMonth, cat)}
-                                className="text-left text-[11px] font-semibold text-[#fe2c55] underline"
-                              >
-                                {count} รายการย่อย
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-rose-600">
-                              {amt > 0 ? formatTHB(amt) : "-"}
-                            </span>
+              ) : (
+                <Table className="text-xs">
+                  <TableHeader sticky={false} className="bg-[#f8fafc] border-b border-slate-200">
+                    <TableRow>
+                      <TableHead sticky={false} className="w-12 text-center font-bold text-slate-700">#</TableHead>
+                      <TableHead sticky={false} className="w-32 font-bold text-slate-800">รหัสผังบัญชี</TableHead>
+                      <TableHead sticky={false} className="font-bold text-slate-800">ชื่อหมวดหมู่รายจ่าย</TableHead>
+                      <TableHead sticky={false} className="w-36 text-center font-bold text-slate-700">การจัดการ</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {categories.map((cat, idx) => (
+                      <TableRow key={cat.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <TableCell className="text-center font-mono text-slate-500">
+                          {idx + 1}
+                        </TableCell>
+                        <TableCell className="font-mono font-bold text-slate-700">
+                          {cat.accountCode || "-"}
+                        </TableCell>
+                        <TableCell className="font-bold text-slate-800">
+                          {cat.name}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center gap-1.5">
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2 text-[11px] text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                              className="h-7 px-2 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100"
                               onClick={() => {
-                                setEditingCell({
-                                  yearMonth: statementRow.yearMonth,
-                                  category: cat,
-                                  currentAmount: amt,
-                                  currentDirect: direct,
-                                  itemCount: count,
-                                });
-                                setCellAmountInput(direct > 0 ? String(direct) : "");
-                                setCellNoteInput("");
-                                setCellEditOpen(true);
+                                setCategoryToEdit(cat);
+                                setEditCategoryName(cat.name);
+                                setEditCategoryAccountCode(cat.accountCode || "");
+                                setEditCategoryColor(cat.color || "slate");
+                                setEditCategoryOpen(true);
                               }}
                             >
-                              <Edit2Icon className="size-3.5" />
+                              <Edit2Icon className="mr-1 size-3.5" />
+                              แก้ไข
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                              onClick={() => {
+                                setCategoryToDelete(cat);
+                                setDeleteCategoryOpen(true);
+                              }}
+                            >
+                              <Trash2Icon className="mr-1 size-3.5" />
+                              ลบ
                             </Button>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="mt-auto flex items-center justify-between border-t border-slate-200 pt-3">
-                  <span className="text-xs font-bold text-rose-700">
-                    รวมรายจ่ายบริษัททั้งหมด
-                  </span>
-                  <span className="font-mono text-base font-bold text-rose-700">
-                    {formatTHB(statementRow.totalExpenses)}
-                  </span>
-                </div>
-              </Card>
-
-              {/* Bottom Summary Bar for selected month */}
-              <Card className="col-span-1 md:col-span-2 flex flex-wrap items-center justify-between gap-4 p-5 border-2 border-rose-200 bg-rose-50/20 shadow-2xs rounded-xl">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-bold text-slate-700">
-                    สรุปผลกำไรสุทธิประจำเดือน {formatThaiYearMonth(statementRow.yearMonth)}
-                  </span>
-                  <p className="text-xs text-slate-600">
-                    รายรับ <strong>{formatTHB(statementRow.totalPlatformPayout)}</strong> หักรายจ่าย{" "}
-                    <strong>{formatTHB(statementRow.totalExpenses)}</strong>
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-6">
-                  <div className="flex flex-col items-end">
-                    <span className="text-xs font-medium text-slate-500">อัตรากำไร</span>
-                    <span className="font-mono text-sm font-bold text-slate-800">
-                      {statementRow.profitMarginPercent !== null
-                        ? `${statementRow.profitMarginPercent.toFixed(1)}%`
-                        : "-"}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col items-end">
-                    <span className="text-xs font-bold text-slate-700">กำไรคงเหลือสุทธิ</span>
-                    <span
-                      className={cn(
-                        "font-mono text-2xl font-black",
-                        statementRow.netRemaining >= 0
-                          ? "text-emerald-600"
-                          : "text-rose-600",
-                      )}
-                    >
-                      {formatTHB(statementRow.netRemaining)}
-                    </span>
-                  </div>
-                </div>
-              </Card>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </div>
-          ) : (
-            <Card className="p-8 text-center text-xs text-slate-500 bg-white border border-slate-200 rounded-xl">
-              กรุณาเลือกเดือนเพื่อดูงบการเงิน
-            </Card>
-          )}
-        </TabsContent>
-
-        {/* TAB 3: Category Management Tab */}
-        <TabsContent value="categories" className="mt-2 flex flex-col gap-3">
-          <Card className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white border border-slate-200 shadow-2xs rounded-xl">
-            <div className="flex flex-col gap-0.5">
-              <h3 className="text-sm font-bold text-slate-900">
-                หมวดหมู่รายจ่ายทั้งหมด ({categories.length})
-              </h3>
-              <p className="text-xs text-slate-500">
-                เพิ่ม แก้ไขชื่อ หรือลบหมวดหมู่รายจ่ายของคุณได้ที่นี่อย่างอิสระ
-              </p>
-            </div>
-
-            <Button
-              type="button"
-              size="sm"
-              className="gap-1.5 text-xs font-bold bg-[#fe2c55] hover:bg-[#e0264b] text-white shadow-xs rounded-lg"
-              onClick={() => setAddCategoryOpen(true)}
-            >
-              <PlusIcon className="size-4" />
-              เพิ่มหมวดหมู่ใหม่
-            </Button>
-          </Card>
-
-          <Card className="overflow-hidden border border-slate-200 bg-white shadow-2xs rounded-xl">
-            {categories.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
-                <div className="flex size-12 items-center justify-center rounded-full bg-rose-50 text-[#fe2c55]">
-                  <FolderPlusIcon className="size-6 stroke-[1.75]" />
-                </div>
-                <div className="flex flex-col gap-1 max-w-sm">
-                  <p className="text-sm font-bold text-slate-800">
-                    ยังไม่มีหมวดหมู่รายจ่าย
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    เพิ่มหมวดหมู่รายจ่ายแรกเพื่อเริ่มต้นจัดระเบียบค่าใช้จ่ายของบริษัท
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="mt-1 h-8.5 gap-1.5 px-4 text-xs font-bold bg-[#fe2c55] hover:bg-[#e0264b] text-white shadow-xs rounded-lg"
-                  onClick={() => setAddCategoryOpen(true)}
-                >
-                  <PlusIcon className="size-4" />
-                  เพิ่มหมวดหมู่แรก
-                </Button>
-              </div>
-            ) : (
-              <Table className="text-xs">
-                <TableHeader sticky={false} className="bg-[#f8fafc] border-b border-slate-200">
-                  <TableRow>
-                    <TableHead sticky={false} className="w-12 text-center font-bold text-slate-700">#</TableHead>
-                    <TableHead sticky={false} className="font-bold text-slate-800">ชื่อหมวดหมู่</TableHead>
-                    <TableHead sticky={false} className="w-36 text-center font-bold text-slate-700">การจัดการ</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {categories.map((cat, idx) => (
-                    <TableRow key={cat.id} className="border-b border-slate-100 hover:bg-slate-50">
-                      <TableCell className="text-center font-mono text-slate-500">
-                        {idx + 1}
-                      </TableCell>
-                      <TableCell className="font-bold text-slate-800">
-                        {cat.name}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-                            onClick={() => {
-                              setCategoryToEdit(cat);
-                              setEditCategoryName(cat.name);
-                              setEditCategoryOpen(true);
-                            }}
-                          >
-                            <Edit2Icon className="mr-1 size-3.5" />
-                            แก้ไข
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs font-medium text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                            onClick={() => {
-                              setCategoryToDelete(cat);
-                              setDeleteCategoryOpen(true);
-                            }}
-                          >
-                            <Trash2Icon className="mr-1 size-3.5" />
-                            ลบ
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </Card>
-        </TabsContent>
-      </Tabs>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog: Add Category */}
       <Dialog open={addCategoryOpen} onOpenChange={setAddCategoryOpen}>
         <DialogContent className="sm:max-w-md bg-white border border-slate-200 shadow-xl">
           <DialogHeader className="pr-11">
-            <DialogTitle className="text-slate-900 font-bold">เพิ่มหมวดหมู่รายจ่ายใหม่</DialogTitle>
+            <DialogTitle className="text-slate-900 font-bold">เพิ่มหมวดหมู่รายจ่ายและรหัสบัญชี</DialogTitle>
             <DialogDescription className="text-slate-500">
-              สร้างหมวดหมู่รายจ่ายตามที่คุณต้องการ เช่น ค่าแอดโฆษณา, ค่าเช่าสำนักงาน,
-              เงินเดือน, ค่าแพ็คเกจจิ้ง
+              กำหนดรหัสผังบัญชี (ถ้ามี) และชื่อหมวดหมู่ เช่น 51020.01 / การตลาดและโฆษณา
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleAddCategory} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="new-category-name"
-                className="text-xs font-bold text-slate-700"
-              >
-                ชื่อหมวดหมู่รายจ่าย <span className="text-[#fe2c55]">*</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="new-category-code"
+                  className="text-xs font-bold text-slate-700"
+                >
+                  รหัสผังบัญชี
+                </label>
+                <Input
+                  id="new-category-code"
+                  type="text"
+                  value={newCategoryAccountCode}
+                  onChange={(e) => setNewCategoryAccountCode(e.target.value)}
+                  placeholder="เช่น 53031.01"
+                  className="h-10 font-mono text-xs border-slate-200"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
+                <label
+                  htmlFor="new-category-name"
+                  className="text-xs font-bold text-slate-700"
+                >
+                  ชื่อหมวดหมู่รายจ่าย <span className="text-[#fe2c55]">*</span>
+                </label>
+                <Input
+                  id="new-category-name"
+                  type="text"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="เช่น ค่าโฆษณา, ค่าไฟฟ้า, ค่าเช่าสำนักงาน"
+                  className="h-10 text-sm border-slate-200 focus-visible:ring-[#fe2c55]"
+                  autoFocus
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="new-category-color" className="text-xs font-bold text-slate-700">
+                สีป้ายหมวดหมู่ (Badge Color)
               </label>
-              <Input
-                id="new-category-name"
-                type="text"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="เช่น ค่าโฆษณา / ค่าแอด, ค่าเช่าสำนักงาน"
-                className="h-10 text-sm border-slate-200 focus-visible:ring-[#fe2c55]"
-                autoFocus
-                required
-              />
+              <Select value={newCategoryColor} onValueChange={setNewCategoryColor}>
+                <SelectTrigger id="new-category-color" className="h-9 text-xs border-slate-200 bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-slate-200 text-slate-800 shadow-xl z-50">
+                  <SelectItem value="rose" className="text-xs">สีชมพูแดง (การตลาด/โฆษณา)</SelectItem>
+                  <SelectItem value="amber" className="text-xs">สีเหลืองอำพัน (ค่าไฟ/วัสดุแพ็ค)</SelectItem>
+                  <SelectItem value="blue" className="text-xs">สีฟ้า (ขนส่ง/อินเทอร์เน็ต)</SelectItem>
+                  <SelectItem value="emerald" className="text-xs">สีเขียว (เงินเดือน/ค่าแรง)</SelectItem>
+                  <SelectItem value="purple" className="text-xs">สีม่วง (ค่าเช่า/อุปกรณ์คอมฯ)</SelectItem>
+                  <SelectItem value="cyan" className="text-xs">สีฟ้าน้ำทะเล (ค่าน้ำประปา)</SelectItem>
+                  <SelectItem value="slate" className="text-xs">สีเทา (ค่าบริการทั่วไป)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2.5 pt-2">
@@ -1532,26 +1495,65 @@ export function ExpensesManager({
       <Dialog open={editCategoryOpen} onOpenChange={setEditCategoryOpen}>
         <DialogContent className="sm:max-w-md bg-white border border-slate-200 shadow-xl">
           <DialogHeader className="pr-11">
-            <DialogTitle className="text-slate-900 font-bold">แก้ไขชื่อหมวดหมู่รายจ่าย</DialogTitle>
-            <DialogDescription className="text-slate-500">เปลี่ยนชื่อหมวดหมู่รายจ่ายในระบบ</DialogDescription>
+            <DialogTitle className="text-slate-900 font-bold">แก้ไขหมวดหมู่และรหัสผังบัญชี</DialogTitle>
+            <DialogDescription className="text-slate-500">ปรับปรุงรหัสผังบัญชี ชื่อหมวดหมู่ และสีป้ายกำกับ</DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleEditCategory} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="edit-category-name"
-                className="text-xs font-bold text-slate-700"
-              >
-                ชื่อหมวดหมู่ <span className="text-[#fe2c55]">*</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor="edit-category-code"
+                  className="text-xs font-bold text-slate-700"
+                >
+                  รหัสผังบัญชี
+                </label>
+                <Input
+                  id="edit-category-code"
+                  type="text"
+                  value={editCategoryAccountCode}
+                  onChange={(e) => setEditCategoryAccountCode(e.target.value)}
+                  placeholder="เช่น 53031.01"
+                  className="h-10 font-mono text-xs border-slate-200"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5 sm:col-span-2">
+                <label
+                  htmlFor="edit-category-name"
+                  className="text-xs font-bold text-slate-700"
+                >
+                  ชื่อหมวดหมู่ <span className="text-[#fe2c55]">*</span>
+                </label>
+                <Input
+                  id="edit-category-name"
+                  type="text"
+                  value={editCategoryName}
+                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  className="h-10 text-sm border-slate-200 focus-visible:ring-[#fe2c55]"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="edit-category-color" className="text-xs font-bold text-slate-700">
+                สีป้ายหมวดหมู่ (Badge Color)
               </label>
-              <Input
-                id="edit-category-name"
-                type="text"
-                value={editCategoryName}
-                onChange={(e) => setEditCategoryName(e.target.value)}
-                className="h-10 text-sm border-slate-200 focus-visible:ring-[#fe2c55]"
-                required
-              />
+              <Select value={editCategoryColor} onValueChange={setEditCategoryColor}>
+                <SelectTrigger id="edit-category-color" className="h-9 text-xs border-slate-200 bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-slate-200 text-slate-800 shadow-xl z-50">
+                  <SelectItem value="rose" className="text-xs">สีชมพูแดง (การตลาด/โฆษณา)</SelectItem>
+                  <SelectItem value="amber" className="text-xs">สีเหลืองอำพัน (ค่าไฟ/วัสดุแพ็ค)</SelectItem>
+                  <SelectItem value="blue" className="text-xs">สีฟ้า (ขนส่ง/อินเทอร์เน็ต)</SelectItem>
+                  <SelectItem value="emerald" className="text-xs">สีเขียว (เงินเดือน/ค่าแรง)</SelectItem>
+                  <SelectItem value="purple" className="text-xs">สีม่วง (ค่าเช่า/อุปกรณ์คอมฯ)</SelectItem>
+                  <SelectItem value="cyan" className="text-xs">สีฟ้าน้ำทะเล (ค่าน้ำประปา)</SelectItem>
+                  <SelectItem value="slate" className="text-xs">สีเทา (ค่าบริการทั่วไป)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2.5 pt-2">
@@ -1725,150 +1727,37 @@ export function ExpensesManager({
         </DialogContent>
       </Dialog>
 
-      {/* Dialog: Add Itemized Record */}
-      <Dialog open={addRecordOpen} onOpenChange={setAddRecordOpen}>
-        <DialogContent className="sm:max-w-md bg-white border border-slate-200 shadow-xl">
-          <DialogHeader className="pr-11">
-            <DialogTitle className="text-slate-900 font-bold">บันทึกรายการรายจ่ายย่อย</DialogTitle>
-            <DialogDescription className="text-slate-500">
-              บันทึกรายการรายจ่ายพร้อมระบุวันที่ รายละเอียด และยอดเงิน
-            </DialogDescription>
-          </DialogHeader>
+      {/* Dialog: Create / Edit Accounting Expense Record */}
+      <ExpenseRecordFormDialog
+        open={addRecordOpen}
+        onOpenChange={setAddRecordOpen}
+        categories={categories}
+        editingRecord={editingRecord}
+        initialValues={recordFormInitial}
+        saving={savingRecord}
+        onSubmit={handleSubmitExpenseRecord}
+        onQuickCreateCategory={handleQuickCreateCategory}
+      />
 
-          <form onSubmit={handleAddRecord} className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor="record-date"
-                  className="text-xs font-bold text-slate-700"
-                >
-                  วันที่จ่าย <span className="text-[#fe2c55]">*</span>
-                </label>
-                <Input
-                  id="record-date"
-                  type="date"
-                  value={recordDate}
-                  onChange={(e) => setRecordDate(e.target.value)}
-                  className="h-9 text-xs border-slate-200"
-                  required
-                />
-              </div>
+      {/* Dialog: Receipt Image Preview */}
+      <ExpenseReceiptPreviewDialog
+        open={receiptPreviewOpen}
+        onOpenChange={setReceiptPreviewOpen}
+        record={previewRecord}
+        onEditRecord={openEditRecordModal}
+        onOpenVoucher={(rec) => {
+          setVoucherRecord(rec);
+          setVoucherOpen(true);
+        }}
+      />
 
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor="record-category"
-                  className="text-xs font-bold text-slate-700"
-                >
-                  หมวดหมู่ <span className="text-[#fe2c55]">*</span>
-                </label>
-                <Select
-                  value={String(recordCategoryId || categories[0]?.id || "")}
-                  onValueChange={(val) => setRecordCategoryId(Number(val))}
-                >
-                  <SelectTrigger
-                    id="record-category"
-                    className="h-9 w-full rounded-lg border-slate-200 bg-white px-3 text-xs font-medium shadow-2xs hover:bg-slate-50 focus-visible:ring-1 focus-visible:ring-[#fe2c55]"
-                  >
-                    <SelectValue placeholder="เลือกหมวดหมู่รายจ่าย" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white border-slate-200 text-slate-800 shadow-xl rounded-lg z-50">
-                    {categories.map((cat) => (
-                      <SelectItem
-                        key={cat.id}
-                        value={String(cat.id)}
-                        className="text-xs font-medium cursor-pointer"
-                      >
-                        {cat.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="record-amount"
-                className="text-xs font-bold text-slate-700"
-              >
-                ยอดเงิน (บาท) <span className="text-[#fe2c55]">*</span>
-              </label>
-              <Input
-                id="record-amount"
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={recordAmount}
-                onChange={(e) => setRecordAmount(e.target.value)}
-                placeholder="0.00"
-                className="h-10 text-base font-bold border-slate-200 focus-visible:ring-[#fe2c55]"
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="record-title"
-                className="text-xs font-bold text-slate-700"
-              >
-                ชื่อรายการ / รายละเอียด <span className="text-[#fe2c55]">*</span>
-              </label>
-              <Input
-                id="record-title"
-                type="text"
-                value={recordTitle}
-                onChange={(e) => setRecordTitle(e.target.value)}
-                placeholder="เช่น บูสต์โพสต์ TikTok แคมเปญ 10.10, ค่าเช่าโกดัง"
-                className="h-9 text-xs border-slate-200"
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="record-note"
-                className="text-xs font-medium text-slate-500"
-              >
-                หมายเหตุเพิ่มเติม
-              </label>
-              <Input
-                id="record-note"
-                type="text"
-                value={recordNote}
-                onChange={(e) => setRecordNote(e.target.value)}
-                placeholder="เช่น เลขที่บิล/ใบเสร็จ หรือหมายเหตุอื่น"
-                className="h-9 text-xs border-slate-200"
-              />
-            </div>
-
-            <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2.5 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 px-4 text-xs font-semibold rounded-lg bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                onClick={() => setAddRecordOpen(false)}
-                disabled={savingRecord}
-              >
-                ยกเลิก
-              </Button>
-              <Button
-                type="submit"
-                className="h-9 px-4 text-xs font-bold rounded-lg bg-[#fe2c55] hover:bg-[#e0264b] text-white"
-                disabled={savingRecord}
-              >
-                {savingRecord ? (
-                  <>
-                    <Loader2Icon className="mr-2 size-4 animate-spin" />
-                    กำลังบันทึก...
-                  </>
-                ) : (
-                  "บันทึกรายการ"
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Dialog: Printable Payment Voucher (A4) */}
+      <ExpenseVoucherDialog
+        open={voucherOpen}
+        onOpenChange={setVoucherOpen}
+        record={voucherRecord}
+        seller={seller}
+      />
 
       {/* Sheet: Month Detail List */}
       <Sheet open={detailSheetOpen} onOpenChange={setDetailSheetOpen}>
@@ -1892,13 +1781,10 @@ export function ExpensesManager({
               size="sm"
               className="w-full gap-1.5 text-xs font-bold bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-2xs"
               onClick={() => {
-                if (sheetYearMonth) {
-                  setRecordDate(`${sheetYearMonth}-01`);
-                }
-                if (sheetCategoryId) {
-                  setRecordCategoryId(sheetCategoryId);
-                }
-                setAddRecordOpen(true);
+                openCreateRecordModal({
+                  entryDate: sheetYearMonth ? `${sheetYearMonth}-01` : undefined,
+                  categoryId: sheetCategoryId ?? undefined,
+                });
               }}
             >
               <PlusIcon className="size-4 text-[#fe2c55]" />

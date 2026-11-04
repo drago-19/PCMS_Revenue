@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-04-v39";
+const SCHEMA_VERSION = "2026-11-04-v41";
 
 export type { CompanyId };
 
@@ -790,6 +790,32 @@ CREATE TABLE IF NOT EXISTS expense_records (
 CREATE INDEX IF NOT EXISTS ix_expense_records_ym ON expense_records(year_month);
 CREATE INDEX IF NOT EXISTS ix_expense_records_date ON expense_records(entry_date DESC);
 CREATE INDEX IF NOT EXISTS ix_expense_records_cat ON expense_records(category_id);
+
+ALTER TABLE expense_categories ADD COLUMN IF NOT EXISTS account_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS document_no TEXT NOT NULL DEFAULT '';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS subtotal_amount DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS vat_type TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS vat_amount DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS wht_rate DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS wht_amount DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS net_paid_amount DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS vendor_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS vendor_tax_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS tax_invoice_no TEXT NOT NULL DEFAULT '';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'paid';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'transfer';
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS attachment_url TEXT;
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS attachment_name TEXT;
+ALTER TABLE expense_records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+UPDATE expense_records
+SET document_no = 'EXP' || REPLACE(entry_date, '-', '') || LPAD(id::text, 4, '0'),
+    subtotal_amount = CASE WHEN subtotal_amount = 0 AND amount > 0 THEN amount ELSE subtotal_amount END,
+    net_paid_amount = CASE WHEN net_paid_amount = 0 AND amount > 0 THEN amount ELSE net_paid_amount END
+WHERE document_no = '' OR document_no IS NULL;
+
+CREATE INDEX IF NOT EXISTS ix_expense_records_status ON expense_records(payment_status, entry_date DESC);
+CREATE INDEX IF NOT EXISTS ix_expense_records_doc_no ON expense_records(document_no);
 
 CREATE OR REPLACE FUNCTION prevent_audit_log_mutation()
 RETURNS TRIGGER AS $$

@@ -133,8 +133,17 @@ export function NavigationProgress() {
     }
 
     function updateScrollbarWidthVar() {
-      const sbWidth = window.innerWidth - document.documentElement.clientWidth;
-      if (sbWidth > 0 && !document.body.hasAttribute("data-scroll-locked")) {
+      if (document.body.hasAttribute("data-scroll-locked")) return;
+      let sbWidth = window.innerWidth - document.documentElement.clientWidth;
+      if (sbWidth <= 0) {
+        const probe = document.createElement("div");
+        probe.style.cssText =
+          "position:fixed;top:-9999px;width:100px;height:100px;overflow:scroll;visibility:hidden;pointer-events:none;";
+        document.body.appendChild(probe);
+        sbWidth = probe.offsetWidth - probe.clientWidth;
+        document.body.removeChild(probe);
+      }
+      if (sbWidth >= 0) {
         document.documentElement.style.setProperty(
           "--app-scrollbar-width",
           `${sbWidth}px`,

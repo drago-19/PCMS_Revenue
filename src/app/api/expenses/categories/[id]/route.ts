@@ -24,7 +24,7 @@ export async function PUT(
   let body: Record<string, unknown>;
   try {
     const raw = await request.text();
-    if (raw.length > 4096) {
+    if (raw.length > 8192) {
       return Response.json(
         { error: "ข้อมูลคำขอมีขนาดใหญ่เกินกำหนด", requestId: auth.requestId },
         { status: 413, headers: { "x-request-id": auth.requestId } },
@@ -40,6 +40,8 @@ export async function PUT(
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const color = typeof body.color === "string" ? body.color.trim() : undefined;
+  const accountCode =
+    typeof body.accountCode === "string" ? body.accountCode.trim() : undefined;
 
   if (!name) {
     return Response.json(
@@ -49,7 +51,7 @@ export async function PUT(
   }
 
   try {
-    const updated = await updateExpenseCategory(id, name, color);
+    const updated = await updateExpenseCategory(id, name, color, accountCode);
     if (!updated) {
       return Response.json(
         { error: "ไม่พบคอลัมน์รายจ่ายที่ต้องการแก้ไข", requestId: auth.requestId },
@@ -70,7 +72,10 @@ export async function PUT(
         error: isDuplicate ? "มีชื่อคอลัมน์รายจ่ายนี้อยู่ในระบบแล้ว" : msg,
         requestId: auth.requestId,
       },
-      { status: isDuplicate ? 409 : 500, headers: { "x-request-id": auth.requestId } },
+      {
+        status: isDuplicate ? 409 : 500,
+        headers: { "x-request-id": auth.requestId },
+      },
     );
   }
 }
