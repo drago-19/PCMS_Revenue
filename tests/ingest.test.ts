@@ -893,7 +893,14 @@ test("normalizeSellerSettings, buildInvoice VAT base toggle, and getOrderLinkSta
   assert.equal(invZeroRefunded.total, 0);
 
   // Link status classification
-  assert.equal(getOrderLinkStatus(sampleRow as never), "linked");
+  assert.equal(getOrderLinkStatus(sampleRow as never), "missing_items");
+  assert.equal(
+    getOrderLinkStatus({
+      ...sampleRow,
+      productDetail: "D9832 · ชุดราตรี × 1",
+    } as never),
+    "linked",
+  );
   assert.equal(
     getOrderLinkStatus({ ...sampleRow, orderCode: null } as never),
     "unlinked",
@@ -3216,8 +3223,9 @@ test("buildOmsOrderUid prevents cross-month Shipnity order_code collisions (e.g.
   const breakdownSum = diffLines.reduce((acc, l) => acc + l.amount, 0);
   assert.equal(2580 + breakdownSum, diffShippingTiktokInvoice.receiptTotal);
 
-  // 6. Verify Facebook OMS orders behave identically to Shopee OMS orders (both "facebook" and "Facebook Live" normalize to "Facebook")
-  //    AND unpaid/unshipped/zero-sales orders (e.g. CZ79 with paidDate='-' or BO15 with trackingNo='-' & printedDate='-') are filtered out.
+  // 6. Verify Facebook OMS orders normalize "facebook" and "Facebook Live" to "Facebook"
+  //    AND unpaid/zero-sales orders (e.g. CZ79 with paidDate='-' or SX16 with salesAmount=0) are filtered out,
+  //    while paid orders with salesAmount > 0 (including those without trackingNo like BO15) are included.
   const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
   const { getOrderLinkStatus } = await import("../src/lib/queries");
   const fbOrdersCsv = [
@@ -3788,7 +3796,7 @@ test("Facebook zero-product-price exchange orders (link_priority = 3) are exclud
 test("isOrderEligibleForInvoice restricts tax invoice printing strictly to complete data and normal sales bills", async () => {
   const { isOrderEligibleForInvoice } = await import("../src/lib/invoice");
 
-  // 1. Normal linked TikTok order with settlement: eligible
+  // 1. Normal linked TikTok order with settlement + File 2 items: eligible
   assert.equal(
     isOrderEligibleForInvoice({
       channel: "TikTok",
@@ -3796,9 +3804,33 @@ test("isOrderEligibleForInvoice restricts tax invoice printing strictly to compl
       income: 1432,
       payout: 1300,
       orderCode: "TT101",
-      productDetail: "ชุดนอนเด็ก",
+      productDetail: "D9832 · ชุดนอนเด็ก × 1",
     }),
     true,
+  );
+
+  // 1b. TikTok order with settlement + orderCode, but missing File 2 items ('/' or raw numeric ID): ineligible
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ",
+      income: 1432,
+      payout: 1300,
+      orderCode: "TT101",
+      productDetail: "/",
+    }),
+    false,
+  );
+  assert.equal(
+    isOrderEligibleForInvoice({
+      channel: "TikTok",
+      transactionType: "คำสั่งซื้อ",
+      income: 1432,
+      payout: 1300,
+      orderCode: "TT101",
+      productDetail: "1729485938495839485 * 1",
+    }),
+    false,
   );
 
   // 2. TikTok OMS placeholder (no settlement yet): ineligible
@@ -4102,6 +4134,888 @@ test("LINE OA 2-file comparison: parses shifted sales/profit row (FZI72), blank 
   assert.equal(ab001.salesAmount, 266);
   assert.equal(ab001.profitAmount, 266);
 });
+
+test("reconcileCrossFileOrderUids merges an order initially imported without tracking_no with a subsequent items file that includes tracking_no", async () => {
+  const { query, withTransaction } = await import("../src/lib/db");
+  const {
+    saveOmsOrdersBatch,
+    saveOmsItemsBatch,
+    reconcileAndSyncThreeFiles,
+  } = await import("../src/lib/ingest/import-service");
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+
+  // 1. Order file (like line_ปี69.xlsx) without tracking number -> order_uid = "TEST_AB99|2026-09|2026-09-12"
+  const orderXlsx = await buildXlsx([
+    {
+      name: "line",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อ",
+          "เบอร์โทร",
+          "ขนส่ง",
+          "ค่าส่งที่เก็บลูกค้า",
+          "ค่าส่งที่ร้านจ่าย",
+          "เลขพัสดุ",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+        ],
+        [
+          "TEST_AB99",
+          "Line OA",
+          "ลูกค้าทดสอบ",
+          null,
+          "J&T Express",
+          22,
+          0,
+          null,
+          "12/09/2026",
+          "12/09/2026",
+          3,
+          139,
+          null,
+        ],
+      ],
+    },
+  ]);
+
+  // 2. Subsequent Items file (oms_items) WITH tracking number -> order_uid = "TEST_AB99|2026-09|JTTH999888777"
+  const itemsXlsx = await buildXlsx([
+    {
+      name: "items",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "รหัสสินค้า",
+          "ชื่อสินค้า",
+          "ราคา",
+          "จำนวน",
+          "ยอดขายออเดอร์",
+          "ค่าส่ง",
+          "ผู้ส่ง",
+          "ชื่อลูกค้า",
+          "ที่อยู่",
+          "เบอร์โทร",
+          "วันที่โอน",
+          "วันที่สร้าง",
+          "ขนส่ง",
+          "ช่องทาง",
+          "เลขพัสดุ",
+        ],
+        [
+          "TEST_AB99",
+          "SKU-LINE-01",
+          "ชุดเซตเสื้อยืดเด็ก (120)",
+          50,
+          3,
+          139,
+          22,
+          "Kissi Studio",
+          "ลูกค้าทดสอบ",
+          "กรุงเทพฯ 10110",
+          "0812345678",
+          "12/09/2026",
+          "12/09/2026",
+          "J&T Express",
+          "Line OA",
+          "JTTH999888777",
+        ],
+      ],
+    },
+  ]);
+
+  const parsedOrder = await detectAndParseOmsInput(orderXlsx);
+  const parsedItems = await detectAndParseOmsInput(itemsXlsx);
+  assert.ok(parsedOrder && parsedOrder.fileType === "oms_orders");
+  assert.ok(parsedItems && parsedItems.fileType === "oms_items");
+  assert.equal(parsedOrder.orders[0]!.orderUid, "TEST_AB99|2026-09|2026-09-12");
+  assert.equal(parsedItems.items[0]!.orderUid, "TEST_AB99|2026-09|JTTH999888777");
+
+  try {
+    await withTransaction(async (client) => {
+      const imp1 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('test_line_orders.xlsx', 'hash_test_line_999901', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_orders')
+         RETURNING id`,
+        [],
+        client,
+      );
+      const imp2 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('test_line_items.xlsx', 'hash_test_line_999902', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_items')
+         RETURNING id`,
+        [],
+        client,
+      );
+      const impId1 = Number(imp1[0]!.id);
+      const impId2 = Number(imp2[0]!.id);
+
+      // Step A: Save order without tracking number first
+      await saveOmsOrdersBatch(parsedOrder.orders, impId1, client);
+      await reconcileAndSyncThreeFiles(client, impId1, new Date().toISOString());
+
+      const beforeItems = await query<{
+        external_id: string;
+        oms_order_uid: string;
+        product_detail: string | null;
+        shop_name: string | null;
+      }>(
+        `SELECT external_id, oms_order_uid, product_detail, shop_name
+         FROM transactions WHERE order_code = 'TEST_AB99'`,
+        [],
+        client,
+      );
+      assert.equal(beforeItems.length, 1);
+      assert.equal(beforeItems[0]!.product_detail, null);
+
+      // Step B: Later upload items file that contains a tracking number
+      await saveOmsItemsBatch(parsedItems.items, impId2, client);
+      await reconcileAndSyncThreeFiles(client, impId2, new Date().toISOString());
+
+      const afterItems = await query<{
+        external_id: string;
+        oms_order_uid: string;
+        product_detail: string | null;
+        shop_name: string | null;
+        income: string | number;
+      }>(
+        `SELECT external_id, oms_order_uid, product_detail, shop_name, income
+         FROM transactions WHERE order_code = 'TEST_AB99'`,
+        [],
+        client,
+      );
+      // Must NOT create duplicate bill rows; must merge items, tracking_no, and shop_name into the original bill!
+      assert.equal(afterItems.length, 1);
+      assert.equal(afterItems[0]!.oms_order_uid, "TEST_AB99|2026-09|2026-09-12");
+      assert.equal(
+        afterItems[0]!.product_detail,
+        "SKU-LINE-01 · ชุดเซตเสื้อยืดเด็ก (120) × 3",
+      );
+      assert.equal(afterItems[0]!.shop_name, "Kissi Studio");
+      assert.equal(Number(afterItems[0]!.income), 139);
+
+      const mergedOmsOrder = await query<{
+        order_uid: string;
+        tracking_no: string | null;
+        shop_name: string | null;
+        customer_phone: string | null;
+      }>(
+        `SELECT order_uid, tracking_no, shop_name, customer_phone
+         FROM oms_orders WHERE order_code = 'TEST_AB99'`,
+        [],
+        client,
+      );
+      assert.equal(mergedOmsOrder.length, 1);
+      assert.equal(mergedOmsOrder[0]!.tracking_no, "JTTH999888777");
+      assert.equal(mergedOmsOrder[0]!.shop_name, "Kissi Studio");
+      assert.equal(mergedOmsOrder[0]!.customer_phone, "0812345678");
+
+      const invReg = await query<{
+        invoice_no: string;
+        channel: string;
+        status: string;
+      }>(
+        `SELECT invoice_no, channel, status
+         FROM invoice_registry WHERE order_id = $1`,
+        [afterItems[0]!.external_id],
+        client,
+      );
+      assert.equal(invReg.length, 1);
+      assert.equal(invReg[0]!.channel, "LINE");
+      assert.equal(invReg[0]!.status, "active");
+      assert.match(invReg[0]!.invoice_no, /^SEQ\/LINE\/2609\//);
+
+      throw new Error("ROLLBACK_TEST_ONLY");
+    });
+  } catch (err) {
+    if (!(err instanceof Error && err.message === "ROLLBACK_TEST_ONLY")) {
+      throw err;
+    }
+  }
+});
+
+test("seeheng company schema does not inject hardcoded Kiddee Shop / Kissi Studio tabs when empty, and dynamically shows uploaded shop names", async () => {
+  const { withTransaction } = await import("../src/lib/db");
+  const { listBills, getDailyUploadCompleteness, getOverallStats } = await import(
+    "../src/lib/queries"
+  );
+
+  // Test inside an isolated temporary schema inside a rolled-back transaction (NEVER touch real seeheng or public rows)
+  try {
+    await withTransaction(async (client) => {
+      await client.query("CREATE SCHEMA test_seeheng_shops");
+      await client.query("SET LOCAL search_path TO test_seeheng_shops, public");
+      for (const table of [
+        "imports",
+        "transactions",
+        "oms_orders",
+        "oms_order_items",
+        "daily_summaries",
+        "sku_summaries",
+        "invoice_registry",
+        "invoice_registry_audit",
+        "app_settings",
+      ]) {
+        await client.query(
+          `CREATE TABLE test_seeheng_shops.${table} (LIKE public.${table} INCLUDING ALL)`,
+        );
+      }
+
+      // 1. When schema has 0 orders, shopCounts and availableShops must NOT contain Kiddee Shop or Kissi Studio
+      const emptyBills = await listBills({ page: 1, pageSize: 20 }, client);
+      assert.deepEqual(Object.keys(emptyBills.shopCounts), ["all"]);
+      assert.equal(emptyBills.shopCounts.all, 0);
+      assert.equal(emptyBills.shopCounts["Kiddee Shop"], undefined);
+      assert.equal(emptyBills.shopCounts["Kissi Studio"], undefined);
+
+      const emptyCompleteness = await getDailyUploadCompleteness(
+        { year: 2026 },
+        client,
+      );
+      assert.deepEqual(emptyCompleteness.availableShops, []);
+
+      // 2. When seeheng uploads orders from its own shops (e.g. "Seeheng Official", "Seeheng Wholesale"), they appear dynamically
+      const imp = await client.query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('seeheng_test.xlsx', 'hash_seeheng_test_001', 100, now(), 'upload', 'ok', 2, 2, 2, 'oms_orders')
+         RETURNING id`,
+      );
+      const impId = Number(imp.rows[0]!.id);
+
+      await client.query(
+        `INSERT INTO transactions (
+          import_id, external_id, transaction_type, is_order, created_date, paid_date,
+          currency, income, fee_total, adjustment, payout, channel, order_code, shop_name,
+          checks_json, warnings_json, normalized_json, created_at
+        ) VALUES
+          ($1, 'SH-ORD-01', 'คำสั่งซื้อ', 1, '2026-10-05', '2026-10-05', 'THB', 500, -20, 0, 480, 'TikTok', 'SH01', 'Seeheng Official', '{"ok":true}', '[]', '{"fields":{"incomeTotal":500,"feeTotal":-20,"payout":480}}', now()),
+          ($1, 'SH-ORD-02', 'คำสั่งซื้อ (OMS)', 1, '2026-10-05', '2026-10-05', 'THB', 900, -30, 0, 870, 'TikTok', 'SH02', 'Seeheng Wholesale', '{"ok":true}', '[]', '{"fields":{"incomeTotal":900,"feeTotal":-30,"payout":870}}', now())`,
+        [impId],
+      );
+
+      const billsRes = await listBills({ page: 1, pageSize: 20 }, client);
+      assert.equal(billsRes.shopCounts.all, 2);
+      assert.equal(billsRes.shopCounts["Seeheng Official"], 1);
+      assert.equal(billsRes.shopCounts["Seeheng Wholesale"], 1);
+      assert.equal(billsRes.shopCounts["Kiddee Shop"], undefined);
+      assert.equal(billsRes.shopCounts["Kissi Studio"], undefined);
+
+      const stats = await getOverallStats({ shop: "all" }, client);
+      const shopNames = (stats.shopSummaries ?? [])
+        .map((s) => s.shopName)
+        .sort();
+      assert.deepEqual(shopNames, ["Seeheng Official", "Seeheng Wholesale"]);
+
+      const completeness = await getDailyUploadCompleteness(
+        { year: 2026, month: "2026-10" },
+        client,
+      );
+      assert.deepEqual(completeness.availableShops, [
+        "Seeheng Official",
+        "Seeheng Wholesale",
+      ]);
+      const oct5 = completeness.rows.find((r) => r.date === "2026-10-05");
+      assert.ok(oct5);
+      assert.deepEqual(oct5.shopBreakdown, [
+        { shopName: "Seeheng Official", orders: 1, missingFile3: 0 },
+        { shopName: "Seeheng Wholesale", orders: 1, missingFile3: 1 },
+      ]);
+
+      throw new Error("ROLLBACK_SEEHENG_TEST");
+    });
+  } catch (err) {
+    if (!(err instanceof Error && err.message === "ROLLBACK_SEEHENG_TEST")) {
+      throw err;
+    }
+  }
+});
+
+test("TikTok & Shipnity orders missing File 2 (oms_items) get link_priority = 4 (missing_items), are excluded from linked & invoice_registry, and automatically upgrade to link_priority = 0 when File 2 is synced", async () => {
+  const { withTransaction } = await import("../src/lib/db");
+  const { listBills, getDailyUploadCompleteness } = await import(
+    "../src/lib/queries"
+  );
+  const { syncMonthlyInvoiceRegistry } = await import(
+    "../src/lib/ingest/import-service"
+  );
+
+  try {
+    await withTransaction(async (client) => {
+      await client.query("CREATE SCHEMA test_missing_file2");
+      await client.query("SET LOCAL search_path TO test_missing_file2, public");
+      for (const table of [
+        "imports",
+        "transactions",
+        "oms_orders",
+        "oms_order_items",
+        "daily_summaries",
+        "sku_summaries",
+        "invoice_registry",
+        "invoice_registry_audit",
+        "app_settings",
+      ]) {
+        await client.query(
+          `CREATE TABLE test_missing_file2.${table} (LIKE public.${table} INCLUDING ALL)`,
+        );
+      }
+
+      const imp = await client.query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('test_f1_f3.xlsx', 'hash_f1_f3_only', 100, now(), 'upload', 'ok', 3, 3, 3, 'settlement')
+         RETURNING id`,
+      );
+      const impId = Number(imp.rows[0]!.id);
+
+      // Insert 1 TikTok settled order with '/' (missing File 2), 1 TikTok settled order with '1729... * 1' (missing File 2), and 1 Shopee order with NULL product_detail (missing File 2)
+      await client.query(
+        `INSERT INTO transactions (
+          import_id, external_id, transaction_type, is_order, created_date, paid_date,
+          currency, income, fee_total, adjustment, payout, channel, order_code, oms_order_uid, product_detail,
+          checks_json, warnings_json, normalized_json, created_at
+        ) VALUES
+          ($1, '586815767644702384', 'คำสั่งซื้อ', 1, '2026-10-27', '2026-10-27', 'THB', 756.5, -200.43, 0, 556.07, 'TikTok', 'TEST_RF49', 'TEST_RF49|2026-10|TH01', '/', '{"ok":true}', '[]', '{"fields":{"incomeTotal":756.5,"feeTotal":-200.43,"payout":556.07}}', now()),
+          ($1, '586815379925862174', 'คำสั่งซื้อ', 1, '2026-10-27', '2026-10-27', 'THB', 290, -70.91, 0, 219.09, 'TikTok', 'TEST_RF47', 'TEST_RF47|2026-10|TH02', '1729485938495839485 * 1;', '{"ok":true}', '[]', '{"fields":{"incomeTotal":290,"feeTotal":-70.91,"payout":219.09}}', now()),
+          ($1, '261027SP999', 'คำสั่งซื้อ (OMS)', 1, '2026-10-27', '2026-10-27', 'THB', 500, -35, 0, 465, 'Shopee', 'TEST_RF50', 'TEST_RF50|2026-10|SP01', NULL, '{"ok":true}', '[]', '{"fields":{"incomeTotal":500,"feeTotal":-35,"payout":465}}', now())`,
+        [impId],
+      );
+
+      // Verify linkCounts before File 2: linked = 0, missingItems = 3 (TikTok = 2, Shopee = 1)
+      const beforeAll = await listBills({ channel: "all", category: "normal" }, client);
+      assert.equal(beforeAll.linkCounts.all, 3);
+      assert.equal(beforeAll.linkCounts.linked, 0);
+      assert.equal(beforeAll.linkCounts.missingItems, 3);
+
+      const beforeTikTok = await listBills(
+        { channel: "TikTok", category: "normal", linkStatus: "missing_items" },
+        client,
+      );
+      assert.equal(beforeTikTok.total, 2);
+      assert.equal(beforeTikTok.linkCounts.linked, 0);
+      assert.equal(beforeTikTok.linkCounts.missingItems, 2);
+
+      // Verify no active invoice numbers are assigned while File 2 is missing
+      await syncMonthlyInvoiceRegistry(client, impId);
+      const regBefore = await client.query(
+        `SELECT COUNT(*)::int AS cnt FROM invoice_registry WHERE status = 'active'`,
+      );
+      assert.equal(regBefore.rows[0]!.cnt, 0);
+
+      // Verify completeness report detects missingFile2Count = 3
+      const compBefore = await getDailyUploadCompleteness(
+        { year: 2026, month: "2026-10" },
+        client,
+      );
+      assert.equal(compBefore.summary.totalMissingFile2, 3);
+      assert.equal(compBefore.summary.completeDays, 0);
+
+      // Now simulate File 2 (oms_items) sync into product_detail (with ' · ')
+      await client.query(
+        `UPDATE transactions
+         SET product_detail = 'D999 · เสื้อเชิ้ต × 1'
+         WHERE import_id = $1`,
+        [impId],
+      );
+      await syncMonthlyInvoiceRegistry(client, impId);
+
+      // Verify after File 2: linked = 3, missingItems = 0, active invoices = 3, missingFile2 = 0
+      const afterAll = await listBills({ channel: "all", category: "normal" }, client);
+      assert.equal(afterAll.linkCounts.linked, 3);
+      assert.equal(afterAll.linkCounts.missingItems, 0);
+
+      const regAfter = await client.query(
+        `SELECT COUNT(*)::int AS cnt FROM invoice_registry WHERE status = 'active'`,
+      );
+      assert.equal(regAfter.rows[0]!.cnt, 3);
+
+      const compAfter = await getDailyUploadCompleteness(
+        { year: 2026, month: "2026-10" },
+        client,
+      );
+      assert.equal(compAfter.summary.totalMissingFile2, 0);
+
+      throw new Error("ROLLBACK_MISSING_FILE2_TEST");
+    });
+  } catch (err) {
+    if (!(err instanceof Error && err.message === "ROLLBACK_MISSING_FILE2_TEST")) {
+      throw err;
+    }
+  }
+});
+
+test("listBills and getOverallStats return detailed nonOrderBreakdown (platform compensations vs GMV ad deductions) for StatBreakdownDialog", async () => {
+  const { withTransaction } = await import("../src/lib/db");
+  const { listBills, getOverallStats } = await import("../src/lib/queries");
+
+  try {
+    await withTransaction(async (client) => {
+      await client.query(`CREATE SCHEMA IF NOT EXISTS test_stat_breakdown`);
+      await client.query(`SET LOCAL search_path TO test_stat_breakdown, public`);
+      for (const table of [
+        "imports",
+        "transactions",
+        "oms_orders",
+        "oms_order_items",
+        "daily_summaries",
+        "sku_summaries",
+        "invoice_registry",
+        "invoice_registry_audit",
+        "app_settings",
+      ]) {
+        await client.query(
+          `CREATE TABLE test_stat_breakdown.${table} (LIKE public.${table} INCLUDING ALL)`,
+        );
+      }
+
+      const imp = await client.query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('test_breakdown.xlsx', 'hash_breakdown_test', 100, now(), 'upload', 'ok', 4, 4, 2, 'settlement')
+         RETURNING id`,
+      );
+      const impId = Number(imp.rows[0]!.id);
+
+      await client.query(
+        `INSERT INTO transactions (
+          import_id, external_id, transaction_type, is_order, created_date, paid_date,
+          currency, income, fee_total, adjustment, payout, channel, order_code, product_detail,
+          checks_json, warnings_json, normalized_json, created_at
+        ) VALUES
+          ($1, '580001', 'คำสั่งซื้อ', 1, '2026-10-01', '2026-10-02', 'THB', 1000, -100, 0, 900, 'TikTok', 'ORD1', 'SKU1 · เสื้อ × 1', '{"ok":true}', '[]', '{"fields":{"incomeTotal":1000,"feeTotal":-100,"payout":900}}', now()),
+          ($1, '580002', 'คำสั่งซื้อ', 1, '2026-10-01', '2026-10-02', 'THB', -100, -50, 0, -150, 'TikTok', 'ORD2', 'SKU1 · เสื้อ × 1', '{"ok":true}', '[]', '{"fields":{"incomeTotal":-100,"feeTotal":-50,"payout":-150}}', now()),
+          ($1, 'COMP01', 'การชดเชยจากแพลตฟอร์ม', 0, '2026-10-01', '2026-10-02', 'THB', 0, 0, 50, 50, 'TikTok', NULL, NULL, '{"ok":true}', '[]', '{"fields":{"payout":50}}', now()),
+          ($1, 'GMV01', 'การชำระเงินด้วย GMV สำหรับโฆษณา TikTok', 0, '2026-10-01', '2026-10-02', 'THB', 0, 0, -300, -300, 'TikTok', NULL, NULL, '{"ok":true}', '[]', '{"fields":{"payout":-300}}', now())`,
+        [impId],
+      );
+
+      await client.query(
+        `INSERT INTO daily_summaries (
+          paid_date, transaction_count, order_count, order_payout, order_income, order_fees,
+          other_count, other_payout, total_payout, adjustment, tiktok_count, shopee_count,
+          facebook_count, lazada_count, line_count, other_channel_count, compensation_count,
+          linked_count, oms_only_count, unlinked_count, mismatch_count, shipping_positive, shipping_negative
+        ) VALUES (
+          '2026-10-02', 4, 2, 750, 900, -150,
+          2, -250, 500, -250, 2, 0,
+          0, 0, 0, 0, 1,
+          2, 0, 0, 0, 0, 0
+        )`,
+      );
+
+      const billsRes = await listBills({ channel: "all", category: "normal" }, client);
+      assert.equal(billsRes.summary.payout, 950); // 900 normal order + 50 compensation
+      assert.equal(billsRes.categoryCounts.refundFeePayout, -150);
+      assert.equal(billsRes.periodNetSummary.orderPayout, 750); // 900 - 150
+      assert.equal(billsRes.periodNetSummary.compensationCount, 1);
+      assert.equal(billsRes.periodNetSummary.compensationPayout, 50);
+      assert.equal(billsRes.periodNetSummary.otherDeductionCount, 1);
+      assert.equal(billsRes.periodNetSummary.otherDeductionPayout, -300);
+      assert.equal(billsRes.periodNetSummary.otherPayout, -250); // +50 - 300
+      assert.equal(billsRes.periodNetSummary.totalPayout, 500); // 750 - 250
+      assert.equal(billsRes.periodNetSummary.nonOrderBreakdown?.length, 2);
+
+      const dashStats = await getOverallStats({ shop: "all" }, client);
+      assert.equal(dashStats.totalPayout, 800); // 900 - 150 + 50
+      assert.equal(dashStats.channelSummaries?.length, 1);
+      assert.equal(dashStats.channelSummaries?.[0]?.normalPayout, 950);
+      assert.equal(dashStats.channelSummaries?.[0]?.refundPayout, -150);
+      assert.equal(dashStats.channelSummaries?.[0]?.compensationPayout, 50);
+      assert.equal(dashStats.nonOrderBreakdown?.length, 2);
+
+      throw new Error("ROLLBACK_STAT_BREAKDOWN_TEST");
+    });
+  } catch (err) {
+    if (!(err instanceof Error && err.message === "ROLLBACK_STAT_BREAKDOWN_TEST")) {
+      throw err;
+    }
+  }
+});
+
+test("reconcileAndSyncThreeFiles is 100% order-independent across all upload permutations of File 1 (Orders), File 2 (Items), and File 3 (Settlement)", async () => {
+  const { query, withTransaction } = await import("../src/lib/db");
+  const {
+    saveOmsOrdersBatch,
+    saveOmsItemsBatch,
+    reconcileAndSyncThreeFiles,
+  } = await import("../src/lib/ingest/import-service");
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+
+  const orderXlsx = await buildXlsx([
+    {
+      name: "orders",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อ",
+          "เบอร์โทร",
+          "ขนส่ง",
+          "ค่าส่งที่เก็บลูกค้า",
+          "ค่าส่งที่ร้านจ่าย",
+          "เลขพัสดุ",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "เลขที่บน Marketplace",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+        ],
+        [
+          "PERM_TT01",
+          "TikTok",
+          "ลูกค้า TikTok",
+          "0891112222",
+          "J&T Express",
+          35,
+          35,
+          "JTTH_PERM_001",
+          "27/10/2026",
+          "27/10/2026",
+          "589999000011112222",
+          1,
+          756.5,
+          556.07,
+        ],
+        [
+          "PERM_SP01",
+          "Shopee",
+          "ลูกค้า Shopee",
+          "0893334444",
+          "Flash Express",
+          0,
+          0,
+          "TH_PERM_SP001",
+          "27/10/2026",
+          "27/10/2026",
+          "261027PERM_SP01",
+          2,
+          450,
+          320,
+        ],
+        [
+          "PERM_FB01",
+          "Facebook",
+          "ลูกค้า Facebook",
+          "0895556666",
+          "J&T Express",
+          30,
+          25,
+          "JT_PERM_FB001",
+          "27/10/2026",
+          "27/10/2026",
+          "-",
+          1,
+          330,
+          205,
+        ],
+        [
+          "PERM_LN01",
+          "Line OA",
+          "ลูกค้า LINE",
+          "0897778888",
+          "Flash Express",
+          0,
+          0,
+          null,
+          "27/10/2026",
+          "27/10/2026",
+          "-",
+          1,
+          590,
+          490,
+        ],
+        [
+          "PERM_OT01",
+          "อื่นๆ",
+          "ลูกค้า Other",
+          "0899990000",
+          "Kerry",
+          0,
+          0,
+          "KR_PERM_OT001",
+          "27/10/2026",
+          "27/10/2026",
+          "-",
+          1,
+          250,
+          150,
+        ],
+      ],
+    },
+  ]);
+
+  const itemsXlsx = await buildXlsx([
+    {
+      name: "items",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "รหัสสินค้า",
+          "ชื่อสินค้า",
+          "ราคา",
+          "จำนวน",
+          "ยอดขายออเดอร์",
+          "ค่าส่ง",
+          "ผู้ส่ง",
+          "ชื่อลูกค้า",
+          "ที่อยู่",
+          "เบอร์โทร",
+          "วันที่โอน",
+          "วันที่สร้าง",
+          "ขนส่ง",
+          "ช่องทาง",
+          "เลขพัสดุ",
+        ],
+        [
+          "PERM_TT01",
+          "H-2PJ-12-M",
+          "ชุดนอน Jessie ริ้วชมพู (M)",
+          756.5,
+          1,
+          756.5,
+          35,
+          "Hygge.H",
+          "ลูกค้า TikTok",
+          "กรุงเทพฯ 10110",
+          "0891112222",
+          "27/10/2026",
+          "27/10/2026",
+          "J&T Express",
+          "TikTok",
+          "JTTH_PERM_001",
+        ],
+        [
+          "PERM_SP01",
+          "H-1SW-09",
+          "เสื้อไหมพรม Hygge",
+          225,
+          2,
+          450,
+          0,
+          "Hygge.H",
+          "ลูกค้า Shopee",
+          "เชียงใหม่ 50000",
+          "0893334444",
+          "27/10/2026",
+          "27/10/2026",
+          "Flash Express",
+          "Shopee",
+          "TH_PERM_SP001",
+        ],
+        [
+          "PERM_FB01",
+          "H-FB-01",
+          "กางเกงยีนส์ขายาว",
+          300,
+          1,
+          330,
+          30,
+          "Hygge.H",
+          "ลูกค้า Facebook",
+          "นนทบุรี 11000",
+          "0895556666",
+          "27/10/2026",
+          "27/10/2026",
+          "J&T Express",
+          "Facebook",
+          "JT_PERM_FB001",
+        ],
+        [
+          "PERM_LN01",
+          "H-LN-01",
+          "เดรสลูกไม้ขาว",
+          590,
+          1,
+          590,
+          0,
+          "Hygge.H",
+          "ลูกค้า LINE",
+          "ภูเก็ต 83000",
+          "0897778888",
+          "27/10/2026",
+          "27/10/2026",
+          "Flash Express",
+          "Line OA",
+          "FL_PERM_LN001",
+        ],
+        [
+          "PERM_OT01",
+          "H-OT-01",
+          "หมวกบักเก็ต",
+          250,
+          1,
+          250,
+          0,
+          "Hygge.H",
+          "ลูกค้า Other",
+          "ขอนแก่น 40000",
+          "0899990000",
+          "27/10/2026",
+          "27/10/2026",
+          "Kerry",
+          "อื่นๆ",
+          "KR_PERM_OT001",
+        ],
+      ],
+    },
+  ]);
+
+  const parsedOrder = await detectAndParseOmsInput(orderXlsx);
+  const parsedItems = await detectAndParseOmsInput(itemsXlsx);
+  assert.ok(parsedOrder && parsedOrder.fileType === "oms_orders");
+  assert.ok(parsedItems && parsedItems.fileType === "oms_items");
+
+  const permutations: Array<Array<"orders" | "items" | "settlement">> = [
+    ["orders", "settlement", "items"], // File 1 -> File 3 -> File 2 (the exact seeheng sequence!)
+    ["items", "orders", "settlement"], // File 2 -> File 1 -> File 3
+    ["settlement", "items", "orders"], // File 3 -> File 2 -> File 1
+  ];
+
+  for (let pIdx = 0; pIdx < permutations.length; pIdx++) {
+    const seq = permutations[pIdx]!;
+    const schemaName = `test_perm_${pIdx}`;
+    try {
+      await withTransaction(async (client) => {
+        await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+        await client.query(`SET LOCAL search_path TO ${schemaName}, public`);
+        for (const table of [
+          "imports",
+          "transactions",
+          "oms_orders",
+          "oms_order_items",
+          "products",
+          "daily_summaries",
+          "sku_summaries",
+          "invoice_registry",
+          "invoice_registry_audit",
+          "app_settings",
+        ]) {
+          await client.query(
+            `CREATE TABLE ${schemaName}.${table} (LIKE public.${table} INCLUDING ALL)`,
+          );
+        }
+
+        for (const step of seq) {
+          const imp = await query<{ id: number }>(
+            `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+             VALUES ($1, $2, 100, now(), 'upload', 'ok', 2, 2, 2, $3)
+             RETURNING id`,
+            [`perm_${pIdx}_${step}.xlsx`, `hash_perm_${pIdx}_${step}`, step === "orders" ? "oms_orders" : step === "items" ? "oms_items" : "settlement"],
+            client,
+          );
+          const impId = Number(imp[0]!.id);
+
+          if (step === "orders") {
+            await saveOmsOrdersBatch(parsedOrder.orders, impId, client);
+            await reconcileAndSyncThreeFiles(client, impId, new Date().toISOString());
+          } else if (step === "items") {
+            await saveOmsItemsBatch(parsedItems.items, impId, client);
+            await reconcileAndSyncThreeFiles(client, impId, new Date().toISOString());
+          } else {
+            // Simulate importWorkbook for TikTok Settlement: delete any OMS placeholder row with the same external_id first, then insert the real Settlement row
+            await query(
+              `DELETE FROM transactions WHERE external_id = '589999000011112222' AND is_order = 1`,
+              [],
+              client,
+            );
+            await query(
+              `INSERT INTO transactions (
+                 import_id, external_id, transaction_type, is_order, created_date, paid_date,
+                 currency, income, fee_total, adjustment, payout, product_detail, channel,
+                 checks_json, warnings_json, normalized_json, created_at
+               ) VALUES (
+                 $1, '589999000011112222', 'คำสั่งซื้อ', 1, '2026-10-27', '2026-10-31',
+                 'THB', 756.5, -200.43, 0, 556.07, '/', 'TikTok',
+                 '{"incomeDiff":0,"feeDiff":0,"payoutDiff":0}', '[]',
+                 '{"fields":{"orderId":"589999000011112222","incomeTotal":756.5,"feeTotal":-200.43,"payout":556.07}}',
+                 now()
+               )`,
+              [impId],
+              client,
+            );
+            await reconcileAndSyncThreeFiles(client, impId, new Date().toISOString());
+          }
+        }
+
+        // Verify final state is 100% identical regardless of upload order!
+        const txs = await query<{
+          external_id: string;
+          channel: string;
+          order_code: string | null;
+          oms_order_uid: string | null;
+          shop_name: string | null;
+          product_detail: string | null;
+          link_priority: number;
+          payout: number;
+        }>(
+          `SELECT external_id, channel, order_code, oms_order_uid, shop_name, product_detail, link_priority, payout
+           FROM transactions
+           WHERE is_order = 1
+           ORDER BY channel ASC`,
+          [],
+          client,
+        );
+
+        assert.equal(txs.length, 5, `Permutation ${seq.join("->")} must produce exactly 5 order bills across all channels`);
+
+        for (const bill of txs) {
+          assert.equal(bill.shop_name, "Hygge.H", `${bill.channel} shop_name in ${seq.join("->")}`);
+          assert.equal(Number(bill.link_priority), 0, `${bill.channel} link_priority=0 in ${seq.join("->")}`);
+          assert.ok(bill.product_detail && bill.product_detail.includes("·"), `${bill.channel} product_detail in ${seq.join("->")}`);
+        }
+
+        const spBill = txs.find((t) => t.channel === "Shopee")!;
+        assert.equal(spBill.order_code, "PERM_SP01", `Shopee order_code in ${seq.join("->")}`);
+        assert.equal(spBill.product_detail, "H-1SW-09 · เสื้อไหมพรม Hygge × 2", `Shopee product_detail in ${seq.join("->")}`);
+        assert.equal(Number(spBill.payout), 450, `Shopee payout in ${seq.join("->")}`);
+
+        const fbBill = txs.find((t) => t.channel === "Facebook")!;
+        assert.equal(fbBill.order_code, "PERM_FB01", `Facebook order_code in ${seq.join("->")}`);
+        assert.equal(Number(fbBill.payout), 305, `Facebook payout (330 - 25) in ${seq.join("->")}`);
+
+        const lnBill = txs.find((t) => t.channel === "LINE")!;
+        assert.equal(lnBill.order_code, "PERM_LN01", `LINE order_code (merged across missing tracking_no) in ${seq.join("->")}`);
+        assert.equal(Number(lnBill.payout), 590, `LINE payout in ${seq.join("->")}`);
+
+        const otBill = txs.find((t) => t.channel === "Other")!;
+        assert.equal(otBill.order_code, "PERM_OT01", `Other order_code in ${seq.join("->")}`);
+        assert.equal(Number(otBill.payout), 250, `Other payout in ${seq.join("->")}`);
+
+        const ttBill = txs.find((t) => t.channel === "TikTok")!;
+        assert.equal(ttBill.external_id, "589999000011112222", `TikTok external_id in ${seq.join("->")}`);
+        assert.equal(ttBill.order_code, "PERM_TT01", `TikTok order_code in ${seq.join("->")}`);
+        assert.equal(ttBill.product_detail, "H-2PJ-12-M · ชุดนอน Jessie ริ้วชมพู (M) × 1", `TikTok product_detail in ${seq.join("->")}`);
+        assert.equal(Number(ttBill.payout), 556.07, `TikTok payout in ${seq.join("->")}`);
+
+        // Verify daily_summaries linked_count is refreshed even when items is uploaded last
+        const ds = await query<{ paid_date: string; linked_count: number }>(
+          `SELECT paid_date, linked_count FROM daily_summaries ORDER BY paid_date ASC`,
+          [],
+          client,
+        );
+        const totalLinkedInDs = ds.reduce((acc, r) => acc + Number(r.linked_count), 0);
+        assert.equal(totalLinkedInDs, 5, `daily_summaries.linked_count must equal 5 in ${seq.join("->")}`);
+
+        // Verify invoice_registry assigned active invoice numbers to all 5 complete normal bills
+        const invs = await query<{ order_id: string; status: string }>(
+          `SELECT order_id, status FROM invoice_registry WHERE status = 'active'`,
+          [],
+          client,
+        );
+        assert.equal(invs.length, 5, `invoice_registry active count must equal 5 in ${seq.join("->")}`);
+
+        throw new Error("ROLLBACK_PERM_TEST");
+      });
+    } catch (err) {
+      if (!(err instanceof Error && err.message === "ROLLBACK_PERM_TEST")) {
+        throw err;
+      }
+    }
+  }
+});
+
 
 
 

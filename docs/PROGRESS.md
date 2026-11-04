@@ -3,7 +3,146 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-03)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-04)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **แก้ไขปัญหาแถบขาวด้านขวาและหน้าจอกระตุกตอนเปิดป๊อปอัป + แก้ไขปัญหาตัวหนังสือหนาแล้วค่อยบางตอนรีโหลดหน้า + เพิ่มอนิเมชั่นตัวเลขวิ่ง (`AnimatedValueText.tsx`) บนการ์ดสรุปยอด (`StatCard`), การ์ดยอดใหญ่หน้าแรก (`Hero Amount`), การ์ดเปรียบเทียบร้านค้า และป๊อปอัปสรุปที่มา (`src/app/globals.css`, `src/components/NavigationProgress.tsx`, `src/components/AnimatedValueText.tsx`, `src/components/CompactValueToggle.tsx`, `src/components/PageHeader.tsx`, `src/components/StatBreakdownDialog.tsx`, `src/components/DashboardShopComparison.tsx`, `src/app/page.tsx`, `tests/invoice-eligibility.test.ts`)**:
+    - [x] **1. แก้ไขอาการแถบขาวด้านขวาและหน้าจอขยับกระตุกเวลาเปิดป๊อปอัป (`Dialog` / `Sheet`)**:
+      - บันทึกความกว้างสกอร์บาร์จริงของหน้าต่างเบราว์เซอร์ลงตัวแปร `--app-scrollbar-width` ใน `src/components/NavigationProgress.tsx`
+      - ใน `src/app/globals.css`: กำหนด `html:has(body[data-scroll-locked]) { scrollbar-gutter: auto; }` คู่กับ `html body[data-scroll-locked] { margin-right: 0 !important; padding-right: var(--app-scrollbar-width, var(--removed-body-scroll-bar-size, 0px)) !important; }` เพื่อป้องกันไม่ให้ `react-remove-scroll` ของ Radix UI ฉีด `margin-right: 15px` ซ้ำซ้อนกับ `scrollbar-gutter: stable` ของ `html`
+      - ผลลัพธ์: เวลาเปิด-ปิดป๊อปอัปทุกจุด (`StatBreakdownDialog`, `BillPreviewDialog`, `ExcelFilePreviewDialog`, `Sheet`) เนื้อหาพื้นหลังนิ่งสนิท (`headShift = 0px`) และฉากหลังสีดำ (`DialogOverlay`) คลุมเต็มความกว้างหน้าต่าง 100% (`1280px`) โดยไม่มีแถบขาวโผล่ด้านขวาอีกต่อไป
+    - [x] **2. แก้ไขอาการตัวหนังสือเป็นตัวหนาแล้วค่อยบางตอนรีโหลดหน้าเว็บ (FOUT / Faux-Bold Shift)**:
+      - ปรับลำดับ `font-family` ใน `src/app/globals.css` ให้ขึ้นต้นด้วย `"Noto Sans Thai", "Inter"` ก่อนตัวแปร Fallback และกำหนด `font-synthesis: none;` บน `body` เพื่อป้องกันเบราว์เซอร์พอกความหนาเทียม (Synthetic Bold) หรือสลับจาก `Inter Fallback` (`Arial size-adjust: 107.12%`) ตอนรีโหลดหน้า
+    - [x] **3. เพิ่มอนิเมชั่นตัวเลขวิ่งจาก `0` → ค่าจริง (`AnimatedValueText.tsx` — ตัวเลือก A)**:
+      - สร้างคอมโพเนนต์ `AnimatedValueText` ที่ใช้ `requestAnimationFrame` (`easeOutQuart`, `duration = 650ms`) พร้อม `tabular-nums` และรองรับ `prefers-reduced-motion`
+      - แสดงผลเฉพาะจุดสำคัญตามตัวเลือก A: การ์ดสรุปยอดด้านบนทุกหน้า (`StatCard` ใน `/`, `/bills`, `/products`, `/history`, `/expenses`), ยอดโอนสุทธิขนาดใหญ่ในการ์ด Hero หน้าแรก (`.hero-amount`), การ์ดเปรียบเทียบผลประกอบการรายร้านค้า (`DashboardShopComparison.tsx`), และยอดรวมในป๊อปอัปแจกแจงที่มา (`StatBreakdownDialog.tsx`) โดยไม่แตะต้องเอกสารใบพิมพ์ (`BillDocument.tsx`, `InvoiceDocument.tsx`)
+    - [x] **4. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`66 pass, 0 fail, 2 skipped`) พร้อมเคสทดสอบใหม่ `parseAnimatedValueString และ formatAnimatedNumberFrame`
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบจริงที่ความกว้าง `360px`, `390px`, `768px`, `1280px` บน `/bills` และ `/` (`pageOverflow: false`, `headShiftBreakdown: 0`, `headShiftBill: 0`, `overlayFullWidth: true`, `childOverflow: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **นำออเดอร์ Facebook ที่ชำระเงินแล้วแต่ไม่มีเลขพัสดุใน Shipnity เข้าสู่ระบบบิล (`/bills`) ครบ 100% และปรับตัวเลขสรุประหว่าง `/bills`, `/days` และ `/` (Dashboard) ให้ตรงกันทุกจุด (`src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/db.ts`, `src/lib/queries.ts`, `src/app/bills/page.tsx`, `tests/ingest.test.ts`)**:
+    - [x] **1. แยกเงื่อนไขการนำเข้าออเดอร์ `Facebook` ออกจาก `Shopee` (`src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/db.ts` — `SCHEMA_VERSION = "2026-11-04-v38"`)**:
+      - เดิม `Facebook` ถูกผูกเงื่อนไขร่วมกับ `Shopee` ให้ต้องมี `tracking_no <> '' OR printed_date <> ''` ทำให้ออเดอร์ `Facebook` ที่ลูกค้าโอนเงินแล้วแต่แอดมินไม่ได้คีย์เลขพัสดุใน Shipnity (**`seeheng` จำนวน 13 ออเดอร์ ยอดขาย `฿106,520.00`** และ **`dragon19` จำนวน 2 ออเดอร์ ยอดขาย `฿10,019.00`**) มีอยู่ใน `oms_orders` และ `oms_order_items` แต่ไม่ถูกสร้างบิลใน `transactions`
+      - แยกเงื่อนไขตาม `AGENTS.md` Rule 3 (Strict Platform Financial Isolation):
+        - `Shopee`: คงการกรองต้องมี `sales_amount > 0`, `paid_date <> ''`, และ `(tracking_no <> '' OR printed_date <> '')`
+        - `Facebook`: ใช้เกณฑ์เดียวกับ `LINE OA` คือ `sales_amount > 0 AND paid_date IS NOT NULL AND paid_date <> ''`
+      - รัน Migration `v38` ใน `ensureSchema()` เพื่อซิงก์ออเดอร์ `Facebook` ที่ตกหล่นทั้งใน `public` (`dragon19`) และ `seeheng` เข้าสู่ `transactions`, อัปเดต `product_detail`, `daily_summaries`, และออกเลขใบกำกับภาษี (`invoice_registry`) อัตโนมัติทันที:
+        - **`dragon19`**: ออเดอร์ `Facebook` ใน `transactions` ตรงกับ `oms_orders` 100% (**`13,909` ออเดอร์ ยอดขายรวม `฿7,164,016.00`** = บิลขายปกติ `13,871` ใบ + บิลเปลี่ยนสินค้า 0 บาท `38` ใบ)
+        - **`seeheng`**: ออเดอร์ `Facebook` ใน `transactions` ตรงกับ `oms_orders` 100% (**`126` ออเดอร์ ยอดขายรวม `฿216,108.00`** = บิลขายปกติ `117` ใบ + บิลเปลี่ยนสินค้า 0 บาท `9` ใบ)
+    - [x] **2. ปรับตัวเลขสรุปยอดและจำนวนบิลระหว่าง `/bills`, `/days` และ `/` (Dashboard) ให้ตรงกัน 100% (`src/lib/queries.ts`, `src/app/bills/page.tsx`)**:
+      - ใน `getOverallStats` (`src/lib/queries.ts`): กรอง `${ORDER_LINK_PRIORITY_SQL} <> 3` บน `shopRows` และ `channelRows` เพื่อให้ผลรวม 3 หมวด (`normalCount + refundCount + zeroCount`) ในป๊อปอัปการ์ดหน้า Dashboard (`/`) ตรงกับ `stats.orderCount` และ `periodNetSummary.orderCount` ในหน้า `/bills` 100% (`dragon19 = 87,105 ใบ`, `seeheng = 41,405 ใบ`)
+      - ใน `listBills` (`src/lib/queries.ts`): จำกัดการ fallback ของ `linkCounts.compensation` ให้เฉพาะเมื่อ `category === "normal" && (channel === "all" || channel === "TikTok")` เท่านั้น และหัก `compensationPayoutFromBreakdown` ออกจาก `channelNetOrderIncome`/`channelNetOrderPayout` เมื่อคำนวณจาก `summaryIncome`/`summaryPayout`
+      - ใน `src/app/bills/page.tsx`: ปรับสูตรจำนวนใบในบรรทัด `"= สุทธิหลังหักตีกลับ (เฉพาะคำสั่งซื้อ)"` และเพิ่มบรรทัดแจกแจง `"รวมเฉพาะคำสั่งซื้อ (is_order = 1 · ตรงกับหน้าสรุปรายวัน)"` (`orderCount - compCount + noPrice`) ให้ตรงกับหน้า `/days` (`daily_summaries.order_count`: `dragon19 = 87,087 ใบ`, `seeheng = 41,361 ใบ`) เป๊ะ 100%
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `node --env-file=.env --import tsx --test tests/*.test.ts`: ผ่านครบ **67/67 เทสต์ (`65 pass, 0 fail, 2 skipped`)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบหน้า `/bills` และป๊อปอัป `StatBreakdownDialog` ที่ความกว้าง `360px`, `390px`, `768px`, `1280px` (`noHorizScroll: true`, `childOverflow: 0`, `dlgOverflow: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **ปรับปรุงระบบซิงก์ข้อมูลทุกช่องทาง (`TikTok`, `Shopee`, `Facebook`, `Lazada`, `LINE OA`, `Other`) ให้ทำงานแบบ Order-Independent 100% ไม่ว่าจะอัปโหลดไฟล์ใดก่อน-หลัง (`ไฟล์ 1: ออเดอร์ Shipnity`, `ไฟล์ 2: สินค้า Shipnity`, `ไฟล์ 3: รายได้ Settlement`) และซิงก์ข้อมูลร้าน `Hygge.H` ใน `seeheng` ครบถ้วน (`src/lib/ingest/import-service.ts`, `src/lib/db.ts`, `tests/ingest.test.ts`)**:
+    - [x] **1. แก้ไขจุดที่ทำให้การอัปโหลดไม่เรียงลำดับเกิดข้อมูลค้าง (`src/lib/ingest/import-service.ts`, `src/lib/db.ts` — `SCHEMA_VERSION = "2026-11-04-v37"`)**:
+      - **Step 5 ใน `reconcileAndSyncThreeFiles`**: ถอดเงื่อนไขจำกัด `(t.import_id = $1 OR o.import_id = $1)` ออก และให้ตรวจสอบความเปลี่ยนแปลงด้วย `IS DISTINCT FROM` โดยตรง พร้อมซิงก์ `oms_orders.shop_name` และ `transactions.shop_name` จาก `oms_order_items.sender_name` ทุกครั้งที่มีการอัปโหลดไฟล์ใดก็ตาม
+      - **Step 4 ใน `reconcileAndSyncThreeFiles`**: เพิ่ม `OR EXISTS (SELECT 1 FROM oms_order_items i WHERE i.order_uid = o.order_uid AND i.import_id = $1)` เพื่อให้กรณีที่อัปโหลดไฟล์ออเดอร์ที่ยังไม่มีเลขพัสดุก่อน แล้วอัปโหลดไฟล์สินค้าที่มีเลขพัสดุตามมาทีหลัง สร้าง/อัปเดตแถวบิลใน `transactions` ทันที
+      - **Step 0a (`reconcileCrossFileOrderUids`) และ Step 6b**: รองรับการรวมร่าง `order_uid` ข้ามเดือนในกรณีที่มีรหัสออเดอร์ (`order_code`) และเลขพัสดุจริง (`tracking_no`) ตรงกัน 100% รวมถึงมี Fallback ผูกรายการสินค้าด้วย `order_code + channel + เดือนเดียวกัน`
+      - **`refreshSummaryTables`**: เพิ่มการดึง `paid_date` จาก `oms_order_items` (`WHERE i.import_id = $1`) และจาก `transactions` ที่ผูกกับ `oms_order_items` (`JOIN transactions t ON t.oms_order_uid = i.order_uid WHERE i.import_id = $1`) เพื่อให้การอัปโหลดไฟล์สินค้าทีหลังอัปเดต `daily_summaries.linked_count` ทันที
+      - **`syncMonthlyInvoiceRegistry`**: เพิ่มการตรวจสอบ `invoice_registry` ที่ `order_id` เดิมถูกแทนที่ด้วย `external_id` ของ Settlement จริง เพื่อทำการ `void` เลขชั่วคราวเดิมและออกเลขให้บิลจริงอย่างถูกต้องเมื่ออัปโหลด `Items -> Orders -> Settlement`
+      - **ผลลัพธ์ในฐานข้อมูล `seeheng` (`บริษัท ชีเฮง จำกัด`)**: บิลที่มีไฟล์สินค้าครบทั้งหมดย้ายจาก `"⏳ รอผูกไฟล์ร้านค้า"` เข้าสู่ร้าน **`🏪 Hygge.H (36,909 บิล)`** ทันที (`ข้อมูลครบ 36,147 บิล`), เหลือใน `"⏳ รอผูกไฟล์ร้านค้า"` เพียง **`85 บิล`** ที่ยังไม่มีแถวในไฟล์สินค้า Excel จริงๆ (`รอไฟล์สินค้า 82 บิล` + `รอไฟล์รายได้ 3 บิล`)
+    - [x] **2. เพิ่ม Automated Permutation Test ครบทุกช่องทางและทุกลำดับการอัปโหลด (`tests/ingest.test.ts`)**:
+      - เพิ่มเทสต์ `reconcileAndSyncThreeFiles is 100% order-independent across all upload permutations of File 1 (Orders), File 2 (Items), and File 3 (Settlement)` ทดสอบครบทั้ง 5 ช่องทาง (`TikTok`, `Shopee`, `Facebook`, `LINE`, `Other`) ในทุกลำดับการอัปโหลด:
+        1. `Orders (ไฟล์ 1) -> Settlement (ไฟล์ 3) -> Items (ไฟล์ 2)`
+        2. `Items (ไฟล์ 2) -> Orders (ไฟล์ 1) -> Settlement (ไฟล์ 3)`
+        3. `Settlement (ไฟล์ 3) -> Items (ไฟล์ 2) -> Orders (ไฟล์ 1)`
+      - ยืนยันว่าทุกลำดับได้ผลลัพธ์ `shop_name`, `order_code`, `product_detail`, `link_priority = 0`, `payout`, `daily_summaries.linked_count`, และ `invoice_registry` ตรงกัน 100%
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ **67/67 เทสต์ (`65 pass, 0 fail, 2 skipped`)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ตรวจสอบหน้า `/bills` ที่ความกว้าง `360px`, `390px`, `768px`, `1280px` (`overflowX: false` ทุกขนาดจอ แสดง `🏪 Hygge.H 36,909` และ `⏳ รอผูกไฟล์ร้านค้า 85` ถูกต้อง)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **เพิ่มระบบป๊อปอัปแจกแจงที่มาของตัวเลข (`StatBreakdownDialog.tsx`) เมื่อคลิกที่การ์ดสรุปยอดทั้ง 5 ใบในหน้า `/bills` และทั้ง 4 ใบในหน้า `/` (Dashboard) พร้อมปรับข้อความอธิบายยอดรวมหลังหักค่าโฆษณา GMV / ชดเชย (`src/components/StatBreakdownDialog.tsx`, `src/components/PageHeader.tsx`, `src/components/CompactValueToggle.tsx`, `src/lib/queries.ts`, `src/app/bills/page.tsx`, `src/app/page.tsx`, `tests/ingest.test.ts`)**:
+    - [x] **1. สาเหตุที่ `"รวมชดเชย ฿15.5M"` น้อยกว่า `"สุทธิหลังหักตีกลับ ฿16.3M"` ในบัญชี `seeheng`**:
+      - ยอด **`สุทธิหลังหักตีกลับ ฿16,269,376.45` (`฿16.3M`)** คือยอดเงินโอนสุทธิเฉพาะคำสั่งซื้อ (`is_order = 1`: บิลขายปกติ `36,928` ใบ `฿16,317,080.17` หักออเดอร์คืนเงิน/ตีกลับ `547` ใบ `-฿47,703.72`)
+      - ส่วนยอด **`฿15,483,318.26` (`฿15.5M`)** คือ `total_payout` ซึ่งรวมรายการนอกคำสั่งซื้อทั้งหมดในไฟล์ Settlement (`is_order = 0` จำนวน `692` รายการ สุทธิ `-฿786,058.19`) ที่ประกอบด้วย:
+        - เงินชดเชยฝั่งบวก (`53` รายการ รวม **`+฿14,479.50`**): `เงินชดเชยด้านโลจิสติกส์` (`11` รายการ `+฿7,622.50`) + `การชดเชยจากแพลตฟอร์ม` (`42` รายการ `+฿6,857.00`)
+        - รายการหักฝั่งลบ (`639` รายการ รวม **`-฿800,537.69`**): `การชำระเงินด้วย GMV สำหรับโฆษณา TikTok` (`636` รายการ **`-฿800,442.69`**) + `Other adjustment` (`2` รายการ `-฿60.00`) + `ข้อผิดพลาดจากทางร้านค้า` (`1` รายการ `-฿35.00`)
+      - ปรับข้อความ Hint บนการ์ดใบที่ 4 ใน `/bills` จาก `"รวมชดเชย"` เป็น `"สุทธิรวมหัก GMV/ชดเชย"` เมื่อมีรายการหักโฆษณา GMV/ปรับยอด เพื่อให้สื่อความหมายตรงกับตัวเลขจริงทันที
+    - [x] **2. สร้างคอมโพเนนต์ `StatBreakdownTrigger` (`src/components/StatBreakdownDialog.tsx`) และเชื่อมต่อกับ `StatCard` (`src/components/PageHeader.tsx`)**:
+      - ใช้ `Dialog` ของ `shadcn/ui` (`DialogContent`, `DialogHeader` เว้น `pr-12` กันชนปุ่ม `×`) แสดงรายละเอียดที่มาของตัวเลขแยกเป็นหมวดหมู่ชัดเจนเมื่อคลิกที่การ์ดใบใดก็ได้ทั้งในหน้า `/bills` (5 การ์ด) และหน้า `/` Dashboard (4 การ์ด)
+      - แยกการคลิกสลับตัวเลขย่อ/เต็ม (`CompactValueToggle`) ด้วย `data-compact-toggle="true"` + `stopPropagation()` เมื่ออยู่ภายใน `[data-stat-breakdown-trigger]` เพื่อให้คลิกสลับตัวเลขย่อได้ตามปกติ และคลิกพื้นที่การ์ดเพื่อเปิดป๊อปอัปโดยไม่รบกวนกัน
+      - คงความสูงและโครงสร้าง `.stats > .stat` เดิม 100% (`statsTop = 145px`, `statsHeight = 143px`, `cardTop = 300px` ไม่เกิด Layout Shift)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบทุกเทสต์ (`0 fail`) พร้อมเคสทดสอบใหม่ `listBills and getOverallStats return detailed nonOrderBreakdown`
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบกดเปิดป๊อปอัปครบทั้ง 5 การ์ดใน `/bills` และ 4 การ์ดใน `/` ที่ความกว้าง `360px`, `390px`, `768px` และ `1280px` (`pageOverflow: false`, `childOverflow: 0`, `overlapClose: false`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **แก้ไขปัญหาปุ่มกรอง `"ข้อมูลครบ"` แสดงรวมออเดอร์ที่ยังขาดไฟล์สินค้า (`ไฟล์ 2: สินค้าในออเดอร์ Shipnity` / `oms_items`) และเพิ่มปุ่มตัวกรอง `"รอไฟล์สินค้า"` (`link_priority = 4` / `missing_items`) แยกชัดเจน (`src/lib/db.ts`, `src/lib/queries.ts`, `src/lib/invoice.ts`, `src/lib/ingest/import-service.ts`, `src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`, `src/app/invoices/[orderId]/page.tsx`, `tests/ingest.test.ts`, `tests/invoice-eligibility.test.ts`)**:
+    - [x] **1. สาเหตุและการแก้ไขคอลัมน์ `link_priority` และเกณฑ์ความครบของข้อมูล (`src/lib/db.ts` — `SCHEMA_VERSION = "2026-11-04-v36"`, `src/lib/queries.ts`, `src/lib/invoice.ts`)**:
+      - **สาเหตุ**: เดิมคอลัมน์ `link_priority` และ `getOrderLinkStatus` ตรวจสอบเฉพาะว่าออเดอร์ `TikTok` มีรหัสออเดอร์จากไฟล์ 1 (`order_code <> ''`) และมีไฟล์รายได้จากไฟล์ 3 (`transaction_type <> 'คำสั่งซื้อ (OMS)'`) หรือไม่ โดยไม่ได้ตรวจสอบว่ามีชื่อสินค้าจริงจากไฟล์ 2 (`oms_items`) แล้วหรือยัง (เพราะไฟล์รายได้ TikTok ใส่ค่า `'/'` หรือตัวเลขรหัส 19 หลักลงใน `product_detail` มาให้) ทำให้ในบริษัท `seeheng` ที่อัปโหลดเฉพาะไฟล์ที่ 1 และไฟล์ที่ 3 (ยังไม่ได้อัปโหลดไฟล์ที่ 2 สินค้า Shipnity เลย 0 แถว) ออเดอร์ `35,422` รายการจึงถูกจัดเข้าปุ่ม `"ข้อมูลครบ (35,475)"` ทั้งที่ในตารางขึ้นป้ายเหลือง `"รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity"`
+      - **การแก้ไข**:
+        - ปรับ `link_priority` (`GENERATED ALWAYS AS (...) STORED` ใน `src/lib/db.ts`), `getOrderLinkStatus` (`src/lib/queries.ts`), และ `isOrderEligibleForInvoice` (`src/lib/invoice.ts`) ให้กำหนดว่าออเดอร์จะถือเป็น **`ข้อมูลครบ · พร้อมออกใบกำกับฯ` (`link_priority = 0` / `linked`)** ได้ก็ต่อเมื่อมีรายการสินค้าจริง (`product_detail LIKE '%·%'` หรือสำหรับ `Lazada` มี `product_detail <> '/'`) เท่านั้น
+        - เพิ่มระดับ **`link_priority = 4` (`missing_items` — `รอไฟล์สินค้า / ขาดสินค้า Shipnity`)** สำหรับออเดอร์ที่มี `order_code <> ''` (และสำหรับ TikTok มีไฟล์รายได้แล้ว) แต่ยังไม่มีรายการสินค้าจากไฟล์ที่ 2 (`oms_items`)
+        - ปรับ Step 6 ของ `reconcileAndSyncThreeFiles` (`src/lib/ingest/import-service.ts`) ให้อัปเดต `product_detail` ทันทีเมื่อนำเข้าไฟล์ที่ 2 ตามมาภายหลัง สำหรับแถวที่ `product_detail` เดิมเป็น `'/'` หรือยังไม่มี `'·'`
+        - ปรับ `hasItemsSql` ใน `getDailyUploadCompleteness` (`src/lib/queries.ts` หน้า `/import`) ไม่ให้นับค่า `'/'` หรือตัวเลขล้วนจากไฟล์ TikTok ว่าเป็นไฟล์ที่ 2 (`oms_items`)
+    - [x] **2. เพิ่มปุ่มตัวกรอง `"รอไฟล์สินค้า"` ในแถวที่ 3 ของหน้า `/bills` (`src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`)**:
+      - แสดงปุ่ม **`รอไฟล์สินค้า` (`ขาดสินค้า Shipnity`)** สีส้ม (`#ea580c`) พร้อมตัวเลขจำนวนบิลที่รอไฟล์ที่ 2 ในแถบ `3. สถานะความครบของข้อมูล (Data Completeness)` เมื่อมีรายการที่ขาดไฟล์สินค้า (`linkCounts.missingItems > 0`)
+      - ผลลัพธ์ในบริษัท **`seeheng` (`บริษัท ซีเฮง จำกัด`)**:
+        - `TikTok Shop (36,240)`: แสดง `ข้อมูลครบ (53)` (เฉพาะรายการชดเชยแพลตฟอร์มที่ไม่ต้องใช้ไฟล์สินค้า), `ชดเชยแพลตฟอร์ม (53)`, **`รอไฟล์สินค้า (35,422)`**, `รอไฟล์ออเดอร์ (0)`, `รอไฟล์รายได้ (765)` (รวม `53 + 35,422 + 0 + 765 = 36,240` ตรงกัน 100%)
+        - `Shopee (505)` และ `Facebook (104)`: แสดงใน **`รอไฟล์สินค้า`** จนกว่าจะอัปโหลดไฟล์ที่ 2 (`oms_items`)
+      - ผลลัพธ์ในบริษัท **`dragon19` (`บริษัท ดราก้อน วันไนน์ จำกัด`)**:
+        - Backfill `product_detail` ของออเดอร์ข้ามเดือน 5 รายการ (`#BZ95`, `#CA76`, `#BH53`, `#CM62`, `#CM72`) จาก `oms_order_items` ที่มีอยู่แล้วในฐานข้อมูล ทำให้ตัวเลขของ `dragon19` คงเดิม 100% (`ข้อมูลครบ 65,188`, `รอไฟล์สินค้า 0`, และไม่กระทบใบกำกับภาษีเดิมแม้แต่ใบเดียว)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`63 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **แก้ไขปัญหาการนำเข้าไฟล์ค้างที่ `95%` (`reconcileAndSyncThreeFiles` ใน `src/lib/ingest/import-service.ts`) และแยก Schema ทดสอบใน `tests/ingest.test.ts` ไม่ให้แตะข้อมูลจริงของ `seeheng`**:
+    - [x] **1. ขจัดคอขวด `OR` ข้ามคอลัมน์ใน `reconcileAndSyncThreeFiles` (`src/lib/ingest/import-service.ts`)**:
+      - แยก `EXISTS (... t.oms_order_uid = o.order_uid OR t.external_id = o.marketplace_order_norm)` ในคำสั่ง `DELETE FROM transactions` (ขั้นตอนที่ 3) และ `NOT EXISTS` ใน `SELECT o.* FROM oms_orders` (ขั้นตอนที่ 4) ออกเป็น 2 เงื่อนไข `EXISTS` / `NOT EXISTS` ย่อยที่อ้างอิงคอลัมน์เดี่ยว
+      - แยกคำสั่ง `UPDATE transactions t ... FROM oms_orders o` (ขั้นตอนที่ 5) ออกเป็น 3 คำสั่งย่อยตามคีย์ที่จับคู่ (`t.external_id = o.matched_external_id`, `t.oms_order_uid = o.order_uid`, และ `t.external_id = o.marketplace_order_norm`)
+      - ผลลัพธ์จาก `EXPLAIN (ANALYZE, BUFFERS)` บนข้อมูลจริงของ `seeheng` (`42,038` transactions / `37,548` OMS orders): PostgreSQL เปลี่ยนจาก Nested Loop 280 ล้านรอบ (`> 71 วินาที` ต่อไฟล์) มาใช้ `Bitmap Index Scan` + `hashed SubPlan` บน `ix_oms_orders_matched_ext` เสร็จภายใน **`100.7 ms` (`0.1 วินาที`)** โดยผลการผูกข้อมูล 3 ไฟล์เหมือนเดิม 100%
+    - [x] **2. แยกการรันเทสต์ของ `seeheng` ออกไปใช้ Schema ชั่วคราว (`tests/ingest.test.ts`)**:
+      - ปรับเทสต์ `seeheng company schema does not inject hardcoded Kiddee Shop / Kissi Studio tabs...` ให้สร้าง Schema ชั่วคราว `CREATE SCHEMA test_seeheng_shops` ภายใน Transaction ที่ Rollback เสมอ เพื่อไม่ให้ชุดทดสอบแตะต้องข้อมูลจริงใน `seeheng`
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบทุกเทสต์ (`0 fail`) และข้อมูลของ `seeheng` ทั้ง **15 ไฟล์ (`42,038` รายการใน `transactions` และ `37,548` ออเดอร์ใน `oms_orders`)** อยู่ครบ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **แก้ไขปัญหาแถบเลือกร้านค้าในรหัส `seeheng` (`บริษัท ชีเฮง จำกัด`) แสดงชื่อร้าน `Kiddee Shop` และ `Kissi Studio` ค้างเป็นค่าเริ่มต้น และปรับระบบ Multi-Shop ทุกหน้าให้ดึงชื่อร้านตามไฟล์ที่อัปโหลดจริง 100% (`src/lib/queries.ts`, `src/components/BillsShopTabs.tsx`, `src/components/DashboardShopComparison.tsx`, `src/components/UploadCompletenessCalendar.tsx`, `src/lib/ingest/lazada-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/db.ts`, `tests/ingest.test.ts`)**:
+    - [x] **1. ถอดค่าเริ่มต้น `["Kiddee Shop", "Kissi Studio"]` ที่ Hardcode ไว้เมื่อยังไม่มีข้อมูลร้านค้า**:
+      - ใน `listBills` (`src/lib/queries.ts`): เปลี่ยนค่าเริ่มต้น `shopCounts` จาก `{ all: 0, "Kiddee Shop": 0, "Kissi Studio": 0 }` เป็น `{ all: 0 }` เพื่อให้แสดงเฉพาะร้านที่มีข้อมูลจริงใน Schema ของบริษัทนั้นๆ
+      - ใน `BillsShopTabs.tsx` (`/bills`) และ `UploadCompletenessCalendar.tsx` (`/import`): ยกเลิก Fallback `["Kiddee Shop", "Kissi Studio"]` เมื่อ `rawShopKeys` / `availableShops` ว่างเปล่า (เมื่อ `seeheng` ยังไม่ได้อัปโหลดไฟล์ จะแสดงเฉพาะปุ่ม `🏢 รวมทุกร้าน 0` และเมื่ออัปโหลดไฟล์เข้ามาจะสร้างปุ่มร้านค้าตามชื่อร้านในไฟล์อัตโนมัติ)
+    - [x] **2. ปรับ `DashboardShopComparison.tsx` และ `UploadCompletenessCalendar.tsx` ให้รองรับหลายร้านค้าแบบ Dynamic ตามไฟล์ที่อัปโหลด**:
+      - ใน `DashboardShopComparison.tsx` (`/`): เปลี่ยนจากการค้นหาเฉพาะ `"Kiddee Shop"` และ `"Kissi Studio"` เป็นการวนลูปแสดงการ์ดทุก `shopName` ที่มีใน `shopSummaries`
+      - ใน `getDailyUploadCompleteness` (`src/lib/queries.ts`) และ `UploadCompletenessCalendar.tsx` (`/import`): เพิ่ม `shopBreakdown` รายวันและรายเดือนแบบ Dynamic ตามร้านที่มีจริงในฐานข้อมูล แทนการล็อกชื่อร้านตายตัว
+      - ใน `lazada-parse.ts`, `import-service.ts`, และ `db.ts`: ปรับการผูกชื่อร้านของ Lazada และรายการชดเชยแพลตฟอร์มไม่ให้บังคับยัด `'Kiddee Shop'` ข้ามบริษัท
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ **64/64 เทสต์ (63 pass, 0 fail, 1 skipped sample)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบจริงทั้งบัญชี `seeheng` และ `dragon19` ครบทุกขนาดหน้าจอ (`360px`, `390px`, `768px`, `1280px`) บน `/bills`, `/import`, และ `/` (`docOverflow: false`, `hasKiddee: false`, `hasKissi: false` สำหรับ `seeheng` และแสดงร้านครบถ้วนสำหรับ `dragon19`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **เพิ่มระบบเชื่อมรหัสออเดอร์อัจฉริยะข้ามไฟล์ (`reconcileCrossFileOrderUids` — Smart Order UID Linker) รองรับกรณีอัปโหลดไฟล์สินค้า (`oms_items`) หรือไฟล์ออเดอร์ตามมาในอนาคตแม้มี/ไม่มีเลขพัสดุต่างกัน (`src/lib/ingest/import-service.ts`, `tests/ingest.test.ts`)**:
+    - [x] **1. แก้ไขปัญหา `order_uid` ไม่ตรงกันเมื่อไฟล์หนึ่งไม่มีเลขพัสดุและอีกไฟล์มีเลขพัสดุ (`src/lib/ingest/import-service.ts`)**:
+      - สำหรับออเดอร์ที่นำเข้าจากไฟล์ออเดอร์โดยยังไม่มีเลขพัสดุ (เช่น `#AB001`–`#AB015` ใน `line_ปี69.xlsx` ซึ่งมี `order_uid = "AB015|2026-09|2026-09-12"`): เมื่อในอนาคตมีการอัปโหลดไฟล์สินค้า (`oms_items`) หรือไฟล์ออเดอร์ใหม่ของออเดอร์เดียวกัน (รหัส `order_code` + ช่องทาง `channel` + เดือน `YYYY-MM` เดียวกัน) ที่มีเลขพัสดุแนบมาด้วย (เช่น `"AB015|2026-09|JTTH..."`) หรือกลับกัน
+      - สร้างฟังก์ชัน `reconcileCrossFileOrderUids` และเรียกใช้งานในขั้นตอนแรกของ `reconcileAndSyncThreeFiles` เพื่อรวมร่าง (Merge) รหัส `order_uid` เข้าสู่บิลหลักโดยอัตโนมัติ:
+        - ย้ายรายการสินค้า (`oms_order_items`) มาผูกกับ `order_uid` ของบิลหลักโดยไม่สร้างบิลซ้ำ
+        - เติม `tracking_no` (เลขพัสดุ), `shop_name` (ชื่อร้านค้าจาก `ผู้ส่ง`), และ `customer_phone` (เบอร์โทร) เข้าสู่ออเดอร์หลักพร้อมคงยอดขายที่ถูกต้องไว้
+        - ซิงก์ `transactions.product_detail`, ออกเลขที่ใบกำกับภาษี (`LN2609/xxxxx`) อัตโนมัติทันที และอัปเดต `daily_summaries` ของวันที่ที่เกี่ยวข้องครบถ้วน
+    - [x] **2. เพิ่ม Automated Integration Test (`tests/ingest.test.ts`)**:
+      - เพิ่มเทสต์ `reconcileCrossFileOrderUids merges an order initially imported without tracking_no with a subsequent items file that includes tracking_no` จำลองการนำเข้าไฟล์ออเดอร์ LINE OA ที่ไม่มีเลขพัสดุก่อน แล้วตามด้วยการนำเข้าไฟล์สินค้าที่มีเลขพัสดุ ตรวจสอบว่าไม่เกิดบิลซ้ำ รายการสินค้าผูกเข้าบิลเดิมครบถ้วน อัปเดตเลขพัสดุและชื่อร้านค้า (`Kissi Studio`) และออกเลขใบกำกับภาษี `SEQ/LINE/2609/...` (`status = 'active'`) สำเร็จ 100%
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `npx.cmd tsx --env-file=.env --test tests/*.test.ts`: ผ่านครบ **63/63 เทสต์ (62 pass, 0 fail, 1 skipped sample)**
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-03)**:
   - **แยกลำดับเลขที่ใบกำกับภาษี (`invoice_registry`) และตั้งค่าอักษรนำหน้า (`Prefix`) แยกตามแต่ละแพลตฟอร์ม (`TikTok` = `TT`, `Shopee` = `SP`, `Facebook` = `FB`, `Lazada` = `LZ`, `LINE OA` = `LN`, `อื่นๆ` = `OT`) + แก้ไขปัญหาเลขที่ใบกำกับฯ วันที่ `2026-10-01` กระโดดจาก `00120` ไป `04362`**:

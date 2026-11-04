@@ -186,7 +186,7 @@ test("TikTok ที่ไฟล์ครบทีหลัง (link 2 → 0) ไ
       { id: "Y", channel: "TikTok", paid: "2026-10-02" },
     ]);
     await syncMonthlyInvoiceRegistry(c);
-    await c.query(`UPDATE transactions SET order_code = 'OC-X', product_detail = 'SKU', import_id = 2 WHERE external_id = 'X'`);
+    await c.query(`UPDATE transactions SET order_code = 'OC-X', product_detail = 'SKU · item × 1', import_id = 2 WHERE external_id = 'X'`);
     await syncMonthlyInvoiceRegistry(c, 2);
     assert.deepEqual(await registry(c), ["Y=SEQ/2610/00001", "X=SEQ/2610/00002"]);
   }, t);
@@ -587,6 +587,53 @@ test("End-to-End importWorkbook: นำเข้าไฟล์ Excel จริ�
       }
     }
   });
+});
+
+import {
+  formatAnimatedNumberFrame,
+  parseAnimatedValueString,
+} from "../src/components/AnimatedValueText";
+
+test("parseAnimatedValueString และ formatAnimatedNumberFrame รองรับตัวเลขการเงิน จำนวนบิล เปอร์เซ็นต์ และข้ามวันที่", () => {
+  const thb = parseAnimatedValueString("฿15,483,318.26");
+  assert.ok(thb);
+  assert.equal(thb.prefix, "฿");
+  assert.equal(thb.targetNumber, 15483318.26);
+  assert.equal(thb.decimals, 2);
+  assert.equal(thb.useGrouping, true);
+  assert.equal(thb.suffix, "");
+  assert.equal(formatAnimatedNumberFrame(0, thb), "฿0.00");
+  assert.equal(formatAnimatedNumberFrame(15483318.26, thb), "฿15,483,318.26");
+
+  const negThb = parseAnimatedValueString("-฿47,703.72");
+  assert.ok(negThb);
+  assert.equal(negThb.prefix, "-฿");
+  assert.equal(negThb.targetNumber, 47703.72);
+  assert.equal(formatAnimatedNumberFrame(0, negThb), "-฿0.00");
+  assert.equal(formatAnimatedNumberFrame(47703.72, negThb), "-฿47,703.72");
+
+  const compactM = parseAnimatedValueString("฿15.5M");
+  assert.ok(compactM);
+  assert.equal(compactM.prefix, "฿");
+  assert.equal(compactM.targetNumber, 15.5);
+  assert.equal(compactM.decimals, 1);
+  assert.equal(compactM.suffix, "M");
+  assert.equal(formatAnimatedNumberFrame(0, compactM), "฿0.0M");
+  assert.equal(formatAnimatedNumberFrame(15.5, compactM), "฿15.5M");
+
+  const countBills = parseAnimatedValueString("38,268 ใบ");
+  assert.ok(countBills);
+  assert.equal(countBills.prefix, "");
+  assert.equal(countBills.targetNumber, 38268);
+  assert.equal(countBills.decimals, 0);
+  assert.equal(countBills.suffix, " ใบ");
+  assert.equal(formatAnimatedNumberFrame(0, countBills), "0 ใบ");
+  assert.equal(formatAnimatedNumberFrame(38268, countBills), "38,268 ใบ");
+
+  // วันที่ต้องไม่ถูกแปลงเป็นตัวเลขวิ่ง
+  assert.equal(parseAnimatedValueString("04/11/2026"), null);
+  assert.equal(parseAnimatedValueString("2026-11-04"), null);
+  assert.equal(parseAnimatedValueString("ปกติทุกไฟล์"), null);
 });
 
 test.after(async () => {
