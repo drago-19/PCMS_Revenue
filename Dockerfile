@@ -12,7 +12,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_STANDALONE=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN node ./node_modules/next/dist/bin/next build --webpack
+RUN node ./node_modules/next/dist/bin/next build
 
 # ---- run ----
 FROM node:24-alpine AS runner
@@ -24,6 +24,7 @@ RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
 EXPOSE 3000
