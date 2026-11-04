@@ -492,6 +492,11 @@ export function InvoiceDocument({
     invoice.items.length === 0
       ? 1
       : invoice.items.reduce((acc, item) => acc + item.qty, 0);
+  const isCompensationInvoice = Boolean(
+    invoice.isPlatformCompensation ||
+      invoice.items.some((item) => item.isCompensation),
+  );
+  const quantityUnitLabel = isCompensationInvoice ? "รายการ" : "ตัว";
   const itemsNetTotal = round2(
     Math.max(0, invoice.salesAmount - Math.max(0, round2(invoice.platformCoupon ?? 0))),
   );
@@ -643,19 +648,33 @@ export function InvoiceDocument({
                   : "col-span-7 min-w-0 border-l border-[#e2e8f0] pl-1.5"
               }
             >
-              <div className="font-extrabold text-[#0f172a]">รายละเอียดคำสั่งซื้อ</div>
+              <div className="font-extrabold text-[#0f172a]">
+                {isCompensationInvoice
+                  ? "รายละเอียดรายการชดเชย"
+                  : "รายละเอียดคำสั่งซื้อ"}
+              </div>
               <dl className="mt-0.5 space-y-[1px] leading-tight">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-1 gap-y-[1px]">
                   <dt className="shrink-0 whitespace-nowrap text-[#475569]">
-                    ออเดอร์ :
+                    {isCompensationInvoice ? "เลขธุรกรรม :" : "ออเดอร์ :"}
                   </dt>
                   <dd className="mono ml-auto whitespace-nowrap text-right font-bold tracking-tight text-[#0f172a]">
                     {invoice.orderId}
                   </dd>
                 </div>
+                {isCompensationInvoice && invoice.relatedOrderId ? (
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-1 gap-y-[1px]">
+                    <dt className="shrink-0 whitespace-nowrap text-[#475569]">
+                      คำสั่งซื้ออ้างอิง :
+                    </dt>
+                    <dd className="mono ml-auto whitespace-nowrap text-right font-semibold tracking-tight text-[#0f172a]">
+                      {invoice.relatedOrderId}
+                    </dd>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-baseline justify-between gap-x-1 gap-y-[1px]">
                   <dt className="shrink-0 whitespace-nowrap text-[#475569]">
-                    วันสั่งซื้อ :
+                    {isCompensationInvoice ? "วันที่รายการ :" : "วันสั่งซื้อ :"}
                   </dt>
                   <dd className="ml-auto whitespace-nowrap text-right font-semibold text-[#0f172a]">
                     {invoice.createdDate
@@ -696,7 +715,8 @@ export function InvoiceDocument({
             >
               <span>รายได้</span>
               <span className="shrink-0 whitespace-nowrap tabular-nums">
-                {formatReceiptTHB(invoice.receiptTotal)} ({totalItemQty} ตัว)
+                {formatReceiptTHB(invoice.receiptTotal)} ({totalItemQty}{" "}
+                {quantityUnitLabel})
               </span>
             </div>
             <table
@@ -742,25 +762,43 @@ export function InvoiceDocument({
                     return (
                       <tr key={`${item.sku}-${index}`}>
                         <td className={`${cellPadClass} leading-tight text-[#0f172a]`}>
-                          <span className="font-semibold text-[#0f172a]">
-                            {item.name || `รหัสสินค้า ${item.sku}`}
-                          </span>
-                          {unitNetAmount !== null ? (
-                            <span className="font-normal text-[#475569]">
-                              {" "}
-                              (ตัวละ {formatReceiptTHB(unitNetAmount)})
-                            </span>
-                          ) : null}
-                          {!item.name && isNumericPlatformSku && invoice.createdDate ? (
-                            <span className="ml-1 text-[8px] text-[#64748b]">
-                              (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ {formatDate(invoice.createdDate)})
-                            </span>
-                          ) : null}
-                          {showSkuAbbrev && item.sku ? (
-                            <span className="mono ml-1 text-[8px] text-[#64748b]">
-                              [{item.sku}]
-                            </span>
-                          ) : null}
+                          {item.isCompensation ? (
+                            <div className="space-y-0.5">
+                              <div className="font-bold text-[#0f172a]">
+                                {item.compensationType || item.name}
+                              </div>
+                              {item.referenceOrderId ? (
+                                <div className="text-[8.5px] font-medium text-[#334155]">
+                                  คำสั่งซื้อ{" "}
+                                  <span className="mono font-semibold text-[#0f172a]">
+                                    #{item.referenceOrderId}
+                                  </span>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <>
+                              <span className="font-semibold text-[#0f172a]">
+                                {item.name || `รหัสสินค้า ${item.sku}`}
+                              </span>
+                              {unitNetAmount !== null ? (
+                                <span className="font-normal text-[#475569]">
+                                  {" "}
+                                  (ตัวละ {formatReceiptTHB(unitNetAmount)})
+                                </span>
+                              ) : null}
+                              {!item.name && isNumericPlatformSku && invoice.createdDate ? (
+                                <span className="ml-1 text-[8px] text-[#64748b]">
+                                  (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ {formatDate(invoice.createdDate)})
+                                </span>
+                              ) : null}
+                              {showSkuAbbrev && item.sku ? (
+                                <span className="mono ml-1 text-[8px] text-[#64748b]">
+                                  [{item.sku}]
+                                </span>
+                              ) : null}
+                            </>
+                          )}
                         </td>
                         <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
                           {item.qty}
@@ -941,20 +979,34 @@ export function InvoiceDocument({
 
           <div className="min-w-0 sm:col-span-5 sm:border-l sm:border-[#e2e8f0] sm:pl-3.5 print:col-span-5 print:border-l print:border-[#e2e8f0] print:pl-3.5">
             <h3 className="border-b border-[#e2e8f0] pb-1 text-xs font-extrabold text-[#0f172a]">
-              รายละเอียดคำสั่งซื้อ
+              {isCompensationInvoice
+                ? "รายละเอียดรายการชดเชย"
+                : "รายละเอียดคำสั่งซื้อ"}
             </h3>
             <dl className="mt-1.5 space-y-1">
               <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                 <dt className="shrink-0 whitespace-nowrap text-[#475569]">
-                  หมายเลขคำสั่งซื้อ :
+                  {isCompensationInvoice
+                    ? "หมายเลขธุรกรรม :"
+                    : "หมายเลขคำสั่งซื้อ :"}
                 </dt>
                 <dd className="mono ml-auto text-right text-xs font-bold tracking-tight text-[#0f172a]">
                   {invoice.orderId}
                 </dd>
               </div>
+              {isCompensationInvoice && invoice.relatedOrderId ? (
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                  <dt className="shrink-0 whitespace-nowrap text-[#475569]">
+                    เลขคำสั่งซื้อที่อ้างอิง :
+                  </dt>
+                  <dd className="mono ml-auto text-right text-xs font-semibold tracking-tight text-[#0f172a]">
+                    {invoice.relatedOrderId}
+                  </dd>
+                </div>
+              ) : null}
               <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                 <dt className="shrink-0 whitespace-nowrap text-[#475569]">
-                  วันที่สั่งซื้อ :
+                  {isCompensationInvoice ? "วันที่รายการ :" : "วันที่สั่งซื้อ :"}
                 </dt>
                 <dd className="ml-auto text-right font-semibold text-[#0f172a]">
                   {invoice.createdDate
@@ -993,7 +1045,8 @@ export function InvoiceDocument({
           <div className="mb-1.5 flex items-baseline justify-between gap-2 px-1 text-xs font-extrabold text-[#0f172a] sm:text-[13px]">
             <span>รายได้</span>
             <span className="shrink-0 whitespace-nowrap tabular-nums">
-              {formatReceiptTHB(invoice.receiptTotal)} ({totalItemQty} ตัว)
+              {formatReceiptTHB(invoice.receiptTotal)} ({totalItemQty}{" "}
+              {quantityUnitLabel})
             </span>
           </div>
           <table className="w-full border-collapse text-xs sm:text-[13px]">
@@ -1037,7 +1090,21 @@ export function InvoiceDocument({
                   return (
                     <tr key={`${item.sku}-${index}`}>
                       <td className="px-3 py-2.5 leading-snug text-[#0f172a]">
-                        {item.name ? (
+                        {item.isCompensation ? (
+                          <div className="space-y-0.5">
+                            <div className="font-bold text-[#0f172a]">
+                              {item.compensationType || item.name}
+                            </div>
+                            {item.referenceOrderId ? (
+                              <div className="text-xs font-medium text-[#334155]">
+                                คำสั่งซื้อ{" "}
+                                <span className="mono font-semibold text-[#0f172a]">
+                                  #{item.referenceOrderId}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : item.name ? (
                           <span className="font-semibold text-[#0f172a]">
                             {item.name}
                             {unitNetAmount !== null ? (
@@ -1166,7 +1233,11 @@ export function InvoiceDocument({
           </div>
         ) : null}
         <div>
-          <span className="invoice-label">เลขคำสั่งซื้อ ({channelLabel})</span>
+          <span className="invoice-label">
+            {isCompensationInvoice
+              ? `เลขธุรกรรม (${channelLabel})`
+              : `เลขคำสั่งซื้อ (${channelLabel})`}
+          </span>
           <span className="mono">{invoice.orderId}</span>
         </div>
         <div>
@@ -1185,8 +1256,16 @@ export function InvoiceDocument({
           <span>{channelLabel}</span>
         </div>
         <div>
-          <span className="invoice-label">เลขที่บน Marketplace</span>
-          <span className="mono">{invoice.orderId}</span>
+          <span className="invoice-label">
+            {isCompensationInvoice && invoice.relatedOrderId
+              ? "เลขคำสั่งซื้อที่อ้างอิง"
+              : "เลขที่บน Marketplace"}
+          </span>
+          <span className="mono">
+            {isCompensationInvoice && invoice.relatedOrderId
+              ? invoice.relatedOrderId
+              : invoice.orderId}
+          </span>
         </div>
         {showShippingTracking && invoice.trackingNo ? (
           <div>
@@ -1280,7 +1359,25 @@ export function InvoiceDocument({
                       {showSkuFull ? (
                         <td className="mono font-semibold">{item.sku}</td>
                       ) : null}
-                      <td>{item.name || `สินค้า SKU ${item.sku}`}</td>
+                      <td>
+                        {item.isCompensation ? (
+                          <div className="space-y-0.5">
+                            <div className="font-bold text-[#0f172a]">
+                              {item.compensationType || item.name}
+                            </div>
+                            {item.referenceOrderId ? (
+                              <div className="text-xs font-medium text-[#334155]">
+                                คำสั่งซื้อ{" "}
+                                <span className="mono font-semibold text-[#0f172a]">
+                                  #{item.referenceOrderId}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          item.name || `สินค้า SKU ${item.sku}`
+                        )}
+                      </td>
                       <td className="num">{item.qty}</td>
                       <td className="num">
                         {item.unitPrice !== undefined || index === 0

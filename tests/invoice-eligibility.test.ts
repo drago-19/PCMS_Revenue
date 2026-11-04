@@ -593,6 +593,71 @@ import {
   formatAnimatedNumberFrame,
   parseAnimatedValueString,
 } from "../src/components/AnimatedValueText";
+import { buildInvoice } from "../src/lib/invoice";
+import type { TransactionRow } from "../src/lib/queries";
+
+test("buildInvoice จัดรูปแบบรายการชดเชยแพลตฟอร์มและชดเชยโลจิสติกส์อย่างเป็นทางการ (ไม่แสดง #ออเดอร์ภายใน และแยกเลขคำสั่งซื้ออ้างอิงชัดเจน)", () => {
+  const mockCompRow: TransactionRow = {
+    id: 1,
+    importId: 1,
+    externalId: "7701672071202719508",
+    transactionType: "การชดเชยจากแพลตฟอร์ม",
+    isOrder: false,
+    createdDate: "2026-10-28",
+    paidDate: "2026-10-29",
+    currency: "THB",
+    income: 0,
+    feeTotal: 0,
+    adjustment: 29,
+    payout: 29,
+    relatedOrderId: "586752541731686138",
+    productDetail: "SKU1 · กางเกงบาเรลทหาร ชมพู (Free size) × 1; SKU2 · เสื้อยืด เลดี้ แทรมป์ × 1",
+    weightEstimated: null,
+    weightCharged: null,
+    checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+    warnings: [],
+    normalized: {
+      externalId: "7701672071202719508",
+      transactionType: "การชดเชยจากแพลตฟอร์ม",
+      isOrder: false,
+      createdAt: "2026-10-28",
+      paidAt: "2026-10-29",
+      currency: "THB",
+      sourceRows: 1,
+      firstRow: 2,
+      rowIndexes: [2],
+      fields: {
+        payout: 29,
+        adjustment: 29,
+        relatedOrderId: "586752541731686138",
+      },
+      mappedFields: [],
+      feeGroups: {},
+      unknownValues: [],
+      checks: { incomeDiff: 0, feeDiff: 0, payoutDiff: 0 },
+      warnings: [],
+      raw: {},
+    },
+    createdAt: "2026-10-29T00:00:00Z",
+    channel: "TikTok",
+    orderCode: "QP11",
+    invoiceNo: "SEQ/2610/06218",
+  };
+
+  const inv = buildInvoice(mockCompRow);
+  assert.equal(inv.isPlatformCompensation, true);
+  assert.equal(inv.relatedOrderId, "586752541731686138");
+  assert.equal(inv.receiptTotal, 29);
+  assert.equal(inv.items.length, 1);
+  const item = inv.items[0]!;
+  assert.equal(item.isCompensation, true);
+  assert.equal(item.compensationType, "การชดเชยจากแพลตฟอร์ม");
+  assert.equal(item.referenceOrderId, "586752541731686138");
+  assert.equal(item.referenceItemsSummary, null);
+  assert.equal(item.name, "การชดเชยจากแพลตฟอร์ม (คำสั่งซื้อ #586752541731686138)");
+  assert.doesNotMatch(item.name ?? "", /#QP11/, "ห้ามแสดงรหัสภายใน #QP11 บนชื่อรายการใบกำกับภาษี");
+  assert.doesNotMatch(item.name ?? "", /กางเกงบาเรล/, "ห้ามแสดงรายการสินค้ายาวบนใบกำกับภาษีชดเชย");
+});
 
 test("parseAnimatedValueString และ formatAnimatedNumberFrame รองรับตัวเลขการเงิน จำนวนบิล เปอร์เซ็นต์ และข้ามวันที่", () => {
   const thb = parseAnimatedValueString("฿15,483,318.26");

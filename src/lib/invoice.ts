@@ -14,6 +14,11 @@ export interface InvoiceItem {
   unitPrice?: number;
   qty: number;
   lineTotal?: number;
+  isCompensation?: boolean;
+  compensationType?: string;
+  referenceOrderId?: string | null;
+  referenceOrderCode?: string | null;
+  referenceItemsSummary?: string | null;
 }
 
 export interface InvoiceCustomer {
@@ -31,6 +36,9 @@ export interface InvoiceModel {
   orderId: string;
   orderCode: string | null;
   channel: string;
+  isPlatformCompensation?: boolean;
+  compensationType?: string | null;
+  relatedOrderId?: string | null;
   trackingNo: string | null;
   courier: string | null;
   issuedAt: string;
@@ -233,23 +241,37 @@ export function buildInvoice(
   const shippingFee = isPlatformCompensation ? 0 : custShippingFee;
 
   let items: InvoiceItem[] = [];
+  const rawRelatedId = String(
+    row.relatedOrderId ?? fields.relatedOrderId ?? "",
+  ).trim();
+  const validRelatedOrderId =
+    rawRelatedId && rawRelatedId !== "/" && rawRelatedId !== "-"
+      ? rawRelatedId
+      : null;
+
   if (isPlatformCompensation) {
-    const relatedId = String(
-      row.relatedOrderId ?? fields.relatedOrderId ?? "",
-    ).trim();
-    const omsDesc =
-      row.omsItems && row.omsItems.length > 0
-        ? ` · ${row.omsItems.map((it) => `${it.productName} × ${it.quantity}`).join(", ")}`
-        : row.productDetail && row.productDetail !== "/"
-          ? ` · ${row.productDetail}`
-          : "";
+    const formalCompTitle =
+      row.transactionType === "เงินชดเชยด้านโลจิสติกส์"
+        ? "เงินชดเชยด้านโลจิสติกส์"
+        : "การชดเชยจากแพลตฟอร์ม";
     items = [
       {
-        sku: row.orderCode ? `COMP-${row.orderCode}` : "COMP-TIKTOK",
-        name: `${row.transactionType}${row.orderCode ? ` (อ้างอิงออเดอร์ #${row.orderCode})` : ""}${relatedId && relatedId !== "/" && relatedId !== "-" ? ` [คำสั่งซื้อ #${relatedId}]` : ""}${omsDesc}`,
+        sku: validRelatedOrderId
+          ? `COMP-${validRelatedOrderId}`
+          : row.orderCode
+            ? `COMP-${row.orderCode}`
+            : "COMP-TIKTOK",
+        name: validRelatedOrderId
+          ? `${formalCompTitle} (คำสั่งซื้อ #${validRelatedOrderId})`
+          : formalCompTitle,
         unitPrice: compAmount,
         qty: 1,
         lineTotal: compAmount,
+        isCompensation: true,
+        compensationType: formalCompTitle,
+        referenceOrderId: validRelatedOrderId,
+        referenceOrderCode: row.orderCode ?? null,
+        referenceItemsSummary: null,
       },
     ];
   } else if (row.omsItems && row.omsItems.length > 0) {
@@ -496,6 +518,9 @@ export function buildInvoice(
     orderId: displayOrderId,
     orderCode: row.orderCode ?? null,
     channel: row.channel || "TikTok",
+    isPlatformCompensation,
+    compensationType: isPlatformCompensation ? row.transactionType : null,
+    relatedOrderId: validRelatedOrderId,
     trackingNo: row.trackingNo ?? null,
     courier: row.courier ?? null,
     issuedAt: new Date().toISOString(),
