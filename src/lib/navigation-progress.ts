@@ -16,6 +16,32 @@ export function notifyNavigationCancel(): void {
   window.dispatchEvent(new Event(NAVIGATION_CANCEL_EVENT));
 }
 
+function normalizeUrlSearch(rawSearch: string): string {
+  const cleaned = rawSearch.startsWith("?") ? rawSearch.slice(1) : rawSearch;
+  const params = new URLSearchParams(cleaned);
+  const entries = Array.from(params.entries()).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  return new URLSearchParams(entries).toString();
+}
+
+/**
+ * ตรวจสอบว่า URL ปลายทางตรงกับ URL ปัจจุบันในเบราว์เซอร์หรือไม่ (ไม่สนลำดับ query parameter)
+ */
+export function isSameBrowserUrl(targetHref: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const targetUrl = new URL(targetHref, window.location.href);
+    return (
+      targetUrl.pathname === window.location.pathname &&
+      normalizeUrlSearch(targetUrl.search) ===
+        normalizeUrlSearch(window.location.search)
+    );
+  } catch {
+    return false;
+  }
+}
+
 type PendingListener = () => void;
 
 const pendingListeners = new Set<PendingListener>();

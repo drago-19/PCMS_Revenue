@@ -16,7 +16,11 @@ import { IconAlert, IconCheckCircle } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatTHB } from "@/lib/format";
-import { notifyNavigationStart } from "@/lib/navigation-progress";
+import {
+  isSameBrowserUrl,
+  notifyNavigationCancel,
+  notifyNavigationStart,
+} from "@/lib/navigation-progress";
 import type {
   BillCategoryCounts,
   BillCategoryKey,
@@ -91,6 +95,10 @@ export function BillsFilterProvider({
     }
     event.preventDefault();
     setOptimistic((prev) => ({ ...prev, ...patch }));
+    if (isSameBrowserUrl(href)) {
+      notifyNavigationCancel();
+      return;
+    }
     notifyNavigationStart();
     startTransition(() => {
       router.push(href, { scroll: false });

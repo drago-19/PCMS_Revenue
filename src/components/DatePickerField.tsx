@@ -19,7 +19,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { formatDateLong } from "@/lib/format"
-import { notifyNavigationStart } from "@/lib/navigation-progress"
+import {
+  isSameBrowserUrl,
+  notifyNavigationCancel,
+  notifyNavigationStart,
+} from "@/lib/navigation-progress"
 import { cn } from "@/lib/utils"
 
 export interface DatePickerFieldProps {
@@ -208,8 +212,13 @@ export function DatePickerField({
         }
       }
       const qs = search.toString()
+      const targetHref = qs ? `${targetPath}?${qs}` : targetPath
+      if (isSameBrowserUrl(targetHref)) {
+        notifyNavigationCancel()
+        return
+      }
       notifyNavigationStart()
-      router.push(qs ? `${targetPath}?${qs}` : targetPath, { scroll: false })
+      router.push(targetHref, { scroll: false })
       return
     }
 
@@ -226,8 +235,13 @@ export function DatePickerField({
         search.delete(name)
       }
       const qs = search.toString()
+      const targetHref = qs ? `${basePath}?${qs}` : basePath
+      if (isSameBrowserUrl(targetHref)) {
+        notifyNavigationCancel()
+        return
+      }
       notifyNavigationStart()
-      router.push(qs ? `${basePath}?${qs}` : basePath, { scroll: false })
+      router.push(targetHref, { scroll: false })
       return
     }
 

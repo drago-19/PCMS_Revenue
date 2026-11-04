@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+import { recordTableRegionHeight } from "@/components/TableSkeleton";
 import {
   NAVIGATION_CANCEL_EVENT,
   NAVIGATION_START_EVENT,
+  isSameBrowserUrl,
   setNavigationPending,
 } from "@/lib/navigation-progress";
-import { recordTableRegionHeight } from "@/components/TableSkeleton";
 import { cn } from "@/lib/utils";
 
 /**
@@ -55,22 +56,7 @@ export function NavigationProgress() {
   const start = useCallback(() => {
     if (!pendingRef.current) {
       pendingRef.current = true;
-      // บันทึกความสูงของโซนตารางรวมแถบแบ่งหน้าก่อนสลับเป็น skeleton เพื่อกันความสูงหน้าหดกระตุก
-      const tableWrap = document.querySelector<HTMLElement>(
-        '[data-slot="table-container"]',
-      );
-      const paginationEl = document.querySelector<HTMLElement>(".pagination");
-      const emptyWrap = document.querySelector<HTMLElement>(".empty-state");
-      if (tableWrap) {
-        recordTableRegionHeight(
-          tableWrap.offsetHeight + (paginationEl?.offsetHeight ?? 0),
-        );
-      } else if (emptyWrap) {
-        recordTableRegionHeight(
-          emptyWrap.parentElement?.offsetHeight ?? emptyWrap.offsetHeight,
-        );
-      }
-      // เปิดใช้ทันที (ไม่หน่วง 120ms) เพื่อให้ skeleton ของตารางขึ้นพร้อมคลิก
+      // เปิดใช้ทันที (ไม่หน่วง 120ms) เพื่อให้ skeleton ของตารางขึ้นพร้อมคลิกโดยไม่อ่าน offsetHeight ซ้ำ (ป้องกัน Forced Reflow)
       setNavigationPending(true);
     }
     clearTimers();
@@ -88,6 +74,20 @@ export function NavigationProgress() {
     lastLocationRef.current = locationKey;
     stop();
   }, [locationKey, stop]);
+
+  // วัดความสูงตารางแบบไม่อุดตัน Main Thread (ผ่าน ResizeObserver แทนการอ่าน offsetHeight สดตอนคลิก)
+  useEffect(() => {
+    const tableWrap = document.querySelector(".table-wrap");
+    if (!tableWrap || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height ?? 0;
+      if (h > 240) {
+        recordTableRegionHeight(h + 56);
+      }
+    });
+    ro.observe(tableWrap);
+    return () => ro.disconnect();
+  }, [locationKey]);
 
   useEffect(() => {
     function isPlainLeftClick(event: MouseEvent) {
@@ -117,11 +117,8 @@ export function NavigationProgress() {
       }
       if (url.origin !== window.location.origin) return;
       if (url.protocol !== "http:" && url.protocol !== "https:") return;
-      // ลิงก์ที่ชี้ไปตำแหน่งเดิม (รวม hash ภายในหน้า) ไม่ต้องขึ้น loading
-      if (
-        url.pathname === window.location.pathname &&
-        url.search === window.location.search
-      ) {
+      // ลิงก์ที่ชี้ไปตำแหน่งเดิม (รวม hash หรือลำดับ query ต่างกัน) ไม่ต้องขึ้น loading
+      if (isSameBrowserUrl(url.href)) {
         return;
       }
       start();

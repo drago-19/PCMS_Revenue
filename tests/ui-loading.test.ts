@@ -220,3 +220,43 @@ test("navigation loading: page skeleton is accessible, uses shadcn Skeleton and 
   assert.doesNotMatch(pageSkeletonSource, /w-\[\d{4,}px\]/);
   assert.match(pageSkeletonSource, /max-w-full/);
 });
+
+
+test("navigation loading: prevents 15-second stuck skeleton when navigating to the current URL", () => {
+  const navigationHelperSource = readSource("src/lib/navigation-progress.ts");
+  assert.match(
+    navigationHelperSource,
+    /export function isSameBrowserUrl\(targetHref: string\): boolean/,
+    "navigation-progress.ts must export isSameBrowserUrl",
+  );
+  assert.match(
+    navigationHelperSource,
+    /normalizeUrlSearch/,
+    "isSameBrowserUrl must normalize query parameter order",
+  );
+
+  // ทุกจุดที่เรียก notifyNavigationStart() หรือดักคลิก <a href> ต้องเช็ค isSameBrowserUrl ก่อนเสมอ
+  for (const relativePath of [
+    "src/components/NavigationProgress.tsx",
+    "src/components/DatePickerField.tsx",
+    "src/components/BillsFilterInteractive.tsx",
+    "src/components/PaginationBar.tsx",
+  ]) {
+    const source = readSource(relativePath);
+    assert.match(source, /isSameBrowserUrl\(/, `${relativePath} must guard same-URL navigation`);
+  }
+
+  // listBills ใน queries.ts ต้องรองรับ fast summary แม้มีรายการชดเชย (dsCompensationCount > 0)
+  // และจำกัด correlated subquery LINE_MISMATCH_SQL เฉพาะตอนเลือกช่องทาง LINE หรือ link_status = line_mismatch
+  const queriesSource = readSource("src/lib/queries.ts");
+  assert.doesNotMatch(
+    queriesSource,
+    /canUseFastSummary =[\s\S]{0,160}?dsCompensationCount === 0/,
+    "canUseFastSummary must not be blocked when platform compensation rows exist",
+  );
+  assert.match(
+    queriesSource,
+    /lineMismatchSelectSql =[\s\S]{0,80}?channel === "LINE" \|\| linkStatus === "line_mismatch"/,
+    "LINE_MISMATCH_SQL correlated subquery must only run when needed",
+  );
+});
