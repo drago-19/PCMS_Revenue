@@ -135,13 +135,14 @@ export interface TransactionRow {
   sellerSettings?: SellerInfo;
 }
 
-export type OrderLinkStatus = "linked" | "unlinked" | "oms_only";
+export type OrderLinkStatus = "linked" | "unlinked" | "oms_only" | "missing_items";
 
 export type BillLinkStatusKey =
   | "all"
   | "linked"
   | "unlinked"
   | "oms_only"
+  | "missing_items"
   | "compensation"
   | "no_price"
   | "all_fb"
@@ -157,23 +158,30 @@ export function getOrderLinkStatus(row: TransactionRow): OrderLinkStatus {
   if (!hasOmsCode) {
     return "unlinked";
   }
+  const ch = row.channel || "TikTok";
+  const hasRealProductDetail = Boolean(
+    row.productDetail &&
+      row.productDetail.trim() !== "" &&
+      row.productDetail.trim() !== "/" &&
+      (ch === "Lazada" || row.productDetail.includes("·")),
+  );
+  const hasItems = Boolean(
+    hasRealProductDetail || (row.omsItems && row.omsItems.length > 0),
+  );
   if (row.transactionType === "คำสั่งซื้อ (OMS)") {
     if (
-      (row.channel === "Shopee" ||
-        row.channel === "Facebook" ||
-        row.channel === "Lazada" ||
-        row.channel === "LINE" ||
-        row.channel === "Other") &&
-      Boolean(
-        (row.productDetail && row.productDetail.trim() !== "") ||
-          (row.omsItems && row.omsItems.length > 0),
-      )
+      (ch === "Shopee" ||
+        ch === "Facebook" ||
+        ch === "Lazada" ||
+        ch === "LINE" ||
+        ch === "Other") &&
+      hasItems
     ) {
       return "linked";
     }
-    return "oms_only";
+    return ch === "TikTok" || ch === "LINE" ? "oms_only" : "missing_items";
   }
-  return "linked";
+  return hasItems ? "linked" : "missing_items";
 }
 
 export interface BillLinkCounts {
@@ -181,6 +189,7 @@ export interface BillLinkCounts {
   linked: number;
   unlinked: number;
   omsOnly: number;
+  missingItems: number;
   compensation: number;
   noPrice: number;
   allWithNoPrice: number;
@@ -221,6 +230,12 @@ export interface BillCategoryCounts {
   refundFeePayout: number;
 }
 
+export interface NonOrderTransactionBreakdownItem {
+  transactionType: string;
+  count: number;
+  payout: number;
+}
+
 export interface BillListResult {
   rows: TransactionRow[];
   total: number;
@@ -247,6 +262,11 @@ export interface BillListResult {
     otherCount: number;
     otherPayout: number;
     totalPayout: number;
+    compensationCount?: number;
+    compensationPayout?: number;
+    otherDeductionCount?: number;
+    otherDeductionPayout?: number;
+    nonOrderBreakdown?: NonOrderTransactionBreakdownItem[];
   };
   dateScope: {
     minPaidDate: string | null;
@@ -267,6 +287,25 @@ export interface ShopSummaryStat {
   totalFees: number;
 }
 
+export interface ChannelSummaryStat {
+  channel: string;
+  orderCount: number;
+  totalIncome: number;
+  totalFees: number;
+  totalPayout: number;
+  normalCount: number;
+  normalIncome: number;
+  normalFees: number;
+  normalPayout: number;
+  refundCount: number;
+  refundIncome: number;
+  refundFees: number;
+  refundPayout: number;
+  zeroCount: number;
+  compensationCount: number;
+  compensationPayout: number;
+}
+
 export interface OverallStats {
   importCount: number;
   orderCount: number;
@@ -275,6 +314,8 @@ export interface OverallStats {
   totalFees: number;
   latestPaidDate: string | null;
   shopSummaries?: ShopSummaryStat[];
+  channelSummaries?: ChannelSummaryStat[];
+  nonOrderBreakdown?: NonOrderTransactionBreakdownItem[];
   activeShop?: string;
 }
 
@@ -2589,9 +2630,11 @@ export async function listBills(
                     ? `${ORDER_LINK_PRIORITY_SQL} = 1`
                     : linkStatus === "unlinked"
                       ? `${ORDER_LINK_PRIORITY_SQL} = 2`
-                      : q || category === "refund_fee"
-                        ? "TRUE"
-                        : `${ORDER_LINK_PRIORITY_SQL} <> 3`;
+                      : linkStatus === "missing_items"
+                        ? `${ORDER_LINK_PRIORITY_SQL} = 4`
+                        : q || category === "refund_fee"
+                          ? "TRUE"
+                          : `${ORDER_LINK_PRIORITY_SQL} <> 3`;
 
   const dsParams: unknown[] = [];
   let dsWhere = "";
@@ -2949,6 +2992,7 @@ export async function listBills(
                  SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 1 THEN 1 ELSE 0 END) AS oms_only_count,
                  SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 2 THEN 1 ELSE 0 END) AS unlinked_count,
                  SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 3 THEN 1 ELSE 0 END) AS no_price_count,
+                 SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 4 THEN 1 ELSE 0 END) AS missing_items_count,
                  SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN 1 ELSE 0 END) AS compensation_count,
                  SUM(CASE WHEN t.channel = 'Shopee' AND t.payout > 0 THEN 1 ELSE 0 END) AS shopee_normal_count,
                  SUM(CASE WHEN t.channel = 'Shopee' AND t.payout < 0 THEN 1 ELSE 0 END) AS shopee_neg_count,
@@ -2983,6 +3027,7 @@ export async function listBills(
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 1 THEN 1 ELSE 0 END) AS oms_only_count,
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 2 THEN 1 ELSE 0 END) AS unlinked_count,
                     SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 3 THEN 1 ELSE 0 END) AS no_price_count,
+                    SUM(CASE WHEN ${ORDER_LINK_PRIORITY_SQL} = 4 THEN 1 ELSE 0 END) AS missing_items_count,
                     SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN 1 ELSE 0 END) AS compensation_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout > 0 THEN 1 ELSE 0 END) AS shopee_normal_count,
                     SUM(CASE WHEN t.channel = 'Shopee' AND t.payout < 0 THEN 1 ELSE 0 END) AS shopee_neg_count,
@@ -3041,9 +3086,13 @@ export async function listBills(
     linked: resolvedLinkedCount,
     omsOnly: Number(effectiveLinkStatsRow?.oms_only_count ?? 0),
     unlinked: Number(effectiveLinkStatsRow?.unlinked_count ?? 0),
+    missingItems: Number(effectiveLinkStatsRow?.missing_items_count ?? 0),
     noPrice: resolvedNoPriceCount,
     allWithNoPrice: resolvedAllWithNoPriceCount,
-    compensation: Number(effectiveLinkStatsRow?.compensation_count ?? dsCompensationCount ?? 0),
+    compensation:
+      category === "normal" && (channel === "all" || channel === "TikTok")
+        ? Number(effectiveLinkStatsRow?.compensation_count ?? dsCompensationCount ?? 0)
+        : 0,
     shopeeNormal: Number(effectiveLinkStatsRow?.shopee_normal_count ?? 0),
     shopeeNegative: Number(effectiveLinkStatsRow?.shopee_neg_count ?? 0),
     shopeeZero: Number(effectiveLinkStatsRow?.shopee_zero_count ?? 0),
@@ -3122,6 +3171,59 @@ export async function listBills(
     refundFeePayout: Number(nonPosRow?.refund_fee_payout ?? 0),
   };
 
+  // Breakdown of non-order transactions (is_order = 0: platform/logistics compensations vs GMV ad deductions & adjustments)
+  const nonOrderClauses: string[] = ["t.is_order = 0"];
+  const nonOrderParams: unknown[] = [];
+  if (date) {
+    if (isMonthFilter || isYearFilter) {
+      nonOrderClauses.push(`t.paid_date LIKE $${nonOrderParams.length + 1}`);
+      nonOrderParams.push(`${date}-%`);
+    } else {
+      nonOrderClauses.push(`t.paid_date = $${nonOrderParams.length + 1}`);
+      nonOrderParams.push(date);
+    }
+  }
+  if (activeShop && activeShop !== "all") {
+    if (activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ") {
+      nonOrderClauses.push(
+        `(t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')`,
+      );
+    } else {
+      nonOrderClauses.push(`t.shop_name = $${nonOrderParams.length + 1}`);
+      nonOrderParams.push(activeShop);
+    }
+  }
+  const nonOrderRows =
+    channel === "all" || channel === "TikTok"
+      ? await query<Record<string, unknown>>(
+          `SELECT t.transaction_type, COUNT(*)::int AS cnt, ROUND(SUM(t.payout)::numeric, 2) AS sum_payout
+           FROM transactions t
+           WHERE ${nonOrderClauses.join(" AND ")}
+           GROUP BY t.transaction_type
+           ORDER BY sum_payout DESC`,
+          nonOrderParams,
+          db,
+        )
+      : [];
+  const nonOrderBreakdown: NonOrderTransactionBreakdownItem[] = nonOrderRows.map((r) => ({
+    transactionType: String(r.transaction_type ?? ""),
+    count: Number(r.cnt ?? 0),
+    payout: Number(r.sum_payout ?? 0),
+  }));
+  let compensationCountFromBreakdown = 0;
+  let compensationPayoutFromBreakdown = 0;
+  let otherDeductionCountFromBreakdown = 0;
+  let otherDeductionPayoutFromBreakdown = 0;
+  for (const item of nonOrderBreakdown) {
+    if (isCompensationTransactionType(item.transactionType) && item.payout > 0) {
+      compensationCountFromBreakdown += item.count;
+      compensationPayoutFromBreakdown = round2(compensationPayoutFromBreakdown + item.payout);
+    } else {
+      otherDeductionCountFromBreakdown += item.count;
+      otherDeductionPayoutFromBreakdown = round2(otherDeductionPayoutFromBreakdown + item.payout);
+    }
+  }
+
   // Period net summary across all 3 categories for the selected channel
   const channelTotalOrderCount =
     categoryCounts.normal + categoryCounts.refundFee + categoryCounts.zero;
@@ -3138,7 +3240,11 @@ export async function listBills(
       ? Number(dsRow?.order_income ?? 0)
       : category === "normal" && linkStatus === "all"
         ? Number(
-            (summaryIncome + Number(nonPosRow?.non_pos_income ?? 0)).toFixed(2),
+            (
+              summaryIncome -
+              compensationPayoutFromBreakdown +
+              Number(nonPosRow?.non_pos_income ?? 0)
+            ).toFixed(2),
           )
         : Number(dsRow?.order_income ?? 0);
   const channelNetOrderFees =
@@ -3154,7 +3260,11 @@ export async function listBills(
       ? Number(dsRow?.order_payout ?? 0)
       : category === "normal" && linkStatus === "all"
         ? Number(
-            (summaryPayout + Number(nonPosRow?.non_pos_payout ?? 0)).toFixed(2),
+            (
+              summaryPayout -
+              compensationPayoutFromBreakdown +
+              Number(nonPosRow?.non_pos_payout ?? 0)
+            ).toFixed(2),
           )
         : Number(dsRow?.order_payout ?? 0);
 
@@ -3166,6 +3276,11 @@ export async function listBills(
     otherCount: channelOtherCount,
     otherPayout: channelOtherPayout,
     totalPayout: Number((channelNetOrderPayout + channelOtherPayout).toFixed(2)),
+    compensationCount: compensationCountFromBreakdown,
+    compensationPayout: compensationPayoutFromBreakdown,
+    otherDeductionCount: otherDeductionCountFromBreakdown,
+    otherDeductionPayout: otherDeductionPayoutFromBreakdown,
+    nonOrderBreakdown,
   };
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -3212,8 +3327,6 @@ export async function listBills(
   let allShopsCount = 0;
   const shopCounts: Record<string, number> = {
     all: 0,
-    "Kiddee Shop": 0,
-    "Kissi Studio": 0,
   };
   for (const scr of shopCountRows) {
     const sName = String(scr.shop);
@@ -3612,27 +3725,78 @@ export async function getOverallStats(
   db?: Queryable,
 ): Promise<OverallStats> {
   const activeShop = (options?.shop ?? "all").trim();
-  const [stats, shopRows] = await Promise.all([
-    queryOne<{ import_count: number }>(
-      "SELECT COUNT(*) AS import_count FROM imports",
-      [],
-      db,
-    ),
-    query<Record<string, unknown>>(
-      `SELECT 
-         COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name,
-         COUNT(*)::int AS order_count,
-         ROUND(SUM(t.payout)::numeric, 2) AS total_payout,
-         ROUND(SUM(t.income)::numeric, 2) AS total_income,
-         ROUND(SUM(t.fee_total)::numeric, 2) AS total_fees
-       FROM transactions t
-       WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
-       GROUP BY COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า')
-       ORDER BY order_count DESC`,
-      [],
-      db,
-    ),
-  ]);
+  const isUnlinkedShop = activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ";
+  const shopWhereClause =
+    activeShop && activeShop !== "all"
+      ? isUnlinkedShop
+        ? "AND (t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')"
+        : "AND t.shop_name = $1"
+      : "";
+  const shopParams: unknown[] =
+    activeShop && activeShop !== "all" && !isUnlinkedShop ? [activeShop] : [];
+
+  const stats = await queryOne<{ import_count: number }>(
+    "SELECT COUNT(*) AS import_count FROM imports",
+    [],
+    db,
+  );
+  const shopRows = await query<Record<string, unknown>>(
+    `SELECT 
+       COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name,
+       COUNT(*)::int AS order_count,
+       ROUND(SUM(t.payout)::numeric, 2) AS total_payout,
+       ROUND(SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN t.payout ELSE t.income END)::numeric, 2) AS total_income,
+       ROUND(SUM(t.fee_total)::numeric, 2) AS total_fees
+     FROM transactions t
+     WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+       AND ${ORDER_LINK_PRIORITY_SQL} <> 3
+     GROUP BY COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า')
+     ORDER BY order_count DESC`,
+    [],
+    db,
+  );
+
+  const channelRows = await query<Record<string, unknown>>(
+    `SELECT
+       COALESCE(NULLIF(t.channel, ''), 'TikTok') AS channel,
+       COUNT(*)::int AS order_count,
+       ROUND(SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN t.payout ELSE t.income END)::numeric, 2) AS total_income,
+       ROUND(SUM(t.fee_total)::numeric, 2) AS total_fees,
+       ROUND(SUM(t.payout)::numeric, 2) AS total_payout,
+       SUM(CASE WHEN (${BILL_CATEGORY_SQL.normal}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END)::int AS normal_count,
+       ROUND(SUM(CASE WHEN (${BILL_CATEGORY_SQL.normal}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN (CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN t.payout ELSE t.income END) ELSE 0 END)::numeric, 2) AS normal_income,
+       ROUND(SUM(CASE WHEN (${BILL_CATEGORY_SQL.normal}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN t.fee_total ELSE 0 END)::numeric, 2) AS normal_fees,
+       ROUND(SUM(CASE WHEN (${BILL_CATEGORY_SQL.normal}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN t.payout ELSE 0 END)::numeric, 2) AS normal_payout,
+       SUM(CASE WHEN (${BILL_CATEGORY_SQL.refund_fee}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END)::int AS refund_count,
+       ROUND(SUM(CASE WHEN (${BILL_CATEGORY_SQL.refund_fee}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN t.income ELSE 0 END)::numeric, 2) AS refund_income,
+       ROUND(SUM(CASE WHEN (${BILL_CATEGORY_SQL.refund_fee}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN t.fee_total ELSE 0 END)::numeric, 2) AS refund_fees,
+       ROUND(SUM(CASE WHEN (${BILL_CATEGORY_SQL.refund_fee}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN t.payout ELSE 0 END)::numeric, 2) AS refund_payout,
+       SUM(CASE WHEN (${BILL_CATEGORY_SQL.zero}) AND ${ORDER_LINK_PRIORITY_SQL} <> 3 THEN 1 ELSE 0 END)::int AS zero_count,
+       SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN 1 ELSE 0 END)::int AS comp_count,
+       ROUND(SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN t.payout ELSE 0 END)::numeric, 2) AS comp_payout
+     FROM transactions t
+     WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+       AND ${ORDER_LINK_PRIORITY_SQL} <> 3
+       ${shopWhereClause}
+     GROUP BY COALESCE(NULLIF(t.channel, ''), 'TikTok')
+     ORDER BY order_count DESC`,
+    shopParams,
+    db,
+  );
+
+  const nonOrderRows = await query<Record<string, unknown>>(
+    `SELECT
+       t.transaction_type,
+       COUNT(*)::int AS cnt,
+       ROUND(SUM(t.payout)::numeric, 2) AS sum_payout
+     FROM transactions t
+     WHERE t.is_order = 0
+       ${shopWhereClause}
+     GROUP BY t.transaction_type
+     ORDER BY sum_payout DESC`,
+    shopParams,
+    db,
+  );
 
   const shopSummaries: ShopSummaryStat[] = shopRows.map((r) => ({
     shopName: String(r.shop_name ?? "รอผูกไฟล์ร้านค้า"),
@@ -3642,14 +3806,38 @@ export async function getOverallStats(
     totalFees: Number(r.total_fees ?? 0),
   }));
 
+  const channelSummaries: ChannelSummaryStat[] = channelRows.map((r) => ({
+    channel: String(r.channel ?? "TikTok"),
+    orderCount: Number(r.order_count ?? 0),
+    totalIncome: Number(r.total_income ?? 0),
+    totalFees: Number(r.total_fees ?? 0),
+    totalPayout: Number(r.total_payout ?? 0),
+    normalCount: Number(r.normal_count ?? 0),
+    normalIncome: Number(r.normal_income ?? 0),
+    normalFees: Number(r.normal_fees ?? 0),
+    normalPayout: Number(r.normal_payout ?? 0),
+    refundCount: Number(r.refund_count ?? 0),
+    refundIncome: Number(r.refund_income ?? 0),
+    refundFees: Number(r.refund_fees ?? 0),
+    refundPayout: Number(r.refund_payout ?? 0),
+    zeroCount: Number(r.zero_count ?? 0),
+    compensationCount: Number(r.comp_count ?? 0),
+    compensationPayout: Number(r.comp_payout ?? 0),
+  }));
+
+  const nonOrderBreakdown: NonOrderTransactionBreakdownItem[] = nonOrderRows.map((r) => ({
+    transactionType: String(r.transaction_type ?? ""),
+    count: Number(r.cnt ?? 0),
+    payout: Number(r.sum_payout ?? 0),
+  }));
+
   if (activeShop && activeShop !== "all") {
-    const isUnlinked = activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ";
     const shopRow = shopSummaries.find((r) =>
-      isUnlinked
+      isUnlinkedShop
         ? r.shopName === "รอผูกไฟล์ร้านค้า" || r.shopName === "อื่นๆ"
         : r.shopName === activeShop,
     );
-    const latestRow = isUnlinked
+    const latestRow = isUnlinkedShop
       ? await queryOne<{ latest_paid_date: string | null }>(
           `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND (t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')`,
           [],
@@ -3668,7 +3856,9 @@ export async function getOverallStats(
       totalFees: shopRow?.totalFees ?? 0,
       latestPaidDate: latestRow?.latest_paid_date ? String(latestRow.latest_paid_date) : null,
       shopSummaries,
-      activeShop: isUnlinked ? "รอผูกไฟล์ร้านค้า" : activeShop,
+      channelSummaries,
+      nonOrderBreakdown,
+      activeShop: isUnlinkedShop ? "รอผูกไฟล์ร้านค้า" : activeShop,
     };
   }
 
@@ -3697,11 +3887,19 @@ export async function getOverallStats(
     totalFees: round2(totalFees),
     latestPaidDate: latestRow?.latest_paid_date ? String(latestRow.latest_paid_date) : null,
     shopSummaries,
+    channelSummaries,
+    nonOrderBreakdown,
     activeShop: "all",
   };
 }
 
 export type UploadDateMode = "created" | "paid";
+
+export interface DailyShopCompletenessBreakdown {
+  shopName: string;
+  orders: number;
+  missingFile3: number;
+}
 
 export interface DailyUploadCompletenessRow {
   date: string;
@@ -3724,6 +3922,7 @@ export interface DailyUploadCompletenessRow {
   kissiOrders?: number;
   kiddeeMissingFile3?: number;
   kissiMissingFile3?: number;
+  shopBreakdown?: DailyShopCompletenessBreakdown[];
 }
 
 export interface MonthlyCompletenessOverview {
@@ -3859,155 +4058,200 @@ export async function getDailyUploadCompleteness(
   }
   const availableYears = Array.from(availableYearsSet).sort((a, b) => b - a);
 
-  const hasItemsSql = `(NULLIF(t.product_detail, '') IS NOT NULL OR EXISTS (SELECT 1 FROM oms_order_items oi WHERE (NULLIF(t.oms_order_uid, '') IS NOT NULL AND oi.order_uid = t.oms_order_uid) OR (NULLIF(t.oms_order_uid, '') IS NULL AND oi.order_code = t.order_code)))`;
+  const hasItemsSql = `((t.channel = 'Lazada' AND NULLIF(t.product_detail, '') IS NOT NULL AND t.product_detail <> '/') OR COALESCE(t.product_detail, '') LIKE '%·%' OR EXISTS (SELECT 1 FROM oms_order_items oi WHERE (NULLIF(t.oms_order_uid, '') IS NOT NULL AND oi.order_uid = t.oms_order_uid) OR (NULLIF(t.oms_order_uid, '') IS NULL AND oi.order_code = t.order_code)))`;
 
-  const [rawRows, recentImportRows, importPeriodRows, distinctShopRows] = await Promise.all([
-    query<Record<string, unknown>>(
-      `WITH settled_paid_dates AS (
-         SELECT DISTINCT paid_date AS d
-         FROM transactions
-         WHERE is_order = 1
-           AND transaction_type <> 'คำสั่งซื้อ (OMS)'
-           AND paid_date LIKE $1 || '-%'
-       )
-       SELECT
-         ${dateCol} AS d,
-         COUNT(*)::int AS normal_orders,
-         SUM(
-           CASE
-             WHEN COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS tiktok_orders,
-         SUM(
-           CASE
-             WHEN t.channel = 'Shopee'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS shopee_orders,
-         SUM(
-           CASE
-             WHEN t.channel = 'Facebook'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS facebook_orders,
-         SUM(
-           CASE
-             WHEN t.channel = 'Lazada'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS lazada_orders,
-         SUM(
-           CASE
-             WHEN t.channel = 'LINE'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS line_orders,
-         SUM(
-           CASE
-             WHEN t.channel = 'Other'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS other_orders,
-         SUM(
-           CASE
-             WHEN t.order_code IS NOT NULL
-              AND t.order_code <> ''
-              AND ${hasItemsSql}
-              AND (COALESCE(NULLIF(t.channel, ''), 'TikTok') <> 'TikTok' OR t.transaction_type <> 'คำสั่งซื้อ (OMS)')
-             THEN 1
-             ELSE 0
-           END
-         )::int AS complete_count,
-         SUM(
-           CASE
-             WHEN t.order_code IS NULL OR t.order_code = ''
-             THEN 1
-             ELSE 0
-           END
-         )::int AS missing_file1_count,
-         SUM(
-           CASE
-             WHEN t.order_code IS NOT NULL
-              AND t.order_code <> ''
-              AND NOT ${hasItemsSql}
-             THEN 1
-             ELSE 0
-           END
-         )::int AS missing_file2_count,
-         SUM(
-           CASE
-             WHEN COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS missing_file3_count,
-         SUM(CASE WHEN t.shop_name = 'Kiddee Shop' THEN 1 ELSE 0 END)::int AS kiddee_orders,
-         SUM(CASE WHEN t.shop_name = 'Kissi Studio' THEN 1 ELSE 0 END)::int AS kissi_orders,
-         SUM(
-           CASE
-             WHEN t.shop_name = 'Kiddee Shop' AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS kiddee_missing_file3,
-         SUM(
-           CASE
-             WHEN t.shop_name = 'Kissi Studio' AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
-             THEN 1
-             ELSE 0
-           END
-         )::int AS kissi_missing_file3,
-         MAX(CASE WHEN spd.d IS NOT NULL THEN 1 ELSE 0 END)::int AS has_paid_settlement
-       FROM transactions t
-       LEFT JOIN settled_paid_dates spd ON spd.d = ${dateCol}
-       WHERE t.is_order = 1
-         AND t.income > 0${
-           activeShop !== "all"
-             ? activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ"
-               ? " AND (t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')"
-               : ` AND t.shop_name = '${activeShop.replace(/'/g, "''")}'`
-             : ""
-         }
-         AND ${dateCol} LIKE $1 || '-%'
-         AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-         AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
-       GROUP BY ${dateCol}
-       ORDER BY ${dateCol} ASC`,
-      [String(selectedYear)],
-      db,
-    ),
-    query<Record<string, unknown>>(
-      `SELECT id, filename, file_type, period_start, period_end, order_count, imported_at
-       FROM imports
-       ORDER BY id DESC
-       LIMIT 6`,
-      [],
-      db,
-    ),
-    query<Record<string, unknown>>(
-      `SELECT file_type, period_start, period_end
-       FROM imports
-       WHERE period_start IS NOT NULL
-         AND period_end IS NOT NULL
-         AND period_start ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-         AND period_end ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-         AND period_start >= '2000-01-01'`,
-      [],
-      db,
-    ),
-    query<Record<string, unknown>>(
-      `SELECT DISTINCT COALESCE(NULLIF(shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name FROM transactions WHERE is_order = 1 ORDER BY shop_name ASC`,
-      [],
-      db,
-    ),
-  ]);
+  const rawRows = await query<Record<string, unknown>>(
+    `WITH settled_paid_dates AS (
+       SELECT DISTINCT paid_date AS d
+       FROM transactions
+       WHERE is_order = 1
+         AND transaction_type <> 'คำสั่งซื้อ (OMS)'
+         AND paid_date LIKE $1 || '-%'
+     )
+     SELECT
+       ${dateCol} AS d,
+       COUNT(*)::int AS normal_orders,
+       SUM(
+         CASE
+           WHEN COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS tiktok_orders,
+       SUM(
+         CASE
+           WHEN t.channel = 'Shopee'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS shopee_orders,
+       SUM(
+         CASE
+           WHEN t.channel = 'Facebook'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS facebook_orders,
+       SUM(
+         CASE
+           WHEN t.channel = 'Lazada'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS lazada_orders,
+       SUM(
+         CASE
+           WHEN t.channel = 'LINE'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS line_orders,
+       SUM(
+         CASE
+           WHEN t.channel = 'Other'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS other_orders,
+       SUM(
+         CASE
+           WHEN t.order_code IS NOT NULL
+            AND t.order_code <> ''
+            AND ${hasItemsSql}
+            AND (COALESCE(NULLIF(t.channel, ''), 'TikTok') <> 'TikTok' OR t.transaction_type <> 'คำสั่งซื้อ (OMS)')
+           THEN 1
+           ELSE 0
+         END
+       )::int AS complete_count,
+       SUM(
+         CASE
+           WHEN t.order_code IS NULL OR t.order_code = ''
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_file1_count,
+       SUM(
+         CASE
+           WHEN t.order_code IS NOT NULL
+            AND t.order_code <> ''
+            AND NOT ${hasItemsSql}
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_file2_count,
+       SUM(
+         CASE
+           WHEN COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_file3_count,
+       SUM(CASE WHEN t.shop_name = 'Kiddee Shop' THEN 1 ELSE 0 END)::int AS kiddee_orders,
+       SUM(CASE WHEN t.shop_name = 'Kissi Studio' THEN 1 ELSE 0 END)::int AS kissi_orders,
+       SUM(
+         CASE
+           WHEN t.shop_name = 'Kiddee Shop' AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS kiddee_missing_file3,
+       SUM(
+         CASE
+           WHEN t.shop_name = 'Kissi Studio' AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS kissi_missing_file3,
+       MAX(CASE WHEN spd.d IS NOT NULL THEN 1 ELSE 0 END)::int AS has_paid_settlement
+     FROM transactions t
+     LEFT JOIN settled_paid_dates spd ON spd.d = ${dateCol}
+     WHERE t.is_order = 1
+       AND t.income > 0${
+         activeShop !== "all"
+           ? activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ"
+             ? " AND (t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')"
+             : ` AND t.shop_name = '${activeShop.replace(/'/g, "''")}'`
+           : ""
+       }
+       AND ${dateCol} LIKE $1 || '-%'
+       AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+     GROUP BY ${dateCol}
+     ORDER BY ${dateCol} ASC`,
+    [String(selectedYear)],
+    db,
+  );
+  const recentImportRows = await query<Record<string, unknown>>(
+    `SELECT id, filename, file_type, period_start, period_end, order_count, imported_at
+     FROM imports
+     ORDER BY id DESC
+     LIMIT 6`,
+    [],
+    db,
+  );
+  const importPeriodRows = await query<Record<string, unknown>>(
+    `SELECT file_type, period_start, period_end
+     FROM imports
+     WHERE period_start IS NOT NULL
+       AND period_end IS NOT NULL
+       AND period_start ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       AND period_end ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       AND period_start >= '2000-01-01'`,
+    [],
+    db,
+  );
+  const distinctShopRows = await query<Record<string, unknown>>(
+    `SELECT DISTINCT COALESCE(NULLIF(shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name FROM transactions WHERE is_order = 1 ORDER BY shop_name ASC`,
+    [],
+    db,
+  );
+  const rawShopDateRows = await query<Record<string, unknown>>(
+    `SELECT
+       ${dateCol} AS d,
+       t.shop_name AS shop_name,
+       COUNT(*)::int AS orders,
+       SUM(
+         CASE
+           WHEN COALESCE(NULLIF(t.channel, ''), 'TikTok') = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_file3
+     FROM transactions t
+     WHERE t.is_order = 1
+       AND t.income > 0
+       AND t.shop_name IS NOT NULL
+       AND t.shop_name <> ''
+       AND t.shop_name <> 'อื่นๆ'
+       AND t.shop_name <> 'รอผูกไฟล์ร้านค้า'${
+         activeShop !== "all"
+           ? activeShop === "รอผูกไฟล์ร้านค้า" || activeShop === "อื่นๆ"
+             ? " AND 1 = 0"
+             : ` AND t.shop_name = '${activeShop.replace(/'/g, "''")}'`
+           : ""
+       }
+       AND ${dateCol} LIKE $1 || '-%'
+       AND ${dateCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+     GROUP BY ${dateCol}, t.shop_name
+     ORDER BY ${dateCol} ASC, t.shop_name ASC`,
+    [String(selectedYear)],
+    db,
+  );
+
+  const shopBreakdownByDate = new Map<string, DailyShopCompletenessBreakdown[]>();
+  for (const sr of rawShopDateRows) {
+    const d = String(sr.d ?? "");
+    const sName = String(sr.shop_name ?? "").trim();
+    if (!d || !sName) continue;
+    const list = shopBreakdownByDate.get(d) ?? [];
+    list.push({
+      shopName: sName,
+      orders: Number(sr.orders ?? 0),
+      missingFile3: Number(sr.missing_file3 ?? 0),
+    });
+    shopBreakdownByDate.set(d, list);
+  }
 
   const settlementPeriods: { start: string; end: string }[] = [];
   for (const r of importPeriodRows) {
@@ -4128,6 +4372,7 @@ export async function getDailyUploadCompleteness(
       kissiOrders: Number(r.kissi_orders ?? 0),
       kiddeeMissingFile3: Number(r.kiddee_missing_file3 ?? 0),
       kissiMissingFile3: Number(r.kissi_missing_file3 ?? 0),
+      shopBreakdown: shopBreakdownByDate.get(date) ?? [],
     });
   }
 

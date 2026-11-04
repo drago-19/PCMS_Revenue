@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-03-v34";
+const SCHEMA_VERSION = "2026-11-04-v38";
 
 export type { CompanyId };
 
@@ -113,6 +113,24 @@ export function ensureSchema(): Promise<void> {
 
         await client.query("SET search_path TO public");
         await client.query(SCHEMA_SQL);
+        const { reconcileAndSyncThreeFiles, refreshSummaryTables } = await import("./ingest/import-service");
+        const fbMissingPublic = await client.query<{ paid_date: string }>(
+          `SELECT DISTINCT o.paid_date
+           FROM oms_orders o
+           WHERE o.channel = 'Facebook'
+             AND o.sales_amount > 0
+             AND o.paid_date IS NOT NULL AND o.paid_date <> ''
+             AND NOT EXISTS (
+               SELECT 1 FROM transactions t
+               WHERE t.is_order = 1 AND t.oms_order_uid = o.order_uid
+             )`,
+        );
+        if (fbMissingPublic.rows.length > 0) {
+          await reconcileAndSyncThreeFiles(client, 0, new Date().toISOString());
+          await refreshSummaryTables(client, {
+            dates: fbMissingPublic.rows.map((r) => String(r.paid_date)),
+          });
+        }
         await client.query(
           `INSERT INTO app_schema_version (schema_name, version, applied_at)
            VALUES ('public', $1, now())
@@ -123,6 +141,23 @@ export function ensureSchema(): Promise<void> {
         await client.query("CREATE SCHEMA IF NOT EXISTS seeheng");
         await client.query("SET search_path TO seeheng, public");
         await client.query(SCHEMA_SQL);
+        const fbMissingSeeheng = await client.query<{ paid_date: string }>(
+          `SELECT DISTINCT o.paid_date
+           FROM oms_orders o
+           WHERE o.channel = 'Facebook'
+             AND o.sales_amount > 0
+             AND o.paid_date IS NOT NULL AND o.paid_date <> ''
+             AND NOT EXISTS (
+               SELECT 1 FROM transactions t
+               WHERE t.is_order = 1 AND t.oms_order_uid = o.order_uid
+             )`,
+        );
+        if (fbMissingSeeheng.rows.length > 0) {
+          await reconcileAndSyncThreeFiles(client, 0, new Date().toISOString());
+          await refreshSummaryTables(client, {
+            dates: fbMissingSeeheng.rows.map((r) => String(r.paid_date)),
+          });
+        }
         await client.query(
           `INSERT INTO public.app_schema_version (schema_name, version, applied_at)
            VALUES ('seeheng', $1, now())
@@ -375,7 +410,7 @@ BEGIN
     JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
     WHERE a.attrelid = 'transactions'::regclass
       AND a.attname = 'link_priority'
-      AND pg_get_expr(d.adbin, d.adrelid) NOT LIKE '%Lazada%'
+      AND pg_get_expr(d.adbin, d.adrelid) NOT LIKE '%4%'
   ) THEN
     ALTER TABLE transactions DROP COLUMN link_priority;
   END IF;
@@ -398,11 +433,18 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS link_priority SMALLINT GENERAT
     WHEN (
       order_code IS NOT NULL AND order_code <> ''
       AND (
-        transaction_type <> 'คำสั่งซื้อ (OMS)'
-        OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)
+        (transaction_type <> 'คำสั่งซื้อ (OMS)' AND product_detail LIKE '%·%')
+        OR (channel = 'Lazada' AND NULLIF(product_detail, '') IS NOT NULL AND product_detail <> '/')
+        OR (channel IN ('Shopee', 'Facebook', 'LINE', 'Other') AND product_detail LIKE '%·%')
       )
     ) THEN 0
-    WHEN (order_code IS NOT NULL AND order_code <> '') THEN 1
+    WHEN (
+      order_code IS NOT NULL AND order_code <> ''
+      AND (transaction_type = 'คำสั่งซื้อ (OMS)' AND channel IN ('TikTok', 'LINE'))
+    ) THEN 1
+    WHEN (
+      order_code IS NOT NULL AND order_code <> ''
+    ) THEN 4
     ELSE 2
   END
 ) STORED;
@@ -846,9 +888,9 @@ BEGIN
       SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int,
-      SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int,
+      SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int,
       SUM(CASE WHEN is_order = 1 AND (
         ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
         OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
@@ -1113,7 +1155,7 @@ BEGIN
     UPDATE transactions t
     SET shop_name = o.shop_name
     FROM oms_orders o
-    WHERE (t.oms_order_uid = o.order_uid OR t.order_code = o.order_code OR t.related_order_id = o.marketplace_order_norm)
+    WHERE (t.oms_order_uid = o.order_uid OR t.external_id = o.matched_external_id OR t.order_code = o.order_code OR t.related_order_id = o.marketplace_order_norm)
       AND (t.shop_name IS NULL OR t.shop_name = '')
       AND o.shop_name IS NOT NULL AND o.shop_name <> '';
   END IF;
@@ -1167,7 +1209,16 @@ BEGIN
         ORDER BY COUNT(*) DESC
         LIMIT 1
       ),
-      'Kiddee Shop'
+      (
+        SELECT t3.shop_name
+        FROM transactions t3
+        WHERE t3.shop_name IS NOT NULL AND t3.shop_name <> ''
+          AND t3.shop_name <> 'อื่นๆ'
+          AND t3.shop_name <> 'รอผูกไฟล์ร้านค้า'
+        GROUP BY t3.shop_name
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+      )
     )
     WHERE t.is_order = 0
       AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
@@ -1236,9 +1287,9 @@ BEGIN
       SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int AS ln_count,
       SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int AS oth_ch_count,
       SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int AS cmp_count,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int AS lnk_count,
-      SUM(CASE WHEN is_order = 1 AND order_code IS NOT NULL AND order_code <> '' AND NOT (transaction_type <> 'คำสั่งซื้อ (OMS)' OR (channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') AND NULLIF(product_detail, '') IS NOT NULL)) THEN 1 ELSE 0 END)::int AS oms_count,
-      SUM(CASE WHEN is_order = 1 AND (order_code IS NULL OR order_code = '') THEN 1 ELSE 0 END)::int AS unlnk_count,
+      SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int AS lnk_count,
+      SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int AS oms_count,
+      SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int AS unlnk_count,
       SUM(CASE WHEN is_order = 1 AND (
         ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
         OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
@@ -1278,6 +1329,102 @@ BEGIN
       shipping_positive = EXCLUDED.shipping_positive,
       shipping_negative = EXCLUDED.shipping_negative,
       updated_at = now();
+  END IF;
+
+  -- Backfill product_detail from oms_order_items (by order_uid first, then order_code fallback)
+  -- so cross-month order_code matches in dragon19 get their SKU/product summary and link_priority = 0
+  IF EXISTS (
+    SELECT 1 FROM oms_order_items LIMIT 1
+  ) AND EXISTS (
+    SELECT 1 FROM transactions t
+    WHERE t.is_order = 1
+      AND t.order_code IS NOT NULL AND t.order_code <> ''
+      AND (t.product_detail IS NULL OR t.product_detail NOT LIKE '%·%')
+      AND EXISTS (
+        SELECT 1 FROM oms_order_items i
+        WHERE i.order_uid = t.oms_order_uid OR i.order_code = t.order_code
+      )
+    LIMIT 1
+  ) THEN
+    UPDATE transactions t
+    SET product_detail = s.summary_text
+    FROM (
+      SELECT i.order_uid,
+             STRING_AGG(i.sku_code || ' · ' || i.product_name || ' × ' || i.quantity::text, '; ' ORDER BY i.line_no) AS summary_text
+      FROM oms_order_items i
+      WHERE i.order_uid IS NOT NULL AND i.order_uid <> ''
+      GROUP BY i.order_uid
+    ) s
+    WHERE t.oms_order_uid = s.order_uid
+      AND (t.product_detail IS NULL OR t.product_detail NOT LIKE '%·%')
+      AND t.product_detail IS DISTINCT FROM s.summary_text;
+
+    UPDATE transactions t
+    SET product_detail = s.summary_text
+    FROM (
+      SELECT DISTINCT ON (order_code)
+        order_code,
+        summary_text
+      FROM (
+        SELECT i.order_code,
+               i.order_uid,
+               STRING_AGG(i.sku_code || ' · ' || i.product_name || ' × ' || i.quantity::text, '; ' ORDER BY i.line_no) AS summary_text
+        FROM oms_order_items i
+        WHERE i.order_code IS NOT NULL AND i.order_code <> ''
+        GROUP BY i.order_code, i.order_uid
+      ) by_uid
+      ORDER BY order_code, order_uid DESC
+    ) s
+    WHERE t.order_code = s.order_code
+      AND (t.product_detail IS NULL OR t.product_detail NOT LIKE '%·%')
+      AND t.product_detail IS DISTINCT FROM s.summary_text;
+  END IF;
+
+  -- Void active invoice_registry entries for orders missing File 2 (link_priority = 4) when oms_order_items is empty
+  IF NOT EXISTS (SELECT 1 FROM oms_order_items LIMIT 1) AND EXISTS (
+    SELECT 1 FROM invoice_registry r
+    JOIN transactions t ON t.external_id = r.order_id AND t.is_order = 1
+    WHERE r.status = 'active' AND t.link_priority = 4
+    LIMIT 1
+  ) THEN
+    WITH upd AS (
+      UPDATE invoice_registry r
+      SET status = 'void',
+          voided_at = now(),
+          void_reason = 'รอไฟล์สินค้าในออเดอร์ Shipnity (ยังไม่มีชื่อสินค้า/SKU)'
+      FROM transactions t
+      WHERE r.order_id = t.external_id
+        AND r.status = 'active'
+        AND t.is_order = 1
+        AND t.link_priority = 4
+      RETURNING r.order_id, r.invoice_no, r.void_reason
+    )
+    INSERT INTO invoice_registry_audit (order_id, invoice_no, action, reason)
+    SELECT order_id, invoice_no, 'void', void_reason FROM upd;
+  END IF;
+
+  -- Refresh daily_summaries.linked_count / oms_only_count / unlinked_count if out of sync with link_priority
+  IF (SELECT COALESCE(SUM(linked_count), 0) FROM daily_summaries) IS DISTINCT FROM (SELECT COUNT(*)::int FROM transactions WHERE is_order = 1 AND paid_date <> '' AND paid_date <> 'unknown' AND link_priority = 0) THEN
+    UPDATE daily_summaries d
+    SET linked_count = s.lnk_count,
+        oms_only_count = s.oms_count,
+        unlinked_count = s.unlnk_count,
+        updated_at = now()
+    FROM (
+      SELECT paid_date,
+             SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int AS lnk_count,
+             SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int AS oms_count,
+             SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int AS unlnk_count
+      FROM transactions
+      WHERE paid_date <> '' AND paid_date <> 'unknown'
+      GROUP BY paid_date
+    ) s
+    WHERE d.paid_date = s.paid_date
+      AND (
+        d.linked_count IS DISTINCT FROM s.lnk_count
+        OR d.oms_only_count IS DISTINCT FROM s.oms_count
+        OR d.unlinked_count IS DISTINCT FROM s.unlnk_count
+      );
   END IF;
 END $$;
 

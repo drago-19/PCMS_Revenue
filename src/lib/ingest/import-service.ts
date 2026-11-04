@@ -514,15 +514,225 @@ export async function saveOmsItemsBatch(
           a.sender_name
         FROM agg a
         ON CONFLICT (order_uid) DO UPDATE SET
-          customer_name = COALESCE(oms_orders.customer_name, EXCLUDED.customer_name),
-          customer_phone = COALESCE(oms_orders.customer_phone, EXCLUDED.customer_phone),
-          tracking_no = COALESCE(oms_orders.tracking_no, EXCLUDED.tracking_no),
-          shop_name = COALESCE(EXCLUDED.shop_name, oms_orders.shop_name),
-          total_qty = CASE WHEN oms_orders.total_qty > 0 THEN oms_orders.total_qty ELSE EXCLUDED.total_qty END`,
+          customer_name = COALESCE(NULLIF(oms_orders.customer_name, ''), EXCLUDED.customer_name),
+          customer_phone = COALESCE(NULLIF(oms_orders.customer_phone, ''), EXCLUDED.customer_phone),
+          tracking_no = COALESCE(NULLIF(oms_orders.tracking_no, ''), EXCLUDED.tracking_no),
+          shop_name = COALESCE(NULLIF(EXCLUDED.shop_name, ''), oms_orders.shop_name),
+          total_qty = CASE WHEN oms_orders.total_qty > 0 THEN oms_orders.total_qty ELSE EXCLUDED.total_qty END,
+          updated_at = now()`,
       [uidChunk, importId],
       client,
     );
   }
+}
+
+/**
+ * Smart Order UID Linker:
+ * เมื่อมีการนำเข้าไฟล์ออเดอร์ (เช่น line_ปี69.xlsx) ที่ตอนแรกยังไม่มีเลขพัสดุ (tracking_no ว่าง)
+ * ระบบจะสร้าง order_uid เป็น "AB015|2026-09|2026-09-12"
+ * หากในอนาคตมีการอัปโหลดไฟล์สินค้า (oms_items) หรือไฟล์ออเดอร์ใหม่ของออเดอร์เดียวกัน (order_code + เดือนเดียวกัน)
+ * ที่มีเลขพัสดุแนบมาด้วย (เช่น "AB015|2026-09|JTTH...") หรือกลับกัน:
+ * ฟังก์ชันนี้จะรวมร่าง (Merge) รหัส order_uid เข้าหากันโดยอัตโนมัติ เพื่อไม่ให้เกิดบิลซ้ำและให้รายการสินค้าผูกเข้ากับบิลเดิมทันที 100%
+ */
+export async function reconcileCrossFileOrderUids(
+  client: Queryable,
+  importId: number,
+): Promise<string[]> {
+  const affectedPaidDates = new Set<string>();
+
+  // กรณีที่ 1: มี oms_orders 2 แถวที่เป็นออเดอร์เดียวกัน (order_code + channel + เดือนเดียวกัน)
+  // แถวหนึ่งไม่มีเลขพัสดุ (ใช้วันที่เป็นส่วนท้ายของ order_uid) และอีกแถวหนึ่งมีเลขพัสดุจริง
+  const dupOrderPairs = await query<{
+    no_trk_uid: string;
+    with_trk_uid: string;
+    no_trk_paid: string | null;
+    with_trk_paid: string | null;
+    tracking_no: string | null;
+    shop_name: string | null;
+    customer_phone: string | null;
+    courier: string | null;
+    sales_amount: number;
+    profit_amount: number;
+    shipping_fee_customer: number;
+    shipping_fee_seller: number;
+    discount_total: number;
+    total_qty: number;
+  }>(
+    `SELECT
+       o_notrk.order_uid AS no_trk_uid,
+       o_trk.order_uid AS with_trk_uid,
+       o_notrk.paid_date AS no_trk_paid,
+       o_trk.paid_date AS with_trk_paid,
+       o_trk.tracking_no,
+       COALESCE(NULLIF(o_notrk.shop_name, ''), NULLIF(o_trk.shop_name, '')) AS shop_name,
+       COALESCE(NULLIF(o_notrk.customer_phone, ''), NULLIF(o_trk.customer_phone, '')) AS customer_phone,
+       COALESCE(NULLIF(o_notrk.courier, ''), NULLIF(o_trk.courier, '')) AS courier,
+       CASE WHEN o_notrk.sales_amount > 0 THEN o_notrk.sales_amount ELSE o_trk.sales_amount END AS sales_amount,
+       CASE WHEN o_notrk.sales_amount > 0 THEN o_notrk.profit_amount ELSE o_trk.profit_amount END AS profit_amount,
+       CASE WHEN o_notrk.shipping_fee_customer > 0 THEN o_notrk.shipping_fee_customer ELSE o_trk.shipping_fee_customer END AS shipping_fee_customer,
+       CASE WHEN o_notrk.shipping_fee_seller > 0 THEN o_notrk.shipping_fee_seller ELSE o_trk.shipping_fee_seller END AS shipping_fee_seller,
+       GREATEST(COALESCE(o_notrk.discount_total, 0), COALESCE(o_trk.discount_total, 0)) AS discount_total,
+       CASE WHEN o_notrk.total_qty > 0 THEN o_notrk.total_qty ELSE o_trk.total_qty END AS total_qty
+     FROM oms_orders o_notrk
+     JOIN oms_orders o_trk
+       ON o_notrk.order_code = o_trk.order_code
+      AND COALESCE(NULLIF(o_notrk.channel, ''), 'TikTok') = COALESCE(NULLIF(o_trk.channel, ''), 'TikTok')
+      AND (
+        SUBSTRING(COALESCE(NULLIF(o_notrk.paid_date, ''), o_notrk.created_date) FROM 1 FOR 7)
+          = SUBSTRING(COALESCE(NULLIF(o_trk.paid_date, ''), o_trk.created_date) FROM 1 FOR 7)
+        OR (
+          o_notrk.tracking_no IS NOT NULL AND o_notrk.tracking_no <> '' AND o_notrk.tracking_no <> '-'
+          AND o_notrk.tracking_no = o_trk.tracking_no
+        )
+      )
+      AND o_notrk.order_uid <> o_trk.order_uid
+     WHERE (o_notrk.import_id = $1 OR o_trk.import_id = $1)
+       AND (
+         (
+           (o_notrk.tracking_no IS NULL OR o_notrk.tracking_no = '' OR o_notrk.tracking_no = '-')
+           AND (o_trk.tracking_no IS NOT NULL AND o_trk.tracking_no <> '' AND o_trk.tracking_no <> '-')
+         )
+         OR (
+           o_notrk.tracking_no IS NOT NULL AND o_notrk.tracking_no <> '' AND o_notrk.tracking_no <> '-'
+           AND o_notrk.tracking_no = o_trk.tracking_no
+           AND o_notrk.sales_amount > 0
+           AND o_trk.sales_amount = 0
+         )
+       )`,
+    [importId],
+    client,
+  );
+
+  for (const pair of dupOrderPairs) {
+    if (pair.no_trk_paid) affectedPaidDates.add(String(pair.no_trk_paid));
+    if (pair.with_trk_paid) affectedPaidDates.add(String(pair.with_trk_paid));
+
+    // ยึด canonical_uid เป็นตัวที่มีอยู่แล้วใน transactions (เพื่อให้ external_id และ invoice_registry เดิมไม่หลุด)
+    const txNoTrk = await queryOne<{ external_id: string }>(
+      `SELECT external_id FROM transactions WHERE is_order = 1 AND oms_order_uid = $1 LIMIT 1`,
+      [pair.no_trk_uid],
+      client,
+    );
+    const canonicalUid = txNoTrk ? pair.no_trk_uid : pair.with_trk_uid;
+    const obsoleteUid = txNoTrk ? pair.with_trk_uid : pair.no_trk_uid;
+
+    // ย้ายรายการสินค้าทั้งหมดมาที่ canonicalUid
+    await query(
+      `DELETE FROM oms_order_items
+       WHERE order_uid = $1
+         AND line_no IN (SELECT line_no FROM oms_order_items WHERE order_uid = $2)`,
+      [canonicalUid, obsoleteUid],
+      client,
+    );
+    await query(
+      `UPDATE oms_order_items SET order_uid = $1 WHERE order_uid = $2`,
+      [canonicalUid, obsoleteUid],
+      client,
+    );
+
+    // อัปเดตข้อมูลที่สมบูรณ์เข้าสู่แถว oms_orders หลัก (และผูก import_id = $12 เพื่อให้ Step 4 ใน reconcileAndSyncThreeFiles ซิงก์บิลทันที)
+    await query(
+      `UPDATE oms_orders
+       SET tracking_no = COALESCE(NULLIF($2, ''), tracking_no),
+           shop_name = COALESCE(NULLIF($3, ''), shop_name),
+           customer_phone = COALESCE(NULLIF($4, ''), customer_phone),
+           courier = COALESCE(NULLIF($5, ''), courier),
+           sales_amount = $6,
+           profit_amount = $7,
+           shipping_fee_customer = $8,
+           shipping_fee_seller = $9,
+           discount_total = $10,
+           total_qty = $11,
+           import_id = $12,
+           updated_at = now()
+       WHERE order_uid = $1`,
+      [
+        canonicalUid,
+        pair.tracking_no,
+        pair.shop_name,
+        pair.customer_phone,
+        pair.courier,
+        pair.sales_amount,
+        pair.profit_amount,
+        pair.shipping_fee_customer,
+        pair.shipping_fee_seller,
+        pair.discount_total,
+        pair.total_qty,
+        importId,
+      ],
+      client,
+    );
+    await query(
+      `DELETE FROM transactions
+       WHERE is_order = 1
+         AND transaction_type = 'คำสั่งซื้อ (OMS)'
+         AND oms_order_uid = $1
+         AND oms_order_uid <> $2`,
+      [obsoleteUid, canonicalUid],
+      client,
+    );
+    await query(
+      `DELETE FROM oms_orders WHERE order_uid = $1`,
+      [obsoleteUid],
+      client,
+    );
+  }
+
+  // กรณีที่ 2: มีรายการใน oms_order_items ที่ order_uid ไม่ตรงกับ oms_orders เพราะเลขพัสดุหรือวันที่ต่างกันเล็กน้อยในเดือนเดียวกัน
+  const unmatchedItemsLinked = await query<{ paid_date: string | null }>(
+    `WITH unmatched_items AS (
+       SELECT DISTINCT
+         i.order_uid AS item_uid,
+         o.order_uid AS target_order_uid,
+         o.paid_date AS target_paid_date,
+         NULLIF(i.tracking_no, '') AS item_tracking,
+         NULLIF(i.sender_name, '') AS item_sender,
+         NULLIF(i.customer_phone, '') AS item_phone
+       FROM oms_order_items i
+       JOIN oms_orders o
+         ON o.order_code = i.order_code
+        AND SUBSTRING(COALESCE(NULLIF(o.paid_date, ''), o.created_date) FROM 1 FOR 7)
+          = SUBSTRING(COALESCE(NULLIF(i.paid_date, ''), i.created_date) FROM 1 FOR 7)
+        AND (
+          COALESCE(NULLIF(o.channel, ''), 'TikTok') = COALESCE(NULLIF(i.channel, ''), 'TikTok')
+          OR i.channel IS NULL OR i.channel = ''
+        )
+       WHERE (i.import_id = $1 OR o.import_id = $1)
+         AND i.order_uid <> o.order_uid
+         AND NOT EXISTS (SELECT 1 FROM oms_orders o2 WHERE o2.order_uid = i.order_uid)
+     ),
+     updated_orders AS (
+       UPDATE oms_orders o
+       SET tracking_no = COALESCE(NULLIF(o.tracking_no, ''), u.item_tracking),
+           shop_name = COALESCE(NULLIF(o.shop_name, ''), u.item_sender),
+           customer_phone = COALESCE(NULLIF(o.customer_phone, ''), u.item_phone),
+           import_id = $1,
+           updated_at = now()
+       FROM unmatched_items u
+       WHERE o.order_uid = u.target_order_uid
+       RETURNING u.item_uid, u.target_order_uid, u.target_paid_date
+     ),
+     updated_items AS (
+       UPDATE oms_order_items i
+       SET order_uid = u.target_order_uid
+       FROM unmatched_items u
+       WHERE i.order_uid = u.item_uid
+         AND NOT EXISTS (
+           SELECT 1 FROM oms_order_items i2
+           WHERE i2.order_uid = u.target_order_uid AND i2.line_no = i.line_no
+         )
+       RETURNING i.order_uid
+     )
+     SELECT DISTINCT target_paid_date AS paid_date FROM updated_orders`,
+    [importId],
+    client,
+  );
+
+  for (const r of unmatchedItemsLinked) {
+    if (r.paid_date) affectedPaidDates.add(String(r.paid_date));
+  }
+
+  return [...affectedPaidDates];
 }
 
 export async function reconcileAndSyncThreeFiles(
@@ -530,6 +740,9 @@ export async function reconcileAndSyncThreeFiles(
   fallbackImportId: number,
   nowIso: string,
 ): Promise<{ matchedOrders: number; syncedOmsBills: number }> {
+  // 0a. Smart Order UID Linker: รวมร่าง order_uid ระหว่างไฟล์ออเดอร์กับไฟล์สินค้าในกรณีที่ไฟล์หนึ่งมีเลขพัสดุและอีกไฟล์ไม่มีเลขพัสดุ
+  const mergedUidPaidDates = await reconcileCrossFileOrderUids(client, fallbackImportId);
+
   // 0. Enforce TikTok, Shopee, Facebook, LINE & Other policy on newly imported rows (scoped by import_id to avoid full-table scans)
   await query(
     `DELETE FROM oms_order_items WHERE import_id = $1 AND COALESCE(NULLIF(channel, ''), 'TikTok') NOT IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')`,
@@ -630,22 +843,43 @@ export async function reconcileAndSyncThreeFiles(
            SELECT 1
            FROM oms_orders o
            WHERE o.matched_external_id IS NOT NULL
-             AND (
-               t.oms_order_uid = o.order_uid
-               OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
-             )
+             AND o.order_uid = t.oms_order_uid
+         )
+         OR EXISTS (
+           SELECT 1
+           FROM oms_orders o
+           WHERE o.matched_external_id IS NOT NULL
+             AND o.marketplace_order_norm IS NOT NULL
+             AND o.marketplace_order_norm <> ''
+             AND o.marketplace_order_norm = t.external_id
          )
          OR (
-           t.channel IN ('Shopee', 'Facebook')
+           t.channel = 'Shopee'
            AND (
              t.income <= 0
              OR EXISTS (
                SELECT 1
                FROM oms_orders o
-               WHERE t.oms_order_uid = o.order_uid
+               WHERE o.order_uid = t.oms_order_uid
                  AND (
                    o.sales_amount <= 0
                    OR ((o.tracking_no IS NULL OR o.tracking_no = '') AND (o.printed_date IS NULL OR o.printed_date = ''))
+                 )
+             )
+           )
+         )
+         OR (
+           t.channel = 'Facebook'
+           AND (
+             t.income <= 0
+             OR EXISTS (
+               SELECT 1
+               FROM oms_orders o
+               WHERE o.order_uid = t.oms_order_uid
+                 AND (
+                   o.sales_amount <= 0
+                   OR o.paid_date IS NULL
+                   OR o.paid_date = ''
                  )
              )
            )
@@ -672,10 +906,15 @@ export async function reconcileAndSyncThreeFiles(
        AND (
          COALESCE(NULLIF(o.channel, ''), 'TikTok') = 'TikTok'
          OR (
-           o.channel IN ('Shopee', 'Facebook')
+           o.channel = 'Shopee'
            AND o.sales_amount > 0
            AND o.paid_date IS NOT NULL AND o.paid_date <> ''
            AND ((o.tracking_no IS NOT NULL AND o.tracking_no <> '') OR (o.printed_date IS NOT NULL AND o.printed_date <> ''))
+         )
+         OR (
+           o.channel = 'Facebook'
+           AND o.sales_amount > 0
+           AND o.paid_date IS NOT NULL AND o.paid_date <> ''
          )
          OR (
            o.channel = 'LINE'
@@ -689,13 +928,25 @@ export async function reconcileAndSyncThreeFiles(
        )
        AND (
          o.import_id = $1
-         OR NOT EXISTS (
-           SELECT 1 FROM transactions t
-           WHERE t.is_order = 1
-             AND (
-               t.oms_order_uid = o.order_uid
-               OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
+         OR EXISTS (
+           SELECT 1 FROM oms_order_items i
+           WHERE i.order_uid = o.order_uid AND i.import_id = $1
+         )
+         OR (
+           NOT EXISTS (
+             SELECT 1 FROM transactions t
+             WHERE t.is_order = 1
+               AND t.oms_order_uid = o.order_uid
+           )
+           AND (
+             o.marketplace_order_norm IS NULL
+             OR o.marketplace_order_norm = ''
+             OR NOT EXISTS (
+               SELECT 1 FROM transactions t
+               WHERE t.is_order = 1
+                 AND t.external_id = o.marketplace_order_norm
              )
+           )
          )
        )
      ORDER BY o.paid_date DESC, o.order_uid ASC`,
@@ -896,42 +1147,106 @@ export async function reconcileAndSyncThreeFiles(
     // เลขที่ใบกำกับฯ ออกใน syncMonthlyInvoiceRegistry (ท้ายฟังก์ชันนี้) เท่านั้น
   }
 
-  // 5. Stamp order_code, oms_order_uid, and channel onto matched transactions
+  // 5. Stamp order_code, oms_order_uid, shop_name, and channel onto matched transactions (order-independent across all 3 files)
+  //    First ensure oms_orders.shop_name is populated from oms_order_items.sender_name whenever items exist
+  await query(
+    `UPDATE oms_orders o
+     SET shop_name = sub.sender_name,
+         updated_at = now()
+     FROM (
+       SELECT DISTINCT ON (order_uid) order_uid, sender_name
+       FROM oms_order_items
+       WHERE order_uid IS NOT NULL AND order_uid <> ''
+         AND sender_name IS NOT NULL AND sender_name <> ''
+       ORDER BY order_uid, line_no ASC
+     ) sub
+     WHERE o.order_uid = sub.order_uid
+       AND (o.shop_name IS NULL OR o.shop_name = '')`,
+    [],
+    client,
+  );
+
   //    TikTok Settlement rows (transaction_type <> 'คำสั่งซื้อ (OMS)') strictly match via external_id = o.matched_external_id
   //    and ALWAYS keep channel = 'TikTok'
   await query(
     `UPDATE transactions t
      SET order_code = o.order_code,
          oms_order_uid = o.order_uid,
-         shop_name = COALESCE(o.shop_name, t.shop_name),
+         shop_name = COALESCE(NULLIF(o.shop_name, ''), t.shop_name),
          channel = CASE
            WHEN t.transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 'TikTok'
            ELSE COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
          END
      FROM oms_orders o
      WHERE t.is_order = 1
-       AND (t.import_id = $1 OR o.import_id = $1 OR t.oms_order_uid IS NULL OR t.oms_order_uid = '')
-       AND (
-         (t.transaction_type <> 'คำสั่งซื้อ (OMS)' AND t.external_id = o.matched_external_id)
-         OR (
-           t.transaction_type = 'คำสั่งซื้อ (OMS)'
-           AND (
-             t.oms_order_uid = o.order_uid
-             OR (o.marketplace_order_norm IS NOT NULL AND o.marketplace_order_norm <> '' AND t.external_id = o.marketplace_order_norm)
-           )
-         )
-       )
+       AND t.transaction_type <> 'คำสั่งซื้อ (OMS)'
+       AND o.matched_external_id IS NOT NULL
+       AND t.external_id = o.matched_external_id
        AND (
          t.order_code IS DISTINCT FROM o.order_code
          OR t.oms_order_uid IS DISTINCT FROM o.order_uid
-         OR t.channel IS DISTINCT FROM (
-           CASE
-             WHEN t.transaction_type <> 'คำสั่งซื้อ (OMS)' THEN 'TikTok'
-             ELSE COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
-           END
-         )
+         OR t.shop_name IS DISTINCT FROM COALESCE(NULLIF(o.shop_name, ''), t.shop_name)
+         OR t.channel IS DISTINCT FROM 'TikTok'
        )`,
-    [fallbackImportId],
+    [],
+    client,
+  );
+
+  await query(
+    `UPDATE transactions t
+     SET order_code = o.order_code,
+         oms_order_uid = o.order_uid,
+         shop_name = COALESCE(NULLIF(o.shop_name, ''), t.shop_name),
+         channel = COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+     FROM oms_orders o
+     WHERE t.is_order = 1
+       AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+       AND t.oms_order_uid = o.order_uid
+       AND (
+         t.order_code IS DISTINCT FROM o.order_code
+         OR t.shop_name IS DISTINCT FROM COALESCE(NULLIF(o.shop_name, ''), t.shop_name)
+         OR t.channel IS DISTINCT FROM COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+       )`,
+    [],
+    client,
+  );
+
+  await query(
+    `UPDATE transactions t
+     SET order_code = o.order_code,
+         oms_order_uid = o.order_uid,
+         shop_name = COALESCE(NULLIF(o.shop_name, ''), t.shop_name),
+         channel = COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+     FROM oms_orders o
+     WHERE t.is_order = 1
+       AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+       AND o.marketplace_order_norm IS NOT NULL
+       AND o.marketplace_order_norm <> ''
+       AND t.external_id = o.marketplace_order_norm
+       AND (
+         t.order_code IS DISTINCT FROM o.order_code
+         OR t.oms_order_uid IS DISTINCT FROM o.order_uid
+         OR t.shop_name IS DISTINCT FROM COALESCE(NULLIF(o.shop_name, ''), t.shop_name)
+         OR t.channel IS DISTINCT FROM COALESCE(NULLIF(o.channel, ''), t.channel, 'TikTok')
+       )`,
+    [],
+    client,
+  );
+
+  //    Also sync transactions.shop_name directly from oms_order_items.sender_name by oms_order_uid if still empty
+  await query(
+    `UPDATE transactions t
+     SET shop_name = sub.sender_name
+     FROM (
+       SELECT DISTINCT ON (order_uid) order_uid, sender_name
+       FROM oms_order_items
+       WHERE order_uid IS NOT NULL AND order_uid <> ''
+         AND sender_name IS NOT NULL AND sender_name <> ''
+       ORDER BY order_uid, line_no ASC
+     ) sub
+     WHERE t.oms_order_uid = sub.order_uid
+       AND (t.shop_name IS NULL OR t.shop_name = '')`,
+    [],
     client,
   );
 
@@ -1004,7 +1319,16 @@ export async function reconcileAndSyncThreeFiles(
          ORDER BY COUNT(*) DESC
          LIMIT 1
        ),
-       'Kiddee Shop'
+       (
+         SELECT t3.shop_name
+         FROM transactions t3
+         WHERE t3.shop_name IS NOT NULL AND t3.shop_name <> ''
+           AND t3.shop_name <> 'อื่นๆ'
+           AND t3.shop_name <> 'รอผูกไฟล์ร้านค้า'
+         GROUP BY t3.shop_name
+         ORDER BY COUNT(*) DESC
+         LIMIT 1
+       )
      )
      WHERE t.is_order = 0
        AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
@@ -1023,7 +1347,7 @@ export async function reconcileAndSyncThreeFiles(
        UNION
        SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE import_id = $1 AND oms_order_uid IS NOT NULL AND oms_order_uid <> ''
        UNION
-       SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE (is_order = 1 OR transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')) AND oms_order_uid IS NOT NULL AND oms_order_uid <> '' AND product_detail IS NULL
+       SELECT DISTINCT oms_order_uid AS order_uid FROM transactions WHERE (is_order = 1 OR transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')) AND oms_order_uid IS NOT NULL AND oms_order_uid <> '' AND (product_detail IS NULL OR product_detail = '' OR product_detail = '/' OR product_detail NOT LIKE '%·%')
      ),
      item_summary AS (
        SELECT
@@ -1042,6 +1366,37 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
+  // 6b. Fallback: if any order transaction still lacks SKU/product summary ('·'), match by order_code + same channel + same year-month
+  await query(
+    `WITH item_by_code AS (
+       SELECT DISTINCT ON (i.order_code, COALESCE(NULLIF(i.channel, ''), 'TikTok'), SUBSTRING(COALESCE(NULLIF(i.paid_date, ''), i.created_date) FROM 1 FOR 7))
+         i.order_code,
+         COALESCE(NULLIF(i.channel, ''), 'TikTok') AS channel,
+         SUBSTRING(COALESCE(NULLIF(i.paid_date, ''), i.created_date) FROM 1 FOR 7) AS ym,
+         i.order_uid,
+         MAX(NULLIF(i.sender_name, '')) AS sender_name,
+         STRING_AGG(i.sku_code || ' · ' || i.product_name || ' × ' || i.quantity::text, '; ' ORDER BY i.line_no) AS summary_text
+       FROM oms_order_items i
+       WHERE i.order_code IS NOT NULL AND i.order_code <> ''
+       GROUP BY i.order_code, COALESCE(NULLIF(i.channel, ''), 'TikTok'), SUBSTRING(COALESCE(NULLIF(i.paid_date, ''), i.created_date) FROM 1 FOR 7), i.order_uid
+       ORDER BY i.order_code, COALESCE(NULLIF(i.channel, ''), 'TikTok'), SUBSTRING(COALESCE(NULLIF(i.paid_date, ''), i.created_date) FROM 1 FOR 7), i.order_uid DESC
+     )
+     UPDATE transactions t
+     SET product_detail = c.summary_text,
+         shop_name = COALESCE(NULLIF(t.shop_name, ''), c.sender_name)
+     FROM item_by_code c
+     WHERE t.is_order = 1
+       AND t.order_code = c.order_code
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = c.channel
+       AND (
+         SUBSTRING(COALESCE(NULLIF(t.created_date, ''), t.paid_date) FROM 1 FOR 7) = c.ym
+         OR SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), t.created_date) FROM 1 FOR 7) = c.ym
+       )
+       AND (t.product_detail IS NULL OR t.product_detail = '' OR t.product_detail = '/' OR t.product_detail NOT LIKE '%·%')`,
+    [],
+    client,
+  );
+
   const matchedCountRow = await queryOne<{ c: string | number }>(
     "SELECT COUNT(*) AS c FROM oms_orders WHERE import_id = $1 AND matched_external_id IS NOT NULL",
     [fallbackImportId],
@@ -1052,7 +1407,7 @@ export async function reconcileAndSyncThreeFiles(
 
   await refreshSummaryTables(client, {
     importId: fallbackImportId,
-    dates: deletedTempPaidDates,
+    dates: [...deletedTempPaidDates, ...mergedUidPaidDates],
   });
 
   return {
@@ -1092,6 +1447,13 @@ export async function syncMonthlyInvoiceRegistry(
          SELECT t.external_id FROM oms_order_items i
          JOIN transactions t ON t.oms_order_uid = i.order_uid AND (t.is_order = 1 OR ${BILLABLE_COMPENSATION_SQL})
          WHERE i.import_id = $1
+         UNION
+         SELECT r.order_id AS external_id FROM invoice_registry r
+         WHERE r.status = 'active'
+           AND NOT EXISTS (
+             SELECT 1 FROM transactions t
+             WHERE t.external_id = r.order_id AND ${INVOICE_ELIGIBLE_SQL}
+           )
          UNION
          SELECT r.order_id FROM invoice_registry r WHERE r.seq IS NULL
        )`
@@ -1225,6 +1587,8 @@ export async function refreshSummaryTables(
        UNION
        SELECT DISTINCT paid_date FROM oms_orders WHERE import_id = $1 AND paid_date <> '' AND paid_date <> 'unknown'
        UNION
+       SELECT DISTINCT paid_date FROM oms_order_items WHERE import_id = $1 AND paid_date <> '' AND paid_date <> 'unknown'
+       UNION
        SELECT DISTINCT t.paid_date
        FROM oms_orders o
        JOIN transactions t ON t.external_id = o.matched_external_id AND t.is_order = 1
@@ -1233,7 +1597,12 @@ export async function refreshSummaryTables(
        SELECT DISTINCT o.paid_date
        FROM oms_orders o
        JOIN transactions t ON t.external_id = o.matched_external_id AND t.is_order = 1
-       WHERE t.import_id = $1 AND o.paid_date <> '' AND o.paid_date <> 'unknown'`,
+       WHERE t.import_id = $1 AND o.paid_date <> '' AND o.paid_date <> 'unknown'
+       UNION
+       SELECT DISTINCT t.paid_date
+       FROM oms_order_items i
+       JOIN transactions t ON t.oms_order_uid = i.order_uid
+       WHERE i.import_id = $1 AND t.paid_date <> '' AND t.paid_date <> 'unknown'`,
       [scope.importId],
       client,
     );
@@ -1737,7 +2106,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       reportProgress?.({
         stage: "saving",
         percent: 70,
-        message: `กำลังบันทึก${fileLabel} และผูกข้อมูลร้าน Kiddee Shop...`,
+        message: `กำลังบันทึก${fileLabel} และผูกข้อมูลร้านค้า...`,
       });
 
       if (lazadaParsed.orders.length > 0) {
@@ -1748,7 +2117,12 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       }
 
       await query(
-        `UPDATE oms_orders SET shop_name = 'Kiddee Shop' WHERE import_id = $1 AND channel = 'Lazada'`,
+        `UPDATE oms_orders
+         SET shop_name = CASE
+           WHEN contact_name IS NULL OR contact_name = '' OR contact_name = 'TH1JWSSKAK' THEN 'Kiddee Shop'
+           ELSE contact_name
+         END
+         WHERE import_id = $1 AND channel = 'Lazada'`,
         [id],
         client,
       );
@@ -1866,7 +2240,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
             "Lazada",
             tx.externalId,
             tx.omsOrderUid,
-            "Kiddee Shop",
+            tx.shopName ?? "Kiddee Shop",
           );
         }
 

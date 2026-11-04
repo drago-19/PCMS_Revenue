@@ -147,44 +147,30 @@ export function isOrderEligibleForInvoice(row: {
   if (!hasOmsCode) return false;
 
   const ch = row.channel || "TikTok";
+  const hasRealProductDetail = Boolean(
+    row.productDetail &&
+      row.productDetail.trim() !== "" &&
+      row.productDetail.trim() !== "/" &&
+      (ch === "Lazada" || row.productDetail.includes("·")),
+  );
+  const hasItems = Boolean(
+    hasRealProductDetail || (row.omsItems && row.omsItems.length > 0),
+  );
   // แยกเงื่อนไขตามช่องทางชัดเจน (Strict Platform Financial Isolation):
   if (ch === "TikTok") {
     if (row.transactionType === "คำสั่งซื้อ (OMS)") return false;
+    if (!hasItems) return false;
   } else if (ch === "Shopee") {
-    const hasItems = Boolean(
-      (row.productDetail && row.productDetail.trim() !== "") ||
-        (row.omsItems && row.omsItems.length > 0),
-    );
     if (!hasItems) return false;
   } else if (ch === "Facebook") {
-    const hasItems = Boolean(
-      (row.productDetail && row.productDetail.trim() !== "") ||
-        (row.omsItems && row.omsItems.length > 0),
-    );
     if (!hasItems) return false;
   } else if (ch === "Lazada") {
-    const hasItems = Boolean(
-      (row.productDetail && row.productDetail.trim() !== "") ||
-        (row.omsItems && row.omsItems.length > 0),
-    );
     if (!hasItems) return false;
   } else if (ch === "LINE") {
-    const hasItems = Boolean(
-      (row.productDetail && row.productDetail.trim() !== "") ||
-        (row.omsItems && row.omsItems.length > 0),
-    );
     if (!hasItems) return false;
   } else if (ch === "Other") {
-    const hasItems = Boolean(
-      (row.productDetail && row.productDetail.trim() !== "") ||
-        (row.omsItems && row.omsItems.length > 0),
-    );
     if (!hasItems) return false;
   } else {
-    const hasItems = Boolean(
-      (row.productDetail && row.productDetail.trim() !== "") ||
-        (row.omsItems && row.omsItems.length > 0),
-    );
     if (!hasItems) return false;
   }
 

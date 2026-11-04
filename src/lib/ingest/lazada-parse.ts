@@ -14,6 +14,7 @@ import { round2 } from "../format";
 
 export interface LazadaNormalizedTransaction extends NormalizedTransaction {
   omsOrderUid: string;
+  shopName?: string;
 }
 
 export type LazadaFileSubtype =
@@ -482,6 +483,10 @@ export async function detectAndParseLazadaInput(
       const resolvedCustomerName = acc.customerName ?? "ลูกค้า Lazada";
       const resolvedCourier = acc.courier ?? "Lazada Logistics";
       const resolvedTracking = acc.trackingNo ?? acc.statementCode;
+      const resolvedShopName =
+        !acc.shortCode || acc.shortCode === "TH1JWSSKAK"
+          ? "Kiddee Shop"
+          : acc.shortCode;
 
       const lines = [...acc.linesByItemId.values()];
       let lineNo = 1;
@@ -497,7 +502,7 @@ export async function detectAndParseLazadaInput(
           quantity: 1,
           orderSalesAmount: incomeTotal,
           shippingFeeCustomer: 0,
-          senderName: "Kiddee Shop",
+          senderName: resolvedShopName,
           customerName: resolvedCustomerName,
           customerAddress: acc.customerAddress,
           postalCode: acc.postalCode,
@@ -518,7 +523,7 @@ export async function detectAndParseLazadaInput(
         channel: "Lazada",
         customerName: resolvedCustomerName,
         customerPhone: acc.customerPhone,
-        contactName: acc.shortCode ?? "Kiddee Shop",
+        contactName: acc.shortCode ?? resolvedShopName,
         courier: resolvedCourier,
         shippingFeeCustomer: 0,
         shippingFeeSeller: round2(Math.abs(feeTotal)),
@@ -544,7 +549,7 @@ export async function detectAndParseLazadaInput(
       const rawBreakdown: Record<string, string | number> = {
         หมายเลขคำสั่งซื้อ: acc.orderId,
         ช่องทาง: "Lazada",
-        ร้านค้า: "Kiddee Shop",
+        ร้านค้า: resolvedShopName,
       };
       if (acc.statementCode) rawBreakdown["รหัสรอบบิล"] = acc.statementCode;
       if (acc.orderStatus) rawBreakdown["สถานะคำสั่งซื้อ"] = acc.orderStatus;
@@ -612,6 +617,7 @@ export async function detectAndParseLazadaInput(
       transactions.push({
         ...normalized,
         omsOrderUid: orderUid,
+        shopName: resolvedShopName,
       });
     }
 
