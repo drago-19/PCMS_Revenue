@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { CompactValueToggle } from "@/components/CompactValueToggle";
+import {
+  StatBreakdownTrigger,
+  type StatBreakdownConfig,
+} from "@/components/StatBreakdownDialog";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -56,22 +60,44 @@ export function StatCard({
   hint,
   tone = "default",
   icon,
+  breakdown,
 }: {
   label: string;
   value: string;
   hint?: ReactNode;
   icon?: ReactNode;
+  breakdown?: StatBreakdownConfig;
 } & VariantProps<typeof statCardVariants>) {
-  return (
-    <Card padding="stat" className={cn(statCardVariants({ tone }))}>
+  const inner = (
+    <>
       <div className="stat-top">
         <span className="stat-label">{label}</span>
         {icon ? <span className="stat-icon">{icon}</span> : null}
       </div>
       <div className="stat-value">
-        <CompactValueToggle value={value} />
+        <CompactValueToggle value={value} animate />
       </div>
       {hint ? <div className="stat-hint">{hint}</div> : null}
+    </>
+  );
+
+  if (breakdown) {
+    return (
+      <StatBreakdownTrigger
+        config={breakdown}
+        className={cn(
+          "rounded-2xl border border-border bg-card text-card-foreground shadow-xs",
+          statCardVariants({ tone }),
+        )}
+      >
+        {inner}
+      </StatBreakdownTrigger>
+    );
+  }
+
+  return (
+    <Card padding="stat" className={cn(statCardVariants({ tone }))}>
+      {inner}
     </Card>
   );
 }

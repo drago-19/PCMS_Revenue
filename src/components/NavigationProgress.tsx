@@ -135,10 +135,25 @@ export function NavigationProgress() {
       stop();
     }
 
+    function updateScrollbarWidthVar() {
+      const sbWidth = window.innerWidth - document.documentElement.clientWidth;
+      if (sbWidth > 0 && !document.body.hasAttribute("data-scroll-locked")) {
+        document.documentElement.style.setProperty(
+          "--app-scrollbar-width",
+          `${sbWidth}px`,
+        );
+      }
+    }
+
+    updateScrollbarWidthVar();
+    window.addEventListener("resize", updateScrollbarWidthVar, {
+      passive: true,
+    });
     document.addEventListener("click", handleClick, true);
     window.addEventListener(NAVIGATION_START_EVENT, handleNotify);
     window.addEventListener(NAVIGATION_CANCEL_EVENT, handleCancel);
     return () => {
+      window.removeEventListener("resize", updateScrollbarWidthVar);
       document.removeEventListener("click", handleClick, true);
       window.removeEventListener(NAVIGATION_START_EVENT, handleNotify);
       window.removeEventListener(NAVIGATION_CANCEL_EVENT, handleCancel);

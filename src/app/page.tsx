@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { AnimatedValueText } from "@/components/AnimatedValueText";
 import { DashboardShopComparison } from "@/components/DashboardShopComparison";
 import { DashboardShopTabs } from "@/components/DashboardShopTabs";
 import { PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
+import type { StatBreakdownConfig } from "@/components/StatBreakdownDialog";
 import {
   IconAlert,
   IconChevronRight,
@@ -37,17 +39,401 @@ export default async function DashboardPage({
   const latest = batches[0] ?? null;
   const latestImport = imports[0] ?? null;
 
-  const totalAllOrderCount = stats.shopSummaries?.reduce(
-    (acc, s) => acc + s.orderCount,
+  const totalAllOrderCount =
+    stats.shopSummaries?.reduce((acc, s) => acc + s.orderCount, 0) ??
+    stats.orderCount;
+
+  const channelSummaries = stats.channelSummaries ?? [];
+  const shopSummaries = stats.shopSummaries ?? [];
+  const nonOrderBreakdown = stats.nonOrderBreakdown ?? [];
+
+  const totalNormalPayout = Number(
+    channelSummaries.reduce((acc, c) => acc + c.normalPayout, 0).toFixed(2),
+  );
+  const totalNormalCount = channelSummaries.reduce(
+    (acc, c) => acc + c.normalCount,
     0,
-  ) ?? stats.orderCount;
+  );
+  const totalRefundPayout = Number(
+    channelSummaries.reduce((acc, c) => acc + c.refundPayout, 0).toFixed(2),
+  );
+  const totalRefundCount = channelSummaries.reduce(
+    (acc, c) => acc + c.refundCount,
+    0,
+  );
+  const totalZeroCount = channelSummaries.reduce(
+    (acc, c) => acc + c.zeroCount,
+    0,
+  );
+  const totalCompCount = channelSummaries.reduce(
+    (acc, c) => acc + c.compensationCount,
+    0,
+  );
+  const totalCompPayout = Number(
+    channelSummaries.reduce((acc, c) => acc + c.compensationPayout, 0).toFixed(2),
+  );
+  const otherDedItems = nonOrderBreakdown.filter((i) => i.payout <= 0);
+  const otherDedCount = otherDedItems.reduce((acc, i) => acc + i.count, 0);
+  const otherDedPayout = Number(
+    otherDedItems.reduce((acc, i) => acc + i.payout, 0).toFixed(2),
+  );
+  const netSettlementWithAllNonOrder = Number(
+    (stats.totalPayout + otherDedPayout).toFixed(2),
+  );
+
+  const scopeSubtitle =
+    activeShop !== "all"
+      ? `ขอบเขตข้อมูล: เฉพาะร้าน ${activeShop}`
+      : "ขอบเขตข้อมูล: รวมทุกร้านค้าและทุกช่องทางจำหน่าย";
+
+  const dashboardPayoutBreakdown: StatBreakdownConfig = {
+    title: "รายละเอียดที่มา: ยอดชำระสุทธิสะสม",
+    subtitle: scopeSubtitle,
+    heroLabel:
+      activeShop !== "all"
+        ? `ยอดชำระสุทธิสะสม (${activeShop})`
+        : "ยอดชำระสุทธิสะสม (คำสั่งซื้อ + ชดเชยแพลตฟอร์ม)",
+    heroValue: formatTHB(stats.totalPayout),
+    heroTone: "positive",
+    formulaNote:
+      "รวมยอดเงินโอนจากบิลขายปกติ หักออเดอร์ตีกลับ/คืนเงิน และรวมเงินชดเชยแพลตฟอร์ม",
+    sections: [
+      {
+        title: "1. แยกตามหมวดหมู่บิลคำสั่งซื้อ",
+        rows: [
+          {
+            label: "หมวดบิลขายปกติ (เฉพาะคำสั่งซื้อ)",
+            countText: `${Math.max(0, totalNormalCount - totalCompCount).toLocaleString("th-TH")} ใบ`,
+            valueText: formatTHB(
+              Number((totalNormalPayout - totalCompPayout).toFixed(2)),
+            ),
+            tone: "positive",
+          },
+          ...(totalCompCount > 0
+            ? [
+                {
+                  label: "บวก: เงินชดเชยแพลตฟอร์ม / โลจิสติกส์",
+                  countText: `${totalCompCount.toLocaleString("th-TH")} รายการ`,
+                  valueText: `+${formatTHB(totalCompPayout)}`,
+                  tone: "positive" as const,
+                },
+              ]
+            : []),
+          ...(totalRefundCount > 0 || totalRefundPayout !== 0
+            ? [
+                {
+                  label: "หัก: ออเดอร์คืนเงิน / ตีกลับ / ขาดทุนค่าส่ง",
+                  countText: `${totalRefundCount.toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(totalRefundPayout),
+                  tone: "negative" as const,
+                },
+              ]
+            : []),
+          ...(totalZeroCount > 0
+            ? [
+                {
+                  label: "ออเดอร์ยกเลิก / หักล้างเป็น 0 บาท",
+                  countText: `${totalZeroCount.toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(0),
+                  tone: "muted" as const,
+                },
+              ]
+            : []),
+          {
+            label: "รวมยอดชำระสุทธิสะสม (บนการ์ด)",
+            countText: `${stats.orderCount.toLocaleString("th-TH")} ใบ`,
+            valueText: formatTHB(stats.totalPayout),
+            isTotal: true,
+          },
+        ],
+      },
+      ...(channelSummaries.length > 0
+        ? [
+            {
+              title: "2. แยกตามช่องทางจำหน่าย (Platform)",
+              rows: channelSummaries.map((ch) => ({
+                label: ch.channel === "LINE" ? "LINE OA" : ch.channel,
+                countText: `${ch.orderCount.toLocaleString("th-TH")} ใบ`,
+                valueText: formatTHB(ch.totalPayout),
+                tone:
+                  ch.totalPayout < 0
+                    ? ("negative" as const)
+                    : ("positive" as const),
+              })),
+            },
+          ]
+        : []),
+      ...(activeShop === "all" && shopSummaries.length > 1
+        ? [
+            {
+              title: "3. แยกตามร้านค้า",
+              rows: shopSummaries.map((s) => ({
+                label: s.shopName,
+                countText: `${s.orderCount.toLocaleString("th-TH")} ใบ`,
+                valueText: formatTHB(s.totalPayout),
+                tone:
+                  s.totalPayout < 0
+                    ? ("negative" as const)
+                    : ("positive" as const),
+              })),
+            },
+          ]
+        : []),
+      ...(otherDedCount > 0
+        ? [
+            {
+              title: "4. รายการหักนอกคำสั่งซื้อในไฟล์ Settlement (ค่าโฆษณา GMV / ปรับยอด)",
+              description:
+                "รายการเหล่านี้ไม่ใช่คำสั่งซื้อของลูกค้า แต่ถูกหักจากยอดโอนรวมในไฟล์ Settlement",
+              rows: [
+                ...otherDedItems.map((item) => ({
+                  label: item.transactionType || "รายการปรับยอดอื่นๆ",
+                  countText: `${item.count.toLocaleString("th-TH")} รายการ`,
+                  valueText: formatTHB(item.payout),
+                  tone: "negative" as const,
+                })),
+                {
+                  label: "ยอดโอนสุทธิรวมหลังหักค่าโฆษณา GMV / ปรับยอดทั้งหมด",
+                  valueText: formatTHB(netSettlementWithAllNonOrder),
+                  tone: "positive" as const,
+                  isSubtotal: true,
+                },
+              ],
+            },
+          ]
+        : []),
+    ],
+  };
+
+  const dashboardIncomeBreakdown: StatBreakdownConfig = {
+    title: "รายละเอียดที่มา: รายได้รวมก่อนหัก",
+    subtitle: scopeSubtitle,
+    heroLabel:
+      activeShop !== "all"
+        ? `รายได้รวมก่อนหัก (${activeShop})`
+        : "รายได้รวมก่อนหักค่าธรรมเนียมสะสม",
+    heroValue: formatTHB(stats.totalIncome),
+    heroTone: "brand",
+    formulaNote:
+      "ดึงตรงจากช่อง ยอดขาย (รวมส่วนลดและค่าจัดส่งตามไฟล์) ของบิลทั้งหมด",
+    sections: [
+      {
+        title: "1. แยกตามหมวดหมู่บิล",
+        rows: [
+          {
+            label: "รายได้จากหมวดบิลขายปกติ",
+            countText: `${totalNormalCount.toLocaleString("th-TH")} ใบ`,
+            valueText: formatTHB(
+              Number(
+                channelSummaries
+                  .reduce((acc, c) => acc + c.normalIncome, 0)
+                  .toFixed(2),
+              ),
+            ),
+            tone: "brand",
+          },
+          ...(totalRefundCount > 0
+            ? [
+                {
+                  label: "หักเงินคืนค่าสินค้า (หมวดคืนเงิน / ตีกลับ)",
+                  countText: `${totalRefundCount.toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(
+                    Number(
+                      channelSummaries
+                        .reduce((acc, c) => acc + c.refundIncome, 0)
+                        .toFixed(2),
+                    ),
+                  ),
+                  tone: "negative" as const,
+                },
+              ]
+            : []),
+          {
+            label: "รวมรายได้ก่อนหักสะสมทั้งหมด",
+            countText: `${stats.orderCount.toLocaleString("th-TH")} ใบ`,
+            valueText: formatTHB(stats.totalIncome),
+            isTotal: true,
+          },
+        ],
+      },
+      ...(channelSummaries.length > 0
+        ? [
+            {
+              title: "2. แยกตามช่องทางจำหน่าย",
+              rows: channelSummaries.map((ch) => ({
+                label: ch.channel === "LINE" ? "LINE OA" : ch.channel,
+                countText: `${ch.orderCount.toLocaleString("th-TH")} ใบ`,
+                valueText: formatTHB(ch.totalIncome),
+                tone: "default" as const,
+              })),
+            },
+          ]
+        : []),
+      ...(activeShop === "all" && shopSummaries.length > 1
+        ? [
+            {
+              title: "3. แยกตามร้านค้า",
+              rows: shopSummaries.map((s) => ({
+                label: s.shopName,
+                countText: `${s.orderCount.toLocaleString("th-TH")} ใบ`,
+                valueText: formatTHB(s.totalIncome),
+              })),
+            },
+          ]
+        : []),
+    ],
+  };
+
+  const dashboardFeesBreakdown: StatBreakdownConfig = {
+    title: "รายละเอียดที่มา: ค่าธรรมเนียมทั้งหมด",
+    subtitle: scopeSubtitle,
+    heroLabel:
+      activeShop !== "all"
+        ? `ค่าธรรมเนียมทั้งหมด (${activeShop})`
+        : "ค่าธรรมเนียมและค่าจัดส่งที่ถูกหักสะสม",
+    heroValue: formatTHB(stats.totalFees),
+    heroTone: "negative",
+    formulaNote:
+      "รวมค่าคอมมิชชั่นแพลตฟอร์ม + ค่าธรรมเนียมธุรกรรม + ค่าจัดส่งสุทธิของทุกคำสั่งซื้อ",
+    sections: [
+      {
+        title: "1. แยกตามหมวดหมู่บิล",
+        rows: [
+          {
+            label: "ค่าธรรมเนียมในหมวดบิลขายปกติ",
+            countText: `${totalNormalCount.toLocaleString("th-TH")} ใบ`,
+            valueText: formatTHB(
+              Number(
+                channelSummaries
+                  .reduce((acc, c) => acc + c.normalFees, 0)
+                  .toFixed(2),
+              ),
+            ),
+            tone: "negative",
+          },
+          ...(totalRefundCount > 0
+            ? [
+                {
+                  label: "ค่าขนส่งตีกลับและค่าธรรมเนียมในหมวดคืนเงิน",
+                  countText: `${totalRefundCount.toLocaleString("th-TH")} ใบ`,
+                  valueText: formatTHB(
+                    Number(
+                      channelSummaries
+                        .reduce((acc, c) => acc + c.refundFees, 0)
+                        .toFixed(2),
+                    ),
+                  ),
+                  tone: "negative" as const,
+                },
+              ]
+            : []),
+          {
+            label: "รวมค่าธรรมเนียมทั้งหมด",
+            countText: `${stats.orderCount.toLocaleString("th-TH")} ใบ`,
+            valueText: formatTHB(stats.totalFees),
+            isTotal: true,
+          },
+        ],
+      },
+      ...(channelSummaries.length > 0
+        ? [
+            {
+              title: "2. แยกตามช่องทางจำหน่าย",
+              rows: channelSummaries.map((ch) => ({
+                label: ch.channel === "LINE" ? "LINE OA" : ch.channel,
+                countText: `${ch.orderCount.toLocaleString("th-TH")} ใบ`,
+                valueText: formatTHB(ch.totalFees),
+                tone:
+                  ch.totalFees < 0
+                    ? ("negative" as const)
+                    : ("muted" as const),
+              })),
+            },
+          ]
+        : []),
+      ...(activeShop === "all" && shopSummaries.length > 1
+        ? [
+            {
+              title: "3. แยกตามร้านค้า",
+              rows: shopSummaries.map((s) => ({
+                label: s.shopName,
+                countText: `${s.orderCount.toLocaleString("th-TH")} ใบ`,
+                valueText: formatTHB(s.totalFees),
+                tone: "negative" as const,
+              })),
+            },
+          ]
+        : []),
+    ],
+  };
+
+  const dashboardCountBreakdown: StatBreakdownConfig = {
+    title: "รายละเอียดที่มา: จำนวนบิลคำสั่งซื้อสะสม",
+    subtitle: scopeSubtitle,
+    heroLabel:
+      activeShop !== "all"
+        ? `จำนวนบิลสะสม (${activeShop})`
+        : "จำนวนบิลคำสั่งซื้อสะสมทั้งหมด",
+    heroValue: `${stats.orderCount.toLocaleString("th-TH")} ใบ`,
+    heroTone: "default",
+    formulaNote: `นำเข้าจากไฟล์ข้อมูลทั้งหมด ${stats.importCount.toLocaleString("th-TH")} ไฟล์`,
+    sections: [
+      {
+        title: "1. แยกตามหมวดหมู่บิลทั้ง 3 หมวด",
+        rows: [
+          {
+            label: "หมวดบิลขายปกติ (+ ชดเชยแพลตฟอร์ม)",
+            valueText: `${totalNormalCount.toLocaleString("th-TH")} ใบ`,
+            tone: "positive",
+          },
+          {
+            label: "หมวดคืนเงิน / ตีกลับ / ขาดทุน (ติดลบ)",
+            valueText: `${totalRefundCount.toLocaleString("th-TH")} ใบ`,
+            tone: "negative",
+          },
+          {
+            label: "หมวดยกเลิก / หักล้างเป็น 0 บาท",
+            valueText: `${totalZeroCount.toLocaleString("th-TH")} ใบ`,
+            tone: "muted",
+          },
+          {
+            label: "รวมบิลคำสั่งซื้อสะสมทั้งหมด",
+            valueText: `${stats.orderCount.toLocaleString("th-TH")} ใบ`,
+            isTotal: true,
+          },
+        ],
+      },
+      ...(channelSummaries.length > 0
+        ? [
+            {
+              title: "2. แยกตามช่องทางจำหน่าย",
+              rows: channelSummaries.map((ch) => ({
+                label: ch.channel === "LINE" ? "LINE OA" : ch.channel,
+                valueText: `${ch.orderCount.toLocaleString("th-TH")} ใบ`,
+              })),
+            },
+          ]
+        : []),
+      ...(shopSummaries.length > 0
+        ? [
+            {
+              title: "3. แยกตามร้านค้า",
+              rows: shopSummaries.map((s) => ({
+                label: s.shopName,
+                valueText: `${s.orderCount.toLocaleString("th-TH")} ใบ`,
+              })),
+            },
+          ]
+        : []),
+    ],
+  };
 
   return (
     <div className="flex flex-col gap-[14px]">
       <PageHeader
         eyebrow="TikTok Shop, Shopee, Facebook, Lazada & LINE OA · Multi-Shop Finance Overview"
         title="หมวดภาพรวมสรุปยอดรายได้"
-        description="สรุปยอดชำระสะสม รอบโอนเงินล่าสุด และแยกดูผลประกอบการรายร้านค้าได้ทันที"
+        description="สรุปยอดชำระสะสม รอบโอนเงินล่าสุด และแยกดูผลประกอบการรายร้านค้าได้ทันที · คลิกที่การ์ดตัวเลขเพื่อดูรายละเอียดที่มา"
         actions={
           <>
             <Button asChild variant="secondary">
@@ -64,7 +450,7 @@ export default async function DashboardPage({
         }
       />
 
-      {/* แถบสลับร้านค้า (รวมทุกร้าน · Kiddee Shop · Kissi Studio) */}
+      {/* แถบสลับร้านค้า */}
       {stats.shopSummaries && stats.shopSummaries.length > 0 ? (
         <DashboardShopTabs
           activeShop={activeShop}
@@ -115,6 +501,7 @@ export default async function DashboardPage({
               hint={activeShop !== "all" ? `ยอดเงินโอนจากบิลเฉพาะร้าน ${activeShop}` : "ยอดเงินโอนจากบิลคำสั่งซื้อทั้งหมด"}
               tone="positive"
               icon={<IconWallet size={19} />}
+              breakdown={dashboardPayoutBreakdown}
             />
             <StatCard
               label={activeShop !== "all" ? `รายได้รวมก่อนหัก (${activeShop})` : "รายได้รวมก่อนหัก"}
@@ -122,6 +509,7 @@ export default async function DashboardPage({
               hint="ยอดขายรวมส่วนลดและค่าจัดส่ง"
               tone="brand"
               icon={<IconTrend size={19} />}
+              breakdown={dashboardIncomeBreakdown}
             />
             <StatCard
               label={activeShop !== "all" ? `ค่าธรรมเนียม (${activeShop})` : "ค่าธรรมเนียมทั้งหมด"}
@@ -129,6 +517,7 @@ export default async function DashboardPage({
               hint="ค่าคอมมิชชั่น + ค่าธุรกรรม + ค่าส่ง"
               tone="negative"
               icon={<IconAlert size={19} />}
+              breakdown={dashboardFeesBreakdown}
             />
             <StatCard
               label={activeShop !== "all" ? `จำนวนบิล (${activeShop})` : "จำนวนบิลคำสั่งซื้อสะสม"}
@@ -136,10 +525,11 @@ export default async function DashboardPage({
               hint={activeShop !== "all" ? `จากบิลร้าน ${activeShop}` : `นำเข้าแล้ว ${stats.importCount.toLocaleString("th-TH")} ไฟล์`}
               tone="default"
               icon={<IconReceipt size={19} />}
+              breakdown={dashboardCountBreakdown}
             />
           </div>
 
-          {/* การ์ดเปรียบเทียบสัดส่วน 2 ร้าน (แสดงเมื่อเลือกโหมดรวมทุกร้าน) */}
+          {/* การ์ดเปรียบเทียบสัดส่วนร้านค้า (แสดงเมื่อเลือกโหมดรวมทุกร้าน) */}
           {activeShop === "all" && stats.shopSummaries && stats.shopSummaries.length > 0 ? (
             <DashboardShopComparison
               shopSummaries={stats.shopSummaries}
@@ -171,7 +561,9 @@ export default async function DashboardPage({
               <p className="hero-sub">
                 ยอดเงินโอนสุทธิจากคำสั่งซื้อในรอบนี้ (Order Payout)
               </p>
-              <p className="hero-amount">{formatTHB(latest.orderPayout)}</p>
+              <p className="hero-amount">
+                <AnimatedValueText value={formatTHB(latest.orderPayout)} />
+              </p>
               <div className="hero-pills">
                 <Badge variant="neutral" className="border-border bg-white px-3 py-1 text-xs font-semibold text-foreground shadow-2xs">
                   {latest.orderCount.toLocaleString("th-TH")} บิลคำสั่งซื้อ
@@ -208,11 +600,17 @@ export default async function DashboardPage({
             <div className="hero-side">
               <div className="hero-side-item">
                 <span>ยอดสุทธิทั้งรอบ (รวม GMV / ปรับยอด)</span>
-                <strong>{formatTHB(latest.totalPayout)}</strong>
+                <strong>
+                  <AnimatedValueText value={formatTHB(latest.totalPayout)} />
+                </strong>
               </div>
               <div className="hero-side-item">
                 <span>รายการที่ไม่ใช่คำสั่งซื้อในรอบนี้</span>
-                <strong>{latest.otherCount.toLocaleString("th-TH")} รายการ</strong>
+                <strong>
+                  <AnimatedValueText
+                    value={`${latest.otherCount.toLocaleString("th-TH")} รายการ`}
+                  />
+                </strong>
               </div>
               <div className="hero-side-item">
                 <span>ไฟล์ Excel ล่าสุดที่นำเข้า</span>

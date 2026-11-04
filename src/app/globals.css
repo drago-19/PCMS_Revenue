@@ -54,8 +54,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: var(--font-latin), var(--font-thai), "Noto Sans Thai", "Inter", system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-mono), "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --font-sans: "Noto Sans Thai", "Inter", var(--font-thai), var(--font-latin), system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", var(--font-mono), "Cascadia Mono", Consolas, monospace;
 }
 
 :root {
@@ -89,6 +89,21 @@
     scrollbar-gutter: stable;
   }
 
+  /* เมื่อเปิดป๊อปอัป (Dialog / Sheet) ที่ล็อกสกอร์บาร์ด้วย react-remove-scroll:
+     - ปิด scrollbar-gutter ชั่วคราวเพื่อให้ฉากหลังสีดำ (DialogOverlay) คลุมเต็ม 100% ของหน้าต่างโดยไม่มีแถบขาวค้างด้านขวา
+     - ชดเชย padding-right เท่าความกว้างสกอร์บาร์จริงแทน margin-right ซ้ำซ้อน เพื่อให้หน้าจอพื้นหลังนิ่งสนิท 0px */
+  html:has(body[data-scroll-locked]) {
+    scrollbar-gutter: auto;
+  }
+
+  html body[data-scroll-locked] {
+    margin-right: 0 !important;
+    padding-right: var(
+      --app-scrollbar-width,
+      var(--removed-body-scroll-bar-size, 0px)
+    ) !important;
+  }
+
   *,
   ::before,
   ::after {
@@ -105,12 +120,13 @@
   }
 
   body {
-    font-family: var(--font-latin), var(--font-thai), "Noto Sans Thai", "Inter",
+    font-family: "Noto Sans Thai", "Inter", var(--font-thai), var(--font-latin),
       "Leelawadee UI", "Segoe UI", system-ui, -apple-system, sans-serif;
     background: var(--bg);
     color: var(--ink);
     font-size: 15px;
     line-height: 1.55;
+    font-synthesis: none;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
