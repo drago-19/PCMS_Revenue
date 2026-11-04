@@ -6,6 +6,52 @@
 ## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-04)
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **แก้ไขปัญหา Performance ตกใน Lighthouse และอาการหน่วงเวลาเปิด/สั่งพิมพ์ใบกำกับภาษีรวมชุดละ 200–500 ใบ (`src/components/AnimatedValueText.tsx`, `src/components/NavigationProgress.tsx`, `src/components/InvoiceZoomControl.tsx`, `src/app/globals.css`, `src/lib/queries.ts`, `src/lib/ingest/import-service.ts`, `src/components/BillsShopTabs.tsx`, `src/app/bills/page.tsx`)**:
+    - [x] **1. เพิ่มความเร็วหน้า `/days/[date]/invoices` และตัดอาการค้างตอนกดปุ่ม `พิมพ์ / บันทึก PDF` (`src/app/globals.css`, `src/components/InvoiceZoomControl.tsx`, `src/lib/queries.ts`)**:
+      - เพิ่ม `@media screen { .invoice-stack > .invoice { content-visibility: auto; contain-intrinsic-size: auto 420px; } .invoice-4up-sheet { content-visibility: auto; contain-intrinsic-size: auto 760px; } }` ใน `src/app/globals.css` เพื่อให้เบราว์เซอร์คำนวณ Layout/Paint เฉพาะใบที่อยู่ในจอ และเพิ่ม `@media print { content-visibility: visible !important; contain-intrinsic-size: none !important; }` เพื่อให้ตอนพิมพ์ออกกระดาษหรือบันทึก PDF ครบทุกใบ 100%
+      - ถอด Event Listener `beforeprint` / `afterprint` (`resetZoomForPrint`) ใน `src/components/InvoiceZoomControl.tsx` ที่สั่งแก้ `--invoice-zoom` บน DOM จนบังคับเบราว์เซอร์คำนวณ Layout ใหม่ทั้ง 200 ใบ (`16,842 DOM nodes`) ซ้ำซ้อนตอนกดพิมพ์ และเปลี่ยนมาใช้ `entry.contentRect.width` ใน `ResizeObserver` แทน `getComputedStyle(container)` เพื่อตัด Forced Reflow
+      - ปรับคิวรี `getMonthlyInvoicesBatchKeyset` ใน `src/lib/queries.ts` ให้ดึง `compensation_count` จาก `daily_summaries` แบบขนานแทนการรัน Correlated Subquery `EXISTS (SELECT 1 FROM transactions ...)` ทุกแถวใน `invoice_registry` (ลด TTFB หน้าพิมพ์ใบกำกับฯ รายเดือนจาก **`7,540 ms`** เหลือ **`1,940 ms`**)
+    - [x] **2. แก้ไขจุดคอขวดที่ทำให้คะแนน Lighthouse Performance ตก และลดขนาด RSC Payload (`src/components/AnimatedValueText.tsx`, `src/components/NavigationProgress.tsx`, `src/lib/queries.ts`, `src/components/BillsShopTabs.tsx`)**:
+      - ปรับ `src/components/AnimatedValueText.tsx` ให้แสดงค่าจริงทันทีตั้งแต่เฟรมแรก (`SSR / First Paint`) โดยไม่รีเซ็ตกลับเป็น `฿0.00` ตอน Hydrate (ตัดเวลาหน่วง LCP `650 ms` และตัดการ Re-render ~200 ครั้งตอนเปิดหน้า) และใช้อนิเมชั่น `200ms` เฉพาะตอนที่ผู้ใช้กดสลับตัวกรองแล้วตัวเลขเปลี่ยนค่า
+      - ถอดการอ่าน `offsetHeight` สดๆ ใน `start()` ของ `src/components/NavigationProgress.tsx` เพื่อตัดคำเตือน **Forced reflow**
+      - ปรับ `mapTransaction` ใน `src/lib/queries.ts` ให้ตัดข้อมูลดิบ `normalized.raw` (ยกเว้น `ช่องทางติดต่อ`), `mappedFields`, และ `rowIndexes` ที่ไม่ได้ใช้บนหน้าเว็บออกจากการส่งเข้า RSC Payload (คง `keepRaw: true` เฉพาะใน `getImportSpreadsheetData`), เพิ่ม In-Memory Cache 30 วินาทีให้ `listDailyBatches()` (พร้อมล้างแคชอัตโนมัติใน `refreshSummaryTables`, `deleteImport`, `deleteAllImports`), เริ่มดึง `page_ids` และ `shopCountRows` เร็วขึ้นใน `listBills`, และเปลี่ยน `buildShopHref` ใน `BillsShopTabs.tsx` เป็น `shopHrefs` object
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบจริงที่ความกว้าง `360px`, `390px`, `768px`, `1280px` ทั้งในหน้า `/bills?date=2026-10&page=3` (TTFB ลดลงเหลือ `780 ms`, `domComplete` `1,761 ms`) และ `/days/2026-10/invoices?paper=a6` (TTFB ลดลงจาก `7,540 ms` เหลือ `1,940 ms`, กดสลับซูม `100%–300%` ลื่นใน `32–68 ms`, `internalOverflow: 0`, `docOverflow: false`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **แก้ไขปัญหาตารางโหลดค้าง 15 วินาทีเมื่อกดตัวเลือกปฏิทินซ้ำ URL เดิม และเพิ่มความเร็วคิวรีกรองวันที่ใน `listBills` ลงเหลือ `< 100 ms` (`src/lib/navigation-progress.ts`, `src/components/NavigationProgress.tsx`, `src/components/DatePickerField.tsx`, `src/components/BillsFilterInteractive.tsx`, `src/components/PaginationBar.tsx`, `src/lib/queries.ts`, `src/lib/db.ts`, `tests/ui-loading.test.ts`)**:
+    - [x] **1. แก้ไขอาการตารางขึ้น `<TableSkeleton>` ค้างนาน 15 วินาทีเมื่อกดตัวเลือกที่ตรงกับ URL ปัจจุบัน (`isSameBrowserUrl`)**:
+      - เพิ่มฟังก์ชัน `isSameBrowserUrl(targetHref)` ใน `src/lib/navigation-progress.ts` ที่เปรียบเทียบ `pathname` และ `searchParams` (เรียงลำดับพารามิเตอร์ก่อนเทียบ) กับ `window.location` ปัจจุบัน
+      - อัปเดต `DatePickerField.tsx`, `BillsFilterInteractive.tsx`, `PaginationBar.tsx`, และ `NavigationProgress.tsx` ให้เช็ค `isSameBrowserUrl(targetHref)` ก่อนเรียก `notifyNavigationStart()` และ `router.push(...)` เสมอ — หากเป็น URL เดิม (เช่น อยู่หน้า `/bills` แล้วเปิดปฏิทินกดปุ่ม `"แสดงข้อมูลทั้งหมดทุกปี / ทุกวัน"` หรือกดเดือนเดิมซ้ำ) จะปิดป๊อปอัปและคงตารางเดิมไว้ทันทีใน **`1–2 ms`** โดยไม่ค้าง Skeleton 15 วินาทีอีกต่อไป
+    - [x] **2. เพิ่มความเร็ว SQL Query ใน `listBills` (`src/lib/queries.ts`) และสร้าง Partial Covering Indexes (`src/lib/db.ts` — `SCHEMA_VERSION = "2026-11-04-v39"`)**:
+      - ย้ายคิวรี `nonOrderRows` ขึ้นมารันพร้อมกับ `dsRow`, `nonPosRow`, `noPriceRow` ใน `Promise.all` ชุดแรก และถอดเงื่อนไขบล็อก `dsCompensationCount === 0` ออกจาก `canUseFastSummary` เพื่อให้ระบบใช้ Fast Summary จาก `daily_summaries` ร่วมกับยอดชดเชยแพลตฟอร์มได้ทันทีแม้บริษัทมีรายการชดเชย (`seeheng = 53 ใบ`, `dragon19 = 56 ใบ`)
+      - จำกัด correlated subquery `LINE_MISMATCH_SQL` (`EXISTS (SELECT 1 FROM oms_order_items ...)`) ใน `linkStatsRow` และ `summaryRow` ให้ทำงานเฉพาะเมื่อ `channel === "LINE" || linkStatus === "line_mismatch"` เท่านั้น (ตัดภาระ SubPlan + PostgreSQL JIT `~564 ms`) และใช้ `dsRow.distinct_dates` แทน `COUNT(DISTINCT paid_date)` (ตัดภาระ External Disk Sort `6 MB / ~728 ms`)
+      - เพิ่ม Partial Covering Indexes `ix_transactions_non_pos_or_payout_cover` และ `ix_transactions_shop_paid_cover` ใน `src/lib/db.ts`
+      - ผลลัพธ์ความเร็ว `listBills`: **`seeheng`** เร็วขึ้นจาก `~380 ms` เหลือ **`63–99 ms`** และ **`dragon19`** เร็วขึ้นจาก **`1,373+ ms`** เหลือ **`42–110 ms`** โดยที่ตัวเลขยอดเงินและจำนวนบิลทุกช่องตรงกับของเดิม **100.00% (ผลต่าง `0.00` ทุกช่อง)**
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `node --env-file=.env --import tsx --test tests/*.test.ts`: ผ่านครบทุกเทสต์ (`71 tests: 69 pass, 0 fail, 2 skipped`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบเปิดปฏิทินกดปุ่ม `"แสดงข้อมูลทั้งหมดทุกปี / ทุกวัน"`, กดเลือกเดือน `"ต.ค. 26"`, กดเดือนเดิมซ้ำ, กด `"ดูทั้งปี 2026"` บน `/bills`, `/products`, `/history` ที่ความกว้าง `360px`, `390px`, `768px`, `1280px` (`hasSkeleton: false`, `docOverflow: false`, `dialogOverflowCount: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
+  - **ปรับรูปแบบการแสดงผลใบกำกับภาษีสำหรับรายการชดเชยแพลตฟอร์ม (`การชดเชยจากแพลตฟอร์ม` และ `เงินชดเชยด้านโลจิสติกส์`) ให้กระชับ เป็นทางการ และเข้าใจง่าย (`src/lib/invoice.ts`, `src/components/InvoiceDocument.tsx`, `tests/invoice-eligibility.test.ts`)**:
+    - [x] **1. ปรับช่อง `รายละเอียด` ในตารางรายการใบกำกับภาษี**:
+      - แสดงเฉพาะหัวข้อหลัก **`การชดเชยจากแพลตฟอร์ม`** (หรือ **`เงินชดเชยด้านโลจิสติกส์`**) และบรรทัดย่อย **`คำสั่งซื้อ #586752541731686138`** เท่านั้น
+      - ตัดรหัสภายใน Shipnity (`#QP11`) และตัดรายชื่อเสื้อผ้า/สินค้าที่ต่อท้ายยาวเหยียดออกจากตารางใบกำกับภาษี
+    - [x] **2. ปรับหน่วยนับและหัวข้ออ้างอิงเอกสารชดเชย**:
+      - เปลี่ยนหน่วยนับด้านขวาของ `รายได้` จาก `(1 ตัว)` เป็น **`(1 รายการ)`** สำหรับใบกำกับภาษีรายการชดเชย
+      - ปรับส่วนหัวข้อด้านบนขวาเป็น `รายละเอียดรายการชดเชย` พร้อมแสดง `เลขธุรกรรม`, `คำสั่งซื้ออ้างอิง`, และ `วันที่รายการ` อย่างเป็นทางการครบทุกขนาดกระดาษ (`A6 100×150 มม.`, `สลิป 80 มม.`, `A4 เต็มแผ่น`, และ `ใบกำกับภาษีแบบเต็มรูป`)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`68 pass, 0 fail, 2 skipped`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบจริงที่ความกว้าง `360px`, `390px`, `768px`, `1280px` ทั้งในหน้า `/invoices/7701672071202719508` (`A6`, `80mm`, `A4`), ป๊อปอัป `BillPreviewDialog` ใน `/bills`, และหน้า `/settings` (`childOverflows: 0`, `pageOverflow: false`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
   - **เพิ่มระบบติดตั้งแอปลงบนหน้าจอ Desktop และมือถือ/แท็บเล็ตแบบ PWA (Progressive Web App) เต็มรูปแบบ รองรับทั้ง Windows, macOS, Android และ iOS (iPhone / iPad) (`src/app/manifest.ts`, `public/sw.js`, `public/icon-192.png`, `public/icon-512.png`, `public/icon-maskable-512.png`, `public/apple-touch-icon.png`, `src/components/PwaInstallControl.tsx`, `src/components/Sidebar.tsx`, `src/app/layout.tsx`, `src/proxy.ts`, `tests/security.test.ts`)**:
     - [x] **1. สร้าง Web App Manifest (`src/app/manifest.ts`), Service Worker (`public/sw.js`), และชุดไอคอนความละเอียดสูง**:
       - สร้าง `/manifest.webmanifest` (`display: "standalone"`, `start_url: "/"`, `theme_color: "#0f1117"`, `background_color: "#0f1117"`) พร้อมไอคอนครบทุกขนาด (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`, `icon.svg`)
