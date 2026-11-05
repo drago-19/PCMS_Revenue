@@ -2134,6 +2134,12 @@ export function AccountingManager({
                                       ? "bg-amber-50 text-amber-800"
                                       : "bg-slate-100 text-slate-600",
                                 )}
+                                title={
+                                  voucher.sourceType === "sales" ||
+                                  voucher.sourceType === "receipt"
+                                    ? "ซิงก์อัตโนมัติจากไฟล์รายได้ที่อัปโหลดในระบบ"
+                                    : "ซิงก์อัตโนมัติจากบิลรายจ่ายในระบบ"
+                                }
                               >
                                 <span
                                   className={cn(
@@ -2146,7 +2152,10 @@ export function AccountingManager({
                                   )}
                                 />
                                 {voucher.status === "approved"
-                                  ? "อนุมัติแล้ว"
+                                  ? voucher.sourceType === "sales" ||
+                                    voucher.sourceType === "receipt"
+                                    ? "ผูกจากไฟล์รายได้แล้ว"
+                                    : "อนุมัติแล้ว"
                                   : voucher.status === "pending"
                                     ? "รอดำเนินการ"
                                     : "ยกเลิก"}
