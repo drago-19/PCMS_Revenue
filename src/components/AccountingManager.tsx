@@ -660,12 +660,48 @@ export function AccountingManager({
   // Dialog states
   const [selectedAccount, setSelectedAccount] =
     useState<GeneralLedgerAccountRow | null>(null);
+  const [editingCoaAccount, setEditingCoaAccount] =
+    useState<GeneralLedgerAccountRow | null>(null);
   const [selectedVoucher, setSelectedVoucher] =
     useState<JournalVoucher | null>(null);
   const [createJvOpen, setCreateJvOpen] = useState(false);
   const [initialJvDraft, setInitialJvDraft] =
     useState<InitialJournalDraft | null>(null);
   const [manageCoaOpen, setManageCoaOpen] = useState(false);
+
+  const handleOpenEditAccount = (acc: GeneralLedgerAccountRow) => {
+    setEditingCoaAccount(acc);
+    setManageCoaOpen(true);
+  };
+
+  const handleOpenRecordEntryForAccount = (acc: GeneralLedgerAccountRow) => {
+    const contraAccount =
+      acc.accountCode === "31000"
+        ? { code: "11121.01", name: "กสิกรไทย (บัญชีกระแสรายวัน/ออมทรัพย์หลัก)" }
+        : { code: "31000", name: "ทุนจดทะเบียนชำระแล้ว" };
+    setInitialJvDraft({
+      documentPrefix: acc.accountType === "asset" ? "OP" : "JV",
+      entryDate: new Date().toISOString().slice(0, 10),
+      description: `ตั้งยอดยกมา / บันทึกรายการ ${acc.accountCode} ${acc.accountName}`,
+      lines: [
+        {
+          accountCode: acc.accountCode,
+          accountName: acc.accountName,
+          debit: 0,
+          credit: 0,
+          memo: `รายการบัญชี ${acc.accountName}`,
+        },
+        {
+          accountCode: contraAccount.code,
+          accountName: contraAccount.name,
+          debit: 0,
+          credit: 0,
+          memo: "บัญชีคู่ตรงข้าม",
+        },
+      ],
+    });
+    setCreateJvOpen(true);
+  };
 
   const handlePeriodChange = (nextPeriod: string) => {
     setSelectedPeriod(nextPeriod);
@@ -1215,7 +1251,10 @@ export function AccountingManager({
           <Button
             type="button"
             variant="outline"
-            onClick={() => setManageCoaOpen(true)}
+            onClick={() => {
+              setEditingCoaAccount(null);
+              setManageCoaOpen(true);
+            }}
             className="min-h-10 gap-1.5 px-2.5 text-[12px] font-semibold"
           >
             <Settings2Icon className="size-3.5 text-sky-700" />
@@ -1688,6 +1727,9 @@ export function AccountingManager({
                         ))}
                     </button>
                   </th>
+                  <th className="w-[100px] px-3 py-3 text-center font-semibold">
+                    จัดการ
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border bg-card">
@@ -1777,6 +1819,31 @@ export function AccountingManager({
                         ) : (
                           <span className="text-muted-foreground">-</span>
                         )}
+                      </td>
+                      <td
+                        className="whitespace-nowrap px-3 py-3.5 text-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`ดูรายการเดินบัญชี ${acc.accountCode}`}
+                            onClick={() => setSelectedAccount(acc)}
+                          >
+                            <EyeIcon className="size-4 text-sky-700" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`แก้ไขผังบัญชี ${acc.accountCode}`}
+                            onClick={() => handleOpenEditAccount(acc)}
+                          >
+                            <PencilIcon className="size-4 text-amber-700" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -2303,6 +2370,8 @@ export function AccountingManager({
               setSelectedVoucher(found);
             }
           }}
+          onEditAccount={handleOpenEditAccount}
+          onRecordEntryForAccount={handleOpenRecordEntryForAccount}
         />
       )}
 
@@ -2336,6 +2405,7 @@ export function AccountingManager({
           onOpenChange={setManageCoaOpen}
           onSaved={refreshData}
           accounts={initialData.accounts}
+          initialAccount={editingCoaAccount}
         />
       )}
     </div>

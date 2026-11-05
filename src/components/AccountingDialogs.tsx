@@ -7,6 +7,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   Loader2Icon,
+  PencilIcon,
   PlusIcon,
   PrinterIcon,
   SearchIcon,
@@ -239,11 +240,15 @@ export function AccountLedgerDetailDialog({
   onOpenChange,
   account,
   onSelectVoucher,
+  onEditAccount,
+  onRecordEntryForAccount,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   account: GeneralLedgerAccountRow | null;
   onSelectVoucher?: (voucherId: string) => void;
+  onEditAccount?: (account: GeneralLedgerAccountRow) => void;
+  onRecordEntryForAccount?: (account: GeneralLedgerAccountRow) => void;
 }) {
   if (!account) return null;
 
@@ -253,22 +258,55 @@ export function AccountLedgerDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-[920px]">
         <DialogHeader className="pr-12">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge
-              variant="outline"
-              className="border-slate-300 bg-slate-100 font-mono text-[12px] font-bold text-slate-900"
-            >
-              {account.accountCode}
-            </Badge>
-            <Badge
-              variant="outline"
-              className={cn("text-[11px] font-semibold", meta.badgeClass)}
-            >
-              {meta.label}
-            </Badge>
-            <span className="text-[11px] text-muted-foreground">
-              หมวดธรรมชาติ: {account.normalBalance === "debit" ? "ฝั่งเดบิต" : "ฝั่งเครดิต"}
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className="border-slate-300 bg-slate-100 font-mono text-[12px] font-bold text-slate-900"
+              >
+                {account.accountCode}
+              </Badge>
+              <Badge
+                variant="outline"
+                className={cn("text-[11px] font-semibold", meta.badgeClass)}
+              >
+                {meta.label}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                หมวดธรรมชาติ: {account.normalBalance === "debit" ? "ฝั่งเดบิต" : "ฝั่งเครดิต"}
+              </span>
+            </div>
+            <div className="no-print flex flex-wrap items-center gap-1.5">
+              {onEditAccount && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onEditAccount(account);
+                  }}
+                  className="h-8 gap-1.5 text-[12px] font-semibold"
+                >
+                  <PencilIcon className="size-3.5 text-amber-700" />
+                  แก้ไขชื่อ/ข้อมูลบัญชี
+                </Button>
+              )}
+              {onRecordEntryForAccount && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onRecordEntryForAccount(account);
+                  }}
+                  className="h-8 gap-1.5 bg-sky-600 text-[12px] font-semibold text-white hover:bg-sky-700"
+                >
+                  <PlusIcon className="size-3.5" />
+                  บันทึกยอดยกมา / เพิ่มรายการเดินบัญชี
+                </Button>
+              )}
+            </div>
           </div>
           <DialogTitle className="mt-1 text-[18px] font-bold text-foreground">
             {account.accountName}
@@ -315,8 +353,22 @@ export function AccountLedgerDetailDialog({
                 ยังไม่มีรายการเคลื่อนไหวในบัญชีนี้สำหรับงวดที่เลือก
               </div>
               <p className="mt-1 max-w-[440px] text-[12px] text-muted-foreground">
-                หากเป็นบัญชีเงินสดหรือธนาคาร คุณสามารถกดปุ่ม &ldquo;+ สร้างสมุดรายวันทั่วไป&rdquo; เพื่อตั้งยอดยกมาต้นงวดได้ทันที
+                คุณสามารถกดปุ่มด้านล่างเพื่อตั้งยอดยกมาต้นงวด หรือเพิ่มรายการเดินบัญชีของรหัส {account.accountCode} ({account.accountName}) ได้ทันที
               </p>
+              {onRecordEntryForAccount && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onRecordEntryForAccount(account);
+                  }}
+                  className="mt-3 gap-1.5 bg-sky-600 text-white hover:bg-sky-700"
+                >
+                  <PlusIcon className="size-4" />
+                  ตั้งยอดยกมา / บันทึกรายการในบัญชี {account.accountCode}
+                </Button>
+              )}
             </div>
           ) : (
             <div className="max-h-[420px] overflow-x-auto overflow-y-auto">
@@ -1509,11 +1561,13 @@ export function ManageChartOfAccountDialog({
   onOpenChange,
   onSaved,
   accounts = [],
+  initialAccount,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   accounts?: GeneralLedgerAccountRow[];
+  initialAccount?: GeneralLedgerAccountRow | null;
 }) {
   const [accountType, setAccountType] = useState<AccountType>("asset");
   const [accountCode, setAccountCode] = useState("");
@@ -1531,6 +1585,26 @@ export function ManageChartOfAccountDialog({
     () => accounts.filter((a) => !a.isSystem && a.id),
     [accounts],
   );
+
+  useEffect(() => {
+    if (open) {
+      if (initialAccount) {
+        setAccountType(initialAccount.accountType);
+        setAccountCode(initialAccount.accountCode);
+        setAccountName(initialAccount.accountName);
+        setPrimaryGroup(initialAccount.primaryGroup);
+        setSecondaryGroup(initialAccount.secondaryGroup);
+        setDescription(initialAccount.description || "");
+      } else {
+        setAccountType("asset");
+        setAccountCode("");
+        setAccountName("");
+        setPrimaryGroup(ACCOUNT_TYPE_META.asset.defaultPrimaryGroup);
+        setSecondaryGroup(ACCOUNT_TYPE_META.asset.defaultSecondaryGroup);
+        setDescription("");
+      }
+    }
+  }, [open, initialAccount]);
 
   const handleTypeChange = (nextType: AccountType) => {
     setAccountType(nextType);
