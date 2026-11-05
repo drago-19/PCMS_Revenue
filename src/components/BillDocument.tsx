@@ -177,7 +177,7 @@ export function BillDocument({
       <dl className="bill-meta">
         {shopName ? (
           <div>
-            <dt>ร้านค้า (Shipnity)</dt>
+            <dt>ร้านค้า</dt>
             <dd className="font-bold text-foreground">
               {shopName === "Kiddee Shop"
                 ? "🛍️ Kiddee Shop"
@@ -571,7 +571,7 @@ export function BillDocument({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 font-bold text-sky-900">
                 <span>
-                  📄 มีเฉพาะไฟล์ออเดอร์ LINE OA (ยอดขาย {formatTHB(bill.incomeTotal)}) · รออัปโหลดไฟล์สินค้า (SKU)
+                  📄 มีเฉพาะไฟล์ออเดอร์ LINE OA (ยอดขาย {formatTHB(bill.incomeTotal)}) · รออัปโหลดไฟล์สินค้า
                 </span>
               </div>
               <Badge

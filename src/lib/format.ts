@@ -25,6 +25,15 @@ export function formatTHB(value: number): string {
   return `฿${currencyFormatter.format(r)}`;
 }
 
+export function formatBaht(value: number): string {
+  const r = round2(value);
+  return currencyFormatter.format(r);
+}
+
+export function formatThaiDate(iso: string): string {
+  return formatDate(iso);
+}
+
 export function formatPlainAmount(value: number): string {
   return numberFormatter.format(round2(value));
 }

@@ -150,7 +150,7 @@ export default async function DashboardPage({
       ...(channelSummaries.length > 0
         ? [
             {
-              title: "2. แยกตามช่องทางจำหน่าย (Platform)",
+              title: "2. แยกตามช่องทางจำหน่าย",
               rows: channelSummaries.map((ch) => ({
                 label: ch.channel === "LINE" ? "LINE OA" : ch.channel,
                 countText: `${ch.orderCount.toLocaleString("th-TH")} ใบ`,
@@ -542,7 +542,7 @@ export default async function DashboardPage({
               <div className="flex flex-wrap items-center gap-2">
                 <p className="hero-label">
                   <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
-                  รอบชำระเงินล่าสุด · Latest Settlement
+                  รอบชำระเงินล่าสุด
                 </p>
                 {activeShop !== "all" ? (
                   <Badge variant="info" className="font-extrabold">
@@ -559,7 +559,7 @@ export default async function DashboardPage({
               </div>
               <h2 className="hero-date">{formatDateLong(latest.date)}</h2>
               <p className="hero-sub">
-                ยอดเงินโอนสุทธิจากคำสั่งซื้อในรอบนี้ (Order Payout)
+                ยอดเงินโอนสุทธิจากคำสั่งซื้อในรอบนี้
               </p>
               <p className="hero-amount">
                 <AnimatedValueText value={formatTHB(latest.orderPayout)} />
@@ -650,16 +650,16 @@ export default async function DashboardPage({
                   <IconFile size={20} />
                 </div>
                 <h3 className="text-base font-bold text-foreground">
-                  หมวดสรุปยอดรหัสสินค้า (SKU)
+                  หมวดสรุปยอดรหัสสินค้า
                 </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  ดูจำนวนชิ้นและยอดขายแยกตามรหัสสินค้า (SKU) เลือกกรองรายเดือนหรือรายวันได้
+                  ดูจำนวนชิ้นและยอดขายแยกตามรหัสสินค้า เลือกกรองรายเดือนหรือรายวันได้
                 </p>
               </div>
               <div className="mt-4 pt-3 border-t border-border">
                 <Button asChild variant="secondary" size="sm" className="w-full justify-between">
                   <Link href="/products" prefetch={false}>
-                    เปิดสรุปยอด SKU <IconChevronRight size={15} />
+                    เปิดสรุปยอดสินค้า <IconChevronRight size={15} />
                   </Link>
                 </Button>
               </div>

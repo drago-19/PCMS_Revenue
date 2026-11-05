@@ -1321,7 +1321,7 @@ export function InvoiceDocument({
               <tr>
                 <th style={{ width: "8%" }}>ลำดับ</th>
                 {showSkuFull ? (
-                  <th style={{ width: "18%" }}>รหัสสินค้า (SKU)</th>
+                  <th style={{ width: "18%" }}>รหัสสินค้า</th>
                 ) : null}
                 <th style={{ width: showSkuFull ? "36%" : "54%" }}>รายการสินค้า</th>
                 <th style={{ width: "10%" }} className="num">
@@ -1419,7 +1419,7 @@ export function InvoiceDocument({
               </tr>
               <tr>
                 <td colSpan={showSkuFull ? 5 : 4}>
-                  ภาษีมูลค่าเพิ่ม (VAT {invoice.seller.vatRate}%)
+                  ภาษีมูลค่าเพิ่ม {invoice.seller.vatRate}%
                 </td>
                 <td className="num">{formatTHB(invoice.vatAmount)}</td>
               </tr>

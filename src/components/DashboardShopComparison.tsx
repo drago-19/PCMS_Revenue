@@ -38,7 +38,7 @@ export function DashboardShopComparison({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-extrabold tracking-tight text-foreground sm:text-base">
-          📊 เปรียบเทียบผลประกอบการรายร้านค้า (Shop Breakdown)
+          📊 เปรียบเทียบผลประกอบการรายร้านค้า
         </h3>
         <span className="text-xs text-muted-foreground">
           สรุปยอดรวมสะสมทุกช่องทาง
@@ -57,9 +57,9 @@ export function DashboardShopComparison({
               : "🏪";
           const subtitle =
             shop.shopName === "Kiddee Shop"
-              ? "ร้านหลัก (TikTok, Shopee, Facebook, Lazada, LINE OA)"
+              ? "ร้านหลัก · TikTok, Shopee, Facebook, Lazada, LINE OA"
               : shop.shopName === "Kissi Studio"
-                ? "ร้านแฟชั่น (TikTok, Shopee, Facebook, LINE OA)"
+                ? "ร้านแฟชั่น · TikTok, Shopee, Facebook, LINE OA"
                 : "ข้อมูลร้านค้าจากไฟล์ที่อัปโหลด";
 
           return (

@@ -278,7 +278,7 @@ export async function detectAndParseLazadaInput(
           {
             code: "LAZADA_BALANCE_SKIPPED",
             message:
-              "ไฟล์นี้เป็นประวัติการฝาก-ถอนเงินกระเป๋า Lazada (Balance Transactions) ซึ่งไม่มีเลขคำสั่งซื้อ ระบบจึงข้ามการสร้างบิลคำสั่งซื้อให้อัตโนมัติ",
+              "ไฟล์นี้เป็นประวัติการฝาก-ถอนเงินกระเป๋า Lazada ซึ่งไม่มีเลขคำสั่งซื้อ ระบบจึงข้ามการสร้างบิลคำสั่งซื้อให้อัตโนมัติ",
             severity: "info",
           },
         ],

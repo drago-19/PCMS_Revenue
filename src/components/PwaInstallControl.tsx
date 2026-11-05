@@ -192,7 +192,7 @@ export function PwaInstallControl({
           )}
         >
           <MonitorDownIcon className="size-3.5 shrink-0" />
-          <span className="truncate">ติดตั้งแอปลงเครื่อง (App)</span>
+          <span className="truncate">ติดตั้งแอปลงเครื่อง</span>
         </Button>
       )}
 
@@ -236,12 +236,12 @@ export function PwaInstallControl({
                 </span>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="font-bold text-[#0f172a]">
-                    แตะปุ่ม &ldquo;แชร์&rdquo; (Share) บนแถบเบราว์เซอร์
+                    แตะปุ่ม &ldquo;แชร์&rdquo; บนแถบเบราว์เซอร์
                   </span>
                   <span className="text-[#475569]">
                     มองหาไอคอน{" "}
                     <ShareIcon className="inline size-3.5 text-[#0284c7]" />{" "}
-                    ด้านล่างหน้าจอ (Safari) หรือมุมขวาบน (Chrome / iPad)
+                    ด้านล่างหน้าจอ หรือมุมขวาบนของเบราว์เซอร์
                   </span>
                 </div>
               </div>
@@ -252,7 +252,7 @@ export function PwaInstallControl({
                 </span>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="font-bold text-[#0f172a]">
-                    เลือก &ldquo;เพิ่มไปยังหน้าจอโฮม&rdquo; (Add to Home Screen)
+                    เลือก &ldquo;เพิ่มไปยังหน้าจอโฮม&rdquo;
                   </span>
                   <span className="text-[#475569]">
                     เลื่อนเมนูลงมาแล้วแตะแถบที่มีไอคอน{" "}
@@ -268,7 +268,7 @@ export function PwaInstallControl({
                 </span>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="font-bold text-[#0f172a]">
-                    แตะปุ่ม &ldquo;เพิ่ม&rdquo; (Add) มุมขวาบน
+                    แตะปุ่ม &ldquo;เพิ่ม&rdquo; มุมขวาบน
                   </span>
                   <span className="text-[#475569]">
                     ไอคอน <strong>PCMS Revenue</strong> จะปรากฏบนหน้าจอโฮมทันที
@@ -290,7 +290,7 @@ export function PwaInstallControl({
                     มองหาไอคอนรูปหน้าจอ{" "}
                     <MonitorDownIcon className="inline size-3.5 text-[#0284c7]" />{" "}
                     ทางด้านขวาของช่องพิมพ์ URL บน Chrome หรือ Edge แล้วกด{" "}
-                    <strong>ติดตั้ง (Install)</strong>
+                    <strong>ติดตั้ง</strong>
                   </span>
                 </div>
               </div>
@@ -312,7 +312,7 @@ export function PwaInstallControl({
                     </li>
                     <li>
                       • <strong>Microsoft Edge</strong>: กดปุ่ม{" "}
-                      <strong>...</strong> มุมขวาบน → <strong>แอป (Apps)</strong>{" "}
+                      <strong>...</strong> มุมขวาบน → <strong>แอป</strong>{" "}
                       → <strong>ติดตั้งไซต์นี้เป็นแอป</strong>
                     </li>
                     <li>

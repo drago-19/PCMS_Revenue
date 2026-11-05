@@ -161,7 +161,7 @@ export default async function ImportHistoryPage({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-bold text-foreground sm:text-base">
-                ตารางประวัติไฟล์ Excel ที่นำเข้า (Import Registry)
+                ตารางประวัติไฟล์ที่นำเข้า
               </h2>
               <p className="text-xs text-muted-foreground">
                 คลิกที่ชื่อไฟล์หรือปุ่ม &ldquo;เปิดอ่าน Excel&rdquo; เพื่อดูตารางข้อมูลทุกแถว-คอลัมน์เหมือนเปิดในโปรแกรม Excel

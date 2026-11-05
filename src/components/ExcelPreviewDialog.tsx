@@ -552,7 +552,7 @@ export function ExcelFilePreviewDialog({
                   </Badge>
                 </DialogTitle>
                 <DialogDescription className="mt-0.5 text-xs text-slate-300">
-                  ตารางอ่านข้อมูลไฟล์นำเข้าแบบ Excel (Spreadsheet Viewer)
+                  ตารางอ่านข้อมูลไฟล์นำเข้าแบบตารางข้อมูล
                   {rowCount !== undefined
                     ? ` · ${rowCount.toLocaleString("th-TH")} แถวข้อมูล`
                     : ""}

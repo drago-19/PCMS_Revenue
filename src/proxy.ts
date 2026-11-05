@@ -48,7 +48,7 @@ export function proxy(request: NextRequest) {
     if (!csrf.ok) {
       return applySecurityHeaders(
         NextResponse.json(
-          { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน (CSRF Protection)", requestId },
+          { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน", requestId },
           { status: 403 },
         ),
         requestId,
@@ -82,7 +82,7 @@ export function proxy(request: NextRequest) {
     if (!csrf.ok) {
       return applySecurityHeaders(
         NextResponse.json(
-          { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน (CSRF Protection)", requestId },
+          { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน", requestId },
           { status: 403 },
         ),
         requestId,

@@ -130,7 +130,7 @@ export default async function ImportReportPage({
               filename={importRow.filename}
               fileType={importRow.fileType}
               rowCount={importRow.rowCount}
-              triggerLabel="ขยายเต็มจอ (Excel)"
+              triggerLabel="ขยายเต็มจอ"
             />
             {importRow.periodStart ? (
               <Button asChild variant="secondary">
@@ -199,7 +199,7 @@ export default async function ImportReportPage({
                 }
               >
                 <Link href={`/import/${importRow.id}?tab=spreadsheet`} scroll={false}>
-                  ตารางข้อมูลไฟล์ (Excel)
+                  ตารางข้อมูลไฟล์
                 </Link>
               </Button>
               <Button

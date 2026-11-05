@@ -672,14 +672,14 @@ export default async function BillsPage({
                       ...(result.linkCounts.noPrice > 0
                         ? [
                             {
-                              label: "บิลเปลี่ยนสินค้า / ไม่มีราคาสินค้า (Facebook · แยกนอกหมวดปกติ)",
+                              label: "บิลเปลี่ยนสินค้า / ไม่มีราคาสินค้า (แยกนอกหมวดปกติ)",
                               valueText: `+${result.linkCounts.noPrice.toLocaleString("th-TH")} ใบ`,
                               tone: "muted" as const,
                             },
                           ]
                         : []),
                       {
-                        label: "รวมเฉพาะคำสั่งซื้อ (is_order = 1 · ตรงกับหน้าสรุปรายวัน)",
+                        label: "รวมเฉพาะคำสั่งซื้อ (ตรงกับหน้าสรุปรายวัน)",
                         valueText: `${(result.periodNetSummary.orderCount - compCount + result.linkCounts.noPrice).toLocaleString("th-TH")} ใบ`,
                         isSubtotal: true,
                       },
@@ -1119,7 +1119,7 @@ export default async function BillsPage({
             {/* ชั้นที่ 4 (ล่างสุดก่อนเข้าตาราง): ค้นหา + เลือกเดือน/วันจากปฏิทิน + พิมพ์ใบกำกับฯ */}
             <div className="flex flex-col gap-1.5 border-t border-border/70 pt-2.5">
               <span className="text-[11.5px] font-extrabold tracking-tight text-[#334155]">
-                4. ค้นหาและเลือกช่วงวันชำระ (Search & Date)
+                4. ค้นหาและเลือกช่วงวันชำระ
               </span>
               <FilterForm autoSubmitDelay={400} className="flex max-w-[1140px] flex-wrap items-center gap-2">
                 {channel !== "all" ? (
@@ -1152,7 +1152,7 @@ export default async function BillsPage({
                     type="search"
                     name="q"
                     defaultValue={q}
-                    placeholder="ค้นหาเลขคำสั่งซื้อ, รหัส OF, หรือรหัสสินค้า (SKU)..."
+                    placeholder="ค้นหาเลขคำสั่งซื้อ, รหัสออเดอร์, หรือรหัสสินค้า..."
                     aria-label="ค้นหาบิล"
                     className="h-full min-h-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
                   />
@@ -1430,7 +1430,7 @@ export default async function BillsPage({
                         </Link>
                       </TableHead>
                       <TableHead className={colSkuClass}>
-                        รายการสินค้า (SKU)
+                        รายการสินค้า
                       </TableHead>
                       <TableHead className={colIncomeClass}>
                         <Link
@@ -1712,7 +1712,7 @@ export default async function BillsPage({
                         </div>
                       </TableCell>
                       <TableCell
-                        data-label="รายการสินค้า (SKU)"
+                        data-label="รายการสินค้า"
                         className={colSkuClass}
                       >
                         {row.omsItems && row.omsItems.length > 0 ? (

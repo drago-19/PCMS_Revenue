@@ -64,7 +64,7 @@ export default async function ImportPage({
           </h2>
           <p className="card-sub">
             อัปโหลดไฟล์รายได้ TikTok Shop, ไฟล์ออเดอร์ใน shipnity
-            และไฟล์สินค้าในออเดอร์ shipnity (SKU)
+            และไฟล์สินค้าในออเดอร์ shipnity
             ระบบจะตรวจสอบชนิดไฟล์และเชื่อมข้อมูลเข้าด้วยกันให้อัตโนมัติ
           </p>
           <UploadForm />

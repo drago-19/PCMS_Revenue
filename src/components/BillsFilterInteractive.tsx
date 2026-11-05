@@ -237,7 +237,7 @@ export function BillsChannelBar({
     },
     {
       key: "Other" as const,
-      label: "อื่นๆ (Other)",
+      label: "ช่องทางอื่นๆ",
       subLabel: "ข้อมูลจากไฟล์ Shipnity",
       count: channelCounts.Other ?? 0,
       dotColor: "bg-[#475569]",
@@ -249,7 +249,7 @@ export function BillsChannelBar({
     <div className="mb-3 flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11.5px] font-extrabold tracking-tight text-[#334155]">
-          1. เลือกช่องทางจำหน่าย (Platform)
+          1. เลือกช่องทางจำหน่าย
         </span>
         <div className="flex flex-wrap items-center gap-2">
           {showStatusFilter ? (
@@ -475,7 +475,7 @@ export function BillsCategoryTabs({
   return (
     <div className="mb-3 flex flex-col gap-1.5">
       <span className="text-[11.5px] font-extrabold tracking-tight text-[#334155]">
-        2. เลือกประเภทบิล (Category)
+        2. เลือกประเภทบิล
       </span>
       <div
         role="tablist"
@@ -658,7 +658,7 @@ export function BillsSubFilters({
               {
                 key: "oms_only",
                 label: "มีเฉพาะไฟล์ออเดอร์",
-                subLabel: "รออัปโหลดไฟล์สินค้า (SKU)",
+                subLabel: "รออัปโหลดไฟล์สินค้า",
                 count: linkCounts.omsOnly,
                 dotColor: "bg-[#2563eb]",
                 activeClass: "border-[#1d4ed8] bg-[#1d4ed8] text-white shadow-xs",
@@ -945,7 +945,7 @@ export function BillsSubFilters({
   return (
     <div className="mb-3 flex flex-col gap-1.5">
       <span className="text-[11.5px] font-extrabold tracking-tight text-[#334155]">
-        3. สถานะความครบของข้อมูล (Data Completeness)
+        3. สถานะความครบของข้อมูล
       </span>
       <div
         role="group"

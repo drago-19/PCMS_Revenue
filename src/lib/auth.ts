@@ -393,7 +393,7 @@ export function requireApiAuth(
     return {
       ok: false,
       response: Response.json(
-        { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน (CSRF Protection)", requestId },
+        { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน", requestId },
         { status: 403, headers: { "x-request-id": requestId } },
       ),
     };

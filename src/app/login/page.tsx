@@ -130,7 +130,7 @@ function LoginFormCard() {
             >
               <div className="flex items-center justify-center gap-2 font-bold">
                 <LockIcon className="size-4 shrink-0 text-[#dc2626]" />
-                <span>ระบบล็อกการเข้าสู่ระบบชั่วคราว (Brute-Force Protection)</span>
+                <span>ระบบล็อกการเข้าสู่ระบบชั่วคราว</span>
               </div>
               <p className="mt-1 font-normal leading-relaxed">{lockedMessage}</p>
             </div>
@@ -150,7 +150,7 @@ function LoginFormCard() {
               htmlFor="login-username"
               className="text-[13px] font-bold text-[#0f172a]"
             >
-              ชื่อผู้ใช้ (Username)
+              ชื่อผู้ใช้
             </label>
             <div className="relative flex items-center">
               <UserIcon
@@ -178,7 +178,7 @@ function LoginFormCard() {
               htmlFor="login-password"
               className="text-[13px] font-bold text-[#0f172a]"
             >
-              รหัสผ่าน (Password)
+              รหัสผ่าน
             </label>
             <div className="relative flex items-center">
               <KeyRoundIcon
@@ -237,7 +237,7 @@ function LoginFormCard() {
           <span>ระบบรักษาความปลอดภัยระดับ Production</span>
         </div>
         <span className="leading-relaxed">
-          เข้ารหัสรหัสผ่านด้วย bcrypt (cost 12) · ล็อกอัตโนมัติ 15 นาทีเมื่อกรอกผิดครบ 5 ครั้ง · บันทึก Audit Trail ทุกการเข้าถึง
+          เข้ารหัสรหัสผ่านด้วยมาตรฐานความปลอดภัยสูง · ล็อกอัตโนมัติ 15 นาทีเมื่อกรอกผิดครบ 5 ครั้ง · บันทึกประวัติทุกการเข้าถึง
         </span>
       </CardFooter>
     </Card>

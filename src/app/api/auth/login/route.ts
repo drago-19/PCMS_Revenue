@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   const csrf = verifyCsrfOrigin(request);
   if (!csrf.ok) {
     return Response.json(
-      { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน (CSRF Protection)", requestId },
+      { error: "ไม่อนุญาตให้ส่งคำขอข้ามโดเมน", requestId },
       { status: 403, headers: { "x-request-id": requestId } },
     );
   }

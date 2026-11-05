@@ -34,7 +34,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "สรุปยอดตามรหัสสินค้า (SKU)" };
+export const metadata = { title: "สรุปยอดตามรหัสสินค้า" };
 
 const VALID_SKU_SORTS: SkuSortKey[] = [
   "qty_desc",
@@ -172,8 +172,8 @@ export default async function ProductsPage({
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop, Shopee, Facebook, Lazada & LINE OA · SKU Summary Table"
-        title="หมวดสรุปยอดขายตามรหัสสินค้า (SKU)"
+        eyebrow="สรุปยอดขายแยกตามรหัสสินค้าและช่องทางจำหน่าย"
+        title="หมวดสรุปยอดขายตามรหัสสินค้า"
         description={
           scopeHintLabel
             ? `กำลังแสดงข้อมูล: ${scopeHintLabel} · ตารางสรุปยอดขายและจำนวนชิ้นรายรหัสสินค้าจากทุกช่องทางจำหน่าย`
@@ -190,7 +190,7 @@ export default async function ProductsPage({
 
       <div className="stats">
         <StatCard
-          label="รหัสสินค้าที่ขายได้ (SKU)"
+          label="รหัสสินค้าที่ขายได้"
           value={`${result.totals.skuCount.toLocaleString("th-TH")} รหัส`}
           hint={
             scopeHintLabel ??
@@ -291,7 +291,7 @@ export default async function ProductsPage({
                   type="search"
                   name="q"
                   defaultValue={q}
-                  placeholder="ค้นหารหัสสินค้า (SKU) หรือชื่อสินค้า..."
+                  placeholder="ค้นหารหัสสินค้า หรือชื่อสินค้า..."
                   aria-label="ค้นหารหัสสินค้า"
                   className="h-full min-h-0 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:outline-none"
                 />
@@ -345,7 +345,7 @@ export default async function ProductsPage({
           <div className="flex min-h-[560px] flex-col items-center justify-center p-6">
             <EmptyState
               icon={<IconFile size={28} />}
-              title="ยังไม่มีข้อมูลรหัสสินค้า (SKU)"
+              title="ยังไม่มีข้อมูลรหัสสินค้า"
               description="อัปโหลดไฟล์ สินค้าในออเดอร์ shipnity (ไฟล์ที่ 3) เพื่อให้ระบบสร้างตารางสรุปยอดขายตามรหัสสินค้าอัตโนมัติ"
               action={
                 <Button asChild variant="default">
@@ -366,7 +366,7 @@ export default async function ProductsPage({
                 <TableRow>
                   <TableHead className="w-12 text-center">#</TableHead>
                   <TableHead className="min-[768px]:w-[130px] min-[1280px]:w-[150px]">
-                    รหัสสินค้า (SKU)
+                    รหัสสินค้า
                   </TableHead>
                   <TableHead className="min-[768px]:min-w-[220px] min-[1280px]:min-w-[280px]">
                     ชื่อสินค้า
@@ -474,7 +474,7 @@ export default async function ProductsPage({
                           {rank}
                         </span>
                       </TableCell>
-                      <TableCell data-label="รหัสสินค้า (SKU)">
+                      <TableCell data-label="รหัสสินค้า">
                         <span className="mono inline-flex items-center rounded-md border border-[#cbd5e1] bg-[#f8fafc] px-2.5 py-0.5 text-xs font-bold text-[#0f172a]">
                           {row.skuCode}
                         </span>

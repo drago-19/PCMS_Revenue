@@ -1195,7 +1195,7 @@ export async function getImportSpreadsheetData(
     });
 
     if (importRow.report.found && importRow.report.raw.length > 0) {
-      const reportHeaders = ["รายการสรุป (Report)", "จำนวนเงิน / รายละเอียด"];
+      const reportHeaders = ["รายการสรุป", "จำนวนเงิน / รายละเอียด"];
       const reportRows: (string | number | null)[][] = [
         reportHeaders,
         ...importRow.report.raw.map((r) => [r.label, r.value]),

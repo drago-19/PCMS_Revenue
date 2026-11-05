@@ -539,7 +539,7 @@ export function BillPreviewModal({
                       {[
                         {
                           key: "a6" as InvoicePaperSize,
-                          label: "100×150 มม. (A6)",
+                          label: "100×150 มม.",
                         },
                         {
                           key: "80mm" as InvoicePaperSize,

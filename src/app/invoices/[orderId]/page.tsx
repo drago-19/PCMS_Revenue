@@ -132,7 +132,7 @@ export default async function InvoicePage({
               </div>
               <div className="rounded-md border border-slate-100 bg-slate-50/50 p-2.5">
                 <span className="text-slate-500 block text-xs">
-                  ยอดชำระสุทธิ (Payout):
+                  ยอดชำระสุทธิ:
                 </span>
                 <span
                   className={cn(
@@ -296,7 +296,7 @@ export default async function InvoicePage({
                     {[
                       {
                         key: "a6" as InvoicePaperSize,
-                        label: "100×150 มม. (A6)",
+                        label: "100×150 มม.",
                       },
                       {
                         key: "80mm" as InvoicePaperSize,

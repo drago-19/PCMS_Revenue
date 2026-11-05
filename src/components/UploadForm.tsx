@@ -135,14 +135,14 @@ function getStepState(
 
 const CUSTOM_MAPPING_FIELDS: { key: string; label: string }[] = [
   { key: "orderCode", label: "[shipnity] เลขที่ออเดอร์ / รหัสคำสั่งซื้อ (จำเป็น)" },
-  { key: "skuCode", label: "[shipnity] รหัสสินค้า (SKU)" },
+  { key: "skuCode", label: "[shipnity] รหัสสินค้า" },
   { key: "productName", label: "[shipnity] ชื่อสินค้า" },
   { key: "unitPrice", label: "[shipnity] ราคาต่อชิ้น" },
   { key: "quantity", label: "[shipnity] จำนวนชิ้น" },
   { key: "salesAmount", label: "[shipnity] ยอดขายรวมออเดอร์" },
   { key: "discountTotal", label: "[shipnity] ส่วนลดรวม" },
   { key: "shippingFeeCustomer", label: "[shipnity] ค่าส่งที่เก็บลูกค้า" },
-  { key: "channel", label: "[shipnity] ช่องทางจำหน่าย (TikTok)" },
+  { key: "channel", label: "[shipnity] ช่องทางจำหน่าย" },
   { key: "marketplaceOrderId", label: "[shipnity] เลขคำสั่งซื้อบน Marketplace" },
   { key: "customerName", label: "[shipnity] ชื่อลูกค้า" },
   { key: "customerPhone", label: "[shipnity] เบอร์โทรลูกค้า" },
@@ -955,7 +955,7 @@ export function UploadForm() {
         <DialogContent className="sm:max-w-xl" showCloseButton={!busy}>
           <DialogHeader className="pr-12">
             <div className="flex flex-wrap items-center gap-2">
-              <DialogTitle>จับคู่คอลัมน์เอง (Custom Column Mapping)</DialogTitle>
+              <DialogTitle>จับคู่คอลัมน์เอง</DialogTitle>
               <Badge variant="warning" size="sm">
                 รูปแบบใหม่
               </Badge>
@@ -1027,7 +1027,7 @@ export function UploadForm() {
                 บันทึกการจับคู่คอลัมน์นี้ไว้ใช้ครั้งถัดไปอัตโนมัติ
               </strong>
               <span className="block text-[11px] text-muted-foreground">
-                ระบบจะจำชื่อคอลัมน์ใหม่ลงฐานข้อมูล (app_settings) อัปโหลดครั้งหน้าไม่ต้องเลือกซ้ำ
+                ระบบจะจำชื่อคอลัมน์ใหม่ลงฐานข้อมูล อัปโหลดครั้งหน้าไม่ต้องเลือกซ้ำ
               </span>
             </div>
             <Button

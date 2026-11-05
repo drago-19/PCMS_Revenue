@@ -127,7 +127,7 @@ const PLATFORM_PREFIX_FIELDS: {
   },
   {
     key: "Other",
-    label: "อื่นๆ (Other)",
+    label: "ช่องทางอื่นๆ",
     badge: "Other",
     defaultLead: "OT",
     badgeVariant: "other",
@@ -428,7 +428,7 @@ export function DocumentSettingsClient({
       }
       if (!res.ok || !data.ok || !data.settings) {
         toast.error(
-          data.error ?? `บันทึกการตั้งค่าไม่สำเร็จ (HTTP ${res.status})`,
+          data.error ?? `บันทึกการตั้งค่าไม่สำเร็จ`,
         );
         return;
       }
@@ -477,7 +477,7 @@ export function DocumentSettingsClient({
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle className="text-base font-bold">
-                1. ข้อมูลบริษัท / ผู้ขาย (Seller Profile)
+                1. ข้อมูลบริษัท / ผู้ขาย
               </CardTitle>
               <Badge variant="secondary">แสดงบนหัวใบกำกับภาษีทุกใบ</Badge>
             </div>
@@ -576,18 +576,18 @@ export function DocumentSettingsClient({
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle className="text-base font-bold">
-                2. รหัสเอกสารและคำนำหน้าแยกตามแพลตฟอร์ม (Platform Document Numbering)
+                2. รหัสเอกสารและคำนำหน้าแยกตามแพลตฟอร์ม
               </CardTitle>
               <Badge variant="secondary">รันแยกแต่ละแพลตฟอร์ม (00001 ใหม่ทุกเดือน)</Badge>
             </div>
             <CardDescription>
-              กำหนดอักษรนำหน้าแยกตามแพลตฟอร์ม (เช่น TikTok = TT, Shopee = SP, Facebook = FB) ส่วนปี-เดือน (YYMM) จะดึงตามวันที่บิลจริง และเริ่มนับ 00001 แยกกันในแต่ละแพลตฟอร์มทุกเดือนอัตโนมัติ
+              กำหนดอักษรนำหน้าแยกตามแพลตฟอร์ม ส่วนปี-เดือนจะดึงตามวันที่บิลจริง และเริ่มนับ 00001 แยกกันในแต่ละแพลตฟอร์มทุกเดือนอัตโนมัติ
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-12">
             <div className="flex flex-col gap-2 sm:col-span-12">
               <label className="flex flex-col gap-1.5 text-xs font-semibold text-foreground">
-                <span>อักษรนำหน้าใบเสร็จรับเงิน (Receipt Prefix)</span>
+                <span>อักษรนำหน้าใบเสร็จรับเงิน</span>
                 <div className="flex flex-wrap items-stretch gap-2">
                   <Input
                     name="receiptLeadPrefix"
@@ -607,7 +607,7 @@ export function DocumentSettingsClient({
                   />
                   <div
                     className="mono flex items-center justify-center rounded-[10px] border border-dashed border-border bg-muted/50 px-3 text-xs font-semibold text-muted-foreground whitespace-nowrap"
-                    title="ระบบเติมรหัสแพลตฟอร์มและปี-เดือน (YYMM) ตามวันที่บิล และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ"
+                    title="ระบบเติมรหัสแพลตฟอร์มและปี-เดือนตามวันที่บิล และเริ่มนับ 00001 ใหม่ทุกเดือนอัตโนมัติ"
                   >
                     + -แพลตฟอร์ม + YYMM/00001
                   </div>
@@ -793,7 +793,7 @@ export function DocumentSettingsClient({
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-bold">
-              3. รูปแบบใบพิมพ์และค่าเริ่มต้น (Print Layout & Toggles)
+              3. รูปแบบใบพิมพ์และค่าเริ่มต้น
             </CardTitle>
             <CardDescription>
               เลือกขนาดกระดาษเริ่มต้นสำหรับเครื่องปริ้นของคุณ และเปิด/ปิดหัวข้อที่ต้องการแสดงบนใบพิมพ์
@@ -809,7 +809,7 @@ export function DocumentSettingsClient({
                   [
                     {
                       id: "a6",
-                      label: "เครื่องปริ้นเล็ก 100×150 มม. (A6 / 1/4 A4)",
+                      label: "เครื่องปริ้นเล็ก 100×150 มม.",
                     },
                     { id: "a4-4up", label: "A4 แบ่ง 4 ใบ (1/4 A4)" },
                     { id: "80mm", label: "สลิปความร้อน 80 มม." },
@@ -851,7 +851,7 @@ export function DocumentSettingsClient({
                   },
                   {
                     key: "showShippingTracking",
-                    label: "แสดงชื่อขนส่งและเลขพัสดุ (J&T / เลขพัสดุ)",
+                    label: "แสดงชื่อขนส่งและเลขพัสดุ",
                   },
                   {
                     key: "showSkuInAbbreviated",
@@ -976,7 +976,7 @@ export function DocumentSettingsClient({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <CardTitle className="text-base font-bold">
-                  ตัวอย่างใบพิมพ์จริง (Live Preview)
+                  ตัวอย่างใบพิมพ์จริง
                 </CardTitle>
                 <CardDescription>
                   ทดสอบสลับขนาดกระดาษเพื่อดูการย่อขนาดตัวอักษรอัตโนมัติ (ไม่มีการตัดคำเป็น ...)
@@ -1075,7 +1075,7 @@ export function DocumentSettingsClient({
                     <div className="grid w-full grid-cols-2 gap-1.5 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center">
                       {(
                         [
-                          { id: "a6", label: "100×150 มม. (A6)" },
+                          { id: "a6", label: "100×150 มม." },
                           { id: "a4-4up", label: "A4 แบ่ง 4 ใบ" },
                           { id: "80mm", label: "สลิป 80 มม." },
                           { id: "a4", label: "A4 เต็มแผ่น" },

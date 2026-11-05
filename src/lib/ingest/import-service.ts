@@ -2013,7 +2013,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
         stage: "done",
         percent: 100,
         message:
-          "ข้ามไฟล์ประวัติฝาก-ถอนเงินกระเป๋า Lazada (Balance Transactions) อัตโนมัติ (ไม่มีเลขคำสั่งซื้อ)",
+          "ข้ามไฟล์ประวัติฝาก-ถอนเงินกระเป๋า Lazada อัตโนมัติ (ไม่มีเลขคำสั่งซื้อ)",
         current: lazadaParsed.dataRowCount,
         total: lazadaParsed.dataRowCount,
       });
@@ -2326,7 +2326,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       if (rawHeaders.length > 0) {
         throw new IngestError(
           "UNRECOGNIZED_HEADERS",
-          "ไม่รู้จักชื่อคอลัมน์ในไฟล์นี้ กรุณาจับคู่คอลัมน์เอง (Custom Column Mapping) เพื่อนำเข้า",
+          "ไม่รู้จักชื่อคอลัมน์ในไฟล์นี้ กรุณาจับคู่คอลัมน์เองเพื่อนำเข้า",
           rawHeaders,
         );
       }

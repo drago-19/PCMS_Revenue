@@ -608,7 +608,7 @@ export function UploadCompletenessCalendar({
                         <div className="font-semibold text-primary">
                           👉 วิธีแก้ไข: เข้า TikTok Shop Seller Center ของ{" "}
                           <strong>{shopStat.shopName}</strong> ไปที่{" "}
-                          <u>การเงิน &gt; การถอนเงิน / ใบแจ้งยอดเงินโอน (Settlements)</u>{" "}
+                          <u>การเงิน &gt; การถอนเงิน / ใบแจ้งยอดเงินโอน</u>{" "}
                           แล้วส่งออกไฟล์ Settlement ของเดือนนี้มาอัปโหลด
                         </div>
                       </div>
@@ -779,7 +779,7 @@ export function UploadCompletenessCalendar({
                 )}
               >
                 <span className="text-xs font-bold text-foreground">
-                  1. ไฟล์ออเดอร์ (Shipnity / Lazada)
+                  1. ไฟล์ออเดอร์
                 </span>
                 <span
                   className={cn(
@@ -809,7 +809,7 @@ export function UploadCompletenessCalendar({
                 )}
               >
                 <span className="text-xs font-bold text-foreground">
-                  2. ไฟล์รายการสินค้า (Shipnity / Lazada)
+                  2. ไฟล์รายการสินค้า
                 </span>
                 <span
                   className={cn(
@@ -856,7 +856,7 @@ export function UploadCompletenessCalendar({
                     : selectedDay.tiktokOrders === 0
                       ? `✓ ไม่ต้องใช้ (มีเฉพาะช่องทางอื่น ${formatNumber(selectedDay.normalOrders)} บิล)`
                       : selectedDay.hasFile3
-                        ? `✓ ครบ (TikTok ${formatNumber(selectedDay.tiktokOrders)} บิล)`
+                        ? `✓ ครบ (${formatNumber(selectedDay.tiktokOrders)} บิล)`
                         : `✕ ขาด ${formatNumber(selectedDay.missingFile3Count)} จาก ${formatNumber(selectedDay.tiktokOrders)} บิล TikTok`}
                 </span>
               </div>

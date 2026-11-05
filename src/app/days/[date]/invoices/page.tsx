@@ -407,7 +407,7 @@ export default async function BulkInvoicesPage({
                     className={mode === "full" ? SEGMENT_ON : SEGMENT_OFF}
                   >
                     <Link href={buildPrintHref({ nextMode: "full", nextPaper: "a4" })} scroll={false}>
-                      แบบเต็มรูป (A4)
+                      แบบเต็มรูป
                     </Link>
                   </Button>
                 </div>
@@ -421,7 +421,7 @@ export default async function BulkInvoicesPage({
                   className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
                 >
                   {[
-                    { key: "a6" as InvoicePaperSize, label: "100×150 มม. (A6)" },
+                    { key: "a6" as InvoicePaperSize, label: "100×150 มม." },
                     { key: "a4-4up" as InvoicePaperSize, label: "A4 แบ่ง 4 ใบ" },
                     { key: "80mm" as InvoicePaperSize, label: "สลิป 80 มม." },
                     { key: "a4" as InvoicePaperSize, label: "A4 เต็มแผ่น" },
@@ -479,7 +479,7 @@ export default async function BulkInvoicesPage({
                 { key: "Lazada" as const, label: "Lazada", count: lazadaOrdersCount, dot: "bg-[#0f146d]" },
                 { key: "LINE" as const, label: "LINE OA", count: lineOrdersCount, dot: "bg-[#06C755]" },
                 { key: "Compensation" as const, label: "ชดเชยแพลตฟอร์ม", count: compensationOrdersCount, dot: "bg-[#059669]" },
-                { key: "Other" as const, label: "อื่นๆ (Other)", count: otherOrdersCount, dot: "bg-[#475569]" },
+                { key: "Other" as const, label: "ช่องทางอื่นๆ", count: otherOrdersCount, dot: "bg-[#475569]" },
               ].map((ch) => {
                 const active = channelFilter === ch.key;
                 const activeClass =
