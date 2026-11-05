@@ -3,7 +3,190 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัตเดตล่าสุด: 2026-11-04)
+## สถานะปัจจุบัน (อัตเดตล่าสุด: 2026-11-05)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **ตรวจสอบความครบถ้วนของทุกฟังก์ชันในระบบ `บริหารบัญชี` (`/accounting`) เทียบกับ FlowAccount + เติมจุดย่อยที่เหลือ 3 จุดให้ครบ 100% + รันชุดทดสอบ E2E ครอบคลุมทั้ง 19 เมนูย่อย, ทุกหน้าต่างป๊อปอัป, และทุกขนาดหน้าจอ (`src/components/AccountingReportsTab.tsx`, `src/components/AccountingDialogs.tsx`, `src/components/AccountingManager.tsx`)**:
+    - [x] **1. เติมเต็มจุดย่อยอีก 3 จุดให้ทำงานครบสมบูรณ์ 100%**:
+      - **ตัวเลือก `แสดงรายการร่าง` (`includeDrafts`) ใน `src/components/AccountingReportsTab.tsx`**: ปรับให้คำนวณยอดคงเหลือ (`totalDebit`, `totalCredit`, `endingBalance`) ของทุกผังบัญชีใหม่แบบเรียลไทม์ทั้ง 5 รายงาน (`งบทดลอง`, `งบกำไรขาดทุน`, `งบฐานะการเงิน`, `รายการเคลื่อนไหว`, `ปิดงบบัญชี`) เมื่อติ๊ก/ไม่ติ๊ก `แสดงรายการร่าง`
+      - **ปุ่ม `ดาวน์โหลด` ใน `src/components/AccountingReportsTab.tsx`**: ปรับให้ส่งออกไฟล์ `.csv` ตามหน้ารายงานที่กำลังเปิดอยู่จริง (`trial-balance-*.csv`, `income-statement-*.csv`, `balance-sheet-*.csv`, `account-movements-*.csv`, `closing-summary-*.csv`)
+      - **หน้าต่าง `บริหารผังบัญชี` (`ManageChartOfAccountDialog`) และ `รายการเดินบัญชีแยกประเภท` (`AccountLedgerDetailDialog`) ใน `src/components/AccountingDialogs.tsx`**: เพิ่มรายการผังบัญชีที่สร้างเองพร้อมปุ่ม `แก้ไข` / `ลบ` (`DELETE /api/accounting/accounts?id=...`) ใน `ManageChartOfAccountDialog` และเพิ่มปุ่ม `ดาวน์โหลด Excel` (`ledger-${accountCode}.csv`) + `พิมพ์รายการเดินบัญชี` ใน `AccountLedgerDetailDialog`
+    - [x] **2. ผลการทดสอบครอบคลุมทุกเมนูและทุกฟังก์ชัน (Comprehensive Test Matrix)**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบ 72 เทสต์ (`0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright E2E Verification: ทดสอบครบทั้ง 19 เมนูย่อยใน Sidebar, ปฏิทิน `FlowAccountPeriodPopover`, ช่องค้นหาผังบัญชี `SearchableAccountSelect`, การสร้าง/แก้ไข/อนุมัติ/ลบสมุดรายวัน, การเพิ่ม/ลบผังบัญชีที่สร้างเอง, การคำนวณงบการเงิน 5 งบ, และตรวจ `Child Bounding-Box Overflow` ที่ `360px`, `390px`, `768px`, `1280px` (`docOverflow: false`, `cardOverflowCount: 0`, `consoleErrors: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **แก้ไข 2 จุดตามภาพที่ผู้ใช้แจ้ง: (1) ปรับตัวเลือกปฏิทิน `วันที่:` (`FlowAccountPeriodPopover`) ให้เหมือน FlowAccount 100% (`ทางลัด: เดือนนี้ / เดือนที่แล้ว / 3 เดือนล่าสุด / 12 เดือนล่าสุด / ปีนี้ / ปีที่แล้ว` + `กำหนดเอง: เลือกเดือน / เลือกปี / เลือกปีงบประมาณ / กำหนดช่วงวันที่` + ปุ่ม `ล้าง`) และ (2) เปลี่ยนตัวเลือกผังบัญชีในหน้าต่างสร้างสมุดรายวัน (`SearchableAccountSelect`) ให้พิมพ์ค้นหารหัสบัญชี/ชื่อบัญชีและกรองตามหมวดหมู่ 1–5 ได้ทันที (`src/components/AccountingManager.tsx`, `src/components/AccountingDialogs.tsx`, `src/lib/accounting.ts`, `src/lib/expenses.ts`, `tests/accounting.test.ts`)**:
+    - [x] **1. ปฏิทินเลือกช่วงเวลา `วันที่:` แบบ FlowAccount (`FlowAccountPeriodPopover` ใน `src/components/AccountingManager.tsx` & `parseAccountingPeriodFilter` ใน `src/lib/accounting.ts`)**:
+      - แทนที่ `<Select>` รายการเดือนยาวเหยียดด้วย Popover แบบเดียวกับ FlowAccount:
+        - **หมวด `ทางลัด`**: ปุ่มลัด 6 ปุ่ม (`เดือนนี้`, `เดือนที่แล้ว`, `3 เดือนล่าสุด`, `12 เดือนล่าสุด`, `ปีนี้`, `ปีที่แล้ว`)
+        - **หมวด `กำหนดเอง`**:
+          - `เลือกเดือน >`: ตาราง 12 เดือน (`ม.ค.` – `ธ.ค.`) พร้อมปุ่มเลื่อนปี `< 2026 >`
+          - `เลือกปี >`: เลือกปีปฏิทิน (`ปี 2026`, `ปี 2025`, ...)
+          - `เลือกปีงบประมาณ >`: เลือกปีงบประมาณ (`1 ม.ค. - 31 ธ.ค.`)
+          - `กำหนดช่วงวันที่ >`: เลือกวันเริ่มต้น – วันสิ้นสุด (`YYYY-MM-DD_YYYY-MM-DD`) ได้อิสระ
+        - **ปุ่ม `ล้าง`**: ล้างตัวกรองกลับเป็น `ทุกช่วงเวลา`
+      - รองรับการกรองช่วงเดือน (`2026-08_2026-10`) และช่วงวันที่ (`2026-01-01_2026-03-31`) ใน `getAccountingOverview`, `getMonthlyChannelSalesAggregates`, และ `listExpenseRecords`
+    - [x] **2. ช่องเลือกผังบัญชีแบบพิมพ์ค้นหาได้ (`SearchableAccountSelect` ใน `src/components/AccountingDialogs.tsx`)**:
+      - แทนที่ Dropdown ยาวที่ค้นหาไม่ได้ในหน้าต่างสร้าง/แก้ไขสมุดรายวัน ด้วย Popover ที่มี **ช่องพิมพ์ค้นหา (`พิมพ์ค้นหา รหัสบัญชี หรือ ชื่อบัญชี...`)** ทันทีที่เปิดขึ้น พร้อมปุ่มกรองหมวดหมู่ด่วน (`ทั้งหมด`, `1.สินทรัพย์`, `2.หนี้สิน`, `3.ทุน`, `4.รายได้`, `5.ค่าใช้จ่าย`)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`72 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบเปิด Popover ปฏิทิน กด `เลือกเดือน` (`ม.ค.`), กด `3 เดือนล่าสุด` (`วันที่: ส.ค. 2026 - ต.ค. 2026`), และพิมพ์ค้นหา `"กสิกร"` ในช่องเลือกผังบัญชีบรรทัดที่ 1 (`11121.01 · กสิกรไทย`) ผ่านครบ (`consoleErrors: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **พัฒนาฟังก์ชันและการทำงานของทุกหน้าย่อยในระบบ `บริหารบัญชี` (`/accounting`) ให้เทียบเท่า FlowAccount ครบ 100% (`src/lib/accounting.ts`, `src/app/api/accounting/journals/route.ts`, `src/components/AccountingDialogs.tsx`, `src/components/AccountingManager.tsx`, `src/components/AccountingReportsTab.tsx`, `src/components/AccountingVatTab.tsx`, `tests/accounting.test.ts`)**:
+    - [x] **1. หน้า `บัญชีแยกประเภท` (`/accounting?tab=ledger`)**:
+      - เรียงลำดับคอลัมน์ (`รหัสบัญชี`, `ยอดคงเหลือ`) จากน้อยไปมาก / มากไปน้อยได้ทันที
+      - มีช่องทำเครื่องหมาย (Checkbox) เลือกผังบัญชีรายแถวหรือเลือกทั้งหมดเพื่อดาวน์โหลดไฟล์ Excel (`.csv`) เฉพาะรายการที่เลือกได้
+      - แถบแบ่งหน้าด้านล่าง (`รายการต่อหน้า: 20, 50, 100, ทั้งหมด` พร้อมปุ่มเลื่อนหน้า `< หน้า X / Y >`)
+      - คลิกแถวเพื่อดูรายการเดินบัญชีแยกประเภท (`AccountLedgerDetailDialog` พร้อมคลิกทะลุไปเปิดใบสำคัญได้) และปุ่ม `บริหารผังบัญชี` (`ManageChartOfAccountDialog` เพิ่ม/แก้ไข/ลบผังบัญชี)
+    - [x] **2. หน้า `สมุดรายวัน 5 เล่ม` (`สมุดรายวันทั่วไป JV`, `สมุดรายวันซื้อ UV`, `สมุดรายวันขาย SV`, `สมุดรายวันจ่าย PV`, `สมุดรายวันรับ RV`)**:
+      - รองรับการ **สร้างใบสำคัญใหม่ได้ครบทั้ง 5 สมุดรายวัน (`JV`, `OP`, `UV`, `SV`, `PV`, `RV`)** โดยปุ่ม `+ สร้าง...` จะเปลี่ยนตามเล่มสมุดรายวันที่กำลังเปิดอยู่โดยอัตโนมัติ
+      - รองรับการ **แก้ไขใบสำคัญที่บันทึกไว้ (`PUT /api/accounting/journals` + `updateManualJournalEntry`)** ทั้งวันที่ ผู้ติดต่อ เลขที่อ้างอิง คำอธิบาย หมายเหตุ และรายการเดบิต/เครดิต
+      - รองรับการ **สร้างซ้ำ (`CopyIcon` / `สร้างซ้ำ`)** คัดลอกรายการจากใบสำคัญใดก็ได้ (รวมถึงใบสำคัญอัตโนมัติ) มาเปิดสร้างใบใหม่ได้ในคลิกเดียว
+      - รองรับการ **เปลี่ยนสถานะเอกสารจากตารางโดยตรง (`อนุมัติแล้ว` / `รอดำเนินการ` / `ยกเลิก`)** และมีตัวกรองสถานะด้านบน (`แสดงทุกสถานะ`, `อนุมัติแล้ว`, `รอดำเนินการ`, `ยกเลิก`)
+      - ในหน้าต่างสร้าง/แก้ไขสมุดรายวัน (`CreateManualJournalDialog`): มีช่อง `หมายเหตุ / โน้ตภายในบริษัท` และแยกปุ่มบันทึกเป็น 2 ปุ่มตาม FlowAccount คือ `บันทึกร่าง รอดำเนินการ` (`pending`) และ `อนุมัติและบันทึกเอกสาร` (`approved`)
+      - ในหน้าต่างดูใบสำคัญ (`JournalVoucherDetailDialog`): มีปุ่ม `เปลี่ยนสถานะ`, `แก้ไขเอกสาร`, `สร้างซ้ำ`, `ดาวน์โหลด Excel` (เฉพาะใบนั้น), และ `พิมพ์ใบสำคัญ`
+      - เรียงลำดับตาม `วันที่` และ `ยอดรวมสุทธิ`, เลือก Checkbox รายแถวเพื่อดาวน์โหลด Excel, และมีแถบแบ่งหน้า `20 / 50 / 100 / ทั้งหมด`
+    - [x] **3. หน้า `ปิดงบบัญชี` & `รายงานด้านบัญชี` (`งบทดลอง`, `งบกำไรขาดทุน`, `งบฐานะการเงิน`, `รายการเคลื่อนไหว`)**:
+      - เพิ่มตัวเลือกการแสดงผลรายงาน `แสดงรายการร่าง` (รวม/ไม่รวมเอกสารสถานะ `รอดำเนินการ`) คู่กับ `ซ่อนยอด 0.00`
+      - ในหน้า `ปิดงบบัญชี > รายได้และค่าใช้จ่าย`: เพิ่มตาราง `ประวัติเอกสารปิดงบบัญชีที่บันทึกไว้` แสดงรายการใบสำคัญปิดงบพร้อมคลิกเปิดดู/แก้ไขได้ทันที
+    - [x] **4. หน้า `บริหารภาษีมูลค่าเพิ่ม` (`จัดการเอกสารภาษีซื้อ`, `เตรียมแบบภาษีรายเดือน`, `รายงานภาษีซื้อ ภ.พ.36`, `รายงานภาษีซื้อ ภ.พ.30`, `รายงานภาษีขาย ภ.พ.30`)**:
+      - ในหน้า `จัดการเอกสารภาษีซื้อ`: เพิ่มปุ่มกรองสถานะใบกำกับภาษี (`ทั้งหมด`, `พร้อมใช้สิทธิ์`, `รอกรอกเลขใบกำกับฯ`, `ไม่มีภาษีมูลค่าเพิ่ม`) และคอลัมน์ `กำหนดใช้สิทธิ์ 6 เดือน` คำนวณงวดสุดท้ายที่ใช้สิทธิ์ขอคืนภาษีซื้อได้อัตโนมัติ
+    - [x] **5. ระบบอัปเดตข้อมูลอัตโนมัติเมื่อนำเข้าไฟล์ใหม่ (`Auto-Invalidation by Import Stamp`)**:
+      - ผูกคีย์แคชของ `getMonthlyChannelSalesAggregates` และ `getMonthlyPlatformRevenues` เข้ากับ `COUNT(*):MAX(id)` ของตาราง `imports` ทันทีที่มีการอัปโหลดหรือลบไฟล์ระบบจะคำนวณงบการเงินและสมุดรายวันใหม่ทันทีโดยไม่ติดแคชเดิม
+    - [x] **6. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`72 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบครบทุกหน้าจอที่ความกว้าง `360px`, `390px`, `768px`, `1280px` (`overflowReport: {360: false, 390: false, 768: false, 1280: false}`, `consoleErrors: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **ปรับแต่ง CSS แถบเลื่อน (Scrollbar) ให้บางเฉียบคุมโทนระบบ, ปรับขนาดและสีปุ่ม `สร้างใบสำคัญปิดงบบัญชี โอนเข้า 32000` ให้เข้ากับธีมระบบพร้อมสถานะ Loading, และเร่งความเร็วการกดสลับเมนูย่อย/โหลดหน้า `/accounting` ให้ทำงานทันที (`< 5ms`) (`src/app/globals.css`, `src/components/Sidebar.tsx`, `src/components/AccountingReportsTab.tsx`, `src/components/AccountingVatTab.tsx`, `src/components/AccountingDialogs.tsx`, `src/components/AccountingManager.tsx`, `src/lib/accounting.ts`, `src/lib/expenses.ts`)**:
+    - [x] **1. ปรับ CSS แถบเลื่อน (Scrollbar) ทั้งระบบและใน Sidebar (`src/app/globals.css`, `src/components/Sidebar.tsx`)**:
+      - กำหนด `scrollbar-width: thin` และ `::-webkit-scrollbar` ให้ไม่มีลูกศรหัว-ท้ายและไม่เป็นแถบสีขาวหนา
+      - สำหรับ `.sidebar` / `.sidebar-scroll`: ความกว้าง `4px` พื้นหลังโปร่งใส ตัวเลื่อนสีเทาเข้มโปร่งแสง `rgba(148, 163, 184, 0.22)` กลมกลืนกับพื้นหลัง `#0f1117`
+      - สำหรับหน้าหลักและตารางข้อมูล: ความกว้าง `6px` โทนสี Slate อ่อนโค้งมน
+    - [x] **2. ปรับขนาด สี และสถานะ Loading ของปุ่ม `สร้างใบสำคัญปิดงบบัญชี โอนเข้า 32000` (`src/components/AccountingReportsTab.tsx`, `src/components/AccountingVatTab.tsx`, `src/components/AccountingDialogs.tsx`)**:
+      - ปรับขนาดปุ่มให้กะทัดรัด (`h-8.5 min-h-[34px] px-3 text-[12px] font-bold rounded-lg`) เปลี่ยนจากสีม่วงสะท้อนแสงเป็นสีธีมระบบ (`bg-sky-600 text-white hover:bg-sky-700`) และลบวงเล็บออกทั้งหมด
+      - เพิ่มสถานะ Loading (`Loader2Icon animate-spin`) ทันทีเมื่อคลิกปุ่ม และตัดการเรนเดอร์ซ้ำสองรอบใน `CreateManualJournalDialog`
+    - [x] **3. เร่งความเร็วการคลิกเมนูย่อยใน Sidebar และการโหลดหน้า `/accounting` (`src/components/Sidebar.tsx`, `src/lib/accounting.ts`, `src/lib/expenses.ts`)**:
+      - เมื่อผู้ใช้อยู่ที่หน้า `/accounting` อยู่แล้ว การคลิกเมนูย่อยทั้ง 19 หัวข้อใน `Sidebar.tsx` จะสลับสถานะฝั่ง Client ทันที (`e.preventDefault()` + `window.history.replaceState` + `CustomEvent("pcms:accounting-nav")`) ใน `< 5ms` โดยไม่ต้องยิง Server Request ใหม่
+      - เมื่อคลิกข้ามมาจากหน้าอื่น แสดง `SubNavDot` พร้อม `Loader2Icon animate-spin` ทันทีที่กด
+      - แคชผลลัพธ์การรวมยอดรายเดือนใน `getMonthlyChannelSalesAggregates` และ `getMonthlyPlatformRevenues` เป็นเวลา 5 นาที (`300,000 ms`) และกรองช่วงเวลาในหน่วยความจำ แทนการสแกนตาราง `transactions` 87,150 แถวซ้ำทุกครั้ง
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **แตกหัวข้อย่อยของเมนู `บริหารบัญชี` ลงในแถบเมนูด้านข้าง (`Sidebar.tsx`) ครบทุกฟังก์ชันตามต้นฉบับ FlowAccount พร้อมเพิ่มหน้างานย่อยใหม่ (`รายการเคลื่อนไหว`, `ปิดงบบัญชี รายได้และค่าใช้จ่าย`, `จัดการเอกสารภาษีซื้อ`, `รายงานภาษีซื้อ ภ.พ.36`, `ยื่นหัก ณ ที่จ่ายออนไลน์`) (`src/components/Sidebar.tsx`, `src/app/accounting/page.tsx`, `src/components/AccountingManager.tsx`, `src/components/AccountingReportsTab.tsx`, `src/components/AccountingVatTab.tsx`, `src/components/ExpensesManager.tsx`, `src/components/ExpenseLedgerTab.tsx`)**:
+    - [x] **1. แตกเมนูย่อยแบบพับ/กางได้ (Collapsible Sub-Menu Tree) ใต้ปุ่ม `บริหารบัญชี` ใน `Sidebar.tsx` ครบทั้ง 6 หมวด 19 หัวข้อย่อย**:
+      - **สมุดรายวัน**: `สมุดรายวันทั่วไป` (`/accounting?tab=journals&book=JV`), `สมุดรายวันซื้อ` (`book=UV`), `สมุดรายวันขาย` (`book=SV`), `สมุดรายวันจ่าย` (`book=PV`), `สมุดรายวันรับ` (`book=RV`)
+      - **บัญชีแยกประเภท**: `/accounting?tab=ledger`
+      - **ปิดงบบัญชี**: `รายได้และค่าใช้จ่าย` (`/accounting?tab=reports&report=closing`)
+      - **รายงานด้านบัญชี**: `งบทดลอง` (`report=trial_balance`), `งบกำไรขาดทุน` (`report=income_statement`), `งบฐานะการเงิน` (`report=balance_sheet`), `รายการเคลื่อนไหว` (`report=movements`)
+      - **บริหารภาษีมูลค่าเพิ่ม**: `จัดการเอกสารภาษีซื้อ` (`vat=input_docs`), `เตรียมแบบภาษีรายเดือน` (`vat=pp30_summary`), `รายงานภาษีซื้อ ภ.พ.36` (`vat=pp36_report`), `รายงานภาษีซื้อ ภ.พ.30` (`vat=input_vat`), `รายงานภาษีขาย ภ.พ.30` (`vat=output_vat`)
+      - **บิลรายจ่าย & หัก ณ ที่จ่าย**: `รายการบิลค่าใช้จ่าย` (`exp=ledger`), `ยื่นหัก ณ ที่จ่ายออนไลน์` (`exp=wht`), `สรุปกำไรสุทธิรายเดือน` (`exp=table`)
+    - [x] **2. พัฒนาหน้าฟังก์ชันย่อยใหม่ให้ทำงานได้จริง 100% และสลับหน้าทันที (Instant Client Sync)**:
+      - `รายงานด้านบัญชี > รายการเคลื่อนไหว`: ตารางแสดงทุกรายการเดินบัญชีเดบิตและเครดิตเรียงตามลำดับใบสำคัญ พร้อมคลิกดูใบสำคัญได้ทันที
+      - `ปิดงบบัญชี > รายได้และค่าใช้จ่าย`: หน้าสรุปการล้างหมวดรายได้ (`4xxxx`) และหมวดค่าใช้จ่าย (`5xxxx`) โอนเข้าบัญชี `32000 กำไร (ขาดทุน) สะสมยังไม่ได้จัดสรร` พร้อมปุ่มสร้างใบสำคัญปิดงบในคลิกเดียว
+      - `บริหารภาษีมูลค่าเพิ่ม > จัดการเอกสารภาษีซื้อ`: ตารางตรวจสอบความครบถ้วนของเลขใบกำกับภาษีซื้อและเลขผู้เสียภาษี 13 หลักของบิลรายจ่ายทุกใบ
+      - `บริหารภาษีมูลค่าเพิ่ม > รายงานภาษีซื้อ ภ.พ.36`: ตารางคำนวณภาษีมูลค่าเพิ่มนำส่ง 7% สำหรับค่าบริการและค่าโฆษณาแพลตฟอร์มต่างประเทศ
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`72 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: กดทดสอบเมนูย่อยใน Sidebar ครบทุกหมวดและตรวจสอบที่ความกว้าง `360px`, `390px`, `768px`, `1280px` (`docOverflow: false`, `consoleErrors: 0`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **แก้ไข 4 ปัญหาหลัก: (1) Console Error `Can't perform a React state update on a component that hasn't mounted yet` (`src/lib/navigation-progress.ts`, `src/components/NavigationProgress.tsx`, `src/components/AccountingManager.tsx`), (2) แยกการซิงก์ผังบัญชีและหมวดค่าใช้จ่ายตามบริษัท (`dragon19` vs `seeheng`) (`src/lib/accounting.ts`, `src/lib/expenses.ts`, `tests/accounting.test.ts`), (3) แก้อาการแถบปุ่มสลับแท็บย่อยขยับ/ตกบรรทัด (`src/components/AccountingVatTab.tsx`, `src/components/AccountingReportsTab.tsx`, `src/components/AccountingManager.tsx`), และ (4) ปรับสัดส่วนการพิมพ์หน้า `/accounting` ให้พอดีกับกระดาษ A4 แนวตั้ง 100% (`src/app/globals.css`)**:
+    - [x] **1. แก้ไข Console Error (`Can't perform a React state update on a component that hasn't mounted yet`)**:
+      - ปรับ `setNavigationPending()` ใน `src/lib/navigation-progress.ts` ให้แจ้งเตือน `useSyncExternalStore` listeners ผ่าน `queueMicrotask(...)` แทนการเรียกตรงระหว่าง Render phase
+      - เพิ่ม `mountedRef` guard ใน `src/components/NavigationProgress.tsx` และค่าเริ่มต้น `EMPTY_EXPENSES_DATA` ใน `src/components/AccountingManager.tsx`
+    - [x] **2. แก้ไขปัญหาสลับเข้าบัญชี `บริษัท ดราก้อน 19 จำกัด` (`dragon19`) แล้วผังบัญชีขึ้น `0 บัญชี`**:
+      - ปรับ `coaSyncedByCompany` และ `monthlySalesAggCache` ใน `src/lib/accounting.ts` รวมถึง `platformRevenueCache` ใน `src/lib/expenses.ts` ให้ผูกตาม `getActiveCompanyId()` (`dragon19` vs `seeheng`) และตรวจสอบ `SELECT COUNT(*)::int FROM chart_of_accounts > 0` ก่อนข้ามการ Seed เสมอ
+      - ตรวจสอบข้อมูลจริงทั้ง 2 รหัสบริษัท:
+        - `dragon19` (`บริษัท ดราก้อน 19 จำกัด`, schema `public`): ผังบัญชีครบ `41 บัญชี` (5 หมวด), สมุดรายวัน `96 รายการ` (จากธุรกรรม 87,150 รายการ / 84 ไฟล์ / 16 งวดเดือน), รายได้รวม `฿22,743,063.66`, ค่าใช้จ่ายรวม `฿3,286,431.51`, กำไรสุทธิ `฿19,456,632.15`, เดบิต = เครดิต = `฿45,486,127.32`
+        - `seeheng` (`บริษัท ซีเฮง จำกัด`, schema `seeheng`): ผังบัญชีครบ `41 บัญชี` (5 หมวด), สมุดรายวัน `78 รายการ` (จากธุรกรรม 42,053 รายการ / 27 ไฟล์ / 11 งวดเดือน), รายได้รวม `฿21,648,849.67`, ค่าใช้จ่ายรวม `฿5,256,003.72`, กำไรสุทธิ `฿16,392,845.95`, เดบิต = เครดิต = `฿43,297,699.34`
+    - [x] **3. แก้ไขแถบปุ่มสลับมุมมองขยับขึ้นลง (`UI Layout Shift = 0px`)**:
+      - แสดงตัวกรองงวดเดือนภาษี (`ทุกเดือนภาษี`) ตลอดเวลาในทั้ง 3 แท็บย่อยของ `AccountingVatTab.tsx` (`1. สรุป ภ.พ.30`, `2. ภาษีขาย 7%`, `3. ภาษีซื้อ 7%`) พร้อมเชื่อมตัวกรองเข้ากับตารางสรุป ภ.พ.30 และปรับขนาดปุ่มใน `AccountingVatTab.tsx`, `AccountingReportsTab.tsx`, และ `AccountingManager.tsx` ให้อยู่ในบรรทัดเดียว (`height: 58px` คงที่ `0px` shift)
+    - [x] **4. ปรับสัดส่วนการพิมพ์หน้า `/accounting` ให้พอดีกับกระดาษ A4 แนวตั้ง 100% (`@media print` ใน `src/app/globals.css`)**:
+      - กำหนด `@page { size: A4 portrait; margin: 8mm; }`, ล้างระยะขอบ `.app-main` / `.app-content` ในโหมดพิมพ์, และย่อสัดส่วนตารางบัญชี (`font-size: 9.5px`, `padding: 4px 5px`, `white-space: normal`, `table-layout: auto`) โดยจำกัดขอบเขตด้วย `:not(:has(.invoice)):not(:has(.bill-doc))` เพื่อไม่ให้กระทบหน้าพิมพ์ใบกำกับภาษีและใบเสร็จ
+      - ทดสอบใน Playwright MCP โหมด `emulateMedia({ media: 'print' })` ที่ความกว้างกระดาษ A4 (`720px`): ตารางสรุป ภ.พ.30 ทั้ง 7 คอลัมน์กว้างรวม `703px <= 720px` (`overflows: false` ครบทุกแท็บ)
+    - [x] **5. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`72 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ทดสอบที่ความกว้าง `360px`, `390px`, `768px`, `1280px` และโหมด `@media print` ไร้ Console Error (`0 errors`) และไร้การล้นขอบ (`overflow: false`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **ลบวงเล็บที่เป็นภาษาอังกฤษ `(...)` และข้อความซับไตเติลภาษาอังกฤษออกจาก UI ทั้งระบบ เหลือเฉพาะภาษาไทยล้วน (`src/components/Sidebar.tsx`, `src/app/accounting/page.tsx`, `src/lib/accounting-types.ts`, `src/lib/accounting.ts`, `src/components/AccountingManager.tsx`, `src/components/AccountingDialogs.tsx`, `src/components/AccountingReportsTab.tsx`, `src/components/AccountingVatTab.tsx`, `src/components/ExpenseRecordFormDialog.tsx`, `src/components/ExpenseVoucherDialog.tsx`, `src/components/ExpenseLedgerTab.tsx`, `src/components/ExpensesManager.tsx`, `src/app/page.tsx`, `src/app/bills/page.tsx`, `src/app/products/page.tsx`, `src/app/import/page.tsx`, `src/app/history/page.tsx`, `src/app/login/page.tsx`, `src/components/BillsFilterInteractive.tsx`, `src/components/DocumentSettingsClient.tsx`, `src/components/InvoiceDocument.tsx`, `src/components/BillDocument.tsx`, `src/components/PwaInstallControl.tsx`, `src/components/UploadCompletenessCalendar.tsx`, `src/components/UploadForm.tsx`, `src/app/globals.css`)**:
+    - [x] **1. ล้างวงเล็บภาษาอังกฤษ `(...)` และคำกำกับภาษาอังกฤษออกจากทุกหน้าและทุก Modal**:
+      - เมนู `Sidebar.tsx`: เปลี่ยนข้อความกำกับและเมนูทุกปุ่มเป็นภาษาไทยล้วน (`ภาพรวมสรุปยอด`, `บิลคำสั่งซื้อทั้งหมด`, `สรุปยอดรหัสสินค้า`, `บริหารบัญชี`, `อัปโหลดไฟล์รายได้`, `ประวัติการนำเข้าไฟล์`, `ตั้งค่าเอกสาร / บริษัท`, `ติดตั้งแอปลงเครื่อง`)
+      - ระบบ `บริหารบัญชี` (`/accounting`): ลบ `(Assets)`, `(Liabilities)`, `(Equity)`, `(Revenue)`, `(Expenses)`, `(JV)`, `(OP)`, `(UV)`, `(SV)`, `(PV)`, `(RV)`, `(Dr.)`, `(Cr.)`, `(Trial Balance)`, `(Income Statement / P&L)`, `(Balance Sheet)`, `(Output VAT 7%)`, `(Input VAT 7%)`, `(Payment Voucher)`, `(Exclude VAT +7%)`, `(Include VAT 7%)`, `(WHT)`, `(A4)`, `(CSV)` ออกจากทั้งโค้ดและอัปเดตฐานข้อมูล `chart_of_accounts` / `expense_categories` อัตโนมัติ
+      - หน้าหลัก, หน้าบิล, หน้าสรุปรหัสสินค้า, หน้าอัปโหลด, และหน้าตั้งค่า: ลบ `(Platform)`, `(Category)`, `(Data Completeness)`, `(Search & Date)`, `(SKU)`, `(Other)`, `(Seller Profile)`, `(Live Preview)`, `(A6)` ออกทั้งหมด โดยไม่แตะต้องค่าคงที่ภายในฐานข้อมูล (`"คำสั่งซื้อ (OMS)"`)
+    - [x] **2. แก้ไขการพิมพ์หน้า `/accounting` โดยตรง (`@media print` ใน `src/app/globals.css`)**:
+      - เพิ่มกฎซ่อน `.sidebar` และปลดล็อก `.app-shell`, `.app-main`, `.overflow-x-auto`, และ `min-w-[...]` ของตารางเมื่อสั่งพิมพ์หน้าเว็บโดยตรง (`Ctrl+P` หรือปุ่ม `พิมพ์รายงาน`) ทำให้พิมพ์เต็มหน้ากระดาษ A4 ไม่มีอาการตกขอบซ้ายและไม่มีแถบเลื่อนแนวนอนติดออกมาบนกระดาษ
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`72 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP Verification: ตรวจสอบทั้ง 5 แท็บของ `/accounting` + หน้าต่าง `สร้างสมุดรายวัน` + โหมด `@media print` และทดสอบขนาดหน้าจอ `360px`, `390px`, `768px`, `1280px` พบวงเล็บภาษาอังกฤษ `0` จุด (`[]`) และไม่มีการล้นขอบ (`scrollWidth === clientWidth`)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **เก็บรายละเอียด UI ให้ตรงระนาบ 100% (`src/components/ui/input.tsx`, `src/components/ui/select.tsx`, `src/components/AccountingDialogs.tsx`, `src/components/AccountingManager.tsx`, `src/components/AccountingVatTab.tsx`, `src/components/AccountingReportsTab.tsx`, `src/components/ExpenseRecordFormDialog.tsx`), แก้อาการหน่วงเวลากด/โหลดหน้า `/accounting` (`src/lib/accounting.ts`, `src/lib/expenses.ts`, `src/app/api/expenses/**/*`), และล้างตัวเลขตัวอย่างในแม่แบบด่วนออก 100%**:
+    - [x] **1. แก้ไขปัญหาช่องกรอกข้อมูลและ Dropdown สูงไม่เท่ากัน/เบี้ยว (`UI Alignment & shadcn/ui Standard`)**:
+      - ปรับ `Input` (`src/components/ui/input.tsx`) และ `SelectTrigger` (`src/components/ui/select.tsx`) ให้ใช้ความสูงมาตรฐาน `h-10 min-h-[40px] rounded-[10px] bg-card` เท่ากันทุกจุด
+      - เปลี่ยน `<select>` ดิบ (`h-9 bg-background`) และ `<Input type="date">` (`08/28/2026`) ใน `CreateManualJournalDialog` (`src/components/AccountingDialogs.tsx`), `AccountingManager.tsx`, `AccountingVatTab.tsx`, และ `ExpenseRecordFormDialog.tsx` ให้เป็น `shadcn/ui` `Select` และ `Popover` + `Calendar` (แสดงวันที่แบบไทย `DD/MM/YYYY`) ทั้งหมด
+      - ตรวจสอบด้วย Playwright วัดพิกัดจริง: ทั้ง 4 ช่องในแถวบน (`วันที่เอกสาร *`, `ประเภทเลขเอกสาร`, `ผู้ติดต่อ / หน่วยงาน`, `เลขที่เอกสารอ้างอิง`) มีพิกัด `top: 334.3px, height: 38px, bottom: 372.3px` เท่ากันเป๊ะ (`0px` diff) และทุกช่องในตารางรายการมีพิกัด `top: 510.1px, height: 38px, bottom: 548.1px` ตรงกันทุกคอลัมน์
+    - [x] **2. แก้ไขอาการหน่วงเวลากดสลับแท็บ/เปิดหน้าต่าง และลดเวลาคิวรีฝั่งเซิร์ฟเวอร์ (`/accounting`)**:
+      - เปลี่ยน `ensureDefaultChartOfAccounts` ใน `src/lib/accounting.ts` จากการวนลูป `INSERT` ทีละแถวทุกครั้งที่โหลดหน้า เป็น Batch `INSERT ... FROM unnest(...)` ครั้งเดียว พร้อม Fast-path Cache (`coaSyncedByCompany`)
+      - เพิ่ม In-Memory Cache 15 วินาทีให้ `getMonthlyChannelSalesAggregates` (`src/lib/accounting.ts`) และ `getMonthlyPlatformRevenues` (`src/lib/expenses.ts`) พร้อมล้างแคชเมื่อแก้ไขข้อมูล และเพิ่ม `revalidatePath("/accounting")` ใน `/api/expenses/**/*` ทุกจุด
+      - ปรับ `AccountingManager.tsx` ให้ Lazy-mount หน้าต่าง Dialog ทั้ง 4 ตัว (`AccountLedgerDetailDialog`, `JournalVoucherDetailDialog`, `CreateManualJournalDialog`, `ManageChartOfAccountDialog`) เฉพาะเมื่อเปิดใช้งาน (`open === true`)
+    - [x] **3. ล้างตัวเลขตัวอย่าง (Mock Template Numbers) ในปุ่มแม่แบบด่วนของ `CreateManualJournalDialog`**:
+      - ปรับปุ่ม `ปิดภาษีซื้อ-ภาษีขาย (ภ.พ.30)` ใน `applyQuickTemplate` ให้ดึงยอด `ภาษีขาย 7%` (`27111`) และ `ภาษีซื้อ 7%` (`17111`) จากข้อมูลจริงในระบบอัตโนมัติ และตั้งค่าเริ่มต้นของแม่แบบ `ตั้งยอดยกมา (OP)` / `เงินเดือน` เป็น `0.00` เพื่อให้ระบบแสดงเฉพาะข้อมูลจริงจากฐานข้อมูล 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **เฟส 3 (ครบสมบูรณ์ 100% ตามต้นฉบับเมนูบริหารบัญชี FlowAccount ของ CEO): พัฒนาระบบ `บริหารภาษีมูลค่าเพิ่ม (ภ.พ.30)` (`src/components/AccountingVatTab.tsx`, `src/components/AccountingManager.tsx`, `src/components/AccountingDialogs.tsx`, `src/app/accounting/page.tsx`) และแก้ไขการจัดหน้าสั่งพิมพ์ `@media print` ใน Modal (`src/components/ui/dialog.tsx`, `src/app/globals.css`)**:
+    - [x] **1. พัฒนาแท็บ `บริหารภาษีมูลค่าเพิ่ม (ภ.พ.30)` (`src/components/AccountingVatTab.tsx`)**:
+      - **ตารางสรุปภาษีมูลค่าเพิ่มรายเดือน (แบบ ภ.พ.30)**: คำนวณ **ภาษีขาย 7% (`27111 Output VAT`)** จากยอดขายรวม VAT แยกตามแพลตฟอร์ม (`gross * 7 / 107`) หักด้วย **ภาษีซื้อ 7% (`17111 Input VAT`)** จากบิลค่าใช้จ่ายบริษัท (`EXP...`) แสดงยอดสุทธิว่าเดือนใดต้อง **ชำระภาษีเพิ่ม (`27115 เจ้าหนี้กรมสรรพากร`)** หรือมี **เครดิตภาษียกไป**
+      - **รายงานภาษีขาย (`Output VAT 7%`) & รายงานภาษีซื้อ (`Input VAT 7%`)**: แยกมุมมองตรวจสอบใบสำคัญขายรายช่องทาง และตารางใบกำกับภาษีซื้อ (`EXP...` พร้อมชื่อผู้ขาย เลขผู้เสียภาษี 13 หลัก เลขใบกำกับภาษี มูลค่าก่อน VAT และภาษีซื้อ 7%) พร้อมตัวกรองรายเดือน ปุ่มส่งออก Excel (`.csv` UTF-8 BOM) และปุ่มพิมพ์รายงาน A4
+      - **ปุ่ม `บันทึกปิดภาษี ภ.พ.30 (JV)` แบบคลิกเดียว**: เปิดหน้าต่างสร้างสมุดรายวันทั่วไป (`CreateManualJournalDialog`) พร้อมเติมคู่บัญชีล้าง `27111 ภาษีขาย` (Dr.) คู่กับ `17111 ภาษีซื้อ` (Cr.) และตั้งค้างจ่าย `27115 เจ้าหนี้กรมสรรพากร (ภ.พ.30 รอชำระ)` ให้สมดุลอัตโนมัติตามตัวเลขจริงของเดือนนั้น
+    - [x] **2. แก้ไขปัญหาหน้าสั่งพิมพ์ (`@media print`) ของ Modal ใบสำคัญสมุดรายวัน (`src/components/ui/dialog.tsx`, `src/app/globals.css`, `src/components/AccountingDialogs.tsx`)**:
+      - เพิ่ม `print:static print:top-auto print:left-auto print:block print:max-h-none print:w-full print:max-w-none print:translate-x-0 print:translate-y-0 print:overflow-visible print:border-0 print:p-0 print:shadow-none` บน `DialogContent` เพื่อล้างค่า `translate-x-[-50%] translate-y-[-50%]` ของ Tailwind v4 ที่ทำให้หน้าพิมพ์เอียงตกขอบซ้าย และซ่อน Scrollbar ในโหมดพิมพ์ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **ยุบรวมเมนู `รายจ่ายบริษัท` เข้าไว้ในเมนู `บริหารบัญชี` (`/accounting`) ที่เดียว และพัฒนา เฟส 2 (`รายงานด้านบัญชี & ปิดงบบัญชี`: งบทดลอง + งบกำไรขาดทุน + งบแสดงฐานะการเงิน) (`src/components/Sidebar.tsx`, `src/app/expenses/page.tsx`, `src/app/accounting/page.tsx`, `src/components/AccountingManager.tsx`, `src/components/AccountingReportsTab.tsx`, `src/components/AccountingDialogs.tsx`)**:
+    - [x] **1. ยุบเมนู Sidebar เหลือเมนู `บริหารบัญชี (Accounting & Expenses)` เพียงเมนูเดียว**:
+      - นำเมนู `รายจ่ายบริษัท` ที่ซ้ำซ้อนออกจาก `Sidebar.tsx` และตั้งให้ `/expenses` Redirect ไปยัง `/accounting?tab=expenses` อัตโนมัติ
+      - รวมทุกอย่างไว้ใน 4 แท็บหลักของหน้า `/accounting`:
+        1. `บัญชีแยกประเภท (General Ledger)`
+        2. `สมุดรายวัน 5 เล่ม`
+        3. `รายงานด้านบัญชี & ปิดงบ`
+        4. `บิลรายจ่าย (EXP) & กำไร`
+    - [x] **2. พัฒนาเฟส 2: `รายงานด้านบัญชี & ปิดงบ` (`src/components/AccountingReportsTab.tsx`)**:
+      - **งบทดลอง (Trial Balance)**: ตารางแสดง `รหัสบัญชี`, `ชื่อบัญชี`, `หมวดบัญชี`, `เดบิตสะสม`, `เครดิตสะสม`, `คงเหลือ เดบิต`, `คงเหลือ เครดิต` พร้อมแถบยืนยัน `งบทดลองสมดุล (Dr. = Cr.)`, ตัวเลือกซ่อนบัญชีที่มียอด `0.00`, และปุ่มดาวน์โหลด Excel (CSV)
+      - **งบกำไรขาดทุน (Income Statement / P&L)**: แสดงรายได้จากการขายและบริการ (`4xxxx`) หักต้นทุนขายและค่าใช้จ่ายในการดำเนินงาน (`5xxxx`) พร้อมคำนวณกำไร (ขาดทุน) สุทธิและอัตรากำไรสุทธิ (`%`)
+      - **งบแสดงฐานะการเงิน (Balance Sheet)**: เทียบสมการบัญชี `สินทรัพย์รวม (1xxxx) = หนี้สินรวม (2xxxx) + ส่วนของผู้ถือหุ้น (3xxxx + กำไรสุทธิงวดปัจจุบัน)` สมดุล 100%
+      - **ปุ่ม `ปิดงบบัญชี (รายได้และค่าใช้จ่าย)`**: เตรียมรายการสมุดรายวันทั่วไป (`JV`) ดึงยอดคงเหลือของหมวดรายได้ (`4xxxx`) และค่าใช้จ่าย (`5xxxx`) โอนเข้าบัญชี `32000 กำไร (ขาดทุน) สะสมยังไม่ได้จัดสรร` อัตโนมัติ
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
+  - **เฟส 1: สร้างระบบบริหารบัญชี (`/accounting`) — บัญชีแยกประเภท 5 หมวดหลัก (General Ledger & Chart of Accounts) และสมุดรายวัน 5 เล่ม (5 Accounting Journals) ตามต้นฉบับ FlowAccount ของ CEO พร้อมเชื่อมต่อยอดขายแพลตฟอร์มและบิลค่าใช้จ่ายอัตโนมัติ (`src/lib/db.ts`, `src/lib/accounting-types.ts`, `src/lib/accounting.ts`, `src/app/api/accounting/**/*`, `src/components/AccountingDialogs.tsx`, `src/components/AccountingManager.tsx`, `src/app/accounting/page.tsx`, `src/components/Sidebar.tsx`, `tests/accounting.test.ts`)**:
+    - [x] **1. ฐานข้อมูลและผังบัญชีมาตรฐาน 5 หมวดหลัก (`chart_of_accounts` & `journal_entries`, `SCHEMA_VERSION = "2026-11-05-v42"`)**:
+      - สร้างตาราง `chart_of_accounts` และ `journal_entries` พร้อม Seed ผังบัญชีมาตรฐานครบทั้ง 5 หมวดหลัก (`1. สินทรัพย์ 1xxxx`, `2. หนี้สิน 2xxxx`, `3. ส่วนของผู้ถือหุ้น 3xxxx`, `4. รายได้ 4xxxx`, `5. ค่าใช้จ่าย 5xxxx` รวม 39 บัญชีมาตรฐาน เช่น `11111 เงินสดในมือ`, `11112 เงินสดคงเหลือ`, `11115 เงินสดย่อย`, `11121.01 กสิกรไทย`, `11130 เช็คในมือ`, `11311 ลูกหนี้การค้า`, `17111 ภาษีซื้อ`, `21210 เจ้าหนี้การค้า`, `27111 ภาษีขาย`, `27120 ภาษีหัก ณ ที่จ่ายค้างจ่าย`, `31000 ทุนจดทะเบียน`, `32000 กำไรสะสม`, `41010.01–05 รายได้จากการขายแยกตามแพลตฟอร์ม`, `42010 รายได้เงินชดเชย`, `51010 ต้นทุนขาย`, `51020 ค่าธรรมเนียมแพลตฟอร์ม`) และเชื่อมรหัสบัญชีจาก `expense_categories` อัตโนมัติ
+    - [x] **2. หน้า `บัญชีแยกประเภท (General Ledger)` ตรงตามภาพหน้าจอที่ CEO วงสีแดง**:
+      - แถบเครื่องมือครบ: ช่องค้นหา (`รหัสบัญชี, ชื่อ, รายละเอียด, กลุ่มบัญชี, ประเภท`), ตัวกรองวันที่/ปีงบประมาณ (`ทุกปีงบประมาณ`, `ปีงบ YYYY`, หรือรายเดือน), ปุ่มตัวกรอง **`📁 หมวดบัญชี`** (`หมวดหมู่ทั้งหมด`, `1. สินทรัพย์`, `2. หนี้สิน`, `3. ส่วนของผู้ถือหุ้น`, `4. รายได้`, `5. ค่าใช้จ่าย`), ปุ่ม **`บริหารผังบัญชี`**, และปุ่ม **`ดาวน์โหลด Excel`**
+      - ตารางแสดง `รหัสบัญชี` · `ชื่อ / รายละเอียด` · `กลุ่มบัญชี / ประเภท` · `หมวดบัญชี` · `ยอดคงเหลือ` พร้อมคลิกที่แถวบัญชีใดก็ได้เพื่อเปิดดู **รายการเดินบัญชีแยกประเภท (Dr. / Cr. / ยอดคงเหลือสะสม)** ได้ทันทีโดยไม่ติดล็อกแพ็กเกจ
+    - [x] **3. ระบบ `สมุดรายวัน 5 เล่ม (5 Accounting Journals)` แบบบัญชีคู่ (Double-Entry `Dr. = Cr.`)**:
+      - รองรับครบทั้ง 5 เล่ม: `สมุดรายวันทั่วไป (JV / OP)`, `สมุดรายวันซื้อ (UV)`, `สมุดรายวันขาย (SV)`, `สมุดรายวันจ่าย (PV)`, และ `สมุดรายวันรับ (RV)`
+      - สังเคราะห์ใบสำคัญ `SV` และ `RV` อัตโนมัติจากยอดขายและยอดโอนสุทธิแยกตามแพลตฟอร์ม (`TikTok`, `Shopee`, `Facebook`, `Lazada`, `LINE`, `Other`) และสังเคราะห์ `UV` / `PV` อัตโนมัติจากบิลค่าใช้จ่าย (`EXP...`)
+      - ปุ่ม **`+ สร้างสมุดรายวันทั่วไป (JV)`** พร้อมระบบตรวจสอบสมดุล `รวมเดบิต = รวมเครดิต` แบบเรียลไทม์, แม่แบบด่วน (`ตั้งยอดยกมา เงินสด/กสิกรไทย (OP)`, `บันทึกเงินเดือน & ประกันสังคม`, `ปิดภาษีซื้อ-ภาษีขาย ภ.พ.30`), และหน้าพิมพ์ใบสำคัญบัญชี A4
+    - [x] **4. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `node --env-file=.env --import tsx --test tests/accounting.test.ts`: ผ่านครบทุกเทสต์ (`2 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+      - Playwright MCP (`/browser`) Verification: ทดสอบที่ความกว้าง `360px`, `390px`, `768px`, `1280px` ครบทั้งแท็บ `บัญชีแยกประเภท`, ตัวกรอง `หมวดบัญชี`, หน้าต่างเจาะลึกรายการเดินบัญชี (`11121.01`), แท็บ `สมุดรายวัน 5 เล่ม`, หน้าต่างสร้าง `JV / OP`, และหน้าต่าง `บริหารผังบัญชี` (`docOverflow: false`, `cardOverflow: 0`, `dlgOverflow: 0`)
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-04)**:
   - **ยกเครื่องหน้า `/expenses` ปรับระบบจัดการบิลค่าใช้จ่ายทางบัญชีจาก FlowAccount เข้ากับ `PCMS_Revenue` ครบ 6 ฟังก์ชันหลัก พร้อมเชื่อมต่อตารางสรุปกำไรรายเดือนและงบ P&L อัตโนมัติ (`src/lib/db.ts`, `src/lib/expense-math.ts`, `src/lib/expenses.ts`, `src/app/api/expenses/**/*`, `src/components/ExpenseLedgerTab.tsx`, `src/components/ExpenseRecordFormDialog.tsx`, `src/components/ExpenseVoucherDialog.tsx`, `src/components/ExpensesManager.tsx`, `src/app/expenses/page.tsx`, `tests/expenses.test.ts`)**:
