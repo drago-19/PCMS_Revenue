@@ -2,6 +2,7 @@
 
 import React, { useMemo, useRef, useState } from "react";
 import {
+  CalendarIcon,
   CheckIcon,
   ImageIcon,
   Loader2Icon,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +22,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -35,7 +42,7 @@ import {
   type ExpenseRecord,
   type ExpenseVatType,
 } from "@/lib/expense-math";
-import { formatTHB } from "@/lib/format";
+import { formatThaiDate, formatTHB } from "@/lib/format";
 
 async function compressImageToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -245,11 +252,11 @@ export function ExpenseRecordFormDialog({
           <DialogTitle className="text-slate-900 font-bold text-base">
             {editingRecord
               ? `แก้ไขเอกสารค่าใช้จ่าย · ${editingRecord.documentNo}`
-              : "สร้างบิลค่าใช้จ่ายใหม่ (ออกเลขเอกสาร EXP อัตโนมัติ)"}
+              : "สร้างบิลค่าใช้จ่ายใหม่ (ออกเลขเอกสารอัตโนมัติ)"}
           </DialogTitle>
           <DialogDescription className="text-slate-500 text-xs">
-            บันทึกข้อมูลผู้จำหน่าย หมวดหมู่ค่าใช้จ่าย ภาษีซื้อ (VAT 7%) หัก ณ
-            ที่จ่าย และแนบรูปใบเสร็จรับเงิน (รองรับการกด Ctrl+V วางรูปได้ทันที)
+            บันทึกข้อมูลผู้จำหน่าย หมวดหมู่ค่าใช้จ่าย ภาษีซื้อ 7% หัก ณ
+            ที่จ่าย และแนบรูปใบเสร็จรับเงิน (รองรับการวางรูปจากคลิปบอร์ดได้ทันที)
           </DialogDescription>
         </DialogHeader>
 
@@ -263,16 +270,31 @@ export function ExpenseRecordFormDialog({
               >
                 วันที่เอกสาร <span className="text-[#fe2c55]">*</span>
               </label>
-              <Input
-                id="exp-entry-date"
-                type="date"
-                value={form.entryDate}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, entryDate: e.target.value }))
-                }
-                className="h-9 text-xs border-slate-200"
-                required
-              />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    id="exp-entry-date"
+                    type="button"
+                    aria-label="เลือกวันที่เอกสารค่าใช้จ่าย"
+                    className="flex h-10 min-h-[40px] w-full items-center justify-between gap-2 rounded-[10px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-900 shadow-2xs transition-[color,box-shadow,border-color] outline-none hover:border-slate-300 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                  >
+                    <span className="truncate font-mono text-xs font-bold">
+                      {formatThaiDate(form.entryDate)}
+                    </span>
+                    <CalendarIcon className="size-4 shrink-0 text-slate-500" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto p-3">
+                  <Calendar
+                    selected={form.entryDate}
+                    defaultMonthIso={form.entryDate}
+                    showCounts={false}
+                    onSelect={(iso) =>
+                      setForm((p) => ({ ...p, entryDate: iso }))
+                    }
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="flex flex-col gap-1.5 sm:col-span-2">
@@ -343,7 +365,7 @@ export function ExpenseRecordFormDialog({
                 >
                   <SelectTrigger
                     id="exp-category"
-                    className="h-9 w-full rounded-lg border-slate-200 bg-white px-3 text-xs font-semibold shadow-2xs"
+                    className="h-10 min-h-[40px] w-full rounded-[10px] border-slate-200 bg-white px-3 text-xs font-semibold shadow-2xs"
                   >
                     <SelectValue placeholder="เลือกหมวดหมู่บัญชี" />
                   </SelectTrigger>
@@ -487,7 +509,7 @@ export function ExpenseRecordFormDialog({
                   setForm((p) => ({ ...p, amount: e.target.value }))
                 }
                 placeholder="0.00"
-                className="h-9 font-mono text-sm font-bold bg-white border-slate-200"
+                className="h-10 font-mono text-sm font-bold bg-white border-slate-200"
                 required
               />
             </div>
@@ -497,7 +519,7 @@ export function ExpenseRecordFormDialog({
                 htmlFor="exp-vat-type"
                 className="text-xs font-bold text-slate-800"
               >
-                ภาษีมูลค่าเพิ่ม (VAT 7%)
+                ภาษีมูลค่าเพิ่ม 7%
               </label>
               <Select
                 value={form.vatType}
@@ -507,7 +529,7 @@ export function ExpenseRecordFormDialog({
               >
                 <SelectTrigger
                   id="exp-vat-type"
-                  className="h-9 w-full rounded-lg border-slate-200 bg-white px-3 text-xs font-semibold"
+                  className="h-10 min-h-[40px] w-full rounded-[10px] border-slate-200 bg-white px-3 text-xs font-semibold"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -516,10 +538,10 @@ export function ExpenseRecordFormDialog({
                     ไม่มีภาษีมูลค่าเพิ่ม (0%)
                   </SelectItem>
                   <SelectItem value="exclude" className="text-xs">
-                    แยกนอก (Exclude VAT +7%)
+                    แยกนอก (+7%)
                   </SelectItem>
                   <SelectItem value="include" className="text-xs">
-                    รวมใน (Include VAT 7%)
+                    รวมใน (7%)
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -530,7 +552,7 @@ export function ExpenseRecordFormDialog({
                 htmlFor="exp-wht-rate"
                 className="text-xs font-bold text-slate-800"
               >
-                ภาษีหัก ณ ที่จ่าย (WHT)
+                ภาษีหัก ณ ที่จ่าย
               </label>
               <Select
                 value={String(form.whtRate || "0")}
@@ -540,7 +562,7 @@ export function ExpenseRecordFormDialog({
               >
                 <SelectTrigger
                   id="exp-wht-rate"
-                  className="h-9 w-full rounded-lg border-slate-200 bg-white px-3 text-xs font-semibold"
+                  className="h-10 min-h-[40px] w-full rounded-[10px] border-slate-200 bg-white px-3 text-xs font-semibold"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -674,10 +696,10 @@ export function ExpenseRecordFormDialog({
                 </SelectTrigger>
                 <SelectContent className="bg-white border-slate-200 text-slate-800 shadow-xl rounded-lg z-50">
                   <SelectItem value="transfer" className="text-xs">
-                    โอนเงินผ่านธนาคาร / QR PromptPay
+                    โอนเงินผ่านธนาคาร / พร้อมเพย์
                   </SelectItem>
                   <SelectItem value="cash" className="text-xs">
-                    เงินสดย่อย (Petty Cash)
+                    เงินสดย่อย
                   </SelectItem>
                   <SelectItem value="credit_card" className="text-xs">
                     บัตรเครดิตบริษัท

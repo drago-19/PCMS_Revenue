@@ -101,7 +101,7 @@ export function ExpenseReceiptPreviewDialog({
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-[11px] text-slate-500">
-                ภาษีซื้อ (VAT 7%)
+                ภาษีซื้อ 7%
               </span>
               <span className="font-mono font-bold text-sky-700">
                 {record.vatAmount > 0 ? formatTHB(record.vatAmount) : "฿0.00"}
@@ -243,7 +243,7 @@ export function ExpenseVoucherDialog({
             <div className="flex items-center gap-2">
               <FileTextIcon className="size-4 text-[#fe2c55]" />
               <span className="text-sm font-bold text-slate-800">
-                ใบสำคัญจ่าย (Payment Voucher) · {record.documentNo}
+                ใบสำคัญจ่าย · {record.documentNo}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -263,7 +263,7 @@ export function ExpenseVoucherDialog({
                 onClick={() => window.print()}
               >
                 <PrinterIcon className="size-3.5" />
-                สั่งพิมพ์ใบสำคัญจ่าย (A4)
+                สั่งพิมพ์ใบสำคัญจ่าย
               </Button>
             </div>
           </div>
@@ -293,7 +293,7 @@ export function ExpenseVoucherDialog({
 
               <div className="flex flex-col sm:items-end gap-1">
                 <div className="inline-flex items-center rounded-md bg-slate-900 px-3 py-1 text-xs font-bold text-white">
-                  ใบสำคัญจ่าย / PAYMENT VOUCHER
+                  ใบสำคัญจ่าย
                 </div>
                 <p className="text-xs font-bold text-slate-900 mt-1">
                   เลขที่เอกสาร:{" "}
@@ -407,7 +407,7 @@ export function ExpenseVoucherDialog({
                     colSpan={3}
                     className="border border-slate-300 p-2 text-right font-semibold text-slate-700"
                   >
-                    รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม (Subtotal)
+                    รวมมูลค่าก่อนภาษีมูลค่าเพิ่ม
                   </td>
                   <td className="border border-slate-300 p-2 text-right font-mono font-bold text-slate-900">
                     {formatTHB(record.subtotalAmount)}
@@ -418,7 +418,7 @@ export function ExpenseVoucherDialog({
                     colSpan={3}
                     className="border border-slate-300 p-2 text-right font-semibold text-slate-700"
                   >
-                    ภาษีมูลค่าเพิ่ม / ภาษีซื้อ (VAT 7%)
+                    ภาษีมูลค่าเพิ่ม / ภาษีซื้อ 7%
                   </td>
                   <td className="border border-slate-300 p-2 text-right font-mono font-bold text-slate-900">
                     {formatTHB(record.vatAmount)}
@@ -429,7 +429,7 @@ export function ExpenseVoucherDialog({
                     colSpan={3}
                     className="border border-slate-300 p-2 text-right font-bold text-slate-900"
                   >
-                    ยอดรวมทั้งสิ้น (Total Expense Amount)
+                    ยอดรวมทั้งสิ้น
                   </td>
                   <td className="border border-slate-300 p-2 text-right font-mono font-extrabold text-slate-900">
                     {formatTHB(record.amount)}
@@ -441,7 +441,7 @@ export function ExpenseVoucherDialog({
                       colSpan={3}
                       className="border border-slate-300 p-2 text-right font-semibold text-amber-800"
                     >
-                      หักภาษี ณ ที่จ่าย (Withholding Tax {record.whtRate}%)
+                      หักภาษี ณ ที่จ่าย {record.whtRate}%
                     </td>
                     <td className="border border-slate-300 p-2 text-right font-mono font-bold text-amber-800">
                       -{formatTHB(record.whtAmount)}
@@ -453,7 +453,7 @@ export function ExpenseVoucherDialog({
                     colSpan={3}
                     className="border border-slate-300 p-2.5 text-right font-black text-rose-950"
                   >
-                    ยอดชำระเงินสุทธิจริง (Net Paid Amount)
+                    ยอดชำระเงินสุทธิจริง
                   </td>
                   <td
                     className={cn(

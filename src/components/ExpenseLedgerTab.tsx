@@ -81,6 +81,7 @@ interface ExpenseLedgerTabProps {
   categories: ExpenseCategory[];
   availableMonths: string[];
   formatThaiYearMonth: (ym: string) => string;
+  initialStatusFilter?: string;
   onCreateNew: () => void;
   onEditRecord: (rec: ExpenseRecord) => void;
   onDuplicateRecord: (rec: ExpenseRecord) => void;
@@ -98,6 +99,7 @@ export function ExpenseLedgerTab({
   categories,
   availableMonths,
   formatThaiYearMonth,
+  initialStatusFilter = "all",
   onCreateNew,
   onEditRecord,
   onDuplicateRecord,
@@ -109,10 +111,16 @@ export function ExpenseLedgerTab({
   deletingRecordId,
   updatingStatusId,
 }: ExpenseLedgerTabProps) {
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
   const [monthFilter, setMonthFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  React.useEffect(() => {
+    if (initialStatusFilter) {
+      setStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
 
   // Compute counts across all records (top-down filter hierarchy)
   const filterCounts = useMemo(() => {
@@ -579,14 +587,14 @@ export function ExpenseLedgerTab({
                   className="text-xs font-medium cursor-pointer rounded-lg py-2"
                 >
                   <FileSpreadsheetIcon className="mr-2 size-4 text-emerald-600" />
-                  1. รายงานบิลค่าใช้จ่ายทั้งหมด (.csv)
+                  1. รายงานบิลค่าใช้จ่ายทั้งหมด
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => handleExportCsv("vat")}
                   className="text-xs font-medium cursor-pointer rounded-lg py-2"
                 >
                   <FileTextIcon className="mr-2 size-4 text-sky-600" />
-                  2. รายงานภาษีซื้อ VAT 7% (ยื่น ภ.พ.30)
+                  2. รายงานภาษีซื้อ 7% (ยื่น ภ.พ.30)
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => handleExportCsv("wht")}
@@ -856,7 +864,7 @@ export function ExpenseLedgerTab({
                               </div>
                               <div className="flex justify-between gap-4">
                                 <span className="text-slate-300">
-                                  VAT 7% ({rec.vatType}):
+                                  ภาษีมูลค่าเพิ่ม 7%:
                                 </span>
                                 <span className="font-mono text-sky-300">
                                   {formatTHB(rec.vatAmount)}

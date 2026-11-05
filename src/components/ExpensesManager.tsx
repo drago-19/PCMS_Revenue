@@ -136,6 +136,7 @@ interface ExpensesManagerProps {
   initialData: ExpensesOverviewData;
   initialYear: string;
   initialShop?: string;
+  initialExpSubView?: "ledger" | "wht" | "table";
   seller?: {
     name?: string;
     taxId?: string;
@@ -147,6 +148,7 @@ interface ExpensesManagerProps {
 export function ExpensesManager({
   initialData,
   initialYear,
+  initialExpSubView = "ledger",
   seller,
 }: ExpensesManagerProps) {
   const router = useRouter();
@@ -154,7 +156,24 @@ export function ExpensesManager({
 
   const [data, setData] = useState<ExpensesOverviewData>(initialData);
   const [selectedYear, setSelectedYear] = useState<string>(initialYear);
-  const [activeTab, setActiveTab] = useState<string>("ledger");
+  const [activeTab, setActiveTab] = useState<string>(
+    initialExpSubView === "table" ? "table" : "ledger",
+  );
+  const [ledgerStatusPreset, setLedgerStatusPreset] = useState<string>(
+    initialExpSubView === "wht" ? "wht" : "all",
+  );
+
+  React.useEffect(() => {
+    if (initialExpSubView === "table") {
+      setActiveTab("table");
+    } else if (initialExpSubView === "wht") {
+      setActiveTab("ledger");
+      setLedgerStatusPreset("wht");
+    } else {
+      setActiveTab("ledger");
+      setLedgerStatusPreset("all");
+    }
+  }, [initialExpSubView]);
 
   // Track expanded rows in table view
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>(() => {
@@ -695,7 +714,7 @@ export function ExpensesManager({
         <StatCard
           label="ยอดรับจากแพลตฟอร์มรวม"
           value={formatTHB(stats.totalPlatformPayout)}
-          hint="ยอดรับจริงสุทธิ (TikTok + Shopee + Facebook + LINE OA)"
+          hint="ยอดรับจริงสุทธิจากทุกช่องทาง"
           tone="positive"
           icon={<WalletIcon className="size-5" />}
         />
@@ -785,6 +804,7 @@ export function ExpensesManager({
             categories={categories}
             availableMonths={availableMonths}
             formatThaiYearMonth={formatThaiYearMonth}
+            initialStatusFilter={ledgerStatusPreset}
             onCreateNew={() => openCreateRecordModal()}
             onEditRecord={openEditRecordModal}
             onDuplicateRecord={openDuplicateRecordModal}
@@ -1444,7 +1464,7 @@ export function ExpensesManager({
 
             <div className="flex flex-col gap-1.5">
               <label htmlFor="new-category-color" className="text-xs font-bold text-slate-700">
-                สีป้ายหมวดหมู่ (Badge Color)
+                สีป้ายหมวดหมู่
               </label>
               <Select value={newCategoryColor} onValueChange={setNewCategoryColor}>
                 <SelectTrigger id="new-category-color" className="h-9 text-xs border-slate-200 bg-white">
@@ -1538,7 +1558,7 @@ export function ExpensesManager({
 
             <div className="flex flex-col gap-1.5">
               <label htmlFor="edit-category-color" className="text-xs font-bold text-slate-700">
-                สีป้ายหมวดหมู่ (Badge Color)
+                สีป้ายหมวดหมู่
               </label>
               <Select value={editCategoryColor} onValueChange={setEditCategoryColor}>
                 <SelectTrigger id="edit-category-color" className="h-9 text-xs border-slate-200 bg-white">
@@ -1914,7 +1934,7 @@ export function ExpensesManager({
 
                 <div className="flex flex-col sm:items-end gap-1">
                   <div className="inline-flex items-center rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-800 border border-slate-300">
-                    รายงานงบการเงินรายเดือน (P&L)
+                    รายงานงบการเงินรายเดือน
                   </div>
                   <p className="text-xs font-bold text-slate-900 mt-1">
                     งวดประจำเดือน: {formatThaiYearMonth(printRow.yearMonth)}
@@ -1939,7 +1959,7 @@ export function ExpensesManager({
               <div className="mb-5">
                 <h3 className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
                   <span className="size-2 rounded-full bg-emerald-600 inline-block" />
-                  ส่วนที่ 1: รายรับสุทธิจากช่องทางจำหน่าย (Platform Net Revenue)
+                  ส่วนที่ 1: รายรับสุทธิจากช่องทางจำหน่าย
                 </h3>
                 <table className="w-full border-collapse border border-slate-300 text-xs">
                   <thead>
@@ -1981,7 +2001,7 @@ export function ExpensesManager({
                       ];
                       if ((printRow.otherPayout ?? 0) !== 0) {
                         inflowRows.push({
-                          channel: "อื่นๆ (Other)",
+                          channel: "ช่องทางอื่น",
                           desc: "ยอดรับเงินสดสุทธิจากช่องทางจำหน่ายอื่น",
                           amount: printRow.otherPayout ?? 0,
                         });
@@ -1999,7 +2019,7 @@ export function ExpensesManager({
                     })()}
                     <tr className="bg-emerald-50/70 font-bold">
                       <td colSpan={3} className="border border-slate-300 p-2.5 text-right text-emerald-950 font-extrabold">
-                        รวมรายรับจากทุกช่องทางจำหน่าย (A)
+                        รวมรายรับจากทุกช่องทางจำหน่าย
                       </td>
                       <td className="border border-slate-300 p-2.5 text-right font-mono font-black text-emerald-700 text-sm">
                         {formatTHB(printRow.totalPlatformPayout)}
@@ -2013,7 +2033,7 @@ export function ExpensesManager({
               <div className="mb-5">
                 <h3 className="text-xs font-bold text-slate-800 mb-2 flex items-center gap-1.5 uppercase tracking-wider">
                   <span className="size-2 rounded-full bg-rose-600 inline-block" />
-                  ส่วนที่ 2: รายจ่ายบริษัทจำแนกตามหมวดหมู่ (Company Expenses by Category)
+                  ส่วนที่ 2: รายจ่ายบริษัทจำแนกตามหมวดหมู่
                 </h3>
                 <table className="w-full border-collapse border border-slate-300 text-xs">
                   <thead>
@@ -2051,7 +2071,7 @@ export function ExpensesManager({
                     )}
                     <tr className="bg-rose-50/70 font-bold">
                       <td colSpan={3} className="border border-slate-300 p-2.5 text-right text-rose-950 font-extrabold">
-                        รวมรายจ่ายบริษัททั้งหมด (B)
+                        รวมรายจ่ายบริษัททั้งหมด
                       </td>
                       <td className="border border-slate-300 p-2.5 text-right font-mono font-black text-rose-700 text-sm">
                         {formatTHB(printRow.totalExpenses)}
@@ -2100,7 +2120,7 @@ export function ExpensesManager({
                 <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 gap-4 text-center sm:text-left">
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-                      รวมรายรับจากแพลตฟอร์ม (A)
+                      รวมรายรับจากแพลตฟอร์ม
                     </span>
                     <span className="font-mono text-base font-bold text-slate-900">
                       {formatTHB(printRow.totalPlatformPayout)}
@@ -2108,7 +2128,7 @@ export function ExpensesManager({
                   </div>
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[11px] font-bold text-rose-700 uppercase tracking-wider">
-                      หัก รวมรายจ่ายบริษัท (B)
+                      หัก รวมรายจ่ายบริษัท
                     </span>
                     <span className="font-mono text-base font-bold text-rose-700">
                       {formatTHB(printRow.totalExpenses)}
@@ -2116,7 +2136,7 @@ export function ExpensesManager({
                   </div>
                   <div className="flex flex-col gap-0.5 sm:border-l sm:border-slate-300 sm:pl-4 print:border-l print:border-slate-300 print:pl-4">
                     <span className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                      กำไรคงเหลือสุทธิ (A - B)
+                      กำไรคงเหลือสุทธิ
                     </span>
                     <span className={cn(
                       "font-mono text-xl font-black flex flex-wrap items-baseline gap-1.5",
