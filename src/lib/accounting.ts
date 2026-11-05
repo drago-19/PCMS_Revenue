@@ -852,7 +852,6 @@ export async function getAccountingOverview(
     coaList,
     manualRows,
     expenseRecords,
-    salesAggs,
     yearMonthRows,
   ] = await Promise.all([
     listChartOfAccounts(db),
@@ -874,13 +873,8 @@ export async function getAccountingOverview(
             : undefined,
       },
     ),
-    getMonthlyChannelSalesAggregates(periodFilter, db),
     query<{ ym: string }>(
-      `SELECT DISTINCT SUBSTRING(paid_date FROM 1 FOR 7) AS ym
-       FROM daily_summaries
-       WHERE paid_date ~ '^[0-9]{4}-[0-9]{2}'
-       UNION
-       SELECT DISTINCT year_month AS ym FROM expense_records WHERE year_month ~ '^[0-9]{4}-[0-9]{2}'
+      `SELECT DISTINCT year_month AS ym FROM expense_records WHERE year_month ~ '^[0-9]{4}-[0-9]{2}'
        UNION
        SELECT DISTINCT year_month AS ym FROM journal_entries WHERE year_month ~ '^[0-9]{4}-[0-9]{2}'
        ORDER BY ym DESC`,
@@ -899,7 +893,7 @@ export async function getAccountingOverview(
 
   const journals: JournalVoucher[] = [];
 
-  // 1. Manual Journal Entries (JV / OP)
+  // 1. Manual Journal Entries (JV / OP / UV / SV / PV / RV)
   for (const row of manualRows) {
     const voucher = mapManualJournalRow(row);
     voucher.lines = voucher.lines.map((line) => ({
@@ -910,155 +904,7 @@ export async function getAccountingOverview(
     journals.push(voucher);
   }
 
-  // 2. Auto-generated Sales Journal (SV) & Receipt Journal (RV) per platform per month
-  for (const agg of salesAggs) {
-    const grossRevenue = round2(agg.orderIncome + agg.compensationIncome);
-    const payout = round2(agg.totalPayout);
-    if (grossRevenue <= 0 && payout <= 0) continue;
-
-    const revAcc = getRevenueAccountForChannel(agg.channel);
-    const chCode = getChannelShortCode(agg.channel);
-    const ymCompact = agg.yearMonth.replace("-", "");
-    const entryDate = agg.lastDate || `${agg.yearMonth}-28`;
-
-    // SV: บันทึกรายได้จากการขายตั้งลูกหนี้แพลตฟอร์ม
-    if (grossRevenue > 0) {
-      const svLines: JournalEntryLine[] = [
-        {
-          accountCode: "11311",
-          accountName: getAccountName(
-            "11311",
-            "ลูกหนี้การค้า - ทั่วไป / แพลตฟอร์ม E-Commerce",
-          ),
-          debit: grossRevenue,
-          credit: 0,
-          memo: `ตั้งลูกหนี้การค้า ${agg.channel} (${agg.orderCount.toLocaleString("th-TH")} รายการ)`,
-        },
-      ];
-      if (agg.orderIncome > 0) {
-        svLines.push({
-          accountCode: revAcc.code,
-          accountName: getAccountName(revAcc.code, revAcc.name),
-          debit: 0,
-          credit: agg.orderIncome,
-          memo: `ยอดขายสินค้า ${agg.channel} ประจำงวด ${agg.yearMonth}`,
-        });
-      }
-      if (agg.compensationIncome > 0) {
-        svLines.push({
-          accountCode: "42010",
-          accountName: getAccountName(
-            "42010",
-            "รายได้เงินชดเชยจากแพลตฟอร์มและโลจิสติกส์",
-          ),
-          debit: 0,
-          credit: agg.compensationIncome,
-          memo: `เงินชดเชยแพลตฟอร์ม ${agg.channel} ประจำงวด ${agg.yearMonth}`,
-        });
-      }
-
-      journals.push({
-        id: `sv-${agg.yearMonth}-${agg.channel}`,
-        documentNo: `SV${ymCompact}-${chCode}`,
-        journalType: "SV",
-        entryDate,
-        yearMonth: agg.yearMonth,
-        contactName: `แพลตฟอร์ม ${agg.channel}`,
-        referenceNo: `${agg.channel} (${agg.orderCount.toLocaleString("th-TH")} บิล)`,
-        description: `สรุปรายได้จากการขาย ${agg.channel} ประจำเดือน ${agg.yearMonth} (${agg.orderCount.toLocaleString("th-TH")} รายการ)`,
-        remarks: "สร้างอัตโนมัติจากข้อมูลบิลคำสั่งซื้อในระบบ",
-        totalDebit: grossRevenue,
-        totalCredit: grossRevenue,
-        status: "approved",
-        sourceType: "sales",
-        channel: agg.channel,
-        lines: svLines,
-      });
-    }
-
-    // RV: บันทึกรับเงินโอนสุทธิ (Settlement Payout) และหักค่าธรรมเนียมแพลตฟอร์ม
-    if (grossRevenue > 0 || payout !== 0) {
-      const platformFeeDeduction = round2(Math.max(0, grossRevenue - payout));
-      const extraSettlementGain = round2(Math.max(0, payout - grossRevenue));
-      const rvTotal = round2(Math.max(grossRevenue, payout));
-
-      if (rvTotal > 0) {
-        const rvLines: JournalEntryLine[] = [];
-        if (payout > 0) {
-          rvLines.push({
-            accountCode: "11121.01",
-            accountName: getAccountName(
-              "11121.01",
-              "กสิกรไทย (บัญชีกระแสรายวัน/ออมทรัพย์หลัก)",
-            ),
-            debit: payout,
-            credit: 0,
-            memo: `รับเงินโอนสุทธิจาก ${agg.channel}`,
-          });
-        }
-        if (platformFeeDeduction > 0) {
-          rvLines.push({
-            accountCode: "51020",
-            accountName: getAccountName(
-              "51020",
-              "ค่าธรรมเนียมแพลตฟอร์มและค่าขนส่งที่ร้านรับภาระ",
-            ),
-            debit: platformFeeDeduction,
-            credit: 0,
-            memo: `หักค่าธรรมเนียม/ค่าส่งแพลตฟอร์ม ${agg.channel} ก่อนโอนสุทธิ`,
-          });
-        }
-        if (grossRevenue > 0) {
-          rvLines.push({
-            accountCode: "11311",
-            accountName: getAccountName(
-              "11311",
-              "ลูกหนี้การค้า - ทั่วไป / แพลตฟอร์ม E-Commerce",
-            ),
-            debit: 0,
-            credit: grossRevenue,
-            memo: `ล้างบัญชีลูกหนี้การค้า ${agg.channel} ประจำงวด ${agg.yearMonth}`,
-          });
-        }
-        if (extraSettlementGain > 0) {
-          rvLines.push({
-            accountCode: "42010",
-            accountName: getAccountName(
-              "42010",
-              "รายได้เงินชดเชยจากแพลตฟอร์มและโลจิสติกส์",
-            ),
-            debit: 0,
-            credit: extraSettlementGain,
-            memo: `ส่วนเพิ่มเงินโอนสุทธิ ${agg.channel}`,
-          });
-        }
-
-        const totalDr = round2(rvLines.reduce((s, l) => s + l.debit, 0));
-        const totalCr = round2(rvLines.reduce((s, l) => s + l.credit, 0));
-        if (totalDr > 0 && Math.abs(totalDr - totalCr) < 0.02) {
-          journals.push({
-            id: `rv-${agg.yearMonth}-${agg.channel}`,
-            documentNo: `RV${ymCompact}-${chCode}`,
-            journalType: "RV",
-            entryDate,
-            yearMonth: agg.yearMonth,
-            contactName: `แพลตฟอร์ม ${agg.channel}`,
-            referenceNo: `งวดโอนเงิน ${agg.yearMonth}`,
-            description: `รับเงินโอนสุทธิจาก ${agg.channel} ประจำเดือน ${agg.yearMonth}`,
-            remarks: "สร้างอัตโนมัติจากยอดรับเงินสุทธิหลังหักค่าธรรมเนียม/ค่าส่ง",
-            totalDebit: totalDr,
-            totalCredit: totalCr,
-            status: "approved",
-            sourceType: "receipt",
-            channel: agg.channel,
-            lines: rvLines,
-          });
-        }
-      }
-    }
-  }
-
-  // 3. Auto-generated Purchase Journal (UV) & Payment Journal (PV) from Expense Records (EXP...)
+  // 2. Purchase Journal (UV) & Payment Journal (PV) from Expense Records (EXP...) entered by user
   for (const exp of expenseRecords) {
     const expAccountCode =
       exp.categoryAccountCode.trim() &&
