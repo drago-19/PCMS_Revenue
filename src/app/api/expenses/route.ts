@@ -80,6 +80,7 @@ export async function POST(request: Request) {
   try {
     await upsertMonthlyExpense(yearMonth, categoryId, amount, note);
     revalidatePath("/expenses");
+    revalidatePath("/accounting");
 
     return Response.json(
       { ok: true, requestId: auth.requestId },

@@ -60,6 +60,7 @@ export async function PUT(
     }
 
     revalidatePath("/expenses");
+    revalidatePath("/accounting");
     return Response.json(
       { ok: true, category: updated, requestId: auth.requestId },
       { status: 200, headers: { "x-request-id": auth.requestId } },
@@ -106,6 +107,7 @@ export async function DELETE(
     }
 
     revalidatePath("/expenses");
+    revalidatePath("/accounting");
     return Response.json(
       { ok: true, requestId: auth.requestId },
       { status: 200, headers: { "x-request-id": auth.requestId } },

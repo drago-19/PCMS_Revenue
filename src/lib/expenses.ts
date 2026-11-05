@@ -1,4 +1,10 @@
-import { query, queryOne, withTransaction, type Queryable } from "./db";
+import {
+  getActiveCompanyId,
+  query,
+  queryOne,
+  withTransaction,
+  type Queryable,
+} from "./db";
 import {
   calculateExpenseTaxAmounts,
   DEFAULT_ACCOUNTING_CATEGORIES,
@@ -187,9 +193,30 @@ export async function deleteExpenseCategory(
   });
 }
 
+const platformRevenueCache = new Map<
+  string,
+  { ts: number; data: MonthlyPlatformRevenue[] }
+>();
+
+export function clearPlatformRevenueCache(): void {
+  platformRevenueCache.clear();
+}
+
 export async function getMonthlyPlatformRevenues(
   db?: Queryable,
 ): Promise<MonthlyPlatformRevenue[]> {
+  const companyId = await getActiveCompanyId();
+  let cacheKey: string = companyId;
+  if (!db) {
+    const impStamp = await queryOne<{ cnt: number; max_id: number }>(
+      `SELECT COUNT(*)::int AS cnt, COALESCE(MAX(id), 0)::int AS max_id FROM imports`,
+    );
+    cacheKey = `${companyId}:${impStamp?.cnt ?? 0}:${impStamp?.max_id ?? 0}`;
+    const cached = platformRevenueCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 300_000) {
+      return cached.data;
+    }
+  }
   const rows = await query<Record<string, unknown>>(
     `SELECT 
        SUBSTRING(paid_date FROM 1 FOR 7) AS ym,
@@ -210,7 +237,7 @@ export async function getMonthlyPlatformRevenues(
     db,
   );
 
-  return rows.map((r) => ({
+  const result = rows.map((r) => ({
     yearMonth: String(r.ym),
     orderCount: Number(r.order_count || 0),
     tiktokPayout: Number(r.tiktok_payout || 0),
@@ -222,6 +249,11 @@ export async function getMonthlyPlatformRevenues(
     totalPlatformPayout: Number(r.total_payout || 0),
     totalIncome: Number(r.total_income || 0),
   }));
+
+  if (!db) {
+    platformRevenueCache.set(cacheKey, { ts: Date.now(), data: result });
+  }
+  return result;
 }
 
 function mapExpenseRecordRow(r: Record<string, unknown>): ExpenseRecord {
@@ -268,6 +300,7 @@ export async function listExpenseRecords(
   db?: Queryable,
   options?: {
     year?: string;
+    dateRange?: { start: string; end: string };
     paymentStatus?: string;
     search?: string;
     limit?: number;
@@ -276,7 +309,20 @@ export async function listExpenseRecords(
   const whereClauses: string[] = [];
   const params: unknown[] = [];
 
-  if (yearMonth) {
+  if (options?.dateRange) {
+    const { start, end } = options.dateRange;
+    if (/^\d{4}-\d{2}$/.test(start) && /^\d{4}-\d{2}$/.test(end)) {
+      params.push(start, end);
+      whereClauses.push(
+        `r.year_month >= $${params.length - 1} AND r.year_month <= $${params.length}`,
+      );
+    } else {
+      params.push(start, end);
+      whereClauses.push(
+        `r.entry_date >= $${params.length - 1} AND r.entry_date <= $${params.length}`,
+      );
+    }
+  } else if (yearMonth) {
     params.push(yearMonth);
     whereClauses.push(`r.year_month = $${params.length}`);
   } else if (options?.year && options.year !== "all") {
@@ -389,7 +435,7 @@ export async function getExpensesOverview(
   db?: Queryable,
 ): Promise<ExpensesOverviewData> {
   const [
-    categories,
+    initialCategories,
     platformRevenues,
     monthlyDirectRows,
     itemizedRows,
@@ -418,6 +464,11 @@ export async function getExpensesOverview(
       limit: 1000,
     }),
   ]);
+
+  const categories =
+    initialCategories.length >= DEFAULT_ACCOUNTING_CATEGORIES.length
+      ? initialCategories
+      : await seedDefaultExpenseCategories(db);
 
   const platformMap = new Map<string, MonthlyPlatformRevenue>();
   for (const p of platformRevenues) {

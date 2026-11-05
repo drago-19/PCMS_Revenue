@@ -153,6 +153,7 @@ export async function POST(request: Request) {
     });
 
     revalidatePath("/expenses");
+    revalidatePath("/accounting");
     return Response.json(
       { ok: true, record, requestId: auth.requestId },
       { status: 201, headers: { "x-request-id": auth.requestId } },

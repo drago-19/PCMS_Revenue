@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-04-v41";
+const SCHEMA_VERSION = "2026-11-05-v42";
 
 export type { CompanyId };
 
@@ -107,7 +107,17 @@ export function ensureSchema(): Promise<void> {
         );
         const publicVer = rows.find((r) => r.schema_name === "public")?.version;
         const seehengVer = rows.find((r) => r.schema_name === "seeheng")?.version;
-        if (publicVer === SCHEMA_VERSION && seehengVer === SCHEMA_VERSION) {
+        const { rows: tableCheck } = await client.query<{ has_coa: boolean }>(
+          `SELECT (
+             EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chart_of_accounts')
+             AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'seeheng' AND table_name = 'chart_of_accounts')
+           ) AS has_coa`,
+        );
+        if (
+          publicVer === SCHEMA_VERSION &&
+          seehengVer === SCHEMA_VERSION &&
+          tableCheck[0]?.has_coa
+        ) {
           return;
         }
 
@@ -816,6 +826,45 @@ WHERE document_no = '' OR document_no IS NULL;
 
 CREATE INDEX IF NOT EXISTS ix_expense_records_status ON expense_records(payment_status, entry_date DESC);
 CREATE INDEX IF NOT EXISTS ix_expense_records_doc_no ON expense_records(document_no);
+
+CREATE TABLE IF NOT EXISTS chart_of_accounts (
+  id BIGSERIAL PRIMARY KEY,
+  account_code TEXT NOT NULL UNIQUE,
+  account_name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  account_type TEXT NOT NULL DEFAULT 'expense',
+  primary_group TEXT NOT NULL DEFAULT '',
+  secondary_group TEXT NOT NULL DEFAULT '',
+  normal_balance TEXT NOT NULL DEFAULT 'debit',
+  is_system BOOLEAN NOT NULL DEFAULT FALSE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_chart_of_accounts_type_code ON chart_of_accounts(account_type, account_code);
+CREATE INDEX IF NOT EXISTS ix_chart_of_accounts_sort ON chart_of_accounts(sort_order ASC, account_code ASC);
+
+CREATE TABLE IF NOT EXISTS journal_entries (
+  id BIGSERIAL PRIMARY KEY,
+  document_no TEXT NOT NULL UNIQUE,
+  journal_type TEXT NOT NULL DEFAULT 'JV',
+  entry_date TEXT NOT NULL,
+  year_month TEXT NOT NULL,
+  contact_name TEXT NOT NULL DEFAULT '',
+  reference_no TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  remarks TEXT NOT NULL DEFAULT '',
+  total_debit DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total_credit DOUBLE PRECISION NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'approved',
+  lines_json JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_journal_entries_date ON journal_entries(entry_date DESC, id DESC);
+CREATE INDEX IF NOT EXISTS ix_journal_entries_ym ON journal_entries(year_month, journal_type);
+CREATE INDEX IF NOT EXISTS ix_journal_entries_status ON journal_entries(status, entry_date DESC);
 
 CREATE OR REPLACE FUNCTION prevent_audit_log_mutation()
 RETURNS TRIGGER AS $$

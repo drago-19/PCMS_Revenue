@@ -56,6 +56,7 @@ export async function POST(request: Request) {
     try {
       const categories = await seedDefaultExpenseCategories();
       revalidatePath("/expenses");
+      revalidatePath("/accounting");
       return Response.json(
         { ok: true, categories, requestId: auth.requestId },
         { status: 200, headers: { "x-request-id": auth.requestId } },
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
   try {
     const created = await createExpenseCategory(name, color, accountCode);
     revalidatePath("/expenses");
+    revalidatePath("/accounting");
 
     return Response.json(
       { ok: true, category: created, requestId: auth.requestId },
