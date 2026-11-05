@@ -29,10 +29,18 @@ export function NavigationProgress() {
   const locationKey = `${pathname ?? ""}?${searchParams?.toString() ?? ""}`;
 
   const [visible, setVisible] = useState(false);
+  const mountedRef = useRef(false);
   const pendingRef = useRef(false);
   const showTimerRef = useRef<number | null>(null);
   const safetyTimerRef = useRef<number | null>(null);
   const lastLocationRef = useRef(locationKey);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const clearTimers = useCallback(() => {
     if (showTimerRef.current !== null) {
@@ -48,7 +56,9 @@ export function NavigationProgress() {
   const stop = useCallback(() => {
     pendingRef.current = false;
     clearTimers();
-    setVisible(false);
+    if (mountedRef.current) {
+      setVisible(false);
+    }
     // แจ้ง skeleton ของตารางว่าข้อมูลใหม่มาถึงแล้ว
     setNavigationPending(false);
   }, [clearTimers]);
@@ -61,7 +71,9 @@ export function NavigationProgress() {
     }
     clearTimers();
     showTimerRef.current = window.setTimeout(() => {
-      setVisible(true);
+      if (mountedRef.current) {
+        setVisible(true);
+      }
     }, SHOW_DELAY_MS);
     safetyTimerRef.current = window.setTimeout(() => {
       stop();

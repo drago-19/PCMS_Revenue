@@ -54,7 +54,14 @@ let navigationPending = false;
 export function setNavigationPending(pending: boolean): void {
   if (navigationPending === pending) return;
   navigationPending = pending;
-  for (const listener of pendingListeners) listener();
+  const snapshot = Array.from(pendingListeners);
+  queueMicrotask(() => {
+    for (const listener of snapshot) {
+      if (pendingListeners.has(listener)) {
+        listener();
+      }
+    }
+  });
 }
 
 export function subscribeNavigationPending(listener: PendingListener): () => void {

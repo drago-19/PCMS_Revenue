@@ -1,13 +1,27 @@
 "use client";
 
-import { useEffect, useState, type ComponentType, type FormEvent } from "react";
-import Link, { useLinkStatus } from "next/link";
-import { usePathname, useRouter } from "next/navigation";
 import {
+   Suspense,
+  useEffect,
+  useState,
+  type ComponentType,
+  type FormEvent,
+} from "react";
+import Link, { useLinkStatus } from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  BarChart3Icon,
+  BookOpenTextIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FileBarChart2Icon,
+  FileTextIcon,
+  FolderKanbanIcon,
   KeyRoundIcon,
   Loader2Icon,
   LogOutIcon,
   MenuIcon,
+  ReceiptIcon,
   SettingsIcon,
   ShieldCheckIcon,
 } from "lucide-react";
@@ -39,6 +53,7 @@ import {
   IconFile,
   IconHistory,
   IconHome,
+  IconLedger,
   IconReceipt,
   IconUpload,
   IconWallet,
@@ -48,14 +63,14 @@ const items = [
   {
     href: "/",
     label: "ภาพรวมสรุปยอด",
-    sub: "Finance Overview",
+    sub: "สรุปรายได้และยอดโอน",
     icon: IconHome,
     match: (pathname: string) => pathname === "/",
   },
   {
     href: "/bills",
     label: "บิลคำสั่งซื้อทั้งหมด",
-    sub: "Order Bills",
+    sub: "บิลขายและใบกำกับภาษี",
     icon: IconReceipt,
     match: (pathname: string) =>
       pathname === "/bills" ||
@@ -66,31 +81,34 @@ const items = [
   },
   {
     href: "/products",
-    label: "สรุปยอดรหัสสินค้า (SKU)",
-    sub: "SKU Summary",
+    label: "สรุปยอดรหัสสินค้า",
+    sub: "ยอดขายแยกตามสินค้า",
     icon: IconFile,
     match: (pathname: string) =>
       pathname === "/products" || pathname.startsWith("/products/"),
   },
   {
-    href: "/expenses",
-    label: "รายจ่ายบริษัท",
-    sub: "Company Expenses",
-    icon: IconWallet,
+    href: "/accounting",
+    label: "บริหารบัญชี",
+    sub: "บัญชี รายจ่าย และภาษี",
+    icon: IconLedger,
     match: (pathname: string) =>
-      pathname === "/expenses" || pathname.startsWith("/expenses/"),
+      pathname === "/accounting" ||
+      pathname.startsWith("/accounting/") ||
+      pathname === "/expenses" ||
+      pathname.startsWith("/expenses/"),
   },
   {
     href: "/import",
     label: "อัปโหลดไฟล์รายได้",
-    sub: "Upload Statement",
+    sub: "นำเข้าไฟล์รายงาน",
     icon: IconUpload,
     match: (pathname: string) => pathname === "/import",
   },
   {
     href: "/history",
     label: "ประวัติการนำเข้าไฟล์",
-    sub: "Import History",
+    sub: "ตรวจสอบไฟล์ที่นำเข้า",
     icon: IconHistory,
     match: (pathname: string) =>
       pathname === "/history" || pathname.startsWith("/import/"),
@@ -98,7 +116,7 @@ const items = [
   {
     href: "/settings",
     label: "ตั้งค่าเอกสาร / บริษัท",
-    sub: "Document Settings",
+    sub: "ข้อมูลบริษัทและรูปแบบบิล",
     icon: SettingsIcon,
     match: (pathname: string) =>
       pathname === "/settings" || pathname.startsWith("/settings/"),
@@ -134,6 +152,470 @@ function NavItemIcon({
   );
 }
 
+function SubNavDot({ isActive }: { isActive: boolean }) {
+  const { pending } = useLinkStatus();
+  if (pending) {
+    return (
+      <Loader2Icon
+        aria-hidden="true"
+        data-nav-pending="true"
+        className="size-3 shrink-0 text-[#fe2c55] motion-safe:animate-spin"
+      />
+    );
+  }
+  return (
+    <span
+      className={cn(
+        "size-1.5 shrink-0 rounded-full transition-colors",
+        isActive ? "bg-[#fe2c55]" : "bg-[#64748b]",
+      )}
+    />
+  );
+}
+
+function AccountingSidebarSubMenu({
+  pathname,
+  onNavigate,
+}: {
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  const searchParams = useSearchParams();
+  const urlTab = searchParams.get("tab") || "ledger";
+  const urlBook = searchParams.get("book") || "all";
+  const urlReport = searchParams.get("report") || "trial_balance";
+  const urlVat = searchParams.get("vat") || "pp30_summary";
+  const urlExp = searchParams.get("exp") || "ledger";
+  const currentPeriod = searchParams.get("period");
+
+  const [optimisticNav, setOptimisticNav] = useState<{
+    tab: string;
+    book: string;
+    report: string;
+    vat: string;
+    exp: string;
+  } | null>(null);
+
+  useEffect(() => {
+    setOptimisticNav(null);
+  }, [urlTab, urlBook, urlReport, urlVat, urlExp, pathname]);
+
+  useEffect(() => {
+    function handleSyncFromPage(event: Event) {
+      const custom = event as CustomEvent<{
+        tab?: string;
+        book?: string;
+        report?: string;
+        vat?: string;
+        exp?: string;
+      }>;
+      const d = custom.detail;
+      if (!d) return;
+      setOptimisticNav((prev) => ({
+        tab: d.tab ?? prev?.tab ?? urlTab,
+        book: d.book ?? prev?.book ?? urlBook,
+        report: d.report ?? prev?.report ?? urlReport,
+        vat: d.vat ?? prev?.vat ?? urlVat,
+        exp: d.exp ?? prev?.exp ?? urlExp,
+      }));
+    }
+    window.addEventListener("pcms:accounting-nav", handleSyncFromPage);
+    return () => {
+      window.removeEventListener("pcms:accounting-nav", handleSyncFromPage);
+    };
+  }, [urlTab, urlBook, urlReport, urlVat, urlExp]);
+
+  const currentTab = optimisticNav?.tab ?? urlTab;
+  const currentBook = optimisticNav?.book ?? urlBook;
+  const currentReport = optimisticNav?.report ?? urlReport;
+  const currentVat = optimisticNav?.vat ?? urlVat;
+  const currentExp = optimisticNav?.exp ?? urlExp;
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    journals: true,
+    closing: true,
+    reports: true,
+    vat: true,
+    expenses: true,
+  });
+
+  const toggleGroup = (key: string) => {
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const buildAccountingHref = (params: Record<string, string>) => {
+    const usp = new URLSearchParams();
+    if (currentPeriod && currentPeriod !== "all") {
+      usp.set("period", currentPeriod);
+    }
+    for (const [k, v] of Object.entries(params)) {
+      if (v) usp.set(k, v);
+    }
+    const qs = usp.toString();
+    return qs ? `/accounting?${qs}` : "/accounting";
+  };
+
+  const handleSubLinkClick = (
+    e: React.MouseEvent<HTMLAnchorElement>,
+    detail: {
+      tab: string;
+      book?: string;
+      report?: string;
+      vat?: string;
+      exp?: string;
+    },
+    targetHref: string,
+  ) => {
+    setOptimisticNav({
+      tab: detail.tab,
+      book: detail.book ?? currentBook,
+      report: detail.report ?? currentReport,
+      vat: detail.vat ?? currentVat,
+      exp: detail.exp ?? currentExp,
+    });
+
+    // หากอยู่ในหน้า /accounting อยู่แล้ว ให้สลับแท็บทันทีฝั่ง Client (< 5ms) โดยไม่ต้องยิง Server ใหม่
+    if (pathname === "/accounting") {
+      e.preventDefault();
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", targetHref);
+        window.dispatchEvent(
+          new CustomEvent("pcms:accounting-nav", { detail }),
+        );
+      }
+      onNavigate?.();
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("pcms:accounting-nav", { detail }),
+      );
+    }
+    onNavigate?.();
+  };
+
+  const subLinkClass = (isActive: boolean) =>
+    cn(
+      "!flex min-h-[32px] items-center gap-2 rounded-lg !px-2.5 !py-1.5 !text-[12.5px] transition-colors",
+      isActive
+        ? "!bg-[#fe2c55]/20 !font-bold !text-white !shadow-none"
+        : "!font-medium !text-[#cbd5e1] hover:!bg-white/[0.06] hover:!text-white",
+    );
+
+  return (
+    <div
+      className="mt-1 ml-2 flex flex-col gap-1 rounded-xl border border-white/10 bg-white/[0.03] p-2"
+      aria-label="เมนูย่อยบริหารบัญชี"
+    >
+      {/* 1. สมุดรายวัน */}
+      <div>
+        <button
+          type="button"
+          onClick={() => toggleGroup("journals")}
+          aria-expanded={openGroups.journals}
+          className="flex min-h-[34px] w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] font-bold text-white transition-colors hover:bg-white/[0.06]"
+        >
+          <span className="inline-flex items-center gap-2">
+            <BookOpenTextIcon className="size-3.5 text-[#38bdf8]" />
+            <span>สมุดรายวัน</span>
+          </span>
+          {openGroups.journals ? (
+            <ChevronDownIcon className="size-3.5 text-[#94a3b8]" />
+          ) : (
+            <ChevronRightIcon className="size-3.5 text-[#94a3b8]" />
+          )}
+        </button>
+
+        {openGroups.journals && (
+          <div className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-white/10 pl-2">
+            {[
+              { book: "JV", label: "สมุดรายวันทั่วไป" },
+              { book: "UV", label: "สมุดรายวันซื้อ" },
+              { book: "SV", label: "สมุดรายวันขาย" },
+              { book: "PV", label: "สมุดรายวันจ่าย" },
+              { book: "RV", label: "สมุดรายวันรับ" },
+            ].map((item) => {
+              const isActive =
+                currentTab === "journals" && currentBook === item.book;
+              const href = buildAccountingHref({
+                tab: "journals",
+                book: item.book,
+              });
+              return (
+                <Link
+                  key={item.book}
+                  href={href}
+                  prefetch={false}
+                  scroll={false}
+                  onClick={(e) =>
+                    handleSubLinkClick(
+                      e,
+                      { tab: "journals", book: item.book },
+                      href,
+                    )
+                  }
+                  className={subLinkClass(isActive)}
+                >
+                  <SubNavDot isActive={isActive} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 2. บัญชีแยกประเภท */}
+      <Link
+        href={buildAccountingHref({ tab: "ledger" })}
+        prefetch={false}
+        scroll={false}
+        onClick={(e) =>
+          handleSubLinkClick(
+            e,
+            { tab: "ledger" },
+            buildAccountingHref({ tab: "ledger" }),
+          )
+        }
+        className={cn(
+          "!flex min-h-[34px] items-center gap-2 rounded-lg !px-2 !py-1.5 !text-[12.5px] transition-colors",
+          currentTab === "ledger"
+            ? "!bg-[#fe2c55]/20 !font-bold !text-white !shadow-none"
+            : "!font-bold !text-white hover:!bg-white/[0.06]",
+        )}
+      >
+        <FolderKanbanIcon className="size-3.5 shrink-0 text-[#38bdf8]" />
+        <span>บัญชีแยกประเภท</span>
+      </Link>
+
+      {/* 3. ปิดงบบัญชี */}
+      <div>
+        <button
+          type="button"
+          onClick={() => toggleGroup("closing")}
+          aria-expanded={openGroups.closing}
+          className="flex min-h-[34px] w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] font-bold text-white transition-colors hover:bg-white/[0.06]"
+        >
+          <span className="inline-flex items-center gap-2">
+            <BarChart3Icon className="size-3.5 text-[#38bdf8]" />
+            <span>ปิดงบบัญชี</span>
+          </span>
+          {openGroups.closing ? (
+            <ChevronDownIcon className="size-3.5 text-[#94a3b8]" />
+          ) : (
+            <ChevronRightIcon className="size-3.5 text-[#94a3b8]" />
+          )}
+        </button>
+
+        {openGroups.closing && (
+          <div className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-white/10 pl-2">
+            <Link
+              href={buildAccountingHref({
+                tab: "reports",
+                report: "closing",
+              })}
+              prefetch={false}
+              scroll={false}
+              onClick={(e) =>
+                handleSubLinkClick(
+                  e,
+                  { tab: "reports", report: "closing" },
+                  buildAccountingHref({
+                    tab: "reports",
+                    report: "closing",
+                  }),
+                )
+              }
+              className={subLinkClass(
+                currentTab === "reports" && currentReport === "closing",
+              )}
+            >
+              <SubNavDot
+                isActive={
+                  currentTab === "reports" && currentReport === "closing"
+                }
+              />
+              <span>รายได้และค่าใช้จ่าย</span>
+            </Link>
+          </div>
+        )}
+      </div>
+
+      {/* 4. รายงานด้านบัญชี */}
+      <div>
+        <button
+          type="button"
+          onClick={() => toggleGroup("reports")}
+          aria-expanded={openGroups.reports}
+          className="flex min-h-[34px] w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] font-bold text-white transition-colors hover:bg-white/[0.06]"
+        >
+          <span className="inline-flex items-center gap-2">
+            <FileBarChart2Icon className="size-3.5 text-[#38bdf8]" />
+            <span>รายงานด้านบัญชี</span>
+          </span>
+          {openGroups.reports ? (
+            <ChevronDownIcon className="size-3.5 text-[#94a3b8]" />
+          ) : (
+            <ChevronRightIcon className="size-3.5 text-[#94a3b8]" />
+          )}
+        </button>
+
+        {openGroups.reports && (
+          <div className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-white/10 pl-2">
+            {[
+              { report: "trial_balance", label: "งบทดลอง" },
+              { report: "income_statement", label: "งบกำไรขาดทุน" },
+              { report: "balance_sheet", label: "งบฐานะการเงิน" },
+              { report: "movements", label: "รายการเคลื่อนไหว" },
+            ].map((item) => {
+              const isActive =
+                currentTab === "reports" && currentReport === item.report;
+              const href = buildAccountingHref({
+                tab: "reports",
+                report: item.report,
+              });
+              return (
+                <Link
+                  key={item.report}
+                  href={href}
+                  prefetch={false}
+                  scroll={false}
+                  onClick={(e) =>
+                    handleSubLinkClick(
+                      e,
+                      { tab: "reports", report: item.report },
+                      href,
+                    )
+                  }
+                  className={subLinkClass(isActive)}
+                >
+                  <SubNavDot isActive={isActive} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 5. บริหารภาษีมูลค่าเพิ่ม */}
+      <div>
+        <button
+          type="button"
+          onClick={() => toggleGroup("vat")}
+          aria-expanded={openGroups.vat}
+          className="flex min-h-[34px] w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] font-bold text-white transition-colors hover:bg-white/[0.06]"
+        >
+          <span className="inline-flex items-center gap-2">
+            <FileTextIcon className="size-3.5 text-[#38bdf8]" />
+            <span>บริหารภาษีมูลค่าเพิ่ม</span>
+          </span>
+          {openGroups.vat ? (
+            <ChevronDownIcon className="size-3.5 text-[#94a3b8]" />
+          ) : (
+            <ChevronRightIcon className="size-3.5 text-[#94a3b8]" />
+          )}
+        </button>
+
+        {openGroups.vat && (
+          <div className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-white/10 pl-2">
+            {[
+              { vat: "input_docs", label: "จัดการเอกสารภาษีซื้อ" },
+              { vat: "pp30_summary", label: "เตรียมแบบภาษีรายเดือน" },
+              { vat: "pp36_report", label: "รายงานภาษีซื้อ ภ.พ.36" },
+              { vat: "input_vat", label: "รายงานภาษีซื้อ ภ.พ.30" },
+              { vat: "output_vat", label: "รายงานภาษีขาย ภ.พ.30" },
+            ].map((item) => {
+              const isActive =
+                currentTab === "vat" && currentVat === item.vat;
+              const href = buildAccountingHref({
+                tab: "vat",
+                vat: item.vat,
+              });
+              return (
+                <Link
+                  key={item.vat}
+                  href={href}
+                  prefetch={false}
+                  scroll={false}
+                  onClick={(e) =>
+                    handleSubLinkClick(
+                      e,
+                      { tab: "vat", vat: item.vat },
+                      href,
+                    )
+                  }
+                  className={subLinkClass(isActive)}
+                >
+                  <SubNavDot isActive={isActive} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 6. บิลรายจ่าย & หัก ณ ที่จ่าย */}
+      <div className="border-t border-white/10 pt-1">
+        <button
+          type="button"
+          onClick={() => toggleGroup("expenses")}
+          aria-expanded={openGroups.expenses}
+          className="flex min-h-[34px] w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] font-bold text-white transition-colors hover:bg-white/[0.06]"
+        >
+          <span className="inline-flex items-center gap-2">
+            <ReceiptIcon className="size-3.5 text-[#38bdf8]" />
+            <span>บิลรายจ่าย & หัก ณ ที่จ่าย</span>
+          </span>
+          {openGroups.expenses ? (
+            <ChevronDownIcon className="size-3.5 text-[#94a3b8]" />
+          ) : (
+            <ChevronRightIcon className="size-3.5 text-[#94a3b8]" />
+          )}
+        </button>
+
+        {openGroups.expenses && (
+          <div className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-white/10 pl-2">
+            {[
+              { exp: "ledger", label: "รายการบิลค่าใช้จ่าย" },
+              { exp: "wht", label: "ยื่นหัก ณ ที่จ่ายออนไลน์" },
+              { exp: "table", label: "สรุปกำไรสุทธิรายเดือน" },
+            ].map((item) => {
+              const isActive =
+                currentTab === "expenses" && currentExp === item.exp;
+              const href = buildAccountingHref({
+                tab: "expenses",
+                exp: item.exp,
+              });
+              return (
+                <Link
+                  key={item.exp}
+                  href={href}
+                  prefetch={false}
+                  scroll={false}
+                  onClick={(e) =>
+                    handleSubLinkClick(
+                      e,
+                      { tab: "expenses", exp: item.exp },
+                      href,
+                    )
+                  }
+                  className={subLinkClass(isActive)}
+                >
+                  <SubNavDot isActive={isActive} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NavLinks({
   pathname,
   onNavigate,
@@ -141,42 +623,108 @@ function NavLinks({
   pathname: string;
   onNavigate?: () => void;
 }) {
+  const [accountingExpanded, setAccountingExpanded] = useState(
+    () =>
+      pathname === "/accounting" ||
+      pathname.startsWith("/accounting/") ||
+      pathname === "/expenses" ||
+      pathname.startsWith("/expenses/"),
+  );
+
+  useEffect(() => {
+    if (
+      pathname === "/accounting" ||
+      pathname.startsWith("/accounting/") ||
+      pathname === "/expenses" ||
+      pathname.startsWith("/expenses/")
+    ) {
+      setAccountingExpanded(true);
+    }
+  }, [pathname]);
+
   return (
-    <div className="flex flex-col gap-2">
+    <div className="sidebar-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-0.5">
       <span className="px-3 text-[11px] font-bold tracking-[0.12em] uppercase text-[#64748b]">
-        หมวดหมู่เมนู · Categories
+        หมวดหมู่เมนูหลัก
       </span>
       <nav className="nav flex flex-col gap-1.5" aria-label="เมนูหลัก">
         {items.map((item) => {
           const active = item.match(pathname);
           const Icon = item.icon;
+          const isAccounting = item.href === "/accounting";
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              prefetch={false}
-              onClick={onNavigate}
-              className={cn(
-                "inline-flex min-h-[46px] items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14px] font-semibold transition-all",
-                active ? "active" : undefined,
-              )}
-              aria-label={item.label}
-              title={item.label}
-              aria-current={active ? "page" : undefined}
-            >
-              <NavItemIcon icon={Icon} />
-              <span className="flex min-w-0 flex-col leading-tight">
-                <span className="!inline font-bold">{item.label}</span>
-                <span
+            <div key={item.href} className="flex flex-col">
+              <div className="relative flex items-center">
+                <Link
+                  href={item.href}
+                  prefetch={false}
+                  onClick={() => {
+                    if (isAccounting) {
+                      setAccountingExpanded(true);
+                    }
+                    onNavigate?.();
+                  }}
                   className={cn(
-                    "text-[11px] font-normal",
-                    active ? "text-white/80" : "text-[#64748b]",
+                    "inline-flex min-h-[46px] w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14px] font-semibold transition-all",
+                    isAccounting && "pr-10",
+                    active ? "active" : undefined,
                   )}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={active ? "page" : undefined}
                 >
-                  {item.sub}
-                </span>
-              </span>
-            </Link>
+                  <NavItemIcon icon={Icon} />
+                  <span className="flex min-w-0 flex-col leading-tight">
+                    <span className="!inline font-bold">{item.label}</span>
+                    <span
+                      className={cn(
+                        "text-[11px] font-normal",
+                        active ? "text-white/80" : "text-[#64748b]",
+                      )}
+                    >
+                      {item.sub}
+                    </span>
+                  </span>
+                </Link>
+                {isAccounting && (
+                  <button
+                    type="button"
+                    aria-label={
+                      accountingExpanded
+                        ? "ซ่อนหัวข้อย่อยบริหารบัญชี"
+                        : "แสดงหัวข้อย่อยบริหารบัญชี"
+                    }
+                    aria-expanded={accountingExpanded}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setAccountingExpanded((prev) => !prev);
+                    }}
+                    className={cn(
+                      "absolute right-1.5 inline-flex size-8 items-center justify-center rounded-lg transition-colors",
+                      active
+                        ? "text-white hover:bg-white/20"
+                        : "text-[#94a3b8] hover:bg-white/10 hover:text-white",
+                    )}
+                  >
+                    {accountingExpanded ? (
+                      <ChevronDownIcon className="size-4" />
+                    ) : (
+                      <ChevronRightIcon className="size-4" />
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {isAccounting && accountingExpanded && (
+                <Suspense fallback={null}>
+                  <AccountingSidebarSubMenu
+                    pathname={pathname}
+                    onNavigate={onNavigate}
+                  />
+                </Suspense>
+              )}
+            </div>
           );
         })}
       </nav>
@@ -287,7 +835,7 @@ function AccountControls({
             <DialogHeader className="pr-11">
               <DialogTitle>เปลี่ยนรหัสผ่านผู้ดูแลระบบ</DialogTitle>
               <DialogDescription>
-                รหัสผ่านใหม่จะถูกเข้ารหัสด้วย bcrypt (cost 12) และบันทึกในฐานข้อมูลทันที
+                รหัสผ่านใหม่จะถูกเข้ารหัสอย่างปลอดภัยและบันทึกในฐานข้อมูลทันที
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleChangePassword} className="flex flex-col gap-3.5">
