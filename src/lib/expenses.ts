@@ -184,13 +184,25 @@ export async function deleteExpenseCategory(
   id: number,
   db?: Queryable,
 ): Promise<boolean> {
-  return withTransaction(async (client) => {
-    const res = await client.query(
-      `DELETE FROM expense_categories WHERE id = $1`,
+  const run = async (client: Queryable) => {
+    const usedRow = await queryOne<{ cnt: string | number }>(
+      `SELECT COUNT(*) AS cnt FROM expense_records WHERE category_id = $1`,
       [id],
+      client,
     );
-    return (res.rowCount ?? 0) > 0;
-  });
+    if (Number(usedRow?.cnt ?? 0) > 0) {
+      throw new Error(
+        "ไม่สามารถลบหมวดหมู่รายจ่ายที่มีรายการบันทึกอยู่ได้ กรุณาย้ายหรือลบรายการรายจ่ายก่อน",
+      );
+    }
+    const res = await query<{ id: number }>(
+      `DELETE FROM expense_categories WHERE id = $1 RETURNING id`,
+      [id],
+      client,
+    );
+    return res.length > 0;
+  };
+  return db ? run(db) : withTransaction(run);
 }
 
 const platformRevenueCache = new Map<
@@ -434,36 +446,65 @@ export async function getExpensesOverview(
   yearFilter?: string,
   db?: Queryable,
 ): Promise<ExpensesOverviewData> {
+  const hasYearFilter = Boolean(yearFilter && yearFilter !== "all");
+  const runExpQueries = async () => {
+    const q1 = () => listExpenseCategories(db);
+    const q2 = () => getMonthlyPlatformRevenues(db);
+    const q3 = () =>
+      query<Record<string, unknown>>(
+        `SELECT year_month, category_id, amount
+         FROM monthly_expenses`,
+        [],
+        db,
+      );
+    const q4 = () =>
+      query<Record<string, unknown>>(
+        `SELECT year_month, category_id,
+                ROUND(COALESCE(SUM(amount), 0)::numeric, 2) AS sum_amount,
+                COUNT(*)::int AS item_count
+         FROM expense_records
+         WHERE COALESCE(payment_status, 'paid') <> 'void'
+         GROUP BY year_month, category_id`,
+        [],
+        db,
+      );
+    const q5 = () =>
+      listExpenseRecords(undefined, undefined, db, {
+        year: yearFilter,
+        limit: 1000,
+      });
+    const q6 = () =>
+      queryOne<Record<string, unknown>>(
+        `SELECT
+           COUNT(*)::int AS total_records_count,
+           SUM(CASE WHEN COALESCE(payment_status, 'paid') = 'void' THEN 1 ELSE 0 END)::int AS void_count,
+           SUM(CASE WHEN COALESCE(payment_status, 'paid') = 'pending' THEN 1 ELSE 0 END)::int AS pending_count,
+           ROUND(COALESCE(SUM(CASE WHEN COALESCE(payment_status, 'paid') = 'pending' THEN amount ELSE 0 END), 0)::numeric, 2) AS pending_amount,
+           SUM(CASE WHEN COALESCE(payment_status, 'paid') NOT IN ('void', 'pending') THEN 1 ELSE 0 END)::int AS paid_count,
+           ROUND(COALESCE(SUM(CASE WHEN COALESCE(payment_status, 'paid') NOT IN ('void', 'pending') THEN amount ELSE 0 END), 0)::numeric, 2) AS paid_amount,
+           SUM(CASE WHEN COALESCE(payment_status, 'paid') <> 'void' AND COALESCE(vat_amount, 0) > 0 THEN 1 ELSE 0 END)::int AS vat_record_count,
+           ROUND(COALESCE(SUM(CASE WHEN COALESCE(payment_status, 'paid') <> 'void' AND COALESCE(vat_amount, 0) > 0 THEN vat_amount ELSE 0 END), 0)::numeric, 2) AS vat_input_total,
+           SUM(CASE WHEN COALESCE(payment_status, 'paid') <> 'void' AND COALESCE(wht_amount, 0) > 0 THEN 1 ELSE 0 END)::int AS wht_record_count,
+           ROUND(COALESCE(SUM(CASE WHEN COALESCE(payment_status, 'paid') <> 'void' AND COALESCE(wht_amount, 0) > 0 THEN wht_amount ELSE 0 END), 0)::numeric, 2) AS wht_total
+         FROM expense_records
+         WHERE ($1::text IS NULL OR year_month LIKE $1)`,
+        [hasYearFilter ? `${yearFilter}%` : null],
+        db,
+      );
+    if (db) {
+      return [await q1(), await q2(), await q3(), await q4(), await q5(), await q6()] as const;
+    }
+    return Promise.all([q1(), q2(), q3(), q4(), q5(), q6()]);
+  };
+
   const [
     initialCategories,
     platformRevenues,
     monthlyDirectRows,
     itemizedRows,
     records,
-  ] = await Promise.all([
-    listExpenseCategories(db),
-    getMonthlyPlatformRevenues(db),
-    query<Record<string, unknown>>(
-      `SELECT year_month, category_id, amount
-       FROM monthly_expenses`,
-      [],
-      db,
-    ),
-    query<Record<string, unknown>>(
-      `SELECT year_month, category_id,
-              ROUND(COALESCE(SUM(amount), 0)::numeric, 2) AS sum_amount,
-              COUNT(*)::int AS item_count
-       FROM expense_records
-       WHERE COALESCE(payment_status, 'paid') <> 'void'
-       GROUP BY year_month, category_id`,
-      [],
-      db,
-    ),
-    listExpenseRecords(undefined, undefined, db, {
-      year: yearFilter,
-      limit: 1000,
-    }),
-  ]);
+    ledgerStatsRow,
+  ] = await runExpQueries();
 
   const categories =
     initialCategories.length >= DEFAULT_ACCOUNTING_CATEGORIES.length
@@ -592,11 +633,26 @@ export async function getExpensesOverview(
         ) / 100
       : null;
 
+  const sqlLedgerStats = ledgerStatsRow
+    ? {
+        totalRecordsCount: Number(ledgerStatsRow.total_records_count ?? 0),
+        paidCount: Number(ledgerStatsRow.paid_count ?? 0),
+        paidAmount: round2(Number(ledgerStatsRow.paid_amount ?? 0)),
+        pendingCount: Number(ledgerStatsRow.pending_count ?? 0),
+        pendingAmount: round2(Number(ledgerStatsRow.pending_amount ?? 0)),
+        voidCount: Number(ledgerStatsRow.void_count ?? 0),
+        vatRecordCount: Number(ledgerStatsRow.vat_record_count ?? 0),
+        vatInputTotal: round2(Number(ledgerStatsRow.vat_input_total ?? 0)),
+        whtRecordCount: Number(ledgerStatsRow.wht_record_count ?? 0),
+        whtTotal: round2(Number(ledgerStatsRow.wht_total ?? 0)),
+      }
+    : computeExpenseLedgerStats(records);
+
   return {
     categories,
     rows,
     records,
-    ledgerStats: computeExpenseLedgerStats(records),
+    ledgerStats: sqlLedgerStats,
     totalStats: {
       totalPlatformPayout: grandTotalPlatformPayout,
       totalExpenses: grandTotalExpenses,

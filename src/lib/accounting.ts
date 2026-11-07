@@ -697,12 +697,12 @@ export function parseAccountingPeriodFilter(selectedPeriod?: string): {
   if (/^\d{4}-\d{2}$/.test(s)) {
     return { mode: "month", raw: s, start: s, end: s };
   }
-  const mRange = /^(\d{4}-\d{2})_(\d{4}-\d{2})$/.exec(s);
+  const mRange = /^(\d{4}-\d{2})(?:_|\.\.)(\d{4}-\d{2})$/.exec(s);
   if (mRange) {
     const [a, b] = mRange[1] <= mRange[2] ? [mRange[1], mRange[2]] : [mRange[2], mRange[1]];
     return { mode: "month_range", raw: `${a}_${b}`, start: a, end: b };
   }
-  const dRange = /^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/.exec(s);
+  const dRange = /^(\d{4}-\d{2}-\d{2})(?:_|\.\.)(\d{4}-\d{2}-\d{2})$/.exec(s);
   if (dRange) {
     const [a, b] = dRange[1] <= dRange[2] ? [dRange[1], dRange[2]] : [dRange[2], dRange[1]];
     return { mode: "date_range", raw: `${a}_${b}`, start: a, end: b };
@@ -742,6 +742,36 @@ async function getMonthlyChannelSalesAggregates(
 
   const companyId = await getActiveCompanyId();
   let allCacheKey = `${companyId}:all`;
+
+  if (parsed.mode === "date_range" && parsed.start && parsed.end) {
+    const rangeRows = await query<Record<string, unknown>>(
+      `SELECT
+         SUBSTRING(t.paid_date FROM 1 FOR 7) AS ym,
+         t.channel AS ch,
+         COUNT(*)::int AS order_count,
+         ROUND(COALESCE(SUM(CASE WHEN t.is_order = 1 THEN t.income ELSE 0 END), 0)::numeric, 2) AS order_income,
+         ROUND(COALESCE(SUM(CASE WHEN t.is_order = 0 THEN t.payout ELSE 0 END), 0)::numeric, 2) AS comp_income,
+         ROUND(COALESCE(SUM(t.payout), 0)::numeric, 2) AS total_payout,
+         MAX(t.paid_date) AS last_date
+       FROM transactions t
+       WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+         AND t.paid_date >= $1 AND t.paid_date <= $2
+         AND t.paid_date <> '' AND t.paid_date <> 'unknown'
+       GROUP BY ym, ch
+       ORDER BY ym DESC, ch ASC`,
+      [parsed.start, parsed.end],
+      db,
+    );
+    return rangeRows.map((r) => ({
+      yearMonth: String(r.ym || ""),
+      channel: String(r.ch || "TikTok"),
+      orderCount: Number(r.order_count || 0),
+      orderIncome: round2(Number(r.order_income || 0)),
+      compensationIncome: round2(Number(r.comp_income || 0)),
+      totalPayout: round2(Number(r.total_payout || 0)),
+      lastDate: String(r.last_date || ""),
+    }));
+  }
 
   if (!db) {
     const impStamp = await queryOne<{ cnt: number; max_id: number }>(
@@ -848,46 +878,68 @@ export async function getAccountingOverview(
     };
   })();
 
+  const runQueries = async () => {
+    const q1 = () => listChartOfAccounts(db);
+    const q2 = () =>
+      query<Record<string, unknown>>(
+        manualSqlAndParams.sql,
+        manualSqlAndParams.params,
+        db,
+      );
+    const q3 = () =>
+      listExpenseRecords(
+        parsedPeriod.mode === "month" ? parsedPeriod.raw : undefined,
+        undefined,
+        db,
+        {
+          year: parsedPeriod.mode === "year" ? parsedPeriod.raw : undefined,
+          dateRange:
+            parsedPeriod.mode === "month_range" ||
+            parsedPeriod.mode === "date_range"
+              ? { start: parsedPeriod.start!, end: parsedPeriod.end! }
+              : undefined,
+        },
+      );
+    const q4 = () =>
+      query<Record<string, unknown>>(
+        `SELECT m.year_month, m.category_id, m.amount, m.note,
+                c.name AS category_name, COALESCE(c.account_code, '') AS category_account_code
+         FROM monthly_expenses m
+         JOIN expense_categories c ON c.id = m.category_id
+         WHERE m.amount > 0`,
+        [],
+        db,
+      );
+    const q5 = () => getMonthlyChannelSalesAggregates(periodFilter, db);
+    const q6 = () =>
+      query<{ ym: string }>(
+        `SELECT DISTINCT SUBSTRING(paid_date FROM 1 FOR 7) AS ym
+         FROM daily_summaries
+         WHERE paid_date ~ '^[0-9]{4}-[0-9]{2}'
+         UNION
+         SELECT DISTINCT year_month AS ym FROM expense_records WHERE year_month ~ '^[0-9]{4}-[0-9]{2}'
+         UNION
+         SELECT DISTINCT year_month AS ym FROM monthly_expenses WHERE amount > 0 AND year_month ~ '^[0-9]{4}-[0-9]{2}'
+         UNION
+         SELECT DISTINCT year_month AS ym FROM journal_entries WHERE year_month ~ '^[0-9]{4}-[0-9]{2}'
+         ORDER BY ym DESC`,
+        [],
+        db,
+      );
+    if (db) {
+      return [await q1(), await q2(), await q3(), await q4(), await q5(), await q6()] as const;
+    }
+    return Promise.all([q1(), q2(), q3(), q4(), q5(), q6()]);
+  };
+
   const [
     coaList,
     manualRows,
     expenseRecords,
+    directExpenseRows,
     salesAggs,
     yearMonthRows,
-  ] = await Promise.all([
-    listChartOfAccounts(db),
-    query<Record<string, unknown>>(
-      manualSqlAndParams.sql,
-      manualSqlAndParams.params,
-      db,
-    ),
-    listExpenseRecords(
-      parsedPeriod.mode === "month" ? parsedPeriod.raw : undefined,
-      undefined,
-      db,
-      {
-        year: parsedPeriod.mode === "year" ? parsedPeriod.raw : undefined,
-        dateRange:
-          parsedPeriod.mode === "month_range" ||
-          parsedPeriod.mode === "date_range"
-            ? { start: parsedPeriod.start!, end: parsedPeriod.end! }
-            : undefined,
-      },
-    ),
-    getMonthlyChannelSalesAggregates(periodFilter, db),
-    query<{ ym: string }>(
-      `SELECT DISTINCT SUBSTRING(paid_date FROM 1 FOR 7) AS ym
-       FROM daily_summaries
-       WHERE paid_date ~ '^[0-9]{4}-[0-9]{2}'
-       UNION
-       SELECT DISTINCT year_month AS ym FROM expense_records WHERE year_month ~ '^[0-9]{4}-[0-9]{2}'
-       UNION
-       SELECT DISTINCT year_month AS ym FROM journal_entries WHERE year_month ~ '^[0-9]{4}-[0-9]{2}'
-       ORDER BY ym DESC`,
-      [],
-      db,
-    ),
-  ]);
+  ] = await runQueries();
 
   const accountMap = new Map<string, ChartOfAccount>();
   for (const acc of coaList) {
@@ -914,7 +966,7 @@ export async function getAccountingOverview(
   for (const agg of salesAggs) {
     const grossRevenue = round2(agg.orderIncome + agg.compensationIncome);
     const payout = round2(agg.totalPayout);
-    if (grossRevenue <= 0 && payout <= 0) continue;
+    if (grossRevenue <= 0 && payout === 0) continue;
 
     const revAcc = getRevenueAccountForChannel(agg.channel);
     const chCode = getChannelShortCode(agg.channel);
@@ -976,11 +1028,12 @@ export async function getAccountingOverview(
       });
     }
 
-    // RV: บันทึกรับเงินโอนสุทธิ (Settlement Payout) และหักค่าธรรมเนียมแพลตฟอร์ม
+    // RV: บันทึกรับเงินโอนสุทธิ (Settlement Payout) และหักค่าธรรมเนียมแพลตฟอร์ม (#24: รองรับกรณี payout ติดลบเมื่อถูกหักค่าธรรมเนียม/ค่าส่งตีกลับเกินยอดขาย)
     if (grossRevenue > 0 || payout !== 0) {
       const platformFeeDeduction = round2(Math.max(0, grossRevenue - payout));
       const extraSettlementGain = round2(Math.max(0, payout - grossRevenue));
-      const rvTotal = round2(Math.max(grossRevenue, payout));
+      const negativePayoutOutflow = payout < 0 ? round2(Math.abs(payout)) : 0;
+      const rvTotal = round2(Math.max(grossRevenue, payout, platformFeeDeduction));
 
       if (rvTotal > 0) {
         const rvLines: JournalEntryLine[] = [];
@@ -1018,6 +1071,18 @@ export async function getAccountingOverview(
             debit: 0,
             credit: grossRevenue,
             memo: `ล้างบัญชีลูกหนี้การค้า ${agg.channel} ประจำงวด ${agg.yearMonth}`,
+          });
+        }
+        if (negativePayoutOutflow > 0) {
+          rvLines.push({
+            accountCode: "11121.01",
+            accountName: getAccountName(
+              "11121.01",
+              "กสิกรไทย (บัญชีกระแสรายวัน/ออมทรัพย์หลัก)",
+            ),
+            debit: 0,
+            credit: negativePayoutOutflow,
+            memo: `หักชำระส่วนต่างยอดโอนติดลบ ${agg.channel} ประจำงวด ${agg.yearMonth}`,
           });
         }
         if (extraSettlementGain > 0) {
@@ -1189,6 +1254,103 @@ export async function getAccountingOverview(
         lines: pvLines,
       });
     }
+  }
+
+  // 3b. Direct Monthly Expenses (`monthly_expenses` table — #26: sync with /expenses overview)
+  for (const dirRow of directExpenseRows) {
+    const ym = String(dirRow.year_month || "");
+    if (!ym) continue;
+    if (parsedPeriod.mode === "year" && !ym.startsWith(parsedPeriod.raw)) continue;
+    if (parsedPeriod.mode === "month" && ym !== parsedPeriod.raw) continue;
+    if (
+      (parsedPeriod.mode === "month_range" || parsedPeriod.mode === "date_range") &&
+      parsedPeriod.start &&
+      parsedPeriod.end
+    ) {
+      const startYm = parsedPeriod.start.slice(0, 7);
+      const endYm = parsedPeriod.end.slice(0, 7);
+      if (ym < startYm || ym > endYm) continue;
+    }
+
+    const directAmount = round2(Number(dirRow.amount || 0));
+    if (directAmount <= 0) continue;
+
+    const catId = Number(dirRow.category_id || 0);
+    const catName = String(dirRow.category_name || "ค่าใช้จ่ายรายเดือน");
+    const rawAccCode = String(dirRow.category_account_code || "").trim();
+    const expAccountCode =
+      rawAccCode && accountMap.has(rawAccCode) ? rawAccCode : rawAccCode || "53032.99";
+    const expAccountName = getAccountName(expAccountCode, catName);
+    const ymCompact = ym.replace("-", "");
+    const entryDate = `${ym}-28`;
+    const docId = `${ymCompact}-M${catId}`;
+
+    journals.push({
+      id: `uv-direct-${ym}-${catId}`,
+      documentNo: `UV${docId}`,
+      journalType: "UV",
+      entryDate,
+      yearMonth: ym,
+      contactName: "รายการปรับปรุงรายเดือน",
+      referenceNo: `M-${ym}-${catId}`,
+      description: `${catName} (ยอดรวมรายเดือน ${ym})`,
+      remarks: String(dirRow.note || `เชื่อมอัตโนมัติจากตารางรายจ่ายรายเดือน (${ym})`),
+      totalDebit: directAmount,
+      totalCredit: directAmount,
+      status: "approved",
+      sourceType: "expense_purchase",
+      lines: [
+        {
+          accountCode: expAccountCode,
+          accountName: expAccountName,
+          debit: directAmount,
+          credit: 0,
+          memo: `${catName} ประจำเดือน ${ym}`,
+        },
+        {
+          accountCode: "21210",
+          accountName: getAccountName("21210", "เจ้าหนี้การค้า - ทั่วไป"),
+          debit: 0,
+          credit: directAmount,
+          memo: `ตั้งค่าใช้จ่ายรายเดือน ${catName}`,
+        },
+      ],
+    });
+
+    journals.push({
+      id: `pv-direct-${ym}-${catId}`,
+      documentNo: `PV${docId}`,
+      journalType: "PV",
+      entryDate,
+      yearMonth: ym,
+      contactName: "รายการปรับปรุงรายเดือน",
+      referenceNo: `M-${ym}-${catId}`,
+      description: `จ่ายชำระ: ${catName} (ยอดรวมรายเดือน ${ym})`,
+      remarks: String(dirRow.note || `เชื่อมอัตโนมัติจากตารางรายจ่ายรายเดือน (${ym})`),
+      totalDebit: directAmount,
+      totalCredit: directAmount,
+      status: "approved",
+      sourceType: "expense_payment",
+      lines: [
+        {
+          accountCode: "21210",
+          accountName: getAccountName("21210", "เจ้าหนี้การค้า - ทั่วไป"),
+          debit: directAmount,
+          credit: 0,
+          memo: `ล้างเจ้าหนี้รายเดือน ${catName}`,
+        },
+        {
+          accountCode: "11121.01",
+          accountName: getAccountName(
+            "11121.01",
+            "กสิกรไทย (บัญชีกระแสรายวัน/ออมทรัพย์หลัก)",
+          ),
+          debit: 0,
+          credit: directAmount,
+          memo: `จ่ายชำระค่า ${catName} ประจำเดือน ${ym}`,
+        },
+      ],
+    });
   }
 
   // Sort all journals newest first
