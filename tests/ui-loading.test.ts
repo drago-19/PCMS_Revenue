@@ -261,3 +261,34 @@ test("navigation loading: prevents 15-second stuck skeleton when navigating to t
     "LINE_MISMATCH_SQL correlated subquery must only run when needed",
   );
 });
+
+test("pwa window-controls-overlay: manifest, titlebar component, and CSS offsets are wired", () => {
+  const manifestSource = readSource("src/app/manifest.ts");
+  assert.match(
+    manifestSource,
+    /display_override:\s*\[\s*"window-controls-overlay"\s*,\s*"standalone"/,
+    "manifest.ts must declare window-controls-overlay in display_override",
+  );
+
+  const layoutSource = readSource("src/app/layout.tsx");
+  assert.match(
+    layoutSource,
+    /<WindowTitleBar\s+companyId=\{companyId\}\s+companyName=\{settings\.name\}\s*\/>/,
+    "layout.tsx must render WindowTitleBar",
+  );
+
+  const titlebarSource = readSource("src/components/WindowTitleBar.tsx");
+  assert.match(titlebarSource, /windowControlsOverlay/);
+  assert.match(titlebarSource, /display-mode:\s*window-controls-overlay/);
+  assert.match(titlebarSource, /data-testid="window-titlebar"/);
+  assert.match(titlebarSource, /data-testid="window-titlebar-back-btn"/);
+  assert.match(titlebarSource, /data-testid="window-titlebar-forward-btn"/);
+  assert.match(titlebarSource, /data-testid="window-titlebar-refresh-btn"/);
+  assert.match(titlebarSource, /no-print/);
+
+  const globalsSource = readSource("src/app/globals.css");
+  assert.match(globalsSource, /--wco-offset:\s*env\(titlebar-area-height,\s*36px\)/);
+  assert.match(globalsSource, /width:\s*env\(titlebar-area-width,\s*100%\)/);
+  assert.match(globalsSource, /-webkit-app-region:\s*drag/);
+  assert.match(globalsSource, /-webkit-app-region:\s*no-drag/);
+});

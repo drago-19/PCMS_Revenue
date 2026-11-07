@@ -966,7 +966,7 @@ export function Sidebar({
 
   return (
     <>
-      <div className="mobile-topbar no-print sticky top-0 z-40 flex h-[61px] min-[1100px]:hidden items-center gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
+      <div className="mobile-topbar no-print sticky top-[var(--wco-offset,0px)] z-40 flex h-[61px] min-[1100px]:hidden items-center gap-3 border-b border-[#1e293b] bg-[#0f1117] px-3.5 py-2.5 text-white">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
             <Button

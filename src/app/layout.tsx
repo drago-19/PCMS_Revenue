@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono, Noto_Sans_Thai } from "next/font/google";
 import { Suspense, type ReactNode } from "react";
 import { NavigationProgress } from "@/components/NavigationProgress";
 import { Sidebar } from "@/components/Sidebar";
+import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getActiveCompanyId } from "@/lib/db";
@@ -78,6 +79,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           <Suspense fallback={null}>
             <NavigationProgress />
           </Suspense>
+          <WindowTitleBar companyId={companyId} companyName={settings.name} />
           <div className="app-shell has-[[data-login-page]]:!grid-cols-1">
             <Sidebar companyId={companyId} companyName={settings.name} />
             <div className="app-main">

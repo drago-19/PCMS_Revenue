@@ -115,7 +115,7 @@ export function InvoiceInteractiveView({
 
   return (
     <>
-      <Card className="no-print mb-5 w-full overflow-hidden border-border bg-white shadow-md min-[768px]:sticky min-[768px]:top-[61px] min-[768px]:z-30 min-[1100px]:top-0">
+      <Card className="no-print mb-5 w-full overflow-hidden border-border bg-white shadow-md min-[768px]:sticky min-[768px]:top-[calc(61px+var(--wco-offset,0px))] min-[768px]:z-30 min-[1100px]:top-[var(--wco-offset,0px)]">
         {toolbarTop}
         {mode === "full" ? (
           <div className="border-t border-border bg-[#f8fafc] px-4 py-2.5 sm:px-5">

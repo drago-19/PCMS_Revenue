@@ -9,6 +9,18 @@
 - **เป้าหมายปัจจุบัน**:
   - [x] ไม่มีงานค้าง
 
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — เพิ่มระบบ PWA Window Controls Overlay + แถบ Desktop Titlebar แบบโปรแกรมเต็มรูปแบบ)**:
+  - **ซ่อนแถบเมนูและชื่อเว็บไซต์เดิมเมื่อติดตั้งลงหน้าจอเครื่อง (`display_override: ["window-controls-overlay", "standalone", "minimal-ui"]`) พร้อมแถบควบคุมด่วนสไตล์โปรแกรม Desktop**:
+    - [x] เพิ่ม `display_override: ["window-controls-overlay", "standalone", "minimal-ui"]` ใน `src/app/manifest.ts` และอัปเดต `CACHE_NAME` ใน `public/sw.js`
+    - [x] สร้างคอมโพเนนต์ `src/components/WindowTitleBar.tsx` แถบ Titlebar โทนเข้ม (`#0f1117`) ที่แสดงเฉพาะตอนเปิดแอปในโหมด Window Controls Overlay (`navigator.windowControlsOverlay.visible` หรือ `(display-mode: window-controls-overlay)` หรือ `?wco=1`) พร้อมโลโก้, ชื่อหน้าปัจจุบันอัตโนมัติตามเส้นทาง, ป้ายชื่อบริษัท, ปุ่มย้อนกลับ / ไปข้างหน้า / รีเฟรช, พื้นที่ลากหน้าต่าง (`-webkit-app-region: drag`) และเว้นระยะปุ่มย่อ/ขยาย/ปิดของ OS (`env(titlebar-area-*)`) อัตโนมัติ
+    - [x] ปรับแต่ง CSS variables `--wco-offset` ใน `src/app/globals.css`, `src/components/Sidebar.tsx`, `src/components/ui/table.tsx`, และ `src/components/InvoiceInteractiveView.tsx` ให้ชดเชยระยะขอบบนของ Sidebar, แถบมือถือ, และตาราง Sticky Header อัตโนมัติโดยไม่กระทบหน้าเว็บปกติหรือหน้าพิมพ์เอกสาร (`@media print`)
+    - [x] อัปเดตคู่มือการติดตั้งใน `src/components/PwaInstallControl.tsx` แนะนำวิธีกดปุ่มลูกศร `⌃` มุมขวาบนเพื่อซ่อนแถบชื่อเรื่องและเมนูให้เหมือนโปรแกรมจริง
+    - [x] **ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx tsc --noEmit`: 0 error
+      - `pnpm test`: ผ่านครบ 77 tests (0 fail)
+      - `pnpm build`: สร้าง Production build ผ่านสำเร็จ
+      - ทดสอบผ่าน Headless Chromium ครบทั้ง 4 ขนาดหน้าจอ (`360px`, `390px`, `768px`, `1280px`) ไม่มีการล้นขอบหรือปุ่มซ้อนทับ (`overflowCount = 0`)
+
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — แก้ไขบั๊กและจุดเสี่ยงการเงิน/ภาษีครบทั้ง 27 ข้อ + เขียน Unit/Integration Test ดักครบทั้ง 27 ข้อ)**:
   - **แก้ไขช่องโหว่และจุดเสี่ยงการเงิน/ภาษีตั้งแต่การนำเข้าไฟล์ Excel/CSV, การผูกข้อมูลข้าม 3 ไฟล์, ใบกำกับภาษี, ยอดสินค้าขายดี (`/products`), จนถึงสมุดรายวันและรายจ่าย (`/accounting`, `/expenses`) ครบทั้ง 27 ข้อ พร้อมเขียน Automated Tests ดักไว้ครบทุกข้อ (`src/lib/ingest/parse.ts`, `src/lib/ingest/oms-parse.ts`, `src/lib/ingest/lazada-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/queries.ts`, `src/lib/db.ts`, `src/lib/accounting.ts`, `src/lib/expenses.ts`, `src/components/UploadForm.tsx`, `src/app/api/imports/route.ts`, `tests/ingest.test.ts`)**:
     - [x] **หมวด A–B (ข้อ #1–#10): การอ่านไฟล์ Excel/CSV และการจับคู่คอลัมน์ (`src/lib/ingest/parse.ts`, `src/lib/ingest/oms-parse.ts`, `src/components/UploadForm.tsx`, `src/app/api/imports/route.ts`)**:

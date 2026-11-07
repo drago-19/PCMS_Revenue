@@ -106,6 +106,9 @@ export function PwaInstallControl({
     }
 
     const mediaQuery = window.matchMedia("(display-mode: standalone)");
+    const wcoQuery = window.matchMedia(
+      "(display-mode: window-controls-overlay)",
+    );
     function handleDisplayModeChange(e: MediaQueryListEvent) {
       if (e.matches) {
         setIsStandalone(true);
@@ -115,6 +118,7 @@ export function PwaInstallControl({
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     window.addEventListener("appinstalled", handleAppInstalled);
     mediaQuery.addEventListener("change", handleDisplayModeChange);
+    wcoQuery.addEventListener("change", handleDisplayModeChange);
 
     return () => {
       window.removeEventListener(
@@ -123,6 +127,7 @@ export function PwaInstallControl({
       );
       window.removeEventListener("appinstalled", handleAppInstalled);
       mediaQuery.removeEventListener("change", handleDisplayModeChange);
+      wcoQuery.removeEventListener("change", handleDisplayModeChange);
     };
   }, []);
 
@@ -321,6 +326,22 @@ export function PwaInstallControl({
                       <strong>ติดตั้งแอป / เพิ่มลงในหน้าจอหลัก</strong>
                     </li>
                   </ul>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 rounded-xl border border-[#e2e8f0] bg-[#f8fafc] p-3">
+                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-[#0f172a] font-bold text-white">
+                  3
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="font-bold text-[#0f172a]">
+                    ซ่อนแถบเมนูและชื่อเว็บไซต์ด้านบนให้เหมือนโปรแกรมเต็มจอ
+                  </span>
+                  <span className="text-[#475569]">
+                    หลังเปิดหน้าต่างแอป ให้คลิกปุ่มลูกศรชี้ขึ้น{" "}
+                    <strong>⌃ (ซ่อนแถบชื่อเรื่อง / Hide title bar)</strong>{" "}
+                    มุมขวาบนใกล้ปุ่มย่อ/ขยาย เพื่อเปิดใช้แถบควบคุมด่วนของโปรแกรม
+                  </span>
                 </div>
               </div>
 
