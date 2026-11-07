@@ -4254,8 +4254,8 @@ test("reconcileCrossFileOrderUids merges an order initially imported without tra
       const impId1 = Number(imp1[0]!.id);
       const impId2 = Number(imp2[0]!.id);
 
-      // Step A: Save order without tracking number first
-      await saveOmsOrdersBatch(parsedOrder.orders, impId1, client);
+      // Step A: Save order without tracking number first (accounting summary file)
+      await saveOmsOrdersBatch(parsedOrder.orders, impId1, client, { isAccounting: true });
       await reconcileAndSyncThreeFiles(client, impId1, new Date().toISOString());
 
       const beforeItems = await query<{
@@ -4270,7 +4270,10 @@ test("reconcileCrossFileOrderUids merges an order initially imported without tra
         client,
       );
       assert.equal(beforeItems.length, 1);
-      assert.equal(beforeItems[0]!.product_detail, null);
+      assert.equal(
+        beforeItems[0]!.product_detail,
+        "CLEARANCE · สินค้าโล๊ะสต๊อก × 3",
+      );
 
       // Step B: Later upload items file that contains a tracking number
       await saveOmsItemsBatch(parsedItems.items, impId2, client);
@@ -4908,7 +4911,7 @@ test("reconcileAndSyncThreeFiles is 100% order-independent across all upload per
           const impId = Number(imp[0]!.id);
 
           if (step === "orders") {
-            await saveOmsOrdersBatch(parsedOrder.orders, impId, client);
+            await saveOmsOrdersBatch(parsedOrder.orders, impId, client, { isAccounting: true });
             await reconcileAndSyncThreeFiles(client, impId, new Date().toISOString());
           } else if (step === "items") {
             await saveOmsItemsBatch(parsedItems.items, impId, client);
@@ -5015,6 +5018,1205 @@ test("reconcileAndSyncThreeFiles is 100% order-independent across all upload per
     }
   }
 });
+
+test("LINE OA clearance orders without Shipnity items get 'CLEARANCE · สินค้าโล๊ะสต๊อก' fallback and active tax invoice", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const { saveOmsOrdersBatch, saveOmsItemsBatch, reconcileAndSyncThreeFiles } = await import(
+    "../src/lib/ingest/import-service"
+  );
+  const { query, withTransaction } = await import("../src/lib/db");
+  const { listBills } = await import("../src/lib/queries");
+
+  const lineOrdersXlsx = await buildXlsx([
+    {
+      name: "Orders",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อ",
+          "เบอร์โทร",
+          "ขนส่ง",
+          "ค่าส่งที่เก็บลูกค้า",
+          "ค่าส่งที่ร้านจ่าย",
+          "เลขพัสดุ",
+          "สร้างโดย",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+        ],
+        [
+          "LN_FULL",
+          "Line OA",
+          "ลูกค้ามีสินค้า",
+          "0811111111",
+          "Flash Express",
+          0,
+          0,
+          "TH0101",
+          "kissiestudio@gmail.com",
+          "12/09/2026",
+          "12/09/2026",
+          1,
+          290,
+          290,
+        ],
+        [
+          "AB015",
+          "Line OA",
+          "ปิยนุช",
+          "0899999999",
+          "Kerry",
+          22,
+          0,
+          "-",
+          "-",
+          "12/09/2026",
+          "12/09/2026",
+          3,
+          139,
+          139,
+        ],
+      ],
+    },
+  ]);
+
+  const lineItemsXlsx = await buildXlsx([
+    {
+      name: "OrderItems",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "รหัสสินค้า",
+          "ชื่อสินค้า",
+          "ราคา",
+          "จำนวน",
+          "ยอดขายออเดอร์",
+          "ค่าส่ง",
+          "ผู้ส่ง",
+          "ชื่อลูกค้า",
+          "ที่อยู่",
+          "เบอร์โทร",
+          "วันที่โอน",
+          "วันที่สร้าง",
+          "ขนส่ง",
+          "ช่องทาง",
+          "เลขพัสดุ",
+        ],
+        [
+          "LN_FULL",
+          "KS-01",
+          "ชุดเดรส Kissi",
+          290,
+          1,
+          290,
+          0,
+          "Kissi Studio",
+          "ลูกค้ามีสินค้า",
+          "123 กทม",
+          "0811111111",
+          "12/09/2026",
+          "12/09/2026",
+          "Flash Express",
+          "Line OA",
+          "TH0101",
+        ],
+      ],
+    },
+  ]);
+
+  const parsedOrders = await detectAndParseOmsInput(lineOrdersXlsx);
+  const parsedItems = await detectAndParseOmsInput(lineItemsXlsx);
+  assert.ok(parsedOrders && parsedOrders.fileType === "oms_orders");
+  assert.ok(parsedItems && parsedItems.fileType === "oms_items");
+
+  const schemaName = "test_line_clearance";
+  try {
+    await withTransaction(async (client) => {
+      await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+      await client.query(`SET LOCAL search_path TO ${schemaName}, public`);
+      for (const table of [
+        "imports",
+        "transactions",
+        "oms_orders",
+        "oms_order_items",
+        "products",
+        "daily_summaries",
+        "sku_summaries",
+        "invoice_registry",
+        "invoice_registry_audit",
+        "app_settings",
+      ]) {
+        await client.query(
+          `CREATE TABLE ${schemaName}.${table} (LIKE public.${table} INCLUDING ALL)`,
+        );
+      }
+
+      const imp1 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('line_items.xlsx', 'hash_line_items', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_items')
+         RETURNING id`,
+        [],
+        client,
+      );
+      await saveOmsItemsBatch(parsedItems.items, Number(imp1[0]!.id), client);
+      await reconcileAndSyncThreeFiles(client, Number(imp1[0]!.id), new Date().toISOString());
+
+      // First, verify when orders come ONLY from normal Shipnity export (isAccounting: false),
+      // LN_FULL is categorized under line_pending_acc ("รอเทียบไฟล์บัญชี") and NOT lineMatched!
+      const imp2 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type, is_accounting)
+         VALUES ('Data_04-11-2026.xlsx', 'hash_shipnity_only', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_orders', 0)
+         RETURNING id`,
+        [],
+        client,
+      );
+      await saveOmsOrdersBatch([parsedOrders.orders[0]!], Number(imp2[0]!.id), client, {
+        isAccounting: false,
+      });
+      await reconcileAndSyncThreeFiles(client, Number(imp2[0]!.id), new Date().toISOString());
+
+      const { isOrderEligibleForInvoice } = await import(
+        "../src/lib/invoice"
+      );
+      const beforeAccRes = await listBills({ channel: "LINE", linkStatus: "all" }, client);
+      const pendingAccRes = await listBills({ channel: "LINE", linkStatus: "line_pending_acc" }, client);
+      assert.equal(beforeAccRes.total, 1);
+      assert.equal(beforeAccRes.linkCounts.lineMatched, 0);
+      assert.equal(beforeAccRes.linkCounts.linePendingAcc, 1);
+      assert.equal(pendingAccRes.total, 1);
+      assert.equal(pendingAccRes.rows[0]!.lineComparisonStatus, "shipnity_only");
+      assert.equal(
+        pendingAccRes.rows[0]!.invoiceNo,
+        null,
+        "Shipnity-only LINE order must NOT receive a tax invoice before accounting approval",
+      );
+      assert.equal(
+        isOrderEligibleForInvoice(pendingAccRes.rows[0]!),
+        false,
+        "Shipnity-only LINE order must NOT be eligible for tax filing",
+      );
+
+      // Next, upload the accounting summary file (isAccounting: true) containing LN_FULL + AB015 (clearance)
+      const imp3 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type, is_accounting)
+         VALUES ('line_69.xlsx', 'hash_line_69', 100, now(), 'upload', 'ok', 2, 2, 2, 'oms_orders', 1)
+         RETURNING id`,
+        [],
+        client,
+      );
+      await saveOmsOrdersBatch(parsedOrders.orders, Number(imp3[0]!.id), client, {
+        isAccounting: true,
+      });
+      await reconcileAndSyncThreeFiles(client, Number(imp3[0]!.id), new Date().toISOString());
+
+      const allRes = await listBills({ channel: "LINE", linkStatus: "all" }, client);
+      const ordersOnlyRes = await listBills({ channel: "LINE", linkStatus: "oms_only" }, client);
+      const linkedRes = await listBills({ channel: "LINE", linkStatus: "linked" }, client);
+
+      assert.equal(allRes.total, 2);
+      assert.equal(linkedRes.total, 1);
+      assert.equal(ordersOnlyRes.total, 1);
+      assert.equal(allRes.linkCounts.lineMatched, 1);
+      assert.equal(allRes.linkCounts.omsOnly, 1);
+      assert.equal(allRes.linkCounts.linePendingAcc, 0);
+
+      const abRow = ordersOnlyRes.rows[0]!;
+      assert.equal(abRow.orderCode, "AB015");
+      assert.equal(abRow.shopName, "Kissi Studio");
+      assert.ok(abRow.invoiceNo && abRow.invoiceNo.startsWith("LN2609/"));
+      assert.equal(abRow.lineComparisonStatus, "orders_only");
+      assert.deepEqual(abRow.omsItems, [
+        {
+          skuCode: "CLEARANCE",
+          productName: "สินค้าโล๊ะสต๊อก",
+          unitPrice: 39,
+          quantity: 3,
+        },
+      ]);
+
+      // Verify deleting the accounting import (imp3) cleanly removes AB015 (clearance)
+      // while preserving LN_FULL (Shipnity order) and restoring its status to line_pending_acc!
+      const { deleteImport } = await import("../src/lib/queries");
+      await deleteImport(Number(imp3[0]!.id), client);
+
+      const afterDeleteAccRes = await listBills({ channel: "LINE", linkStatus: "all" }, client);
+      assert.equal(afterDeleteAccRes.total, 1);
+      assert.equal(afterDeleteAccRes.linkCounts.lineMatched, 0);
+      assert.equal(afterDeleteAccRes.linkCounts.linePendingAcc, 1);
+      assert.equal(afterDeleteAccRes.linkCounts.omsOnly, 0);
+      assert.equal(afterDeleteAccRes.rows[0]!.orderCode, "LN_FULL");
+      assert.equal(afterDeleteAccRes.rows[0]!.lineComparisonStatus, "shipnity_only");
+      assert.equal(
+        afterDeleteAccRes.rows[0]!.invoiceNo,
+        null,
+        "After deleting accounting import, LN_FULL reverts to shipnity_only and must not have an active invoiceNo",
+      );
+      assert.equal(isOrderEligibleForInvoice(afterDeleteAccRes.rows[0]!), false);
+
+      throw new Error("ROLLBACK_LINE_CLEARANCE_TEST");
+    });
+  } catch (err) {
+    if (!(err instanceof Error && err.message === "ROLLBACK_LINE_CLEARANCE_TEST")) {
+      throw err;
+    }
+  }
+});
+
+test("Facebook 2-file comparison: parses accounting summary with warehouse pickup, shifted sales columns, size-exchange rows without orderCode, and skips footer sum row", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const { saveOmsOrdersBatch, saveOmsItemsBatch, reconcileAndSyncThreeFiles } =
+    await import("../src/lib/ingest/import-service");
+  const { withTransaction, query } = await import("../src/lib/db");
+  const { listBills } = await import("../src/lib/queries");
+
+  const fbAccountingCsv = [
+    ",เลขที่ออเดอร์,ชื่อ,เบอร์โทร,ช่องทางติดต่อ,ชื่อตามช่องทางติดต่อ,ขนส่ง,ค่าส่งที่เก็บลูกค้า,จังหวัด,ธนาคาร,เลขพัสดุ,ค่าส่งที่ร้านจ่าย,หมายเหตุ,สร้างโดย,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,เลขที่บน Marketplace,วันที่พิมพ์,ส่วนลดรวม,จำนวนรวม,ยอดขาย,กำไร,",
+    ",CC36,แก้ว,,facebook,,J&T Express,0,Unknown,กสิกร,,0,โอนแล้ว รับที่โกดัง,kissiestudio@gmail.com,06/10/2026 12:03,06/10/2026 13:04,06/10/2026 13:04,-,06/10/2026 13:04,0,2,179,179,0",
+    ",CJ24,Paweena Kongjiw,0899960004,facebook,,J&T Express,50,Unknown,กสิกร,829450358590,0,เพจ kissy.Paweena Kongjiw ,kissiestudio@gmail.com,11/10/2026 13:13,11/10/2026 13:30,11/10/2026 13:33,-,11/10/2026 13:33,0,1,249,249,0",
+    ",,,,,,,,,,,,รายได้ค่าเปลี่ยนไซส์,,2026-10-21 13:13:00,2026-10-21 13:13:00,2026-10-21 13:13:00,,2026-10-21 13:13:00,,,50,,",
+    ",,,,,,,,,,,,รายได้ค่าเปลี่ยนไซส์,,2026-10-22 13:13:00,2026-10-22 13:13:00,2026-10-22 13:13:00,,2026-10-22 13:13:00,,,50,,",
+    ",,,,,,,,,,,,,,,,,,,,,528,,",
+  ].join("\n");
+
+  const parsedAcc = await detectAndParseOmsInput(Buffer.from(fbAccountingCsv, "utf8"));
+  assert.ok(parsedAcc);
+  assert.equal(parsedAcc.fileType, "oms_orders");
+  assert.equal(parsedAcc.orders.length, 4, "Must parse 4 orders and skip the 528 footer row");
+  assert.deepEqual(
+    parsedAcc.orders.map((o) => ({
+      code: o.orderCode,
+      channel: o.channel,
+      sales: o.salesAmount,
+      note: o.note,
+    })),
+    [
+      { code: "CC36", channel: "Facebook", sales: 179, note: "โอนแล้ว รับที่โกดัง" },
+      { code: "CJ24", channel: "Facebook", sales: 249, note: "เพจ kissy.Paweena Kongjiw" },
+      { code: "FB-261021", channel: "Facebook", sales: 50, note: "รายได้ค่าเปลี่ยนไซส์" },
+      { code: "FB-261022", channel: "Facebook", sales: 50, note: "รายได้ค่าเปลี่ยนไซส์" },
+    ],
+  );
+
+  const shipnityItemsCsv = [
+    "เลขที่ออเดอร์,รหัสสินค้า,สินค้า,ราคา,จำนวน,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,เบอร์โทร,วันที่โอนเงิน,วันที่สร้าง,ช่องทางติดต่อ,เลขพัสดุ",
+    "CC36,SKU-FB1,กางเกงยีนส์,89.5,2,179,0,Kissi Studio,แก้ว,,2026-10-06,2026-10-06,Facebook,",
+    "CJ24,SKU-FB2,กระโปรงยีนส์,199,1,249,50,Kissi Studio,Paweena Kongjiw,0899960004,2026-10-11,2026-10-11,Facebook,829450358590",
+    "CZ79,SKU-FB3,เสื้อยืด,259,1,259,0,Kissi Studio,ลูกค้า Shipnity,,2026-10-15,2026-10-15,Facebook,829450399999",
+  ].join("\n");
+  const parsedItems = await detectAndParseOmsInput(Buffer.from(shipnityItemsCsv, "utf8"));
+  assert.ok(parsedItems);
+
+  const shipnityOrdersCsv = [
+    "เลขที่ออเดอร์,ชื่อ,ช่องทางติดต่อ,ค่าส่งที่เก็บลูกค้า,ค่าส่งที่ร้านจ่าย,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,จำนวนรวม,ยอดขาย,กำไร",
+    "CC36,แก้ว,Facebook,0,0,,2026-10-06,2026-10-06,2026-10-06,2,179,179",
+    "CJ24,Paweena Kongjiw,Facebook,50,0,829450358590,2026-10-11,2026-10-11,2026-10-11,1,249,249",
+    "CZ79,ลูกค้า Shipnity,Facebook,0,0,829450399999,2026-10-15,2026-10-15,2026-10-15,1,259,259",
+  ].join("\n");
+  const parsedShipnityOrders = await detectAndParseOmsInput(
+    Buffer.from(shipnityOrdersCsv, "utf8"),
+  );
+  assert.ok(parsedShipnityOrders);
+
+  const schemaName = `test_fb_acc_${Date.now()}`;
+  try {
+    await withTransaction(async (client) => {
+      await client.query(`CREATE SCHEMA ${schemaName}`);
+      await client.query(`SET LOCAL search_path TO ${schemaName}, public`);
+      for (const table of [
+        "imports",
+        "transactions",
+        "oms_orders",
+        "oms_order_items",
+        "products",
+        "daily_summaries",
+        "sku_summaries",
+        "invoice_registry",
+        "invoice_registry_audit",
+        "app_settings",
+      ]) {
+        await client.query(
+          `CREATE TABLE ${schemaName}.${table} (LIKE public.${table} INCLUDING ALL)`,
+        );
+      }
+
+      const impItems = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('fb_items.xlsx', 'hash_fb_items', 100, now(), 'upload', 'ok', 3, 3, 3, 'oms_items')
+         RETURNING id`,
+        [],
+        client,
+      );
+      await saveOmsItemsBatch(parsedItems.items, Number(impItems[0]!.id), client);
+
+      const impShipOrders = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type, is_accounting)
+         VALUES ('fb_shipnity_orders.xlsx', 'hash_fb_ship_orders', 100, now(), 'upload', 'ok', 3, 3, 3, 'oms_orders', 0)
+         RETURNING id`,
+        [],
+        client,
+      );
+      await saveOmsOrdersBatch(
+        parsedShipnityOrders.orders,
+        Number(impShipOrders[0]!.id),
+        client,
+        { isAccounting: false },
+      );
+      await reconcileAndSyncThreeFiles(
+        client,
+        Number(impShipOrders[0]!.id),
+        new Date().toISOString(),
+      );
+
+      // Before uploading accounting file: all 3 Shipnity orders are in line_pending_acc ("รอเทียบไฟล์บัญชี")
+      const beforeAcc = await listBills({ channel: "Facebook", linkStatus: "all" }, client);
+      assert.equal(beforeAcc.total, 3);
+      assert.equal(beforeAcc.linkCounts.lineMatched, 0);
+      assert.equal(beforeAcc.linkCounts.linePendingAcc, 3);
+
+      // Upload the Facebook accounting summary file (isAccounting: true)
+      const impAcc = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type, is_accounting)
+         VALUES ('เฟสบุ๊ค.xlsx', 'hash_fb_acc', 100, now(), 'upload', 'ok', 4, 4, 4, 'oms_orders', 1)
+         RETURNING id`,
+        [],
+        client,
+      );
+      await saveOmsOrdersBatch(parsedAcc.orders, Number(impAcc[0]!.id), client, {
+        isAccounting: true,
+      });
+      await reconcileAndSyncThreeFiles(
+        client,
+        Number(impAcc[0]!.id),
+        new Date().toISOString(),
+      );
+
+      const allFb = await listBills({ channel: "Facebook", linkStatus: "all" }, client);
+      const matchedFb = await listBills({ channel: "Facebook", linkStatus: "linked" }, client);
+      const accOnlyFb = await listBills({ channel: "Facebook", linkStatus: "oms_only" }, client);
+      const pendingFb = await listBills(
+        { channel: "Facebook", linkStatus: "line_pending_acc" },
+        client,
+      );
+
+      assert.equal(allFb.total, 5, "3 Shipnity orders + 2 accounting size-exchange rows = 5");
+      assert.equal(matchedFb.total, 2, "CC36 and CJ24 matched");
+      assert.equal(accOnlyFb.total, 2, "2 size-exchange rows of 50 THB in oms_only");
+      assert.equal(pendingFb.total, 1, "CZ79 remains in pending accounting comparison");
+      assert.equal(allFb.linkCounts.lineMatched, 2);
+      assert.equal(allFb.linkCounts.omsOnly, 2);
+      assert.equal(allFb.linkCounts.linePendingAcc, 1);
+
+      for (const exRow of accOnlyFb.rows) {
+        assert.equal(exRow.income, 50);
+        assert.equal(exRow.shopName, "Kissi Studio");
+        assert.ok(exRow.invoiceNo && exRow.invoiceNo.startsWith("FB2610/"));
+        assert.equal(exRow.lineComparisonStatus, "orders_only");
+        assert.deepEqual(exRow.omsItems, [
+          {
+            skuCode: "CLEARANCE",
+            productName: "รายได้ค่าเปลี่ยนไซส์",
+            unitPrice: 50,
+            quantity: 1,
+          },
+        ]);
+      }
+
+      // Test manual channel switching (updateOrderChannel: Facebook ⇄ LINE)
+      const { updateOrderChannel, getBill } = await import("../src/lib/queries");
+      const { isOrderEligibleForInvoice, buildInvoice } = await import(
+        "../src/lib/invoice"
+      );
+      const cz79Row = pendingFb.rows[0]!;
+      assert.equal(cz79Row.orderCode, "CZ79");
+      assert.equal(cz79Row.channel, "Facebook");
+      assert.equal(
+        cz79Row.invoiceNo,
+        null,
+        "Shipnity-only Facebook order CZ79 must not have an invoiceNo before accounting approval",
+      );
+      assert.equal(isOrderEligibleForInvoice(cz79Row), false);
+
+      const switchedToLine = await updateOrderChannel(
+        cz79Row.externalId,
+        "LINE",
+        client,
+      );
+      assert.ok(switchedToLine);
+      assert.equal(switchedToLine.previousChannel, "Facebook");
+      assert.equal(switchedToLine.channel, "LINE");
+      assert.equal(
+        switchedToLine.invoiceNo,
+        null,
+        "Shipnity-only order CZ79 switched to LINE must remain without invoiceNo until approved in accounting file",
+      );
+
+      // Switching an accounting-approved order (CC36) from Facebook to LINE assigns LN2610/*
+      const cc36Row = matchedFb.rows.find((r) => r.orderCode === "CC36")!;
+      assert.ok(cc36Row.invoiceNo && cc36Row.invoiceNo.startsWith("FB2610/"));
+      const cc36Switched = await updateOrderChannel(cc36Row.externalId, "LINE", client);
+      assert.ok(cc36Switched);
+      assert.ok(
+        cc36Switched.invoiceNo && cc36Switched.invoiceNo.startsWith("LN2610/"),
+        `Expected LN2610/* invoice after switching accounting-approved CC36 to LINE, got ${cc36Switched.invoiceNo}`,
+      );
+
+      const updatedBill = await getBill(cz79Row.externalId, client);
+      assert.ok(updatedBill);
+      assert.equal(updatedBill.channel, "LINE");
+      assert.equal(updatedBill.invoiceNo, null);
+      assert.equal(isOrderEligibleForInvoice(updatedBill), false);
+
+      const lineBillsAfterSwitch = await listBills(
+        { channel: "LINE", linkStatus: "all" },
+        client,
+      );
+      assert.equal(lineBillsAfterSwitch.total, 2);
+
+      // Verify buildInvoice uses the Accounting Summary File amount when amount_diff occurs
+      const amountDiffSample = {
+        ...cc36Row,
+        channel: "LINE",
+        income: 190,
+        payout: 190,
+        omsSalesAmount: 190,
+        omsItemsSalesAmount: 229,
+        omsItemsListTotal: 229,
+        lineComparisonStatus: "amount_diff" as const,
+        omsItems: [
+          {
+            skuCode: "SKU-DIFF",
+            productName: "ชุดเดรส",
+            unitPrice: 229,
+            quantity: 1,
+          },
+        ],
+      };
+      assert.equal(isOrderEligibleForInvoice(amountDiffSample), true);
+      const builtDiffInv = buildInvoice(amountDiffSample);
+      assert.equal(builtDiffInv.salesAmount, 190, "Tax invoice salesAmount must use accounting summary file (190)");
+      assert.equal(builtDiffInv.total, 190, "Tax invoice total must use accounting summary file (190)");
+      assert.equal(builtDiffInv.discountTotal, 0, "No phantom discount on accounting-primary amount_diff invoice");
+      assert.equal(builtDiffInv.items[0]!.lineTotal, 190, "Item lineTotal must match accounting summary file (190)");
+
+      throw new Error("ROLLBACK_FB_ACC_TEST");
+    });
+  } catch (err) {
+    if (!(err instanceof Error && err.message === "ROLLBACK_FB_ACC_TEST")) {
+      throw err;
+    }
+  }
+});
+
+test("Audit Guards #1–#10 & #12 & #22–#23: Parser & Format Resilience (Buddhist Era, DMY/MDY Pre-Scan, Formula Errors, Cross-Company, Custom Mapping, FB Filter, Shifted Row, Fuzzy Priority, Multi-Sheet Dedup, Windows-874 CSV, Lazada Refund, Dual Extraction, Duplicate OrderCode)", async () => {
+  const {
+    parseDateValue,
+    detectDateColumnFormat,
+    toNumber,
+    isFormulaErrorValue,
+    decodeCsvBuffer,
+    parseWorkbook,
+  } = await import("../src/lib/ingest/parse");
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const { detectAndParseLazadaInput } = await import("../src/lib/ingest/lazada-parse");
+  const { detectCrossCompanyWarning } = await import("../src/lib/ingest/import-service");
+
+  // #1: Buddhist Era (พ.ศ. 2569 -> 2026), 2-digit year (69 -> 2026, 26 -> 2026), and Thai month names
+  assert.equal(parseDateValue("12/09/2569")?.iso, "2026-09-12", "#1 Buddhist Era DD/MM/2569");
+  assert.equal(parseDateValue("2569-10-05")?.iso, "2026-10-05", "#1 Buddhist Era YYYY-MM-DD");
+  assert.equal(parseDateValue("12/09/69")?.iso, "2026-09-12", "#1 2-digit Buddhist year 69 -> 2026");
+  assert.equal(parseDateValue("12/09/26")?.iso, "2026-09-12", "#1 2-digit CE year 26 -> 2026");
+  assert.equal(parseDateValue("12 ก.ย. 2569")?.iso, "2026-09-12", "#1 Thai short month ก.ย. 2569");
+  assert.equal(parseDateValue("5 มกราคม 2569")?.iso, "2026-01-05", "#1 Thai full month มกราคม 2569");
+
+  // #2: Ambiguous Date Format (DMY vs MDY) column pre-scan
+  const mdySampleCol = ["09/05/2026", "09/15/2026", "09/20/2026"];
+  const detectedFmt = detectDateColumnFormat(mdySampleCol);
+  assert.equal(detectedFmt, "MDY", "#2 Column with 09/15/2026 must be detected as MDY");
+  assert.equal(
+    parseDateValue("09/05/2026", detectedFmt)?.iso,
+    "2026-09-05",
+    "#2 09/05/2026 in MDY column must parse as 2026-09-05, not 2026-05-09",
+  );
+
+  // #3: Text-in-Number ("1,250 บาท", "500.-") & Excel Formula Error tokens (#REF!, #VALUE!, #DIV/0!)
+  assert.equal(toNumber("1,250 บาท"), 1250, "#3 Strip 'บาท' suffix");
+  assert.equal(toNumber("500.-"), 500, "#3 Strip '.-' suffix");
+  assert.equal(toNumber("350.50 THB"), 350.5, "#3 Strip 'THB' suffix");
+  assert.equal(isFormulaErrorValue("#REF!"), true, "#3 Detect #REF! formula error");
+  assert.equal(isFormulaErrorValue("#DIV/0!"), true, "#3 Detect #DIV/0! formula error");
+  assert.equal(toNumber("#VALUE!"), 0, "#3 Formula error must coerce to 0 in toNumber while isFormulaErrorValue flags it");
+
+  const formulaErrOmsCsv = [
+    "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,ค่าส่งที่เก็บลูกค้า,ค่าส่งที่ร้านจ่าย,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,จำนวนรวม,ยอดขาย,กำไร",
+    "ORD_ERR1,TikTok,ลูกค้า1,0,0,TH111,12/09/2026,12/09/2026,12/09/2026,1,#REF!,200",
+    "ORD_BADDATE,TikTok,ลูกค้า2,0,0,TH112,วันพุธที่แล้ว,วันพุธที่แล้ว,12/09/2026,1,300,300",
+  ].join("\n");
+  const parsedErrOms = await detectAndParseOmsInput(Buffer.from(formulaErrOmsCsv, "utf8"));
+  assert.ok(parsedErrOms);
+  assert.ok(
+    parsedErrOms.warnings.some((w) => w.code === "FORMULA_ERROR"),
+    "#3 OMS parser must emit FORMULA_ERROR warning when salesAmount contains #REF!",
+  );
+  assert.ok(
+    parsedErrOms.warnings.some((w) => w.code === "INVALID_OMS_DATE"),
+    "#1 OMS parser must emit INVALID_OMS_DATE warning when date string is unparseable",
+  );
+
+  // #4: Cross-Company Import Warning
+  const warnSeeheng = detectCrossCompanyWarning("seeheng", "orders_oct.xlsx", [
+    "kissiestudio@gmail.com",
+    "Kiddee Shop",
+  ]);
+  assert.ok(warnSeeheng && warnSeeheng.code === "CROSS_COMPANY_WARNING", "#4 Warn when importing Dragon19 shops into seeheng");
+  const warnDragon = detectCrossCompanyWarning("dragon19", "รายงาน_ชีเฮง_ตค.xlsx", []);
+  assert.ok(warnDragon && warnDragon.code === "CROSS_COMPANY_WARNING", "#4 Warn when importing Seeheng file into dragon19");
+  assert.equal(
+    detectCrossCompanyWarning("dragon19", "orders_oct.xlsx", ["Kiddee Shop"]),
+    null,
+    "#4 No warning when company matches shop",
+  );
+
+  // #5: Stale Custom Mapping Override protection
+  const stdOmsCsv = [
+    "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,ค่าส่งที่เก็บลูกค้า,ค่าส่งที่ร้านจ่าย,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,จำนวนรวม,ยอดขาย,กำไร",
+    "ORD_MAP1,Shopee,สมชาย,30,15,SPX999,2026-09-12,2026-09-12,2026-09-12,1,500,450",
+  ].join("\n");
+  // Stale custom mapping tries to hijack "กำไร" -> "salesAmount" even though "ยอดขาย" (exact standard alias for salesAmount) exists!
+  const parsedProtectedMap = await detectAndParseOmsInput(Buffer.from(stdOmsCsv, "utf8"), {
+    กำไร: "salesAmount",
+  });
+  assert.ok(parsedProtectedMap);
+  assert.equal(
+    parsedProtectedMap.orders[0]!.salesAmount,
+    500,
+    "#5 Built-in exact 'ยอดขาย' (500) must not be overridden by stale custom mapping on 'กำไร' (450)",
+  );
+  assert.equal(
+    parsedProtectedMap.orders[0]!.profitAmount,
+    450,
+    "#5 Built-in exact 'กำไร' (450) must remain mapped to profitAmount",
+  );
+
+  // #6: Facebook Orders Without trackingNo / printedDate columns are preserved
+  const fbNoTrackColCsv = [
+    "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,วันที่สร้าง,วันที่โอนเงิน,จำนวนรวม,ยอดขาย,กำไร",
+    "FB_NOTRK_COL,Facebook,ลูกค้าเพจ,2026-09-12,2026-09-12,1,390,390",
+  ].join("\n");
+  const parsedFbNoTrk = await detectAndParseOmsInput(Buffer.from(fbNoTrackColCsv, "utf8"));
+  assert.ok(parsedFbNoTrk);
+  assert.equal(
+    parsedFbNoTrk.orders.length,
+    1,
+    "#6 Facebook order in a file without trackingNo/printedDate columns must be preserved",
+  );
+
+  // #7: Shifted Column Heuristic restricted to LINE/Facebook with unmapped numeric profitCol+1
+  const shopeeWithExtraColXlsx = await buildXlsx([
+    {
+      name: "Orders",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อ",
+          "ค่าส่งที่เก็บลูกค้า",
+          "ค่าส่งที่ร้านจ่าย",
+          "เลขพัสดุ",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "วันที่พิมพ์",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+          "หมายเหตุ",
+        ],
+        [
+          "SP_NOSHIFT",
+          "Shopee",
+          "ลูกค้า Shopee",
+          0,
+          0,
+          "SPX100",
+          "2026-09-12",
+          "2026-09-12",
+          "2026-09-12",
+          1,
+          0,
+          0,
+          999,
+        ],
+      ],
+    },
+  ]);
+  const parsedSpNoShift = await detectAndParseOmsInput(shopeeWithExtraColXlsx);
+  assert.ok(parsedSpNoShift);
+  assert.equal(
+    parsedSpNoShift.orders.length,
+    0,
+    "#7 Shopee row with 0 sales and numeric note (999) in profitCol+1 must NOT shift 999 into salesAmount and is filtered out as 0-sales",
+  );
+
+  // #8: Fuzzy Header Matching Priority (exact match on the right beats fuzzy match on the left)
+  const fuzzySettlementXlsx = await buildXlsx([
+    {
+      name: "Order details",
+      rows: [
+        [
+          "Order/adjustment ID",
+          "Type",
+          "Order created time",
+          "Order settled time",
+          "Currency",
+          "ยอดการชำระเงินทั้งหมดสำรอง", // fuzzy match for payout (contains ยอดการชำระเงินทั้งหมด)
+          "Total Revenue",
+          "Subtotal after seller discounts",
+          "Subtotal before discounts",
+          "Total Fees",
+          "ยอดการชำระเงินทั้งหมด", // exact match for payout on the right!
+        ],
+        [
+          "577000111222333444",
+          "Order",
+          "2026-09-10",
+          "2026-09-12",
+          "THB",
+          111, // wrong fuzzy column value
+          500,
+          500,
+          500,
+          -50,
+          450, // exact payout value
+        ],
+      ],
+    },
+  ]);
+  const parsedFuzzyPriority = await parseWorkbook(fuzzySettlementXlsx);
+  assert.equal(
+    parsedFuzzyPriority.transactions[0]!.fields.payout,
+    450,
+    "#8 Exact header match on the right (450) must override fuzzy match on the left (111)",
+  );
+
+  // #9: Multi-sheet duplication protection (skip 'Copy of ...' / 'สำเนา...' and deduplicate orderUid across sheets)
+  const multiSheetOmsXlsx = await buildXlsx([
+    {
+      name: "Orders_Main",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อ",
+          "เลขพัสดุ",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "วันที่พิมพ์",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+        ],
+        ["MS_01", "Shopee", "ลูกค้า A", "TH900", "2026-09-12", "2026-09-12", "2026-09-12", 1, 300, 250],
+      ],
+    },
+    {
+      name: "Copy of Orders_Main",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อ",
+          "เลขพัสดุ",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "วันที่พิมพ์",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+        ],
+        ["MS_02", "Shopee", "ลูกค้าสำเนา", "TH901", "2026-09-12", "2026-09-12", "2026-09-12", 1, 300, 250],
+      ],
+    },
+    {
+      name: "Orders_Part2",
+      rows: [
+        [
+          "เลขที่ออเดอร์",
+          "ช่องทางติดต่อ",
+          "ชื่อ",
+          "เลขพัสดุ",
+          "วันที่สร้าง",
+          "วันที่โอนเงิน",
+          "วันที่พิมพ์",
+          "จำนวนรวม",
+          "ยอดขาย",
+          "กำไร",
+        ],
+        ["MS_01", "Shopee", "ลูกค้า A", "TH900", "2026-09-12", "2026-09-12", "2026-09-12", 1, 300, 250],
+      ],
+    },
+  ]);
+  const parsedMultiSheet = await detectAndParseOmsInput(multiSheetOmsXlsx);
+  assert.ok(parsedMultiSheet);
+  assert.equal(
+    parsedMultiSheet.orders.length,
+    1,
+    "#9 Must skip 'Copy of Orders_Main' and deduplicate MS_01 across sheets",
+  );
+
+  // #10: CSV Encoding Windows-874 / TIS-620 auto-detection
+  // In Windows-874: "ก" = 0xA1, "ข" = 0xA2, "ค" = 0xA4
+  const win874Bytes = Buffer.from([0xa1, 0xa2, 0xa4, 0x2c, 0x31, 0x30, 0x30]);
+  const decodedWin874 = decodeCsvBuffer(win874Bytes);
+  assert.equal(decodedWin874, "กขค,100", "#10 Windows-874 Thai bytes must decode to UTF-8 'กขค,100'");
+
+  // #12: Lazada partial item refund/reversal nets against incomeTotal instead of inflating feeTotal
+  const lazadaRefundXlsx = await buildXlsx([
+    {
+      name: "Transaction Overview",
+      rows: [
+        [
+          "Transaction Date",
+          "Transaction Type",
+          "Transaction Name",
+          "Amount(Include Tax)",
+          "Order No.",
+          "Order Item No.",
+          "Paid Status",
+        ],
+        ["12 Sep 2026", "Orders-Lazada Fees", "Item Price Credit", 500, "9900112233", "101", "Paid"],
+        ["12 Sep 2026", "Orders-Lazada Fees", "Item Price Credit", -200, "9900112233", "102", "Paid"],
+        ["12 Sep 2026", "Orders-Lazada Fees", "Payment Fee", -15, "9900112233", "101", "Paid"],
+      ],
+    },
+  ]);
+  const parsedLazadaRefund = await detectAndParseLazadaInput(lazadaRefundXlsx);
+  assert.ok(parsedLazadaRefund);
+  assert.equal(parsedLazadaRefund.transactions.length, 1);
+  assert.equal(
+    parsedLazadaRefund.transactions[0]!.fields.incomeTotal,
+    300,
+    "#12 Lazada negative Item Price Credit (-200) must net against incomeTotal (500 - 200 = 300)",
+  );
+  assert.equal(
+    parsedLazadaRefund.transactions[0]!.fields.feeTotal,
+    -15,
+    "#12 Lazada feeTotal must only include actual fees (-15), not item price reversal",
+  );
+  assert.equal(parsedLazadaRefund.transactions[0]!.fields.payout, 285);
+
+  // #22: Dual Extraction for combined single-sheet Order + SKU exports
+  const combinedSheetCsv = [
+    "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,รหัสสินค้า,สินค้า,ราคา,จำนวน,ยอดขาย,ค่าส่งที่เก็บลูกค้า,ค่าส่งที่ร้านจ่าย,กำไร,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,เลขที่บน Marketplace",
+    "DUAL_01,Shopee,ลูกค้า Dual,SKU-D1,เสื้อเชิ้ต,250,2,500,0,25,400,SPX_DUAL,2026-09-12,2026-09-12,2026-09-12,260912DUAL",
+  ].join("\n");
+  const parsedDual = await detectAndParseOmsInput(Buffer.from(combinedSheetCsv, "utf8"));
+  assert.ok(parsedDual);
+  assert.equal(parsedDual.items.length, 1, "#22 Combined sheet must extract SKU item");
+  assert.equal(parsedDual.orders.length, 1, "#22 Combined sheet must also extract order financials");
+  assert.equal(parsedDual.orders[0]!.shippingFeeSeller, 25, "#22 Combined sheet preserves shippingFeeSeller");
+  assert.equal(parsedDual.orders[0]!.profitAmount, 400, "#22 Combined sheet preserves profitAmount");
+
+  // #23: Duplicate orderCode within the same oms_orders sheet
+  const dupOrderCodeCsv = [
+    "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,จำนวนรวม,ยอดขาย,กำไร",
+    "DUP_SAME,LINE,สมหญิง,TH_D1,2026-09-12,2026-09-12,2026-09-12,1,200,200",
+    "DUP_SAME,LINE,สมหญิง,TH_D1,2026-09-12,2026-09-12,2026-09-12,2,300,300",
+    "DUP_DIFF,LINE,ลูกค้าคนที่หนึ่ง,TH_D2,2026-09-12,2026-09-12,2026-09-12,1,150,150",
+    "DUP_DIFF,LINE,ลูกค้าคนที่สอง,TH_D2,2026-09-12,2026-09-12,2026-09-12,1,450,450",
+  ].join("\n");
+  const parsedDupCode = await detectAndParseOmsInput(Buffer.from(dupOrderCodeCsv, "utf8"));
+  assert.ok(parsedDupCode);
+  assert.equal(parsedDupCode.orders.length, 3, "#23 Same-customer duplicate merges (1) + diff-customer disambiguates (2) = 3 orders");
+  const mergedOrder = parsedDupCode.orders.find((o) => o.orderCode === "DUP_SAME")!;
+  assert.equal(mergedOrder.salesAmount, 500, "#23 Same-customer duplicate sums salesAmount (200 + 300 = 500)");
+  assert.equal(mergedOrder.totalQty, 3, "#23 Same-customer duplicate sums totalQty (1 + 2 = 3)");
+  const disambigOrder = parsedDupCode.orders.find((o) => o.orderCode === "DUP_DIFF-2");
+  assert.ok(disambigOrder, "#23 Different-customer duplicate disambiguates second row as DUP_DIFF-2");
+  assert.equal(disambigOrder!.salesAmount, 450);
+});
+
+test("Audit Guards #11, #13–#21 & #24–#27: Database Reconciliation, Tax Invoice Protection, Proportional SKU Summary, Accounting RV & Expense Guards", async () => {
+  const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
+  const {
+    saveOmsOrdersBatch,
+    saveOmsItemsBatch,
+    reconcileAndSyncThreeFiles,
+    refreshSummaryTables,
+  } = await import("../src/lib/ingest/import-service");
+  const { withTransaction, query, queryOne } = await import("../src/lib/db");
+  const {
+    getBill,
+    updateOrderBuyerInfo,
+    deleteImport,
+    listSkuSummariesPaged,
+  } = await import("../src/lib/queries");
+  const { getAccountingOverview } = await import("../src/lib/accounting");
+  const {
+    getExpensesOverview,
+    createExpenseCategory,
+    createExpenseRecord,
+    deleteExpenseCategory,
+    upsertMonthlyExpense,
+  } = await import("../src/lib/expenses");
+
+  const schemaName = `test_audit27_${Date.now()}`;
+  try {
+    await withTransaction(async (client) => {
+      await client.query(`CREATE SCHEMA ${schemaName}`);
+      await client.query(`SET LOCAL search_path TO ${schemaName}, public`);
+      for (const table of [
+        "imports",
+        "transactions",
+        "oms_orders",
+        "oms_order_items",
+        "products",
+        "daily_summaries",
+        "sku_summaries",
+        "invoice_registry",
+        "invoice_registry_audit",
+        "app_settings",
+        "expense_categories",
+        "monthly_expenses",
+        "expense_records",
+        "chart_of_accounts",
+        "journal_entries",
+      ]) {
+        await client.query(
+          `CREATE TABLE ${schemaName}.${table} (LIKE public.${table} INCLUDING ALL)`,
+        );
+      }
+
+      // #11: Cross-month boundary order (paid_date 2026-02-01, created_date 2026-01-31) links with item (paid_date 2026-01-31)
+      const impOrders1 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('orders_jan_feb.xlsx', 'h_ord_1', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_orders') RETURNING id`,
+        [],
+        client,
+      );
+      const impItems1 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('items_jan_feb.xlsx', 'h_itm_1', 100, now(), 'upload', 'ok', 2, 2, 1, 'oms_items') RETURNING id`,
+        [],
+        client,
+      );
+      const ord1Id = Number(impOrders1[0]!.id);
+      const itm1Id = Number(impItems1[0]!.id);
+
+      const boundaryOrders = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,ค่าส่งที่เก็บลูกค้า,ค่าส่งที่ร้านจ่าย,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,จำนวนรวม,ยอดขาย,กำไร,เลขที่บน Marketplace",
+            "MB_01,TikTok,ลูกค้าข้ามเดือน,0,0,JT_MB01,2026-01-31,2026-02-01,2026-02-01,2,450,450,5.80000111122223E+17",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      const boundaryItems = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,รหัสสินค้า,สินค้า,ราคา,จำนวน,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,เบอร์โทร,วันที่โอนเงิน,วันที่สร้าง,ช่องทางติดต่อ,เลขพัสดุ",
+            "MB_01,SKU-M1,เสื้อ A,300,1,450,0,Kiddee Shop,ลูกค้าข้ามเดือน,0812345678,2026-01-31,2026-01-31,TikTok,",
+            "MB_01,SKU-M2,เสื้อ B,200,1,450,0,Kiddee Shop,ลูกค้าข้ามเดือน,0812345678,2026-01-31,2026-01-31,TikTok,",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      assert.ok(boundaryOrders && boundaryItems);
+      await saveOmsOrdersBatch(boundaryOrders.orders, ord1Id, client);
+      await saveOmsItemsBatch(boundaryItems.items, itm1Id, client);
+      await reconcileAndSyncThreeFiles(client, itm1Id, new Date().toISOString());
+
+      const linkedBoundaryItems = await query<{ order_uid: string }>(
+        `SELECT order_uid FROM oms_order_items WHERE order_code = 'MB_01'`,
+        [],
+        client,
+      );
+      assert.equal(
+        linkedBoundaryItems[0]!.order_uid,
+        boundaryOrders.orders[0]!.orderUid,
+        "#11 Cross-month boundary item (2026-01-31) must link to order (2026-02-01) sharing created_date",
+      );
+
+      // #21: Proportional net_sales_amount allocation for multi-SKU order (SKU-M1 @ 300 + SKU-M2 @ 200 = 500 gross, 450 net order_sales_amount)
+      await refreshSummaryTables(client, { skus: ["SKU-M1", "SKU-M2"] });
+      const skuSumRows = await query<{ sku_code: string; gross_amount: number; net_sales_amount: number }>(
+        `SELECT sku_code, gross_amount, net_sales_amount FROM sku_summaries WHERE sku_code IN ('SKU-M1', 'SKU-M2') ORDER BY sku_code ASC`,
+        [],
+        client,
+      );
+      assert.equal(Number(skuSumRows[0]!.net_sales_amount), 270, "#21 SKU-M1 proportional net_sales_amount = 450 * (300/500) = 270");
+      assert.equal(Number(skuSumRows[1]!.net_sales_amount), 180, "#21 SKU-M2 proportional net_sales_amount = 450 * (200/500) = 180");
+
+      const pagedSkus = await listSkuSummariesPaged({ channel: "TikTok" }, client);
+      const m1Paged = pagedSkus.rows.find((r) => r.skuCode === "SKU-M1")!;
+      const m2Paged = pagedSkus.rows.find((r) => r.skuCode === "SKU-M2")!;
+      assert.equal(m1Paged.netSalesAmount, 270, "#21 listSkuSummariesPaged proportional netSalesAmount for SKU-M1 = 270");
+      assert.equal(m2Paged.netSalesAmount, 180, "#21 listSkuSummariesPaged proportional netSalesAmount for SKU-M2 = 180");
+
+      // #13: Buyer tax info edited on temporary 'คำสั่งซื้อ (OMS)' row is copied when Settlement arrives
+      await updateOrderBuyerInfo(
+        "MB_01",
+        {
+          buyerName: "บจก. ทดสอบใบกำกับภาษี",
+          buyerTaxId: "0105560001112",
+          buyerAddress: "99/9 ถ.สุขุมวิท กรุงเทพฯ",
+        },
+        client,
+      );
+      const impSettle = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type)
+         VALUES ('settlement_feb.xlsx', 'h_settle_1', 100, now(), 'upload', 'ok', 1, 1, 1, 'settlement') RETURNING id`,
+        [],
+        client,
+      );
+      const settle1Id = Number(impSettle[0]!.id);
+      await query(
+        `INSERT INTO transactions (
+           import_id, external_id, transaction_type, is_order, created_date, paid_date,
+           currency, income, fee_total, adjustment, payout, checks_json, warnings_json, normalized_json, created_at, channel
+         ) VALUES ($1, '580000111122223333', 'คำสั่งซื้อ', 1, '2026-01-31', '2026-02-02', 'THB', 450, -45, 0, 405, '{}'::jsonb, '[]'::jsonb, '{"fields":{"orderId":"580000111122223333","incomeTotal":450,"feeTotal":-45,"payout":405}}'::jsonb, now(), 'TikTok')`,
+        [settle1Id],
+        client,
+      );
+      await reconcileAndSyncThreeFiles(client, settle1Id, new Date().toISOString());
+
+      const settledBill = await getBill("580000111122223333", client);
+      assert.ok(settledBill);
+      assert.equal(settledBill.transactionType, "คำสั่งซื้อ");
+      assert.equal(
+        settledBill.buyerName,
+        "บจก. ทดสอบใบกำกับภาษี",
+        "#13 buyerName from temp OMS row must be copied to Settlement row",
+      );
+      assert.equal(
+        settledBill.buyerTaxId,
+        "0105560001112",
+        "#13 buyerTaxId from temp OMS row must be copied to Settlement row",
+      );
+
+      // #14: Deleting settlement import unlocks matched_external_id and restores OMS placeholder bill;
+      //      Deleting oms_items import does NOT delete oms_orders from File 1!
+      await deleteImport(settle1Id, client);
+      const restoredOmsBill = await getBill("MB_01", client);
+      assert.ok(
+        restoredOmsBill && restoredOmsBill.transactionType === "คำสั่งซื้อ (OMS)",
+        "#14 Deleting settlement import must unlock matched_external_id and restore OMS bill",
+      );
+      await deleteImport(itm1Id, client);
+      const orderStillExists = await queryOne<{ order_code: string }>(
+        `SELECT order_code FROM oms_orders WHERE order_code = 'MB_01'`,
+        [],
+        client,
+      );
+      assert.ok(
+        orderStillExists,
+        "#14 Deleting oms_items import must NOT delete oms_orders imported in File 1",
+      );
+
+      // #15: Auto-generated Order Code collision across two separate keyless accounting files on the same date
+      const keylessFile1 = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,หมายเหตุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,ยอดขาย,กำไร",
+            ",LINE,ลูกค้าเช้า,โอนรอบเช้า,2026-09-15,2026-09-15,2026-09-15,150,150",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      const keylessFile2 = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,หมายเหตุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,ยอดขาย,กำไร",
+            ",LINE,ลูกค้าบ่าย,โอนรอบบ่าย,2026-09-15,2026-09-15,2026-09-15,290,290",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      assert.ok(keylessFile1 && keylessFile2);
+      const impK1 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type, is_accounting)
+         VALUES ('line_morning.xlsx', 'h_k1', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_orders', 1) RETURNING id`,
+        [],
+        client,
+      );
+      const impK2 = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type, is_accounting)
+         VALUES ('line_afternoon.xlsx', 'h_k2', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_orders', 1) RETURNING id`,
+        [],
+        client,
+      );
+      await saveOmsOrdersBatch(keylessFile1.orders, Number(impK1[0]!.id), client, { isAccounting: true });
+      await saveOmsOrdersBatch(keylessFile2.orders, Number(impK2[0]!.id), client, { isAccounting: true });
+      const keylessRows = await query<{ order_code: string; sales_amount: number }>(
+        `SELECT order_code, sales_amount FROM oms_orders WHERE order_code LIKE 'LN-260915%' ORDER BY order_code ASC`,
+        [],
+        client,
+      );
+      assert.equal(
+        keylessRows.length,
+        2,
+        "#15 Second keyless file on same date must disambiguate auto-generated code instead of overwriting first file",
+      );
+
+      // #17, #18, #19: Short rotating orderCode (e.g. 'O10') across two different months must not cross-contaminate
+      //                in enrichTransactionsWithOms (#17), schema updates (#18), or updateOrderBuyerInfo (#19)
+      const rotOrdSep = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,จำนวนรวม,ยอดขาย,กำไร",
+            "O10,Shopee,ลูกค้ากันยายน,SPX_SEP,2026-09-10,2026-09-10,2026-09-10,1,300,270",
+            "O10,Shopee,ลูกค้าตุลาคม,SPX_OCT,2026-10-10,2026-10-10,2026-10-10,1,600,540",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      const rotItmSep = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,รหัสสินค้า,สินค้า,ราคา,จำนวน,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,ที่อยู่,เบอร์โทร,วันที่โอนเงิน,วันที่สร้าง,ช่องทางติดต่อ,เลขพัสดุ",
+            "O10,SKU-SEP,ชุดกันยายน,300,1,300,0,Kiddee Shop,ลูกค้ากันยายน,ที่อยู่กันยายน,0810000009,2026-09-10,2026-09-10,Shopee,SPX_SEP",
+            "O10,SKU-OCT,ชุดตุลาคม,600,1,600,0,Kissi Studio,ลูกค้าตุลาคม,ที่อยู่ตุลาคม,0810000010,2026-10-10,2026-10-10,Shopee,SPX_OCT",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      assert.ok(rotOrdSep && rotItmSep);
+      await saveOmsOrdersBatch(rotOrdSep.orders, ord1Id, client);
+      await saveOmsItemsBatch(rotItmSep.items, ord1Id, client);
+      await reconcileAndSyncThreeFiles(client, ord1Id, new Date().toISOString());
+
+      // #19: updateOrderBuyerInfo("O10") must only update the latest/target row, NOT both September and October!
+      await updateOrderBuyerInfo("O10", { buyerName: "บริษัท ตุลาคม จำกัด" }, client);
+      const sepBill = await getBill("O10|2026-09|SPX_SEP", client);
+      const octBill = await getBill("O10|2026-10|SPX_OCT", client);
+      assert.ok(sepBill && octBill);
+      assert.equal(octBill.buyerName, "บริษัท ตุลาคม จำกัด", "#19 Target October O10 updated");
+      assert.equal(sepBill.buyerName, null, "#19 September O10 must NOT be overwritten by October O10 buyer edit");
+      assert.equal(sepBill.customerAddress, "ที่อยู่กันยายน", "#17 September O10 retains September address");
+      assert.equal(octBill.customerAddress, "ที่อยู่ตุลาคม", "#17 October O10 retains October address");
+
+      // #20: Deleting an accounting import that overlaid a Shipnity LINE order restores both SQL columns AND normalized_json.fields!
+      const lineShipItems = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,รหัสสินค้า,สินค้า,ราคา,จำนวน,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,ที่อยู่,เบอร์โทร,วันที่โอนเงิน,วันที่สร้าง,ช่องทางติดต่อ,เลขพัสดุ",
+            "LN_JSYNC,SKU-L1,ชุดเซต,299,1,299,0,Kissi Studio,ลูกค้า LINE,กทม,0819998888,2026-10-15,2026-10-15,LINE,TH_L1",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      const lineAccOverlay = await detectAndParseOmsInput(
+        Buffer.from(
+          [
+            "เลขที่ออเดอร์,ช่องทางติดต่อ,ชื่อ,เลขพัสดุ,วันที่สร้าง,วันที่โอนเงิน,วันที่พิมพ์,จำนวนรวม,ยอดขาย,กำไร",
+            "LN_JSYNC,LINE,ลูกค้า LINE,TH_L1,2026-10-15,2026-10-15,2026-10-15,1,250,250",
+          ].join("\n"),
+          "utf8",
+        ),
+      );
+      assert.ok(lineShipItems && lineAccOverlay);
+      await saveOmsItemsBatch(lineShipItems.items, ord1Id, client);
+      const impLineAcc = await query<{ id: number }>(
+        `INSERT INTO imports (filename, file_hash, file_size, imported_at, source, status, row_count, transaction_count, order_count, file_type, is_accounting)
+         VALUES ('line_acc_overlay.xlsx', 'h_ln_acc_ov', 100, now(), 'upload', 'ok', 1, 1, 1, 'oms_orders', 1) RETURNING id`,
+        [],
+        client,
+      );
+      const lineAccId = Number(impLineAcc[0]!.id);
+      await saveOmsOrdersBatch(lineAccOverlay.orders, lineAccId, client, { isAccounting: true });
+      await reconcileAndSyncThreeFiles(client, lineAccId, new Date().toISOString());
+
+      const beforeDelAccBill = await getBill("LN_JSYNC", client);
+      assert.equal(beforeDelAccBill?.income, 250);
+      assert.equal(beforeDelAccBill?.normalized.fields.incomeTotal, 250);
+
+      await deleteImport(lineAccId, client);
+      const afterDelAccBill = await getBill("LN_JSYNC", client);
+      assert.equal(afterDelAccBill?.income, 299, "#20 SQL income restored to Shipnity 299");
+      assert.equal(
+        afterDelAccBill?.normalized.fields.incomeTotal,
+        299,
+        "#20 normalized_json.fields.incomeTotal also restored to 299",
+      );
+      assert.equal(
+        afterDelAccBill?.normalized.fields.payout,
+        299,
+        "#20 normalized_json.fields.payout also restored to 299",
+      );
+
+      // #24 & #25: getAccountingOverview negative payout RV voucher (#24) & exact date_range filter (#25)
+      await query(
+        `INSERT INTO transactions (
+           import_id, external_id, transaction_type, is_order, created_date, paid_date,
+           currency, income, fee_total, adjustment, payout, checks_json, warnings_json, normalized_json, created_at, channel
+         ) VALUES
+           ($1, 'TT_NEG_1', 'คำสั่งซื้อ', 1, '2026-11-05', '2026-11-05', 'THB', 1000, -1200, 0, -200, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb, now(), 'TikTok'),
+           ($1, 'TT_RNG_1', 'คำสั่งซื้อ', 1, '2026-12-05', '2026-12-05', 'THB', 500, -50, 0, 450, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb, now(), 'TikTok'),
+           ($1, 'TT_RNG_2', 'คำสั่งซื้อ', 1, '2026-12-25', '2026-12-25', 'THB', 800, -80, 0, 720, '{}'::jsonb, '[]'::jsonb, '{}'::jsonb, now(), 'TikTok')`,
+        [ord1Id],
+        client,
+      );
+
+      const novAcc = await getAccountingOverview("2026-11", client);
+      const novRv = novAcc.journals.find((j) => j.id === "rv-2026-11-TikTok");
+      assert.ok(novRv, "#24 Auto RV voucher must be generated even when monthly payout is negative (-200)");
+      assert.equal(novRv!.totalDebit, 1200, "#24 RV totalDebit = platformFeeDeduction (1200)");
+      assert.equal(novRv!.totalCredit, 1200, "#24 RV totalCredit = grossRevenue (1000) + negativePayoutOutflow (200) = 1200");
+
+      const decRangeAcc = await getAccountingOverview("2026-12-01..2026-12-10", client);
+      const decSv = decRangeAcc.journals.find((j) => j.id === "sv-2026-12-TikTok");
+      assert.ok(decSv, "#25 SV voucher generated for date_range 2026-12-01..2026-12-10");
+      assert.equal(
+        decSv!.totalDebit,
+        500,
+        "#25 date_range 2026-12-01..2026-12-10 must only include 2026-12-05 (500) and exclude 2026-12-25 (800)",
+      );
+
+      // #26 & #27: Direct monthly_expenses included in getAccountingOverview (#26) & deleteExpenseCategory guard (#27)
+      const customCat = await createExpenseCategory(
+        "ค่าโฆษณาทดสอบ",
+        "#ff0000",
+        "52010",
+        client,
+      );
+      await upsertMonthlyExpense("2026-11", customCat.id, 1500, "งบยิงแอด พ.ย.", client);
+
+      const novAccWithDirectExp = await getAccountingOverview("2026-11", client);
+      const directUv = novAccWithDirectExp.journals.find(
+        (j) => j.id === `uv-direct-2026-11-${customCat.id}`,
+      );
+      assert.ok(directUv, "#26 Direct monthly_expenses row must generate UV voucher in getAccountingOverview");
+      assert.equal(directUv!.totalDebit, 1500);
+
+      const expOverview = await getExpensesOverview("2026", client);
+      assert.ok(expOverview.ledgerStats, "#26 getExpensesOverview returns SQL-aggregated ledgerStats");
+
+      await createExpenseRecord(
+        {
+          entryDate: "2026-11-10",
+          categoryId: customCat.id,
+          title: "บิลค่าโฆษณา",
+          amount: 500,
+        },
+        client,
+      );
+      await assert.rejects(
+        () => deleteExpenseCategory(customCat.id, client),
+        /ไม่สามารถลบหมวดหมู่รายจ่ายที่มีรายการบันทึกอยู่ได้/,
+        "#27 deleteExpenseCategory must reject when category has expense_records",
+      );
+
+      throw new Error("ROLLBACK_AUDIT27_DB_TEST");
+    });
+  } catch (err) {
+    if (!(err instanceof Error && err.message === "ROLLBACK_AUDIT27_DB_TEST")) {
+      throw err;
+    }
+  }
+});
+
 
 
 

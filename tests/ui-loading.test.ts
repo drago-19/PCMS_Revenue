@@ -166,7 +166,8 @@ test("in-page table skeleton: shows only in the data region so the filter bar st
   assert.match(tableSkeletonSource, /recordTableRegionHeight/);
   assert.match(navigationProgressSource, /recordTableRegionHeight/);
   // หน้า /bills: เมื่อเลือก Facebook ให้ซ่อนคอลัมน์ค่าธรรมเนียมตามความต้องการของผู้ใช้ (ช่องทาง Facebook ไม่มีค่าธรรมเนียม)
-  assert.match(billsSource, /channel !== "Facebook" \? \(\s*<TableHead/);
+  assert.match(billsSource, /const hideFeeColumn = channel === "Facebook" \|\| channel === "LINE"/);
+  assert.match(billsSource, /!hideFeeColumn \? \(\s*<TableHead/);
   assert.match(billsSource, /min-\[768px\]:table-fixed/);
 });
 
@@ -256,7 +257,7 @@ test("navigation loading: prevents 15-second stuck skeleton when navigating to t
   );
   assert.match(
     queriesSource,
-    /lineMismatchSelectSql =[\s\S]{0,80}?channel === "LINE" \|\| linkStatus === "line_mismatch"/,
+    /lineMismatchSelectSql =[\s\S]{0,110}?channel === "LINE"(?: \|\| channel === "Facebook")? \|\| linkStatus === "line_mismatch"/,
     "LINE_MISMATCH_SQL correlated subquery must only run when needed",
   );
 });

@@ -62,6 +62,7 @@ type Row = {
   payout?: number;
   paid: string;
   importId?: number;
+  pendingAcc?: boolean;
 };
 
 // link_priority เป็น GENERATED column จึงกำหนดผ่านคอลัมน์ต้นทาง:
@@ -72,11 +73,30 @@ async function seed(c: PoolClient, rows: Row[]) {
     const isOrder = r.isOrder ?? 1;
     const type = r.type ?? (r.channel === "TikTok" ? "คำสั่งซื้อ" : "คำสั่งซื้อ (OMS)");
     const productPrice = link === 3 ? 0 : 100;
+    const orderCode = link === 2 ? null : `OC-${r.id}`;
+    const omsOrderUid = isOrder === 1 && orderCode ? `UID-${r.id}` : null;
+    if (omsOrderUid && (r.channel === "Facebook" || r.channel === "LINE")) {
+      await c.query(
+        `INSERT INTO oms_orders (order_uid, order_code, channel, created_date, paid_date, sales_amount, profit_amount, import_id, accounting_import_id, updated_at)
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, now())
+         ON CONFLICT (order_uid) DO UPDATE SET accounting_import_id = EXCLUDED.accounting_import_id`,
+        [
+          omsOrderUid,
+          orderCode,
+          r.channel,
+          r.paid,
+          r.income ?? 100,
+          r.payout ?? 90,
+          r.importId ?? 1,
+          r.pendingAcc ? null : (r.importId ?? 1),
+        ],
+      );
+    }
     await c.query(
       `INSERT INTO transactions (import_id, external_id, transaction_type, is_order, created_date, paid_date, currency,
          income, fee_total, adjustment, payout, checks_json, warnings_json, normalized_json, channel,
-         order_code, product_detail, created_at)
-       VALUES ($1, $2, $3, $11, $4, $4, 'THB', $5, 0, 0, $6, '[]', '[]', $7::jsonb, $8, $9, $10, now())`,
+         order_code, oms_order_uid, product_detail, created_at)
+       VALUES ($1, $2, $3, $11, $4, $4, 'THB', $5, 0, 0, $6, '[]', '[]', $7::jsonb, $8, $9, $12, $10, now())`,
       [
         r.importId ?? 1,
         r.id,
@@ -86,9 +106,10 @@ async function seed(c: PoolClient, rows: Row[]) {
         r.payout ?? 90,
         JSON.stringify({ fields: { productAfterDiscount: productPrice, productBeforeDiscount: productPrice } }),
         r.channel,
-        link === 2 ? null : `OC-${r.id}`,
+        orderCode,
         link === 0 ? "SKU · item × 1" : null,
         isOrder,
+        omsOrderUid,
       ],
     );
   }
@@ -234,6 +255,8 @@ test("LINE OA, Other และ ชดเชยจากแพลตฟอร์�
       { id: "COMP_2", channel: "TikTok", isOrder: 0, type: "เงินชดเชยด้านโลจิสติกส์", income: 0, payout: 120, link: 2, paid: "2026-10-03" },
       { id: "COMP_NEG", channel: "TikTok", isOrder: 0, type: "การชดเชยจากแพลตฟอร์ม", income: 0, payout: -20, link: 2, paid: "2026-10-03" },
       { id: "LINE_1", channel: "LINE", paid: "2026-10-04" },
+      { id: "LINE_PENDING", channel: "LINE", paid: "2026-10-04", pendingAcc: true },
+      { id: "FB_PENDING", channel: "Facebook", paid: "2026-10-04", pendingAcc: true },
       { id: "OTHER_1", channel: "Other", paid: "2026-10-05" },
     ]);
     await syncMonthlyInvoiceRegistry(c);
@@ -274,7 +297,7 @@ test("End-to-End importWorkbook: นำเข้าไฟล์ Excel จริ�
       return;
     }
   } catch {
-    t.skip("ไม่มี Postgres ในเครื่อง — ข้าม E2E importWorkbook");
+    t.skip("ไม่มี Postgres ในเครื่อง — ข้าม integration test");
     return;
   }
 
