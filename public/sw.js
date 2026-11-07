@@ -1,4 +1,4 @@
-const CACHE_NAME = "pcms-revenue-pwa-v4";
+const CACHE_NAME = "pcms-revenue-pwa-v5";
 const STATIC_ASSETS = [
   "/manifest.webmanifest",
   "/icon-192.png",

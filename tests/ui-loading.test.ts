@@ -271,8 +271,8 @@ test("pwa window-controls-overlay: manifest, titlebar component, and CSS offsets
   );
   assert.match(
     manifestSource,
-    /theme_color:\s*"#f1f4f9"/,
-    "manifest.ts must use light surface theme_color (#f1f4f9) so OS window controls blend seamlessly without a dark top bar",
+    /theme_color:\s*"#0f1117"/,
+    "manifest.ts must use #0f1117 default theme_color while layout.tsx / WindowTitleBar switches dynamically by breakpoint",
   );
 
   const layoutSource = readSource("src/app/layout.tsx");
@@ -280,6 +280,16 @@ test("pwa window-controls-overlay: manifest, titlebar component, and CSS offsets
     layoutSource,
     /<WindowTitleBar\s+companyId=\{companyId\}\s+companyName=\{settings\.name\}\s*\/>/,
     "layout.tsx must render WindowTitleBar",
+  );
+  assert.match(
+    layoutSource,
+    /media:\s*"\(max-width:\s*1099px\)"\s*,\s*color:\s*"#0f1117"/,
+    "layout.tsx must use #0f1117 themeColor when mobile-topbar is visible (<1100px)",
+  );
+  assert.match(
+    layoutSource,
+    /media:\s*"\(min-width:\s*1100px\)"\s*,\s*color:\s*"#f1f4f9"/,
+    "layout.tsx must use #f1f4f9 themeColor when desktop sidebar layout is active (>=1100px)",
   );
 
   const titlebarSource = readSource("src/components/WindowTitleBar.tsx");

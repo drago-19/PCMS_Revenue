@@ -595,24 +595,34 @@ export async function detectAndParseOmsInput(
       const printedFmt = extractDateColFormat(orderFieldMap, "printedDate");
 
       // Pre-scan dominant channel on the sheet (e.g., Facebook or LINE accounting summary files
-      // where some fee/exchange rows like "รายได้ค่าเปลี่ยนไซส์" leave orderCode and channel blank)
+      // where some rows like AA001..AA304 or "รายได้ค่าเปลี่ยนไซส์" leave channel blank)
       let sheetDefaultChannel: string | null = null;
       const sheetNameNorm = sheet.name.toLowerCase();
-      if (sheetNameNorm.includes("facebook") || sheetNameNorm.includes("เฟส")) {
+      const isExplicitFacebookSheet =
+        sheetNameNorm.includes("facebook") || sheetNameNorm.includes("เฟส");
+      if (isExplicitFacebookSheet) {
         sheetDefaultChannel = "Facebook";
       } else if (sheetNameNorm.includes("line") || sheetNameNorm.includes("ไลน์")) {
         sheetDefaultChannel = "LINE";
-      }
-      for (let sr = headerIdx + 1; sr < rows.length; sr++) {
-        const srow = rows[sr] ?? [];
+      } else {
+        let sawFbOrLine: string | null = null;
+        let sawMarketplaceChannel = false;
         const chCol = orderFieldMap.get("channel");
-        const rawCh = chCol !== undefined ? srow[chCol] : undefined;
-        if (cleanText(rawCh)) {
-          const ch = normalizeChannel(rawCh);
-          if (ch === "Facebook" || ch === "LINE") {
-            sheetDefaultChannel = ch;
-            break;
+        for (let sr = headerIdx + 1; sr < rows.length; sr++) {
+          const srow = rows[sr] ?? [];
+          const rawCh = chCol !== undefined ? srow[chCol] : undefined;
+          if (cleanText(rawCh)) {
+            const ch = normalizeChannel(rawCh);
+            if (ch === "Facebook" || ch === "LINE") {
+              if (!sawFbOrLine) sawFbOrLine = ch;
+            } else {
+              sawMarketplaceChannel = true;
+              break;
+            }
           }
+        }
+        if (sawFbOrLine && !sawMarketplaceChannel) {
+          sheetDefaultChannel = sawFbOrLine;
         }
       }
       const generatedCodeCounter = new Map<string, number>();
@@ -636,12 +646,15 @@ export async function detectAndParseOmsInput(
         const rawPaidDate = parseDateValue(rawPaidCell, paidFmt).iso ?? "";
         const printedDate = parseDateValue(rawPrintedCell, printedFmt).iso ?? "";
         const rawChannelCell = get("channel");
-        let channel = normalizeChannel(rawChannelCell);
+        let channel = cleanText(rawChannelCell)
+          ? normalizeChannel(rawChannelCell)
+          : (sheetDefaultChannel ?? "TikTok");
 
         // If staff accidentally selected 'Facebook' in Shipnity, but the note explicitly states 'line oa' / 'lineoa'
-        // (e.g. #PZ20 with channel='facebook' and note='line oa'), normalize channel to 'LINE'
+        // (e.g. #PZ20 with channel='facebook' and note='line oa' on a non-Facebook sheet), normalize channel to 'LINE'
         if (
           channel === "Facebook" &&
+          !isExplicitFacebookSheet &&
           noteText &&
           /\bline\s*oa\b|^line\b/i.test(noteText.trim())
         ) {
@@ -765,7 +778,8 @@ export async function detectAndParseOmsInput(
               printedDate ||
               !orderFieldMap.has("printedDate") ||
               !orderFieldMap.has("trackingNo") ||
-              (noteText && noteText !== "-"),
+              (noteText && noteText !== "-") ||
+              (cleanText(get("customerPhone")) && round2(toNumber(rawProfitCell)) > 0),
           );
           if (!parsedPaidDate || !hasFbProof || shiftedSalesVal <= 0) {
             continue;
