@@ -3,7 +3,152 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัตเดตล่าสุด: 2026-11-05)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-07)
+
+- **เจ้าของงาน (ACTIVE)**: ว่าง (พร้อมรับงานถัดไป)
+- **เป้าหมายปัจจุบัน**:
+  - [x] ไม่มีงานค้าง
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — แก้ไขบั๊กและจุดเสี่ยงการเงิน/ภาษีครบทั้ง 27 ข้อ + เขียน Unit/Integration Test ดักครบทั้ง 27 ข้อ)**:
+  - **แก้ไขช่องโหว่และจุดเสี่ยงการเงิน/ภาษีตั้งแต่การนำเข้าไฟล์ Excel/CSV, การผูกข้อมูลข้าม 3 ไฟล์, ใบกำกับภาษี, ยอดสินค้าขายดี (`/products`), จนถึงสมุดรายวันและรายจ่าย (`/accounting`, `/expenses`) ครบทั้ง 27 ข้อ พร้อมเขียน Automated Tests ดักไว้ครบทุกข้อ (`src/lib/ingest/parse.ts`, `src/lib/ingest/oms-parse.ts`, `src/lib/ingest/lazada-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/queries.ts`, `src/lib/db.ts`, `src/lib/accounting.ts`, `src/lib/expenses.ts`, `src/components/UploadForm.tsx`, `src/app/api/imports/route.ts`, `tests/ingest.test.ts`)**:
+    - [x] **หมวด A–B (ข้อ #1–#10): การอ่านไฟล์ Excel/CSV และการจับคู่คอลัมน์ (`src/lib/ingest/parse.ts`, `src/lib/ingest/oms-parse.ts`, `src/components/UploadForm.tsx`, `src/app/api/imports/route.ts`)**:
+      - **#1** รองรับปี พ.ศ. (`2569 -> 2026`), เลขปี 2 หลัก (`69 -> 2026`, `26 -> 2026`), เดือนภาษาไทย (`"12 ก.ย. 2569"`, `"5 ตุลาคม 2569"`), และแจ้งเตือน `INVALID_OMS_DATE` เมื่อวันที่อ่านไม่ได้
+      - **#2** เพิ่ม `detectDateColumnFormat(values)` สแกนตัวอย่างทั้งคอลัมน์ก่อนแปลง เพื่อบังคับมาตรฐาน `DD/MM/YYYY` ให้สอดคล้องกันทั้งไฟล์แม้ค่าวันจะ `<= 12` (เช่น `05/10/2026` แปลงเป็น `2026-10-05` ไม่สลับเป็นพฤษภาคม)
+      - **#3** รองรับตัวเลขปนหน่วยเงิน (`"1,250 บาท"`, `"500.-"`, `"THB"`) และตรวจจับสูตร Excel พัง (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#N/A`) พร้อมออกคำเตือน `FORMULA_ERROR` ทันที
+      - **#4** เพิ่ม `detectCrossCompanyWarning` ตรวจจับและแจ้งเตือน `CROSS_COMPANY_SUSPECT` เมื่ออัปโหลดไฟล์ที่มีชื่อร้าน/ชื่อไฟล์ของอีกบริษัทข้ามสลับกัน (`dragon19` ⇄ `seeheng`)
+      - **#5** ปิด Default `saveMappingForFuture` เป็น `false` ใน `UploadForm.tsx` / `route.ts` และป้องกันไม่ให้ `customMapping` ค้างไปแย่งจับคอลัมน์ที่มีชื่อตรงตามมาตรฐาน (`exact match`) อยู่แล้ว
+      - **#6** แก้บั๊กกรองออเดอร์ Facebook ตกหล่นใน `oms-parse.ts` (`!trackingNo && !printedDate`) ให้คงออเดอร์ Facebook ที่ชำระเงินแล้วและมียอดขาย `> 0` ไว้ครบตรงกับ `import-service.ts`
+      - **#7** จำกัด `isShiftedRow` heuristic ให้ทำงานเฉพาะช่องทาง `LINE` และ `Facebook` ที่คอลัมน์ถัดจาก `กำไร` ไม่มี Header และเป็นตัวเลขล้วนเท่านั้น
+      - **#8** จัดลำดับศักดิ์ `confidenceRank` (`exact: 3 > canonical: 2 > fuzzy: 1`) ใน `parseWorkbook` ให้คอลัมน์ที่ชื่อตรงเป๊ะชนะคอลัมน์ที่จับคู่แบบคลุมเครือ (`fuzzy`) เสมอ
+      - **#9** ข้ามชีตสำรองอัตโนมัติ (`Copy of ...`, `สำเนา...`) และป้องกันแถวซ้ำข้ามชีตในไฟล์เดียวกัน (`seenSheetOrderUids` / `seenKeylessSignatures`)
+      - **#10** เพิ่ม `decodeCsvBuffer` ตรวจจับและถอดรหัสไฟล์ CSV ภาษาไทย `Windows-874` / `TIS-620` อัตโนมัติเมื่อพบไบต์ภาษาไทยที่ไม่ใช่ UTF-8
+    - [x] **หมวด C–D (ข้อ #11–#15): การผูกข้อมูลข้ามไฟล์และวงจรชีวิตการลบไฟล์ (`src/lib/ingest/import-service.ts`, `src/lib/ingest/lazada-parse.ts`, `src/lib/queries.ts`)**:
+      - **#11** ขยาย `reconcileCrossFileOrderUids` ให้จับคู่ออเดอร์ข้ามเดือน (`created_date` สิ้นเดือนก่อน แต่ `paid_date` ต้นเดือนถัดมา) เมื่อเลขพัสดุหรือวันที่สร้าง/ชำระตรงกัน
+      - **#12** แก้ไข `lazada-parse.ts` ให้รายการคืนค่าสินค้าฝั่งลบ (`isItemPriceTransactionName && amount < 0`) หักลดจาก `incomeTotal` (`positiveSum`) โดยตรง ไม่นำไปปนในค่าธรรมเนียม (`feeTotal`) เพื่อไม่ให้เสียภาษีขายเกินจริง
+      - **#13** ใน `reconcileAndSyncThreeFiles` ขั้นตอนที่ 3 คัดลอก `buyer_name`, `buyer_tax_id`, และ `buyer_address` จากแถวชั่วคราว `'คำสั่งซื้อ (OMS)'` ไปยังแถว `Settlement` จริงก่อนลบแถวชั่วคราวทิ้ง
+      - **#14** ใน `deleteImport` ปลดล็อก `oms_orders.matched_external_id = NULL` และรัน `reconcileAndSyncThreeFiles` คืนสถานะบิลเมื่อลบไฟล์ `settlement` รวมถึงโอน `oms_orders.import_id` กลับไปยังไฟล์ `oms_orders` เดิมเมื่อลบไฟล์ `oms_items` เพื่อไม่ให้ข้อมูลออเดอร์จากไฟล์ที่ 1 หายไปพร้อมไฟล์ที่ 2
+      - **#15** ใน `saveOmsOrdersBatch` ตรวจสอบรหัสอัตโนมัติ (`FB-YYMMDD` / `LN-YYMMDD`) ข้ามไฟล์และรันเลขลำดับต่อท้าย (`-2`, `-3`) อัตโนมัติเมื่อเป็นคนละรายการในวันเดียวกัน
+    - [x] **หมวด E–G (ข้อ #16–#27): ความแม่นยำของใบกำกับภาษี รายงานสินค้า และระบบบัญชี (`src/lib/ingest/import-service.ts`, `src/lib/queries.ts`, `src/lib/db.ts`, `src/lib/accounting.ts`, `src/lib/expenses.ts`)**:
+      - **#16** ป้องกันไฟล์ `settlement` คนละเดือนลบบิลขายที่ล็อกเลขใบกำกับภาษีแล้ว (แยกเป็นรายการปรับปรุง `${externalId}-ADJ-${dateSuffix}` ข้ามเดือน หรือรวมยอดสุทธิเมื่ออยู่ในเดือนเดียวกัน) พร้อมคงข้อมูลผู้ซื้อไว้ครบ
+      - **#17** เปลี่ยนคีย์ `orderByCode` / `itemByCode` ใน `enrichTransactionsWithOms` (`src/lib/queries.ts`) เป็น Composite Key `${channel}|${ym}|${code}` กันข้อมูลข้ามเดือน/ข้ามช่องทางปนกัน
+      - **#18** จำกัดขอบเขต `UPDATE` ใน `src/lib/db.ts` ที่จับคู่ด้วย `order_code` ให้เช็คเดือน (`ym`) และ `channel` ตรงกันเสมอ
+      - **#19** ปรับ `getBill`, `updateOrderBuyerInfo`, และ `updateOrderChannel` ให้ยึด `external_id = $1` เป็นอันดับแรก และอัปเดตเฉพาะแถว `id` เป้าหมายเดียว
+      - **#20** อัปเดต `normalized_json` (`incomeTotal`, `customerPayment`, `productAfterDiscount`, `productBeforeDiscount`, `payout`) ด้วย `jsonb_set` ทันทีเมื่อกดสลับโหมดไฟล์บัญชี (`toggleImportAccountingMode`) หรือลบไฟล์บัญชี (`deleteImport`)
+      - **#21** ปรับสูตรคำนวณ `sku_summaries.net_sales_amount` ใน `import-service.ts`, `queries.ts`, และ `db.ts` ให้ปันส่วนตามสัดส่วนมูลค่าสินค้าจริงของแต่ละบรรทัด (`(unit_price * quantity) / order_gross_sum`) แทนการบวกยอดขายทั้งบิลซ้ำทุก SKU
+      - **#22** รองรับ Dual Extraction ใน `oms-parse.ts` เมื่ออัปโหลดไฟล์ Shipnity ชีตเดียวที่มีครบทั้งคอลัมน์ระดับออเดอร์และระดับสินค้า (`orders` + `items`)
+      - **#23** ตรวจจับ `order_code` ซ้ำในชีต `oms_orders` เดียวกัน (รวมยอดพร้อมแจ้งเตือน `DUPLICATE_ORDER_MERGED` เมื่อเป็นลูกค้าคนเดียวกัน หรือแยกเป็น `-2` พร้อมแจ้งเตือน `DUPLICATE_ORDER_CODE_CONFLICT` เมื่อเป็นคนละคน)
+      - **#24** แก้ไขการสร้างใบสำคัญรับ `RV` อัตโนมัติใน `src/lib/accounting.ts` สำหรับรอบโอนที่ `payout < 0` ให้ลงขา Credit `11121.01` สมดุลกับขา Debit ค่าธรรมเนียม (`51020`) โดยไม่ตัดบรรทัดทิ้ง
+      - **#25** แก้ไข `getMonthlyChannelSalesAggregates` (`src/lib/expenses.ts`) และ `parseAccountingPeriodFilter` (`src/lib/accounting.ts`) ให้คิวรีกรองตามช่วงวันที่ `paid_date >= $1 AND paid_date <= $2` จริงเมื่อเลือกโหมด `date_range`
+      - **#26** คำนวณ `ledgerStats` ใน `getExpensesOverview` ด้วย SQL `SUM()` โดยตรง (ไม่ติดเพดาน `LIMIT 1000`) และเชื่อมยอดจาก `monthly_expenses` เข้าสมุดรายวัน `/accounting` อัตโนมัติ
+      - **#27** บล็อกการลบหมวดหมู่ค่าใช้จ่ายใน `deleteExpenseCategory` (`src/lib/expenses.ts`) ทันทีหากยังมีรายการบันทึกค่าใช้จ่าย (`expense_records`) ผูกอยู่
+    - [x] **ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx tsc --noEmit`: 0 error
+      - `pnpm test`: ผ่านครบทุกเทสต์ (`76 pass, 0 fail`) รวมถึงชุดเทสต์ใหม่ `Audit Guards #1–#27`
+      - `pnpm build`: ผ่านสมบูรณ์ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — บังคับให้บิล LINE OA และ Facebook ต้องมีชื่ออยู่ใน "ไฟล์สรุปจากฝ่ายบัญชี" เท่านั้นถึงจะอนุญาตให้ยื่นภาษี/ออกใบกำกับภาษีได้ และเมื่อยอด 2 ไฟล์ไม่ตรงกันให้ยึดยอดจากไฟล์ของบัญชีเป็นหลัก 100%)**:
+  - **ปรับเกณฑ์การยื่นภาษีและออกใบกำกับภาษีของช่องทาง `LINE OA` และ `Facebook` ให้ต้องผ่านการยืนยันในไฟล์สรุปจากฝ่ายบัญชี (`accounting_import_id IS NOT NULL`) เท่านั้น ส่วนออเดอร์ที่มีเฉพาะในระบบ Shipnity (`41` รายการใน LINE OA และออเดอร์ที่รอไฟล์บัญชีใน Facebook) ให้ถือว่า `"ยังไม่ยื่นภาษี / รอไฟล์บัญชีอนุมัติก่อน"` และเมื่อยอด 2 ไฟล์ไม่ตรงกัน (`amount_diff`) ให้ใช้ยอดจากไฟล์ของฝ่ายบัญชีเป็นหลักในการออกใบกำกับภาษี 100% (`src/lib/invoice-eligibility.ts`, `src/lib/invoice.ts`, `src/lib/queries.ts`, `src/lib/ingest/import-service.ts`, `src/lib/db.ts`, `src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`, `src/components/BillDocument.tsx`, `src/app/invoices/[orderId]/page.tsx`, `tests/ingest.test.ts`, `tests/invoice-eligibility.test.ts`)**:
+    - [x] **1. บังคับตรวจ `accounting_import_id IS NOT NULL` ก่อนอนุญาตให้ออกใบกำกับภาษี (`src/lib/invoice-eligibility.ts`, `src/lib/invoice.ts`, `src/lib/queries.ts`, `src/lib/db.ts`)**:
+      - แก้ไข `INVOICE_ELIGIBLE_SQL` ให้ช่องทาง `LINE` และ `Facebook` ต้องมี `EXISTS (SELECT 1 FROM oms_orders oa WHERE oa.order_uid = t.oms_order_uid AND oa.accounting_import_id IS NOT NULL)` เสมอ
+      - แก้ไข `isOrderEligibleForInvoice` ใน `src/lib/invoice.ts` ให้คืนค่า `false` ทันทีเมื่อ `(channel === "LINE" || channel === "Facebook") && row.lineComparisonStatus === "shipnity_only"`
+      - ปรับ `SCHEMA_VERSION = "2026-11-07-v49"` ใน `src/lib/db.ts` เพื่อระงับ (`status = 'void'`) เลขใบกำกับภาษีของออเดอร์ `LINE` และ `Facebook` ที่ยังไม่อยู่ในไฟล์สรุปจากฝ่ายบัญชี (`pendingWithInv = 0` จากทั้ง `41` รายการใน `รอเทียบไฟล์บัญชี`)
+      - ป้องกันการเข้าหน้า `/invoices/[orderId]` สำหรับบิลที่ยังรอไฟล์บัญชีอนุมัติ พร้อมแสดงข้อความแจ้งเตือนชัดเจนว่า `"ยังไม่ยื่นภาษี / รอไฟล์สรุปจากฝ่ายบัญชีอนุมัติก่อน"`
+    - [x] **2. ยึดยอดจาก "ไฟล์สรุปจากฝ่ายบัญชี" เป็นหลัก 100% เมื่อยอด 2 ไฟล์ไม่ตรงกัน (`amount_diff`) (`src/lib/invoice.ts`, `src/lib/queries.ts`, `src/components/BillDocument.tsx`)**:
+      - ปรับ `buildInvoice` (`src/lib/invoice.ts`) และ `enrichTransactionsWithOms` (`src/lib/queries.ts`) ให้ช่องทาง `LINE` และ `Facebook` ใช้ยอดขายจากไฟล์สรุปฝ่ายบัญชี (`row.income`) เป็นตัวเลขหลักทั้งในใบกำกับภาษีอย่างย่อและเต็มรูป
+      - เมื่อเกิด `lineComparisonStatus === "amount_diff"` (เช่น `#U25` ไฟล์บัญชี `฿139.00` vs Shipnity `฿39.00`, `#T30` `฿219.00` vs `฿180.00`, `#S79` `฿249.00` vs `฿219.00`) ระบบจะปรับสัดส่วนราคาสินค้าในใบกำกับภาษีให้รวมเท่ากับยอดขายสุทธิของไฟล์บัญชีพอดี (`invTotal === accountingIncome`, `discountTotal = 0`)
+    - [x] **3. ปรับข้อความปุ่มตัวกรองและป้ายสถานะใน `/bills` และ `BillDocument.tsx` ให้ตรงตามหลักการทางภาษี**:
+      - ปุ่ม **`ยอด 2 ไฟล์ไม่ตรงกัน`** (`11` รายการ): เปลี่ยนคำอธิบายย่อยเป็น **`"ยึดไฟล์บัญชี · ยื่นภาษีได้"`**
+      - ปุ่ม **`สินค้าโล๊ะสต๊อก`** (`27` รายการ): เปลี่ยนคำอธิบายย่อยเป็น **`"มีเฉพาะไฟล์บัญชี · ยื่นภาษีได้"`**
+      - ปุ่ม **`รอเทียบไฟล์บัญชี`** (`41` รายการ): เปลี่ยนคำอธิบายย่อยเป็น **`"ยังไม่ยื่นภาษี · รอไฟล์บัญชีอนุมัติ"`** พร้อมป้าย **`⏳ รอไฟล์บัญชีอนุมัติ · ยังไม่ยื่นภาษี`** และซ่อนปุ่ม `ใบกำกับฯ` จนกว่าจะมีชื่ออยู่ในไฟล์สรุปจากฝ่ายบัญชี
+    - [x] **4. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx tsc --noEmit`: 0 error
+      - `pnpm test`: ผ่านครบทุกเทสต์ (`74 pass, 0 fail`)
+      - `pnpm build`: ผ่านสมบูรณ์ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — ระบบตรวจจับหมายเหตุย้ายช่องทางอัตโนมัติ (วิธีที่ 1) + ปุ่มสลับช่องทางออเดอร์ด้วยตัวเอง 1 คลิก (วิธีที่ 2))**:
+  - **แก้ไขออเดอร์ `#PZ20` ที่แอดมินติ๊กช่องทางเป็น `facebook` แต่เขียนหมายเหตุว่า `"line oa"` ให้ย้ายเข้า `LINE OA` อัตโนมัติ (วิธีที่ 1) + เพิ่มปุ่มสลับช่องทางออเดอร์ (`OrderChannelSwitcher` — `⇄ ย้ายไป LINE OA` / `⇄ ย้ายไป Facebook` / `Shopee` / `Other`) ในป๊อปอัปดูบิล (`BillPreviewDialog`) และหน้ารายละเอียดบิล (`/bills/[orderId]`) (วิธีที่ 2) (`src/lib/ingest/oms-parse.ts`, `src/lib/db.ts`, `src/lib/queries.ts`, `src/app/api/bills/[orderId]/channel/route.ts`, `src/components/OrderChannelSwitcher.tsx`, `src/components/BillPreviewDialog.tsx`, `src/app/bills/[orderId]/page.tsx`, `tests/ingest.test.ts`)**:
+    - [x] **วิธีที่ 1 — ระบบตรวจจับหมายเหตุและย้ายช่องทางอัตโนมัติ (`Auto-Fix Misclassified Channel`)**:
+      - หากออเดอร์ถูกติ๊กช่องทางมาเป็น `facebook` แต่ในช่อง `หมายเหตุ` (`note`) ระบุชัดเจนว่าขึ้นต้นด้วย `"line"` หรือ `"line oa"` (เช่น `#PZ20` ในไฟล์ `line_ปี69.xlsx`) ระบบจะปรับช่องทางเป็น `LINE OA` (`channel = 'LINE'`) ให้อัตโนมัติทั้งตอนอัปโหลดไฟล์ใหม่ (`oms-parse.ts`) และย้ายข้อมูลเดิมในฐานข้อมูล (`SCHEMA_VERSION = "2026-11-07-v47"` ใน `db.ts`) พร้อมออกเลขใบกำกับภาษี `LN2605/00005` ให้ทันที
+      - แก้ไข `LINE_PENDING_ACC_SQL` ใน `src/lib/queries.ts` ให้ไม่นับออเดอร์เปลี่ยนไซส์ 0 บาท (`link_priority = 3` จำนวน 38 รายการ) ซ้ำเข้าไปในปุ่ม `"รอเทียบไฟล์บัญชี"` ทำให้ยอดรวมใน Facebook ตรงกันทุกปุ่ม (`ทั้งหมดใน Facebook = 13,870`, `ข้อมูลตรงกัน 2 ไฟล์ = 0`, `รอเทียบไฟล์บัญชี = 13,870`, `เปลี่ยนไซส์ / ฿0 = 38`)
+    - [x] **วิธีที่ 2 — ปุ่มสลับช่องทางออเดอร์ด้วยตัวเองใน 1 คลิก (`Manual Channel Switcher`)**:
+      - สร้างคอมโพเนนต์ `OrderChannelSwitcher` (`src/components/OrderChannelSwitcher.tsx`) แสดงคู่กับป้ายช่องทางในหัวป๊อปอัป `BillPreviewDialog` และแถบเครื่องมือด้านบนของหน้า `/bills/[orderId]`
+      - มีปุ่มด่วน **`⇄ ย้ายไป LINE OA`** (เมื่ออยู่ใน Facebook) หรือ **`⇄ ย้ายไป Facebook`** (เมื่ออยู่ใน LINE OA) พร้อมเมนูตัวเลือก `DropdownMenu` สำหรับเลือกสลับไป `Facebook`, `LINE OA`, `Shopee`, หรือ `Other`
+      - สร้าง API `PATCH /api/bills/[orderId]/channel` และฟังก์ชัน `updateOrderChannel` (`src/lib/queries.ts`) ที่อัปเดตทั้ง `transactions`, `oms_orders`, `oms_order_items`, ออกเลขใบกำกับภาษีใหม่ตามหมวดช่องทางปลายทาง (`FB` ⇄ `LN` ⇄ `SP` ⇄ `OT`), และรีเฟรชตารางสรุป `daily_summaries` / `sku_summaries` ทันที
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — ระบบเทียบยอด 2 ไฟล์ของช่องทาง Facebook แบบเดียวกับ LINE OA)**:
+  - **เพิ่มระบบเปรียบเทียบข้อมูล 2 ไฟล์ของช่องทาง `Facebook` (`ไฟล์สรุปจากฝ่ายบัญชี เฟสบุ๊ค.xlsx` เทียบกับ `ไฟล์สินค้า Shipnity`) เหมือนช่องทาง `LINE OA` 100% + รองรับแถว `"รายได้ค่าเปลี่ยนไซส์"` ที่ไม่มีเลขที่ออเดอร์, ข้ามแถวผลรวมท้ายตาราง (`528`) อัตโนมัติ, และย้าย `#PZ20` (ที่พนักงานติ๊ก `facebook` ผิดแต่เขียนหมายเหตุว่า `"line oa"`) กลับไปอยู่ช่องทาง `LINE OA` (`src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/db.ts`, `src/lib/queries.ts`, `src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`, `src/components/BillDocument.tsx`, `tests/ingest.test.ts`, `tests/ui-loading.test.ts`)**:
+    - [x] **1. อ่านไฟล์สรุปบัญชี Facebook (`src/lib/ingest/oms-parse.ts`)**:
+      - รองรับแถวที่มีคอลัมน์แทรกทำให้ `ยอดขาย` เลื่อนไปอยู่ช่อง `กำไร` (`179, 179, 0` และ `249, 249, 0` ของออเดอร์ `CC36` และ `CJ24`)
+      - รองรับแถว `"รายได้ค่าเปลี่ยนไซส์"` (`50` บาท วันที่ `2026-10-21` และ `2026-10-22`) ที่ฝ่ายบัญชีคีย์แต่ช่อง `หมายเหตุ`, `วันที่`, และ `ยอดขาย` โดยเว้น `เลขที่ออเดอร์` และ `ช่องทางติดต่อ` ว่างไว้ → สร้างรหัสออเดอร์อัตโนมัติ (`FB-261021`, `FB-261022`), กำหนดช่องทางตามไฟล์ (`Facebook`), ผูกร้านค้าหลักของไฟล์ (`Kissi Studio`), แสดงรายการสินค้าเป็น `"รายได้ค่าเปลี่ยนไซส์ × 1"` (`฿50.00`), และออกเลขใบกำกับภาษี `FB2610/...` ให้ครบ
+      - ข้ามแถวผลรวมท้ายตาราง (`528` ที่ไม่มีทั้งเลขที่ออเดอร์ หมายเหตุ และวันที่) โดยอัตโนมัติ ไม่นำมาสร้างเป็นบิลซ้ำ
+    - [x] **2. ปุ่มตัวกรองย่อยและป้ายสถานะเปรียบเทียบ 2 ไฟล์ใน `/bills?channel=Facebook` (`src/components/BillsFilterInteractive.tsx`, `src/lib/queries.ts`, `src/app/bills/page.tsx`, `src/components/BillDocument.tsx`)**:
+      - แสดงปุ่มตัวกรองเปรียบเทียบเหมือน `LINE OA` ทุกประการ:
+        1. **`ทั้งหมดใน Facebook`** (`รวมบิลขายที่ยื่นภาษีได้ใน Facebook`)
+        2. **`ข้อมูลตรงกัน 2 ไฟล์`** (`ออเดอร์ + สินค้าตรงกัน 100%` — เช่น `CC36` `฿179.00` และ `CJ24` `฿249.00`)
+        3. **`ยอด 2 ไฟล์ไม่ตรงกัน`** (`ยึดไฟล์ออเดอร์ · ยื่นภาษีได้`)
+        4. **`สินค้าโล๊ะสต๊อก / เปลี่ยนไซส์`** (`มีเฉพาะไฟล์บัญชี · ยื่นภาษีได้` — เช่น `FB-261021` และ `FB-261022` รายการละ `฿50.00`)
+        5. **`รอเทียบไฟล์บัญชี`** (`ข้อมูลจาก Shipnity · ยื่นภาษีได้` — ออเดอร์ที่มีในระบบ Shipnity แต่ยังไม่อยู่ในไฟล์สรุปบัญชี)
+        6. **`เปลี่ยนไซส์ / ฿0`** (`มีเฉพาะค่าส่ง · ไม่ยื่นภาษี` — แสดงเมื่อมีออเดอร์เปลี่ยนสินค้า 0 บาทใน Shipnity)
+      - แสดงป้ายสถานะ (`✅ ตรงกัน 2 ไฟล์`, `⚠️ ยอดต่างกัน`, `📄 มีเฉพาะไฟล์บัญชี · รายได้ค่าเปลี่ยนไซส์`, `⏳ รอเทียบไฟล์บัญชี`) ทั้งในตาราง `/bills` และกรอบอธิบายด้านบนของหน้ารายละเอียดบิล (`BillDocument.tsx`)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`74 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — งานก่อนหน้า)**:
+  - **ปรับขนาดปุ่มเลือกโหมดอัปโหลดในหน้า `/import` ให้กะทัดรัด (ไม่ยืดเต็มจอ) + เพิ่มระบบป้องกันอัปโหลดสลับโหมดอัตโนมัติ และปุ่มสลับโหมดไฟล์ 1 คลิก (`⇄ สลับเป็นไฟล์สรุปบัญชี` / `⇄ สลับเป็นไฟล์ Shipnity ปกติ`) ในหน้า `/history` และ `/import/[id]` (`src/components/UploadForm.tsx`, `src/components/ToggleImportCategoryButton.tsx`, `src/app/history/page.tsx`, `src/app/import/[id]/page.tsx`, `src/app/api/imports/[id]/route.ts`, `src/lib/ingest/import-service.ts`, `src/lib/queries.ts`, `tests/ingest.test.ts`)**:
+    - [x] **1. ปรับ UI ปุ่มเลือกประเภทไฟล์ใน `/import` (`src/components/UploadForm.tsx`) ไม่ให้ยืดยาวเต็มการ์ด**:
+      - เปลี่ยนจาก `grid-cols-2` ที่กางเต็มความกว้างการ์ด 1,280px มาเป็น **Compact Segmented Pill** (`inline-flex flex-wrap items-center gap-1 rounded-xl border bg-white p-1`) ขนาดกะทัดรัด พอดีกับข้อความ พร้อมคำอธิบายสั้นๆ ด้านขวา
+    - [x] **2. ระบบป้องกันและแก้ไขเมื่อผู้ใช้อัปโหลดผิดโหมด / อัปโหลดสลับกันครบ 4 ชั้น**:
+      - **ชั้นที่ 1 — ระบบตรวจจับและป้องกันอัตโนมัติตอนอัปโหลด (`Auto-Guard`)**:
+        - ไฟล์รายได้ `TikTok Settlement`, `Lazada`, และ `ไฟล์สินค้า Shipnity (ไฟล์ 2: oms_items)` ระบบแยกประเภทไฟล์จากโครงสร้างตารางโดยตรง 100% ต่อให้ผู้ใช้เผลอเลือกปุ่มผิดเป็น `"ไฟล์สรุปจากฝ่ายบัญชี"` ระบบก็จะไม่นำไฟล์เหล่านี้ไปเป็นไฟล์บัญชีเด็ดขาด
+        - หากผู้ใช้อัปโหลดไฟล์ออเดอร์รวมจาก Shipnity (`Data_*.xlsx` ที่มีออเดอร์ `TikTok` หรือ `Shopee` ปนอยู่ด้วย) แต่ลืมสลับปุ่มกลับจาก `"ไฟล์สรุปจากฝ่ายบัญชี"` ระบบจะตรวจพบออเดอร์ `TikTok`/`Shopee` และสลับกลับเป็น **`📦 ไฟล์ออเดอร์ Shipnity ปกติ`** ให้อัตโนมัติทันที
+      - **ชั้นที่ 2 — ปุ่มสลับโหมด 1 คลิก (`⇄ สลับเป็นไฟล์สรุปบัญชี` / `⇄ สลับเป็นไฟล์ Shipnity ปกติ`) โดยไม่ต้องลบหรืออัปโหลดใหม่**:
+        - เพิ่มปุ่ม `ToggleImportCategoryButton` (`PATCH /api/imports/[id]`) ทั้งในหน้าประวัติการนำเข้า (`/history`) และหน้ารายงานไฟล์ (`/import/[id]`)
+        - เมื่อกดสลับ ระบบจะเปลี่ยนสถานะ `is_accounting` (`0 ⇄ 1`), อัปเดต `accounting_import_id` / คืนค่ายอดขายจาก `oms_order_items`, และซิงก์สถานะบิลใหม่ทันทีใน 1 คลิก
+      - **ชั้นที่ 3 — อัปโหลดไฟล์เดิมซ้ำแต่เลือกโหมดใหม่ (`Re-upload Same File with New Mode`)**:
+        - หากผู้ใช้นำไฟล์เดิมที่เพิ่งอัปโหลดผิดโหมด มาเลือกโหมดที่ถูกต้องแล้วกดอัปโหลดซ้ำ ระบบจะตรวจพบว่าโหมดเปลี่ยน (`modeChanged`) และอัปเดตสถานะของไฟล์เดิมให้เป็นโหมดใหม่ทันทีโดยไม่ต้องไปกดลบก่อน
+      - **ชั้นที่ 4 — ลบไฟล์ที่อัปโหลดผิดใน `/history` หรือ `/import/[id]` (`Clean Rollback on Delete`)**:
+        - ปรับปรุง `deleteImport` ใน `src/lib/queries.ts` ให้ล้าง `accounting_import_id` และคืนค่ายอดขาย (`sales_amount`) กลับเป็นค่าของ Shipnity เดิมโดยไม่ลบออเดอร์ Shipnity ทิ้ง พร้อมลบบิลโล๊ะสต๊อกที่มาจากไฟล์บัญชีนั้นออกอย่างสะอาด
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`42 pass, 0 fail` ใน `tests/ingest.test.ts` พร้อมเทสต์จำลองการลบไฟล์บัญชีแล้วคืนค่า `line_pending_acc`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-06)**:
+  - **เพิ่มระบบแยกโหมดอัปโหลด `"ไฟล์สรุปจากฝ่ายบัญชี (เทียบยอด LINE OA / Facebook)"` คู่กับ Custom Column Mapping (วิธีที่ 2) + แยกสถานะ `"รอเทียบไฟล์บัญชี"` ออกจาก `"ข้อมูลตรงกัน 2 ไฟล์"` เด็ดขาด + แก้การอ่านไฟล์ `Line ปี 68.xlsx` ให้แสดงครบ 11 บิล (`src/components/UploadForm.tsx`, `src/app/api/imports/route.ts`, `src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/db.ts`, `src/lib/queries.ts`, `src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`, `src/components/BillDocument.tsx`, `tests/ingest.test.ts`, `tests/ui-loading.test.ts`)**:
+    - [x] **1. ตัวเลือกโหมดอัปโหลดในหน้า `/import` (`UploadForm.tsx` + `/api/imports`)**:
+      - เพิ่มปุ่มเลือกประเภทไฟล์ก่อนอัปโหลด 2 โหมดชัดเจน:
+        1. **`📦 ไฟล์ระบบ Shipnity / TikTok / Lazada (ปกติ)`** (`uploadCategory = "standard"`)
+        2. **`📋 ไฟล์สรุปจากฝ่ายบัญชี (เทียบยอด LINE OA / Facebook)`** (`uploadCategory = "accounting"`)
+      - รองรับการจับคู่คอลัมน์ใหม่ (`Custom Column Mapping`) หากฝ่ายบัญชีเปลี่ยนชื่อหัวคอลัมน์ในอนาคต (เพิ่มฟิลด์ `totalQty`, `profitAmount`, `printedDate`) และไม่พึ่งพาการเดาจากชื่อไฟล์เพียงอย่างเดียว
+    - [x] **2. แยกสถานะ `รอเทียบไฟล์บัญชี` (`line_pending_acc` / `shipnity_only`) ออกจาก `ข้อมูลตรงกัน 2 ไฟล์` (`linked` / `matched`) เด็ดขาด**:
+      - เพิ่มคอลัมน์ `imports.is_accounting`, `oms_orders.accounting_import_id`, และ `oms_orders.accounting_sales_amount` (`SCHEMA_VERSION = "2026-11-06-v45"`)
+      - ออเดอร์ `LINE OA` ที่มาจากไฟล์ Shipnity ปกติ (`Data_*.xlsx` + `OrderItems_*.xlsx`) โดยยังไม่ได้อัปโหลดไฟล์สรุปจากฝ่ายบัญชี จะมี `accounting_import_id IS NULL` และแสดงในปุ่ม **`รอเทียบไฟล์บัญชี`** (`ข้อมูลจาก Shipnity · ยื่นภาษีได้`) ไม่ไปปนในปุ่ม `ข้อมูลตรงกัน 2 ไฟล์`:
+        - **บริษัท ชีเฮง จำกัด (`seeheng`)**: `ทั้งหมดใน LINE OA = 98` → `ข้อมูลตรงกัน 2 ไฟล์ = 0`, `ยอด 2 ไฟล์ไม่ตรงกัน = 0`, `สินค้าโล๊ะสต๊อก = 0`, **`รอเทียบไฟล์บัญชี = 98`**
+        - **บริษัท ดราก้อน 19 จำกัด (`dragon19`) ปี 2026**: `ทั้งหมดใน LINE OA = 90` → `ข้อมูลตรงกัน 2 ไฟล์ = 22`, `ยอด 2 ไฟล์ไม่ตรงกัน = 11`, `สินค้าโล๊ะสต๊อก = 16` (รวม 49 บิลจาก `line_ปี69.xlsx`), และ **`รอเทียบไฟล์บัญชี = 41`** (บิลจาก Shipnity ที่ยังไม่อยู่ในไฟล์บัญชี)
+    - [x] **3. แก้การอ่านไฟล์ `Line ปี 68.xlsx` (`import_id = 181`) ให้แสดงบิลปี 2025 (ปี 68) ครบทั้ง 11 บิล**:
+      - เพิ่ม alias `"วันที่พิมพ์2"` → `printedDate`, `"ค่าส่ง"` → `shippingFeeCustomer`, `"จำนวน"` → `totalQty` ใน `src/lib/ingest/oms-parse.ts` และให้ช่องทาง `LINE` ใช้ `printedDate` เป็น `paidDate` / `createdDate` เมื่อไฟล์บัญชีไม่มีคอลัมน์วันที่โอนเงิน
+      - ดึงข้อมูลจาก `file_blob` ของ `import_id = 180` (`line_ปี69.xlsx`) และ `import_id = 181` (`Line ปี 68.xlsx`) มาประมวลผลและผูก `accounting_import_id` อัตโนมัติ ทำให้เมื่อเลือกปี `2025` ใน `dragon19` แสดงบิล `LINE OA` ครบทั้ง **11 รายการ** (`สินค้าโล๊ะสต๊อก = 11` บิล พร้อมออกใบกำกับภาษี `LN2503/...` – `LN2512/...`)
+    - [x] **4. ซ่อนคอลัมน์ `ค่าธรรมเนียม` ในหน้า `/bills` เมื่อเลือกช่องทาง `LINE OA`** (`hideFeeColumn = channel === "Facebook" || channel === "LINE"`)
+    - [x] **5. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`73 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-06 — งานก่อนหน้า)**:
+  - **รองรับออเดอร์ LINE OA ที่ไม่มีรายการสินค้าในระบบ Shipnity (`AB001`–`AB015` และ `FZI72` จากไฟล์บัญชี `line_ปี69.xlsx`) ให้แสดงชื่อสินค้าเป็น `"สินค้าโล๊ะสต๊อก"` (`CLEARANCE · สินค้าโล๊ะสต๊อก × จำนวน`) ผูกร้านค้า `Kissi Studio` / `Kiddee Shop` และออกเลขใบกำกับภาษี `LN2609/...` / `LN2601/...` ให้ครบ 100% (`src/lib/ingest/import-service.ts`, `src/lib/db.ts`, `src/lib/queries.ts`, `src/components/BillsFilterInteractive.tsx`, `src/app/bills/page.tsx`, `src/components/BillDocument.tsx`, `tests/ingest.test.ts`)**:
+    - [x] **1. แสดงรายการสินค้าเป็น `"สินค้าโล๊ะสต๊อก"` พร้อมจำนวนและราคาต่อชิ้นตามจริง**:
+      - สำหรับออเดอร์ `LINE OA` ที่มีเฉพาะไฟล์ออเดอร์ (`oms_orders`) แต่ไม่มีรายการสินค้าใน Shipnity (`oms_order_items` — เช่น `AB001`–`AB015` วันที่ `12/09/2026` และ `FZI72` วันที่ `07/01/2026` ซึ่งเป็นของมีตำหนิ/โล๊ะสต๊อกที่ไม่ได้คีย์เข้าระบบ Shipnity):
+      - ซิงก์ `product_detail = 'CLEARANCE · สินค้าโล๊ะสต๊อก × ' || total_qty` และสร้าง `omsItems = [{ skuCode: "CLEARANCE", productName: "สินค้าโล๊ะสต๊อก", unitPrice: (income - shippingFeeCustomer) / totalQty, quantity: totalQty }]` (เช่น `AB001`–`AB015` ราคาชิ้นละ `฿39.00` ตรงทุกบิล และ `FZI72` ราคาชิ้นละ `฿129.00 × 2`)
+      - หากในอนาคตมีการอัปโหลดไฟล์สินค้า Shipnity ของออเดอร์นั้นเข้ามา ระบบจะเขียนทับด้วยรหัสและชื่อสินค้าจริงโดยอัตโนมัติ
+    - [x] **2. ผูกร้านค้าอัตโนมัติ (`Kissi Studio` / `Kiddee Shop`) และปลดล็อกใบกำกับภาษี (`LN2609/00001`–`00015`, `LN2601/00001`)**:
+      - ซิงก์ `shop_name` ของ `AB001`–`AB015` จากร้านค้าหลักของไฟล์ `line_ปี69.xlsx` (`Kissi Studio`) และ `FZI72` (`Kiddee Shop` จากอีเมล `homepong02@gmail.com`) ไม่ให้ค้างสถานะ `⏳ รอผูกไฟล์ร้านค้า`
+      - ปรับ `link_priority = 0` และออกเลขใบกำกับภาษีสถานะ `active` ให้ครบทั้ง 16 บิล พร้อมรักษาตัวกรองย่อย 4 ปุ่มใน `/bills?channel=LINE` (`ทั้งหมดใน LINE OA = 90`, `ข้อมูลตรงกัน 2 ไฟล์ = 63`, `ยอด 2 ไฟล์ไม่ตรงกัน = 11`, `มีเฉพาะไฟล์ออเดอร์ = 16 · สินค้าโล๊ะสต๊อก · ยื่นภาษีได้`)
+    - [x] **3. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx.cmd tsc --noEmit`: 0 error
+      - `pnpm.cmd test`: ผ่านครบทุกเทสต์ (`73 pass, 0 fail`)
+      - `pnpm.cmd build`: ผ่านสมบูรณ์ 100%
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-05)**:
   - **เพิ่มปุ่มแก้ไขชื่อ/ข้อมูลผังบัญชี และปุ่มตั้งยอดยกมา/เพิ่มรายการเดินบัญชีโดยตรงทั้งในตาราง `บัญชีแยกประเภท` และในหน้าต่างป๊อปอัปดูรายละเอียดบัญชี (`src/components/AccountingDialogs.tsx`, `src/components/AccountingManager.tsx`)**:
