@@ -184,6 +184,11 @@ export function ensureSchema(): Promise<void> {
                updated_at = now()
            WHERE o.channel = 'Facebook'
              AND o.accounting_import_id IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM imports imp
+               WHERE imp.id = o.accounting_import_id
+                 AND imp.filename ILIKE '%line%'
+             )
              AND o.note IS NOT NULL
              AND LOWER(BTRIM(o.note)) LIKE 'line%'
            RETURNING o.order_uid, o.paid_date`,

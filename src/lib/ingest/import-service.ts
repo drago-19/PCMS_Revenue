@@ -669,6 +669,7 @@ export async function reconcileCrossFileOrderUids(
     with_trk_uid: string;
     no_trk_paid: string | null;
     with_trk_paid: string | null;
+    merged_paid_date: string | null;
     tracking_no: string | null;
     shop_name: string | null;
     customer_phone: string | null;
@@ -687,7 +688,13 @@ export async function reconcileCrossFileOrderUids(
        o_trk.order_uid AS with_trk_uid,
        o_notrk.paid_date AS no_trk_paid,
        o_trk.paid_date AS with_trk_paid,
-       o_trk.tracking_no,
+       COALESCE(
+         CASE WHEN o_notrk.accounting_import_id IS NOT NULL AND o_notrk.paid_date <> '' THEN o_notrk.paid_date END,
+         CASE WHEN o_trk.accounting_import_id IS NOT NULL AND o_trk.paid_date <> '' THEN o_trk.paid_date END,
+         NULLIF(o_notrk.paid_date, ''),
+         NULLIF(o_trk.paid_date, '')
+       ) AS merged_paid_date,
+       COALESCE(NULLIF(o_notrk.tracking_no, ''), NULLIF(o_trk.tracking_no, '')) AS tracking_no,
        COALESCE(NULLIF(o_notrk.shop_name, ''), NULLIF(o_trk.shop_name, '')) AS shop_name,
        COALESCE(NULLIF(o_notrk.customer_phone, ''), NULLIF(o_trk.customer_phone, '')) AS customer_phone,
        COALESCE(NULLIF(o_notrk.courier, ''), NULLIF(o_trk.courier, '')) AS courier,
@@ -729,8 +736,29 @@ export async function reconcileCrossFileOrderUids(
          OR (
            o_notrk.tracking_no IS NOT NULL AND o_notrk.tracking_no <> '' AND o_notrk.tracking_no <> '-'
            AND o_notrk.tracking_no = o_trk.tracking_no
-           AND o_notrk.sales_amount > 0
-           AND o_trk.sales_amount = 0
+           AND (
+             (o_notrk.sales_amount > 0 AND o_trk.sales_amount = 0)
+             OR (
+               SPLIT_PART(o_notrk.order_uid, '|', 3) IN (o_notrk.paid_date, o_notrk.created_date)
+               AND SPLIT_PART(o_trk.order_uid, '|', 3) = o_trk.tracking_no
+             )
+           )
+         )
+         OR (
+           o_notrk.accounting_import_id IS NOT NULL
+           AND o_trk.accounting_import_id IS NULL
+           AND (
+             (
+               o_notrk.tracking_no IS NOT NULL AND o_notrk.tracking_no <> '' AND o_notrk.tracking_no <> '-'
+               AND o_notrk.tracking_no = o_trk.tracking_no
+             )
+             OR (
+               o_notrk.paid_date IS NOT NULL AND o_notrk.paid_date <> ''
+               AND o_notrk.paid_date = o_trk.paid_date
+               AND o_notrk.customer_name IS NOT NULL AND o_notrk.customer_name <> ''
+               AND o_notrk.customer_name = o_trk.customer_name
+             )
+           )
          )
        )`,
     [importId],
@@ -780,6 +808,7 @@ export async function reconcileCrossFileOrderUids(
            import_id = $12,
            accounting_import_id = COALESCE($13, accounting_import_id),
            accounting_sales_amount = COALESCE($14, accounting_sales_amount),
+           paid_date = COALESCE(NULLIF($15, ''), paid_date),
            updated_at = now()
        WHERE order_uid = $1`,
       [
@@ -797,6 +826,7 @@ export async function reconcileCrossFileOrderUids(
         importId,
         pair.accounting_import_id,
         pair.accounting_sales_amount,
+        pair.merged_paid_date,
       ],
       client,
     );
@@ -2090,7 +2120,7 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
 
   const isAccountingUpload =
     options.uploadCategory === "accounting" ||
-    /line[\s_-]*ปี|บัญชี/i.test(options.filename);
+    /line[\s_-]*ปี|เฟสบุ๊ค|เฟสบุค|บัญชี/i.test(options.filename);
 
   const existing = await queryOne<{
     id: number | string;
@@ -3410,6 +3440,11 @@ export async function toggleImportAccountingMode(
           await saveOmsOrdersBatch(reParsed.orders, importId, client, {
             isAccounting: true,
           });
+          await query(
+            "UPDATE imports SET order_count = $1, warnings_json = $2 WHERE id = $3",
+            [reParsed.orders.length, JSON.stringify(reParsed.warnings), importId],
+            client,
+          );
         }
       }
       await query(

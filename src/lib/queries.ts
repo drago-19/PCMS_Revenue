@@ -2904,7 +2904,7 @@ export async function listBills(
     HAVING ABS(t.income - MAX(oi.order_sales_amount)) >= 0.01
   ))`;
 
-  const LINE_ORDERS_ONLY_SQL = `(t.channel IN ('LINE', 'Facebook') AND ${LINE_HAS_ACC_SQL} AND (${ORDER_LINK_PRIORITY_SQL} = 1 OR COALESCE(t.product_detail, '') LIKE 'CLEARANCE · %'))`;
+  const LINE_ORDERS_ONLY_SQL = `(t.channel IN ('LINE', 'Facebook') AND ${ORDER_LINK_PRIORITY_SQL} <> 3 AND ${LINE_HAS_ACC_SQL} AND (${ORDER_LINK_PRIORITY_SQL} = 1 OR COALESCE(t.product_detail, '') LIKE 'CLEARANCE · %'))`;
 
   const linkConditionSql =
     linkStatus === "no_price"
