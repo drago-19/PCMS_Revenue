@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BillPreviewTrigger } from "@/components/BillPreviewDialog";
 import { DeleteImportButton } from "@/components/DeleteImportButton";
+import { ToggleImportCategoryButton } from "@/components/ToggleImportCategoryButton";
 import {
   ExcelFilePreviewDialog,
   ExcelSpreadsheetViewer,
@@ -106,9 +107,13 @@ export default async function ImportReportPage({
         eyebrow={
           importRow.fileType === "lazada_orders"
             ? "Lazada Seller Center · รายงานการนำเข้า"
-            : importRow.fileType === "oms_orders" || importRow.fileType === "oms_items"
-              ? "Shipnity OMS (TikTok, Shopee, Facebook, LINE OA) · รายงานการนำเข้า"
-              : "TikTok Shop · รายงานการนำเข้า"
+            : importRow.fileType === "oms_orders"
+              ? importRow.isAccounting
+                ? "📋 ไฟล์สรุปจากฝ่ายบัญชี (เทียบยอด LINE OA / Facebook) · รายงานการนำเข้า"
+                : "📦 ไฟล์ออเดอร์ Shipnity OMS (ปกติ) · รายงานการนำเข้า"
+              : importRow.fileType === "oms_items"
+                ? "Shipnity OMS (รายการสินค้า) · รายงานการนำเข้า"
+                : "TikTok Shop · รายงานการนำเข้า"
         }
         title={importRow.filename}
         description={`นำเข้า ${formatDateTime(importRow.importedAt)} · รอบชำระ ${
@@ -125,6 +130,13 @@ export default async function ImportReportPage({
                 <IconArrowLeft size={17} /> กลับหมวดประวัติการนำเข้า
               </Link>
             </Button>
+            {importRow.fileType === "oms_orders" ? (
+              <ToggleImportCategoryButton
+                importId={importRow.id}
+                filename={importRow.filename}
+                isAccounting={Boolean(importRow.isAccounting)}
+              />
+            ) : null}
             <ExcelFilePreviewDialog
               importId={importRow.id}
               filename={importRow.filename}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DatePickerField } from "@/components/DatePickerField";
 import { ClearAllImportsButton } from "@/components/DeleteImportButton";
 import { ExcelFilePreviewDialog } from "@/components/ExcelPreviewDialog";
+import { ToggleImportCategoryButton } from "@/components/ToggleImportCategoryButton";
 import { EmptyState, PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
 import { PaginationBar } from "@/components/PaginationBar";
 import { TableLoadingBoundary } from "@/components/TableLoadingBoundary";
@@ -267,7 +268,9 @@ export default async function ImportHistoryPage({
                           <Badge
                             variant={
                               item.fileType === "oms_orders"
-                                ? "info"
+                                ? item.isAccounting
+                                  ? "success"
+                                  : "info"
                                 : item.fileType === "oms_items"
                                   ? "warning"
                                   : item.fileType === "lazada_orders"
@@ -278,7 +281,9 @@ export default async function ImportHistoryPage({
                             className="shrink-0 max-w-full"
                           >
                             {item.fileType === "oms_orders"
-                              ? "1. ออเดอร์ใน shipnity"
+                              ? item.isAccounting
+                                ? "📋 ไฟล์สรุปจากฝ่ายบัญชี"
+                                : "1. ออเดอร์ใน shipnity"
                               : item.fileType === "oms_items"
                                 ? "3. สินค้าในออเดอร์ shipnity"
                                 : item.fileType === "lazada_orders"
@@ -334,6 +339,14 @@ export default async function ImportHistoryPage({
                     </TableCell>
                     <TableCell data-label="การจัดการ" className="num">
                       <span className="inline-flex flex-wrap items-center justify-end gap-1.5 min-[1100px]:flex-nowrap whitespace-nowrap">
+                        {item.fileType === "oms_orders" ? (
+                          <ToggleImportCategoryButton
+                            importId={item.id}
+                            filename={item.filename}
+                            isAccounting={Boolean(item.isAccounting)}
+                            size="xs"
+                          />
+                        ) : null}
                         <ExcelFilePreviewDialog
                           importId={item.id}
                           filename={item.filename}

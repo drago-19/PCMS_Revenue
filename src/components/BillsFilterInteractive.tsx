@@ -575,47 +575,57 @@ export function BillsSubFilters({
       ? activeCategory === "normal"
         ? [
             {
+              key: "all",
+              label: "ทั้งหมดใน Facebook",
+              subLabel: "รวมทุกสถานะใน Facebook",
+              count: linkCounts.all,
+              dotColor: "bg-[#1877F2]",
+              activeClass: channelActiveClass,
+            },
+            {
               key: "linked",
-              label: "ข้อมูลครบ",
-              subLabel: "ออกใบกำกับฯ ได้",
-              count: linkCounts.linked,
+              label: "ข้อมูลตรงกัน 2 ไฟล์",
+              subLabel: "ออเดอร์ + สินค้าตรงกัน 100%",
+              count: linkCounts.lineMatched ?? linkCounts.linked,
               dotColor: "bg-[#059669]",
               activeClass: channelActiveClass,
-              isActive: (cur) =>
-                (cur === "all" && linkCounts.missingItems === 0) ||
-                cur === "linked",
             },
-            ...(linkCounts.missingItems > 0
+            {
+              key: "line_mismatch",
+              label: "ยอด 2 ไฟล์ไม่ตรงกัน",
+              subLabel: "ยึดไฟล์บัญชี · ยื่นภาษีได้",
+              count: linkCounts.lineMismatch ?? 0,
+              dotColor: "bg-[#d97706]",
+              activeClass: "border-[#b45309] bg-[#b45309] text-white shadow-xs",
+            },
+            {
+              key: "oms_only",
+              label: "สินค้าโล๊ะสต๊อก / เปลี่ยนไซส์",
+              subLabel: "มีเฉพาะไฟล์บัญชี · ยื่นภาษีได้",
+              count: linkCounts.omsOnly,
+              dotColor: "bg-[#2563eb]",
+              activeClass: "border-[#1d4ed8] bg-[#1d4ed8] text-white shadow-xs",
+            },
+            {
+              key: "line_pending_acc",
+              label: "รอเทียบไฟล์บัญชี",
+              subLabel: "ยังไม่ยื่นภาษี · รอไฟล์บัญชีอนุมัติ",
+              count: linkCounts.linePendingAcc ?? 0,
+              dotColor: "bg-[#64748b]",
+              activeClass: "border-[#475569] bg-[#475569] text-white shadow-xs",
+            },
+            ...(linkCounts.noPrice > 0
               ? [
                   {
-                    key: "missing_items" as const,
-                    label: "รอไฟล์สินค้า",
-                    subLabel: "ขาดสินค้า Shipnity",
-                    count: linkCounts.missingItems,
-                    dotColor: "bg-[#ea580c]",
+                    key: "no_price" as const,
+                    label: "เปลี่ยนไซส์ / ฿0",
+                    subLabel: "มีเฉพาะค่าส่ง · ไม่ยื่นภาษี",
+                    count: linkCounts.noPrice,
+                    dotColor: "bg-[#7c3aed]",
                     activeClass: channelActiveClass,
                   },
                 ]
               : []),
-            {
-              key: "no_price",
-              label: "เปลี่ยนไซส์ / ฿0",
-              subLabel: "มีเฉพาะค่าส่ง · ไม่ยื่นภาษี",
-              count: linkCounts.noPrice,
-              dotColor: "bg-[#7c3aed]",
-              activeClass: channelActiveClass,
-            },
-            {
-              key: "all_fb",
-              label: "รวมทั้งหมด",
-              subLabel: "บิลขายปกติ + เปลี่ยนสินค้า",
-              count: linkCounts.allWithNoPrice,
-              dotColor: "bg-[#64748b]",
-              activeClass: channelActiveClass,
-              isActive: (cur) =>
-                cur === "all_fb" ||
-                (cur === "all" && linkCounts.missingItems > 0),
-            },
           ]
         : [
             {
@@ -650,18 +660,26 @@ export function BillsSubFilters({
               {
                 key: "line_mismatch",
                 label: "ยอด 2 ไฟล์ไม่ตรงกัน",
-                subLabel: "ยึดไฟล์ออเดอร์ · ยื่นภาษีได้",
+                subLabel: "ยึดไฟล์บัญชี · ยื่นภาษีได้",
                 count: linkCounts.lineMismatch ?? 0,
                 dotColor: "bg-[#d97706]",
                 activeClass: "border-[#b45309] bg-[#b45309] text-white shadow-xs",
               },
               {
                 key: "oms_only",
-                label: "มีเฉพาะไฟล์ออเดอร์",
-                subLabel: "รออัปโหลดไฟล์สินค้า",
+                label: "สินค้าโล๊ะสต๊อก",
+                subLabel: "มีเฉพาะไฟล์บัญชี · ยื่นภาษีได้",
                 count: linkCounts.omsOnly,
                 dotColor: "bg-[#2563eb]",
                 activeClass: "border-[#1d4ed8] bg-[#1d4ed8] text-white shadow-xs",
+              },
+              {
+                key: "line_pending_acc",
+                label: "รอเทียบไฟล์บัญชี",
+                subLabel: "ยังไม่ยื่นภาษี · รอไฟล์บัญชีอนุมัติ",
+                count: linkCounts.linePendingAcc ?? 0,
+                dotColor: "bg-[#64748b]",
+                activeClass: "border-[#475569] bg-[#475569] text-white shadow-xs",
               },
             ]
           : [

@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { recordAuditLog, requireApiAuth } from "@/lib/auth";
+import { toggleImportAccountingMode } from "@/lib/ingest/import-service";
 import {
   deleteImport,
   getImport,
@@ -198,4 +199,86 @@ export async function DELETE(
     { ok: deleted, deletedImport: existing.filename, requestId: auth.requestId },
     { headers: { "x-request-id": auth.requestId } },
   );
+}
+
+export async function PATCH(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const auth = requireApiAuth(request);
+  if (!auth.ok) return auth.response;
+
+  const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 30, 60_000);
+  if (!rate.allowed) {
+    return Response.json(
+      { error: "ส่งคำขอถี่เกินกำหนด กรุณารอสักครู่", requestId: auth.requestId },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rate.retryAfterSeconds),
+          "x-request-id": auth.requestId,
+        },
+      },
+    );
+  }
+
+  const { id } = await context.params;
+  const importId = Number(id);
+  if (!Number.isInteger(importId) || importId <= 0) {
+    return Response.json(
+      { error: "รหัสการนำเข้าไม่ถูกต้อง", requestId: auth.requestId },
+      { status: 400, headers: { "x-request-id": auth.requestId } },
+    );
+  }
+
+  let body: { isAccounting?: boolean } = {};
+  try {
+    body = (await request.json()) as { isAccounting?: boolean };
+  } catch {
+    body = {};
+  }
+
+  try {
+    const updated = await toggleImportAccountingMode(
+      importId,
+      typeof body.isAccounting === "boolean" ? body.isAccounting : undefined,
+    );
+    if (!updated) {
+      return Response.json(
+        { error: "ไม่พบการนำเข้านี้", requestId: auth.requestId },
+        { status: 404, headers: { "x-request-id": auth.requestId } },
+      );
+    }
+
+    await recordAuditLog({
+      actor: auth.session.sub,
+      action: "imports.toggle_category",
+      ipAddress: auth.ip,
+      outcome: "success",
+      details: {
+        importId,
+        filename: updated.filename,
+        isAccounting: updated.isAccounting,
+      },
+      requestId: auth.requestId,
+    });
+
+    return Response.json(
+      {
+        ok: true,
+        importId: updated.id,
+        filename: updated.filename,
+        isAccounting: updated.isAccounting,
+        requestId: auth.requestId,
+      },
+      { headers: { "x-request-id": auth.requestId } },
+    );
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "ไม่สามารถสลับประเภทไฟล์ได้";
+    return Response.json(
+      { error: message, requestId: auth.requestId },
+      { status: 400, headers: { "x-request-id": auth.requestId } },
+    );
+  }
 }

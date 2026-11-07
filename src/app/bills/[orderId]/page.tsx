@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BillDocument } from "@/components/BillDocument";
+import { OrderChannelSwitcher } from "@/components/OrderChannelSwitcher";
 import { PrintButton } from "@/components/PrintButton";
 import { IconArrowLeft, IconCalendar, IconReceipt } from "@/components/icons";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,12 @@ export default async function BillDetailPage({
           </Link>
         </Button>
         <div className="bill-toolbar-actions">
+          <OrderChannelSwitcher
+            orderId={row.externalId}
+            orderCode={row.orderCode}
+            currentChannel={row.channel}
+            transactionType={row.transactionType}
+          />
           {isOrderEligibleForInvoice(row) ? (
             <Button asChild variant="secondary" className="no-print">
               <Link href={`/invoices/${encodeURIComponent(row.externalId)}`}>

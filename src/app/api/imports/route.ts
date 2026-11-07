@@ -78,6 +78,7 @@ export async function POST(request: Request) {
     let fileSize = 0;
     let rawCustomMapping: FormDataEntryValue | string | null = null;
     let rawSaveMapping: FormDataEntryValue | string | null = null;
+    let rawUploadCategory: FormDataEntryValue | string | null = null;
 
     if (headerFilename !== null || !contentType.includes("multipart/form-data")) {
       let decodedName = headerFilename ?? "upload.xlsx";
@@ -113,6 +114,7 @@ export async function POST(request: Request) {
         }
       }
       rawSaveMapping = request.headers.get("x-save-mapping");
+      rawUploadCategory = request.headers.get("x-upload-category");
     } else {
       const form = await request.formData();
       const file = form.get("file");
@@ -139,10 +141,13 @@ export async function POST(request: Request) {
       fileSize = file.size;
       rawCustomMapping = form.get("customMapping");
       rawSaveMapping = form.get("saveMapping");
+      rawUploadCategory = form.get("uploadCategory");
     }
 
+    const uploadCategory: "standard" | "accounting" =
+      rawUploadCategory === "accounting" ? "accounting" : "standard";
+
     const shouldSaveMapping =
-      rawSaveMapping === null ||
       rawSaveMapping === "1" ||
       rawSaveMapping === "true";
     let customMapping: Record<string, string> | undefined;
@@ -192,6 +197,7 @@ export async function POST(request: Request) {
           filename: safeFilename,
           buffer,
           source: "upload",
+          uploadCategory,
           customMapping,
         }),
       );
@@ -230,6 +236,7 @@ export async function POST(request: Request) {
                 filename: safeFilename,
                 buffer,
                 source: "upload",
+                uploadCategory,
                 customMapping,
                 onProgress: (event) => {
                   send({ type: "progress", ...event });

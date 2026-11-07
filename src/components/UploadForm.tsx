@@ -134,24 +134,27 @@ function getStepState(
 }
 
 const CUSTOM_MAPPING_FIELDS: { key: string; label: string }[] = [
-  { key: "orderCode", label: "[shipnity] เลขที่ออเดอร์ / รหัสคำสั่งซื้อ (จำเป็น)" },
+  { key: "orderCode", label: "[shipnity / บัญชี] เลขที่ออเดอร์ / รหัสคำสั่งซื้อ (จำเป็น)" },
   { key: "skuCode", label: "[shipnity] รหัสสินค้า" },
   { key: "productName", label: "[shipnity] ชื่อสินค้า" },
   { key: "unitPrice", label: "[shipnity] ราคาต่อชิ้น" },
   { key: "quantity", label: "[shipnity] จำนวนชิ้น" },
-  { key: "salesAmount", label: "[shipnity] ยอดขายรวมออเดอร์" },
-  { key: "discountTotal", label: "[shipnity] ส่วนลดรวม" },
-  { key: "shippingFeeCustomer", label: "[shipnity] ค่าส่งที่เก็บลูกค้า" },
-  { key: "channel", label: "[shipnity] ช่องทางจำหน่าย" },
-  { key: "marketplaceOrderId", label: "[shipnity] เลขคำสั่งซื้อบน Marketplace" },
-  { key: "customerName", label: "[shipnity] ชื่อลูกค้า" },
-  { key: "customerPhone", label: "[shipnity] เบอร์โทรลูกค้า" },
+  { key: "totalQty", label: "[shipnity / บัญชี] จำนวนชิ้นรวมทั้งบิล" },
+  { key: "salesAmount", label: "[shipnity / บัญชี] ยอดขายรวมออเดอร์" },
+  { key: "profitAmount", label: "[shipnity / บัญชี] กำไรสุทธิ" },
+  { key: "discountTotal", label: "[shipnity / บัญชี] ส่วนลดรวม" },
+  { key: "shippingFeeCustomer", label: "[shipnity / บัญชี] ค่าส่งที่เก็บลูกค้า / ค่าส่ง" },
+  { key: "channel", label: "[shipnity / บัญชี] ช่องทางจำหน่าย" },
+  { key: "marketplaceOrderId", label: "[shipnity / บัญชี] เลขคำสั่งซื้อบน Marketplace" },
+  { key: "customerName", label: "[shipnity / บัญชี] ชื่อลูกค้า" },
+  { key: "customerPhone", label: "[shipnity / บัญชี] เบอร์โทรลูกค้า" },
   { key: "customerAddress", label: "[shipnity] ที่อยู่จัดส่ง" },
   { key: "postalCode", label: "[shipnity] รหัสไปรษณีย์" },
-  { key: "trackingNo", label: "[shipnity] เลขพัสดุ" },
-  { key: "courier", label: "[shipnity] ขนส่ง" },
-  { key: "createdDate", label: "[shipnity] วันที่สั่งซื้อ / วันที่สร้าง" },
-  { key: "paidDate", label: "[shipnity] วันที่โอนเงิน / ชำระเงิน" },
+  { key: "trackingNo", label: "[shipnity / บัญชี] เลขพัสดุ" },
+  { key: "courier", label: "[shipnity / บัญชี] ขนส่ง" },
+  { key: "createdDate", label: "[shipnity / บัญชี] วันที่สั่งซื้อ / วันที่สร้าง" },
+  { key: "paidDate", label: "[shipnity / บัญชี] วันที่โอนเงิน / ชำระเงิน" },
+  { key: "printedDate", label: "[shipnity / บัญชี] วันที่พิมพ์ / วันที่บิล" },
   { key: "orderId", label: "[TikTok รายได้] หมายเลขคำสั่งซื้อ/การปรับยอด" },
   { key: "payout", label: "[TikTok รายได้] ยอดการชำระเงินทั้งหมด (รับสุทธิ)" },
   { key: "incomeTotal", label: "[TikTok รายได้] รายได้ทั้งหมด" },
@@ -164,6 +167,7 @@ const CUSTOM_MAPPING_FIELDS: { key: string; label: string }[] = [
 ];
 
 export function UploadForm() {
+  const [uploadCategory, setUploadCategory] = useState<"standard" | "accounting">("standard");
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -174,7 +178,7 @@ export function UploadForm() {
   const [mappingFile, setMappingFile] = useState<File | null>(null);
   const [unrecognizedHeaders, setUnrecognizedHeaders] = useState<string[]>([]);
   const [fieldToHeader, setFieldToHeader] = useState<Record<string, string>>({});
-  const [saveMappingForFuture, setSaveMappingForFuture] = useState(true);
+  const [saveMappingForFuture, setSaveMappingForFuture] = useState(false);
   const [progress, setProgress] = useState<UploadProgressState>({
     open: false,
     percent: 0,
@@ -393,6 +397,7 @@ export function UploadForm() {
 
       xhr.setRequestHeader("Content-Type", "application/octet-stream");
       xhr.setRequestHeader("x-file-name", encodeURIComponent(targetFile.name));
+      xhr.setRequestHeader("x-upload-category", uploadCategory);
       if (customMap && Object.keys(customMap).length > 0) {
         xhr.setRequestHeader(
           "x-custom-mapping",
@@ -625,6 +630,56 @@ export function UploadForm() {
 
   return (
     <div className="upload-card">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border bg-[#f8fafc] px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-extrabold text-[#0f172a]">
+            ประเภทไฟล์ที่อัปโหลด:
+          </span>
+          <div
+            role="radiogroup"
+            aria-label="เลือกประเภทไฟล์ที่ต้องการอัปโหลด"
+            className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border bg-white p-1 shadow-2xs"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={uploadCategory === "standard"}
+              disabled={busy}
+              onClick={() => setUploadCategory("standard")}
+              className={cn(
+                "inline-flex min-h-[38px] items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-extrabold transition-all",
+                uploadCategory === "standard"
+                  ? "bg-[#0f172a] text-white shadow-xs"
+                  : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]",
+              )}
+            >
+              <span>📦 ไฟล์ระบบปกติ (Shipnity / TikTok / Lazada)</span>
+            </button>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={uploadCategory === "accounting"}
+              disabled={busy}
+              onClick={() => setUploadCategory("accounting")}
+              className={cn(
+                "inline-flex min-h-[38px] items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-extrabold transition-all",
+                uploadCategory === "accounting"
+                  ? "bg-[#06C755] text-white shadow-xs"
+                  : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]",
+              )}
+            >
+              <span>📋 ไฟล์สรุปจากฝ่ายบัญชี (เทียบยอด LINE OA / Facebook)</span>
+            </button>
+          </div>
+        </div>
+        <span className="text-[11px] font-medium text-[#64748b]">
+          {uploadCategory === "accounting"
+            ? "ใช้เทียบยอดกับ Shipnity และสร้างบิลสินค้าโล๊ะสต๊อก · หากอัปผิดสลับโหมดภายหลังได้ที่หน้าประวัติการนำเข้า"
+            : "รองรับไฟล์ออเดอร์/สินค้า Shipnity, รายได้ TikTok และ Lazada · หากอัปผิดสลับโหมดภายหลังได้ใน 1 คลิก"}
+        </span>
+      </div>
+
       <label
         className={cn("dropzone", dragging && "dragging", busy && "busy")}
         htmlFor="income-file"

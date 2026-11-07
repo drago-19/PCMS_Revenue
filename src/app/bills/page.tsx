@@ -161,7 +161,8 @@ export default async function BillsPage({
     rawLink === "compensation" ||
     rawLink === "shopee_negative" ||
     rawLink === "shopee_zero" ||
-    rawLink === "line_mismatch"
+    rawLink === "line_mismatch" ||
+    rawLink === "line_pending_acc"
       ? rawLink
       : "all";
   const rawCategory = (params.category ?? "normal").trim();
@@ -1039,6 +1040,8 @@ export default async function BillsPage({
                     : "ข้อมูลครบ"
                   : linkStatus === "line_mismatch"
                     ? "ยอด 2 ไฟล์ไม่ตรงกัน"
+                    : linkStatus === "line_pending_acc"
+                      ? "รอเทียบไฟล์บัญชี"
                     : linkStatus === "compensation"
                       ? "ชดเชยแพลตฟอร์ม"
                       : linkStatus === "missing_items"
@@ -1106,6 +1109,10 @@ export default async function BillsPage({
                   }),
                   shopee_zero: buildHref({
                     nextLink: "shopee_zero",
+                    nextPage: 1,
+                  }),
+                  line_pending_acc: buildHref({
+                    nextLink: "line_pending_acc",
                     nextPage: 1,
                   }),
                   line_mismatch: buildHref({
@@ -1383,22 +1390,22 @@ export default async function BillsPage({
         ) : (
           <>
             {(() => {
-              const isFb = channel === "Facebook";
-              const colOrderClass = isFb
+              const hideFeeColumn = channel === "Facebook" || channel === "LINE";
+              const colOrderClass = hideFeeColumn
                 ? "min-[768px]:w-[38%] min-[900px]:w-[25%] min-[900px]:min-w-[200px]"
                 : "min-[768px]:w-[38%] min-[900px]:w-[23%] min-[900px]:min-w-[190px]";
-              const colSkuClass = isFb
+              const colSkuClass = hideFeeColumn
                 ? "min-[768px]:w-[42%] min-[900px]:w-[35%] min-[900px]:min-w-[240px]"
                 : "min-[768px]:w-[42%] min-[900px]:w-[30%] min-[900px]:min-w-[230px]";
-              const colIncomeClass = isFb
+              const colIncomeClass = hideFeeColumn
                 ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[12%] min-[900px]:min-w-[100px]"
                 : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[11%] min-[900px]:min-w-[95px]";
-              const colShippingClass = isFb
+              const colShippingClass = hideFeeColumn
                 ? "num min-[768px]:max-[899px]:hidden min-[900px]:w-[14%] min-[900px]:min-w-[125px]"
                 : "num min-[768px]:max-[899px]:hidden min-[900px]:w-[13%] min-[900px]:min-w-[120px]";
               const colFeeClass =
                 "num min-[768px]:max-[899px]:hidden min-[900px]:w-[11%] min-[900px]:min-w-[95px]";
-              const colPayoutClass = isFb
+              const colPayoutClass = hideFeeColumn
                 ? "num min-[768px]:w-[20%] min-[900px]:w-[14%] min-[900px]:min-w-[115px]"
                 : "num min-[768px]:w-[20%] min-[900px]:w-[12%] min-[900px]:min-w-[110px]";
 
@@ -1467,7 +1474,7 @@ export default async function BillsPage({
                           hrefSortAsc={buildHref({ nextSort: "shipping_asc", nextPage: 1 })}
                         />
                       </TableHead>
-                      {channel !== "Facebook" ? (
+                      {!hideFeeColumn ? (
                         <TableHead className={colFeeClass}>
                           <Link
                             href={buildHref({
@@ -1675,7 +1682,8 @@ export default async function BillsPage({
                                 รอผูก ออเดอร์ใน shipnity
                               </Badge>
                             )}
-                            {row.channel === "LINE" && row.lineComparisonStatus === "matched" ? (
+                            {(row.channel === "LINE" || row.channel === "Facebook") &&
+                            row.lineComparisonStatus === "matched" ? (
                               <Badge
                                 variant="success"
                                 size="sm"
@@ -1683,7 +1691,8 @@ export default async function BillsPage({
                               >
                                 ✅ ตรงกัน 2 ไฟล์
                               </Badge>
-                            ) : row.channel === "LINE" && row.lineComparisonStatus === "amount_diff" ? (
+                            ) : (row.channel === "LINE" || row.channel === "Facebook") &&
+                              row.lineComparisonStatus === "amount_diff" ? (
                               <Badge
                                 variant="warning"
                                 size="sm"
@@ -1691,13 +1700,26 @@ export default async function BillsPage({
                               >
                                 ⚠️ ยอดต่างกัน (ไฟล์สินค้า {formatTHB(row.omsItemsSalesAmount ?? 0)})
                               </Badge>
-                            ) : row.channel === "LINE" && row.lineComparisonStatus === "orders_only" ? (
+                            ) : (row.channel === "LINE" || row.channel === "Facebook") &&
+                              row.lineComparisonStatus === "orders_only" ? (
                               <Badge
                                 variant="neutral"
                                 size="sm"
                                 className="shrink-0 border-sky-300 bg-sky-100 px-1.5 py-0 text-[10.5px] font-bold text-sky-950"
                               >
-                                📄 มีเฉพาะไฟล์ออเดอร์
+                                📄 มีเฉพาะไฟล์บัญชี ·{" "}
+                                {row.omsNote && row.omsNote.includes("เปลี่ยนไซส์")
+                                  ? row.omsNote
+                                  : "สินค้าโล๊ะสต๊อก"}
+                              </Badge>
+                            ) : (row.channel === "LINE" || row.channel === "Facebook") &&
+                              row.lineComparisonStatus === "shipnity_only" ? (
+                              <Badge
+                                variant="neutral"
+                                size="sm"
+                                className="shrink-0 border-slate-300 bg-slate-100 px-1.5 py-0 text-[10.5px] font-bold text-slate-800"
+                              >
+                                ⏳ รอไฟล์บัญชีอนุมัติ · ยังไม่ยื่นภาษี
                               </Badge>
                             ) : null}
                             {row.customerName ? (
@@ -1805,7 +1827,7 @@ export default async function BillsPage({
                           <span>
                             {formatTHB(row.isCompensationBill ? row.payout : row.income)}
                           </span>
-                          {row.channel === "LINE" &&
+                          {(row.channel === "LINE" || row.channel === "Facebook") &&
                           row.lineComparisonStatus === "amount_diff" &&
                           row.omsItemsSalesAmount !== null &&
                           row.omsItemsSalesAmount !== undefined ? (
@@ -1871,7 +1893,7 @@ export default async function BillsPage({
                           );
                         })()}
                       </TableCell>
-                      {channel !== "Facebook" ? (
+                      {!hideFeeColumn ? (
                         <TableCell
                           data-label="ค่าธรรมเนียม"
                           className={cn(
@@ -1882,22 +1904,21 @@ export default async function BillsPage({
                         >
                           <div className="flex flex-col items-end gap-0.5 min-[768px]:pt-1">
                             <span>
-                              {row.channel === "Facebook"
+                              {row.channel === "Facebook" || row.channel === "LINE"
                                 ? "-"
                                 : formatTHB(row.feeTotal)}
                             </span>
                             {row.channel !== "Facebook" &&
+                            row.channel !== "LINE" &&
                             row.feeTotal === 0 &&
                             row.normalized.transactionType ===
                               "คำสั่งซื้อ (OMS)" ? (
                               <span className="max-w-[115px] whitespace-normal text-right text-[10px] leading-tight font-normal text-muted-foreground">
                                 {row.channel === "Shopee"
                                   ? "(ออเดอร์ Shopee จาก shipnity)"
-                                  : row.channel === "LINE"
-                                    ? "(ออเดอร์ LINE OA จาก shipnity)"
-                                    : row.channel === "Other"
-                                      ? "(ออเดอร์ Other จาก shipnity)"
-                                      : "(ยังไม่มีข้อมูลรายได้จาก TikTok)"}
+                                  : row.channel === "Other"
+                                    ? "(ออเดอร์ Other จาก shipnity)"
+                                    : "(ยังไม่มีข้อมูลรายได้จาก TikTok)"}
                               </span>
                             ) : null}
                           </div>
@@ -2018,7 +2039,7 @@ export default async function BillsPage({
                       </div>
                     </div>
                   </TableCell>
-                  {channel !== "Facebook" ? (
+                  {!hideFeeColumn ? (
                     <TableCell
                       data-label="รวมค่าธรรมเนียม"
                       className={cn(

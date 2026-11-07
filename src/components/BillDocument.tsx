@@ -51,7 +51,7 @@ export function BillDocument({
   isNoProductPriceOrder?: boolean;
   shopName?: string | null;
   omsItemsSalesAmount?: number | null;
-  lineComparisonStatus?: "matched" | "amount_diff" | "orders_only";
+  lineComparisonStatus?: "matched" | "amount_diff" | "orders_only" | "shipnity_only";
   lineSalesDiff?: number;
 }) {
   const isOmsPlaceholder = bill.transactionType === "คำสั่งซื้อ (OMS)";
@@ -231,6 +231,11 @@ export function BillDocument({
             <dd className="bill-empty-hint font-semibold break-words text-[#b45309]">
               ไม่ออกใบกำกับฯ (ติดลบ / ตีกลับ)
             </dd>
+          ) : (channel === "LINE" || channel === "Facebook") &&
+            lineComparisonStatus === "shipnity_only" ? (
+            <dd className="bill-empty-hint font-semibold break-words text-[#475569]">
+              ยังไม่ยื่นภาษี (รอไฟล์สรุปจากฝ่ายบัญชีอนุมัติก่อน)
+            </dd>
           ) : invoiceNo ? (
             <dd className="mono">{invoiceNo}</dd>
           ) : !isOmsPlaceholder && bill.incomeTotal <= 0 && bill.payout <= 0 ? (
@@ -337,9 +342,6 @@ export function BillDocument({
           const isFullReturn =
             bill.incomeTotal > 0 &&
             Math.abs(bill.feeTotal) >= bill.incomeTotal - 0.01;
-          const netCashBeforeCogs = Number(
-            (bill.incomeTotal + bill.feeTotal).toFixed(2),
-          );
           const totalQty =
             omsItems?.reduce((acc, it) => acc + it.quantity, 0) ?? 0;
 
@@ -493,13 +495,15 @@ export function BillDocument({
         </section>
       ) : null}
 
-      {channel === "LINE" && lineComparisonStatus ? (
+      {(channel === "LINE" || channel === "Facebook") && lineComparisonStatus ? (
         <section
           className={
             lineComparisonStatus === "amount_diff"
               ? "mx-4 mt-3.5 rounded-xl border border-amber-300 bg-amber-50/90 p-3.5 text-xs text-amber-950 sm:mx-6"
               : lineComparisonStatus === "orders_only"
                 ? "mx-4 mt-3.5 rounded-xl border border-sky-300 bg-sky-50/90 p-3 text-xs text-sky-950 sm:mx-6"
+                : lineComparisonStatus === "shipnity_only"
+                  ? "mx-4 mt-3.5 rounded-xl border border-slate-300 bg-slate-50/90 p-3 text-xs text-slate-900 sm:mx-6"
                 : "mx-4 mt-3.5 rounded-xl border border-emerald-300 bg-emerald-50/80 p-3 text-xs text-emerald-950 sm:mx-6"
           }
         >
@@ -509,7 +513,7 @@ export function BillDocument({
                 <div className="flex items-center gap-1.5 font-extrabold text-[13px] text-amber-900">
                   <IconAlert size={16} className="shrink-0 text-amber-600" />
                   <span>
-                    เปรียบเทียบข้อมูล 2 ไฟล์ LINE OA: ยอดขายออเดอร์และไฟล์สินค้าไม่ตรงกัน
+                    เปรียบเทียบข้อมูล 2 ไฟล์ {channel === "Facebook" ? "Facebook" : "LINE OA"}: ยอดไฟล์บัญชีและไฟล์สินค้าไม่ตรงกัน (ยึดไฟล์บัญชีเป็นหลักในการออกใบกำกับภาษี)
                   </span>
                 </div>
                 <Badge
@@ -528,14 +532,14 @@ export function BillDocument({
                   <div className="flex flex-wrap items-center justify-between gap-2 font-bold text-emerald-800">
                     <span className="flex flex-wrap items-center gap-1.5">
                       <span>
-                        1. ยอดขายจริงตามไฟล์ออเดอร์ LINE OA (ใช้แสดงในบิลและยื่นภาษี):
+                        1. ยอดขายตามไฟล์สรุปฝ่ายบัญชี {channel === "Facebook" ? "Facebook" : "LINE OA"} (ใช้ยื่นภาษีและออกใบกำกับภาษีเป็นหลัก):
                       </span>
                       <Badge
                         variant="success"
                         size="sm"
                         className="border-emerald-300 bg-emerald-50 px-1.5 py-0 text-[10.5px] font-bold text-emerald-900"
                       >
-                        ✅ สามารถยื่นภาษีได้
+                        ✅ ยึดไฟล์บัญชี · ยื่นภาษีได้
                       </Badge>
                     </span>
                     <span className="mono">{formatTHB(bill.incomeTotal)}</span>
@@ -549,7 +553,7 @@ export function BillDocument({
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 border-t border-dashed border-amber-200 pt-1 font-extrabold text-amber-900">
-                    <span>= ส่วนต่างระหว่างไฟล์ออเดอร์กับไฟล์สินค้า:</span>
+                    <span>= ส่วนต่างระหว่างไฟล์สรุปฝ่ายบัญชีกับไฟล์สินค้า:</span>
                     <span className="mono">
                       {lineSalesDiff && lineSalesDiff > 0
                         ? `+${formatTHB(lineSalesDiff)}`
@@ -571,15 +575,34 @@ export function BillDocument({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 font-bold text-sky-900">
                 <span>
-                  📄 มีเฉพาะไฟล์ออเดอร์ LINE OA (ยอดขาย {formatTHB(bill.incomeTotal)}) · รออัปโหลดไฟล์สินค้า
+                  📄 มีเฉพาะไฟล์บัญชี {channel === "Facebook" ? "Facebook" : "LINE OA"} (
+                  {omsNote && omsNote.includes("เปลี่ยนไซส์")
+                    ? `${omsNote} · ไม่มีไฟล์สินค้า Shipnity`
+                    : "สินค้าโล๊ะสต๊อก · ไม่ได้เปิดใน Shipnity"}
+                  ) · ยอดขาย {formatTHB(bill.incomeTotal)}
+                </span>
+              </div>
+              <Badge
+                variant="success"
+                size="sm"
+                className="border-emerald-300 bg-white font-bold text-emerald-900"
+              >
+                ✅ ยื่นภาษีได้
+              </Badge>
+            </div>
+          ) : lineComparisonStatus === "shipnity_only" ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                <span>
+                  ⏳ รายการนี้มีเฉพาะในไฟล์ Shipnity (ยอดขาย {formatTHB(bill.incomeTotal)}) · ยังไม่มีชื่ออยู่ในไฟล์สรุปจากฝ่ายบัญชี จึงยังไม่นำมายื่นภาษี/ไม่ออกใบกำกับภาษี
                 </span>
               </div>
               <Badge
                 variant="neutral"
                 size="sm"
-                className="border-sky-300 bg-white font-bold text-sky-900"
+                className="border-slate-300 bg-white font-bold text-slate-800"
               >
-                รอไฟล์สินค้า
+                ⏳ รอไฟล์บัญชีอนุมัติ · ยังไม่ยื่นภาษี
               </Badge>
             </div>
           ) : (
@@ -587,7 +610,7 @@ export function BillDocument({
               <div className="flex items-center gap-1.5 font-bold text-emerald-900">
                 <IconCheckCircle size={15} className="shrink-0 text-emerald-600" />
                 <span>
-                  ข้อมูลตรงกันทั้ง 2 ไฟล์ (ไฟล์ออเดอร์ LINE OA และไฟล์สินค้า Shipnity มียอดขายตรงกัน {formatTHB(bill.incomeTotal)})
+                  ข้อมูลตรงกันทั้ง 2 ไฟล์ (ไฟล์สรุปฝ่ายบัญชี {channel === "Facebook" ? "Facebook" : "LINE OA"} และไฟล์สินค้า Shipnity มียอดขายตรงกัน {formatTHB(bill.incomeTotal)})
                 </span>
               </div>
               <Badge

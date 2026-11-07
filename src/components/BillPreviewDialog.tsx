@@ -19,6 +19,7 @@ import {
   type InvoicePaperSize,
 } from "@/components/InvoiceDocument";
 import { InvoiceZoomControl } from "@/components/InvoiceZoomControl";
+import { OrderChannelSwitcher } from "@/components/OrderChannelSwitcher";
 import {
   IconCalendar,
   IconFile,
@@ -237,6 +238,15 @@ export function BillPreviewModal({
   const [paperSize, setPaperSize] = useState<InvoicePaperSize>(
     row.sellerSettings?.defaultPaperSize ?? "a6",
   );
+  const [currentChannel, setCurrentChannel] = useState(row.channel ?? "TikTok");
+  const [currentInvoiceNo, setCurrentInvoiceNo] = useState<string | null>(
+    row.invoiceNo ?? null,
+  );
+
+  useEffect(() => {
+    setCurrentChannel(row.channel ?? "TikTok");
+    setCurrentInvoiceNo(row.invoiceNo ?? null);
+  }, [row.channel, row.invoiceNo, row.externalId]);
 
   const [persistedBuyer, setPersistedBuyer] = useState(() => ({
     name: row.buyerName ?? row.customerName ?? "",
@@ -312,11 +322,23 @@ export function BillPreviewModal({
     return () => window.clearTimeout(timer);
   }, [open, tab, isDirty, buyerName, buyerTaxId, buyerAddress, saveBuyerToDb]);
 
-  const bill = useMemo(() => buildBill(row.normalized), [row.normalized]);
-  const invoice = useMemo(() => buildInvoice(row), [row]);
+  const effectiveRow = useMemo(
+    () => ({
+      ...row,
+      channel: currentChannel,
+      invoiceNo: currentInvoiceNo,
+    }),
+    [row, currentChannel, currentInvoiceNo],
+  );
+
+  const bill = useMemo(
+    () => buildBill(effectiveRow.normalized),
+    [effectiveRow.normalized],
+  );
+  const invoice = useMemo(() => buildInvoice(effectiveRow), [effectiveRow]);
   const enableFullTaxInvoice =
-    row.sellerSettings?.enableFullTaxInvoice === true;
-  const isInvoiceEligible = isOrderEligibleForInvoice(row);
+    effectiveRow.sellerSettings?.enableFullTaxInvoice === true;
+  const isInvoiceEligible = isOrderEligibleForInvoice(effectiveRow);
 
   useEffect(() => {
     if (open) {
@@ -341,10 +363,12 @@ export function BillPreviewModal({
   const invoiceMode: InvoiceMode =
     effectiveTab === "invoice_full" ? "full" : "abbreviated";
 
-  const encodedExtId = encodeURIComponent(row.externalId);
-  const displayOrderId = row.externalId.includes("|")
-    ? row.orderCode || row.externalId.split("|")[0] || row.externalId
-    : row.externalId;
+  const encodedExtId = encodeURIComponent(effectiveRow.externalId);
+  const displayOrderId = effectiveRow.externalId.includes("|")
+    ? effectiveRow.orderCode ||
+      effectiveRow.externalId.split("|")[0] ||
+      effectiveRow.externalId
+    : effectiveRow.externalId;
 
   const fullPageHref =
     isInvoiceEligible && effectiveTab === "invoice"
@@ -389,43 +413,54 @@ export function BillPreviewModal({
             <div className="flex flex-col gap-1">
               <DialogTitle className="flex flex-wrap items-center gap-2 text-base font-extrabold text-foreground sm:text-lg">
                 <span>คำสั่งซื้อ #{displayOrderId}</span>
-                {row.orderCode && row.orderCode !== displayOrderId ? (
+                {effectiveRow.orderCode &&
+                effectiveRow.orderCode !== displayOrderId ? (
                   <Badge variant="neutral" size="sm" className="mono">
-                    ผูกออเดอร์ #{row.orderCode}
+                    ผูกออเดอร์ #{effectiveRow.orderCode}
                   </Badge>
-                ) : !row.orderCode ? (
+                ) : !effectiveRow.orderCode ? (
                   <span className="text-xs font-normal text-muted-foreground">
                     (ยังไม่ผูก #ออเดอร์ใน shipnity)
                   </span>
                 ) : null}
                 <Badge
                   variant={
-                    row.channel === "Shopee"
+                    currentChannel === "Shopee"
                       ? "shopee"
-                      : row.channel === "Facebook"
+                      : currentChannel === "Facebook"
                         ? "facebook"
-                        : row.channel === "Lazada"
+                        : currentChannel === "Lazada"
                           ? "lazada"
-                          : row.channel === "LINE"
+                          : currentChannel === "LINE"
                             ? "line"
-                            : row.channel === "Other"
+                            : currentChannel === "Other"
                               ? "other"
                               : "default"
                   }
                   size="sm"
                 >
-                  {row.channel === "Shopee"
+                  {currentChannel === "Shopee"
                     ? "Shopee"
-                    : row.channel === "Facebook"
+                    : currentChannel === "Facebook"
                       ? "Facebook"
-                      : row.channel === "Lazada"
+                      : currentChannel === "Lazada"
                         ? "Lazada"
-                        : row.channel === "LINE"
+                        : currentChannel === "LINE"
                           ? "LINE OA"
-                          : row.channel === "Other"
+                          : currentChannel === "Other"
                             ? "Other"
                             : "TikTok"}
                 </Badge>
+                <OrderChannelSwitcher
+                  orderId={effectiveRow.externalId}
+                  orderCode={effectiveRow.orderCode}
+                  currentChannel={currentChannel}
+                  transactionType={effectiveRow.transactionType}
+                  onSwitched={(res) => {
+                    setCurrentChannel(res.channel);
+                    setCurrentInvoiceNo(res.invoiceNo);
+                  }}
+                />
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
                 {enableFullTaxInvoice
@@ -497,10 +532,10 @@ export function BillPreviewModal({
             </div>
 
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-              {row.paidDate ? (
+              {effectiveRow.paidDate ? (
                 <Button asChild variant="outline" size="xs" className="flex-1 sm:flex-initial">
                   <Link
-                    href={`/bills?date=${encodeURIComponent(row.paidDate)}`}
+                    href={`/bills?date=${encodeURIComponent(effectiveRow.paidDate)}`}
                     onClick={() => onOpenChange(false)}
                   >
                     <IconCalendar size={14} /> ดูบิลรอบนี้
@@ -581,16 +616,16 @@ export function BillPreviewModal({
                     <span className="font-bold text-[#334155]">
                       เอกสารสรุปรายละเอียดบิลคำสั่งซื้อ
                     </span>
-                    {row.importFilename ? (
+                    {effectiveRow.importFilename ? (
                       <span className="truncate max-w-[260px] sm:max-w-[420px] text-[#64748b]">
-                        · ไฟล์ต้นทาง: {row.importFilename}
+                        · ไฟล์ต้นทาง: {effectiveRow.importFilename}
                       </span>
                     ) : null}
                   </div>
                   <div className="flex min-h-[28px] items-center">
-                    {row.invoiceNo ? (
+                    {currentInvoiceNo ? (
                       <span className="mono text-xs font-bold text-[#0f172a]">
-                        เลขที่ใบกำกับฯ: {row.invoiceNo}
+                        เลขที่ใบกำกับฯ: {currentInvoiceNo}
                       </span>
                     ) : null}
                   </div>
@@ -694,29 +729,29 @@ export function BillPreviewModal({
             {effectiveTab === "bill" ? (
               <BillDocument
                 bill={bill}
-                shopName={row.shopName}
-                invoiceNo={row.invoiceNo}
-                channel={row.channel}
-                orderCode={row.orderCode}
-                customerName={buyerName || row.customerName}
-                trackingNo={row.trackingNo}
-                courier={row.courier}
-                discountCode={row.discountCode}
-                discountTotal={row.discountTotal}
-                shippingFeeCustomer={row.shippingFeeCustomer}
-                shippingFeeSeller={row.shippingFeeSeller}
-                marketplaceOrderRaw={row.marketplaceOrderRaw}
-                productDetail={row.productDetail}
-                omsItems={row.omsItems}
-                omsNote={row.omsNote}
-                isNoProductPriceOrder={row.isNoProductPriceOrder}
-                omsItemsSalesAmount={row.omsItemsSalesAmount}
-                lineComparisonStatus={row.lineComparisonStatus}
-                lineSalesDiff={row.lineSalesDiff}
+                shopName={effectiveRow.shopName}
+                invoiceNo={currentInvoiceNo}
+                channel={currentChannel}
+                orderCode={effectiveRow.orderCode}
+                customerName={buyerName || effectiveRow.customerName}
+                trackingNo={effectiveRow.trackingNo}
+                courier={effectiveRow.courier}
+                discountCode={effectiveRow.discountCode}
+                discountTotal={effectiveRow.discountTotal}
+                shippingFeeCustomer={effectiveRow.shippingFeeCustomer}
+                shippingFeeSeller={effectiveRow.shippingFeeSeller}
+                marketplaceOrderRaw={effectiveRow.marketplaceOrderRaw}
+                productDetail={effectiveRow.productDetail}
+                omsItems={effectiveRow.omsItems}
+                omsNote={effectiveRow.omsNote}
+                isNoProductPriceOrder={effectiveRow.isNoProductPriceOrder}
+                omsItemsSalesAmount={effectiveRow.omsItemsSalesAmount}
+                lineComparisonStatus={effectiveRow.lineComparisonStatus}
+                lineSalesDiff={effectiveRow.lineSalesDiff}
                 source={{
-                  filename: row.importFilename ?? "ไฟล์นำเข้าระบบ",
-                  importedAt: row.importImportedAt ?? row.createdAt,
-                  importId: row.importId,
+                  filename: effectiveRow.importFilename ?? "ไฟล์นำเข้าระบบ",
+                  importedAt: effectiveRow.importImportedAt ?? effectiveRow.createdAt,
+                  importId: effectiveRow.importId,
                 }}
               />
             ) : (
@@ -727,9 +762,9 @@ export function BillPreviewModal({
                 buyerOverride={
                   effectiveTab === "invoice_full"
                     ? {
-                        name: buyerName || row.customerName || null,
+                        name: buyerName || effectiveRow.customerName || null,
                         taxId: buyerTaxId || null,
-                        address: buyerAddress || row.customerAddress || null,
+                        address: buyerAddress || effectiveRow.customerAddress || null,
                       }
                     : undefined
                 }
