@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-05-v42";
+const SCHEMA_VERSION = "2026-11-07-v50";
 
 export type { CompanyId };
 
@@ -123,8 +123,92 @@ export function ensureSchema(): Promise<void> {
 
         await client.query("SET search_path TO public");
         await client.query(SCHEMA_SQL);
-        const { reconcileAndSyncThreeFiles, refreshSummaryTables } = await import("./ingest/import-service");
-        const fbMissingPublic = await client.query<{ paid_date: string }>(
+        const { reconcileAndSyncThreeFiles, refreshSummaryTables, saveOmsOrdersBatch } = await import("./ingest/import-service");
+        const { detectAndParseOmsInput } = await import("./ingest/oms-parse");
+        const { decompressFileBlob } = await import("./file-blob");
+        const accImportsPublic = await client.query<{
+          id: number;
+          filename: string;
+          file_blob: Buffer | null;
+        }>(
+          `SELECT id, filename, file_blob
+           FROM imports
+           WHERE (filename ILIKE '%line%ปี%' OR filename ILIKE '%บัญชี%')
+             AND (is_accounting = 0 OR order_count = 0 OR NOT EXISTS (
+               SELECT 1 FROM oms_orders o WHERE o.accounting_import_id = imports.id
+             ))`,
+        );
+        for (const imp of accImportsPublic.rows) {
+          if (imp.file_blob) {
+            const buf = decompressFileBlob(imp.file_blob);
+            if (buf) {
+              const reParsed = await detectAndParseOmsInput(buf);
+              if (reParsed && reParsed.fileType === "oms_orders" && reParsed.orders.length > 0) {
+                const paidDates = reParsed.orders
+                  .map((o) => o.paidDate || o.createdDate || o.printedDate)
+                  .filter(Boolean)
+                  .sort();
+                const periodStart = paidDates[0] ?? null;
+                const periodEnd = paidDates[paidDates.length - 1] ?? null;
+                await client.query(
+                  `UPDATE imports
+                   SET is_accounting = 1,
+                       row_count = $2,
+                       order_count = $2,
+                       period_start = COALESCE($3, period_start),
+                       period_end = COALESCE($4, period_end),
+                       status = 'ok'
+                   WHERE id = $1`,
+                  [imp.id, reParsed.orders.length, periodStart, periodEnd],
+                );
+                await saveOmsOrdersBatch(reParsed.orders, Number(imp.id), client, {
+                  isAccounting: true,
+                });
+                await reconcileAndSyncThreeFiles(client, Number(imp.id), new Date().toISOString());
+              } else {
+                await client.query(`UPDATE imports SET is_accounting = 1 WHERE id = $1`, [imp.id]);
+              }
+            } else {
+              await client.query(`UPDATE imports SET is_accounting = 1 WHERE id = $1`, [imp.id]);
+            }
+          } else {
+            await client.query(`UPDATE imports SET is_accounting = 1 WHERE id = $1`, [imp.id]);
+          }
+        }
+        const misclassifiedLineFromFb = await client.query<{
+          order_uid: string;
+          paid_date: string;
+        }>(
+          `UPDATE oms_orders o
+           SET channel = 'LINE',
+               updated_at = now()
+           WHERE o.channel = 'Facebook'
+             AND o.accounting_import_id IS NOT NULL
+             AND o.note IS NOT NULL
+             AND LOWER(BTRIM(o.note)) LIKE 'line%'
+           RETURNING o.order_uid, o.paid_date`,
+        );
+        if (misclassifiedLineFromFb.rows.length > 0) {
+          const fixedUids = misclassifiedLineFromFb.rows.map((r) => String(r.order_uid));
+          await client.query(
+            `UPDATE oms_order_items SET channel = 'LINE' WHERE order_uid = ANY($1::text[]) AND channel <> 'LINE'`,
+            [fixedUids],
+          );
+          await client.query(
+            `UPDATE transactions SET channel = 'LINE' WHERE oms_order_uid = ANY($1::text[]) AND is_order = 1 AND channel <> 'LINE'`,
+            [fixedUids],
+          );
+          await client.query(
+            `UPDATE invoice_registry SET seq = NULL WHERE order_id = ANY($1::text[]) AND channel <> 'LINE'`,
+            [fixedUids],
+          );
+          await reconcileAndSyncThreeFiles(client, 0, new Date().toISOString());
+          await refreshSummaryTables(client, {
+            dates: misclassifiedLineFromFb.rows.map((r) => String(r.paid_date)).filter(Boolean),
+          });
+        }
+
+        const missingSyncPublic = await client.query<{ paid_date: string }>(
           `SELECT DISTINCT o.paid_date
            FROM oms_orders o
            WHERE o.channel = 'Facebook'
@@ -133,14 +217,41 @@ export function ensureSchema(): Promise<void> {
              AND NOT EXISTS (
                SELECT 1 FROM transactions t
                WHERE t.is_order = 1 AND t.oms_order_uid = o.order_uid
-             )`,
+             )
+           UNION
+           SELECT DISTINCT t.paid_date
+           FROM transactions t
+           WHERE t.is_order = 1
+             AND t.channel = 'LINE'
+             AND t.income > 0
+             AND (t.link_priority = 1 OR t.shop_name IS NULL OR t.shop_name = '')`,
         );
-        if (fbMissingPublic.rows.length > 0) {
+        if (missingSyncPublic.rows.length > 0) {
           await reconcileAndSyncThreeFiles(client, 0, new Date().toISOString());
           await refreshSummaryTables(client, {
-            dates: fbMissingPublic.rows.map((r) => String(r.paid_date)),
+            dates: missingSyncPublic.rows.map((r) => String(r.paid_date)).filter(Boolean),
           });
         }
+
+        // LINE OA & Facebook: อนุญาตให้ออกใบกำกับภาษีเฉพาะออเดอร์ที่มีชื่ออยู่ในไฟล์สรุปจากฝ่ายบัญชี (accounting_import_id IS NOT NULL) เท่านั้น
+        const cleanupPendingAccInvoices = async () => {
+          await client.query(
+            `UPDATE invoice_registry r
+             SET status = 'void',
+                 voided_at = now(),
+                 void_reason = 'รอไฟล์สรุปจากฝ่ายบัญชีอนุมัติ'
+             WHERE r.channel IN ('LINE', 'Facebook')
+               AND r.status = 'active'
+               AND NOT EXISTS (
+                 SELECT 1 FROM transactions t
+                 JOIN oms_orders oa ON oa.order_uid = t.oms_order_uid
+                 WHERE t.external_id = r.order_id
+                   AND oa.accounting_import_id IS NOT NULL
+               )`,
+          );
+        };
+        await cleanupPendingAccInvoices();
+
         await client.query(
           `INSERT INTO app_schema_version (schema_name, version, applied_at)
            VALUES ('public', $1, now())
@@ -151,7 +262,7 @@ export function ensureSchema(): Promise<void> {
         await client.query("CREATE SCHEMA IF NOT EXISTS seeheng");
         await client.query("SET search_path TO seeheng, public");
         await client.query(SCHEMA_SQL);
-        const fbMissingSeeheng = await client.query<{ paid_date: string }>(
+        const missingSyncSeeheng = await client.query<{ paid_date: string }>(
           `SELECT DISTINCT o.paid_date
            FROM oms_orders o
            WHERE o.channel = 'Facebook'
@@ -160,14 +271,22 @@ export function ensureSchema(): Promise<void> {
              AND NOT EXISTS (
                SELECT 1 FROM transactions t
                WHERE t.is_order = 1 AND t.oms_order_uid = o.order_uid
-             )`,
+             )
+           UNION
+           SELECT DISTINCT t.paid_date
+           FROM transactions t
+           WHERE t.is_order = 1
+             AND t.channel = 'LINE'
+             AND t.income > 0
+             AND (t.link_priority = 1 OR t.shop_name IS NULL OR t.shop_name = '')`,
         );
-        if (fbMissingSeeheng.rows.length > 0) {
+        if (missingSyncSeeheng.rows.length > 0) {
           await reconcileAndSyncThreeFiles(client, 0, new Date().toISOString());
           await refreshSummaryTables(client, {
-            dates: fbMissingSeeheng.rows.map((r) => String(r.paid_date)),
+            dates: missingSyncSeeheng.rows.map((r) => String(r.paid_date)).filter(Boolean),
           });
         }
+        await cleanupPendingAccInvoices();
         await client.query(
           `INSERT INTO public.app_schema_version (schema_name, version, applied_at)
            VALUES ('seeheng', $1, now())
@@ -391,6 +510,7 @@ CREATE INDEX IF NOT EXISTS ix_invoice_registry_audit_order ON invoice_registry_a
 
 ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_type TEXT NOT NULL DEFAULT 'settlement';
 ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_blob BYTEA;
+ALTER TABLE imports ADD COLUMN IF NOT EXISTS is_accounting INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'TikTok';
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS order_code TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS oms_order_uid TEXT;
@@ -505,6 +625,9 @@ CREATE TABLE IF NOT EXISTS oms_orders (
 
 ALTER TABLE oms_orders ADD COLUMN IF NOT EXISTS order_uid TEXT;
 ALTER TABLE oms_orders ADD COLUMN IF NOT EXISTS shop_name TEXT;
+ALTER TABLE oms_orders ADD COLUMN IF NOT EXISTS accounting_import_id BIGINT;
+ALTER TABLE oms_orders ADD COLUMN IF NOT EXISTS accounting_sales_amount DOUBLE PRECISION;
+CREATE INDEX IF NOT EXISTS ix_oms_orders_acc_import ON oms_orders(accounting_import_id) WHERE accounting_import_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS ix_oms_orders_order_code ON oms_orders(order_code);
 CREATE INDEX IF NOT EXISTS ix_oms_orders_shop_name ON oms_orders(shop_name);
@@ -990,6 +1113,15 @@ BEGIN
     GROUP BY paid_date;
 
     DELETE FROM sku_summaries;
+    WITH order_lines AS (
+      SELECT
+        i.*,
+        COALESCE(NULLIF(i.order_uid, ''), i.order_code) AS ord_key,
+        SUM(i.unit_price * i.quantity) OVER (PARTITION BY COALESCE(NULLIF(i.order_uid, ''), i.order_code)) AS order_gross_sum,
+        COUNT(*) OVER (PARTITION BY COALESCE(NULLIF(i.order_uid, ''), i.order_code)) AS order_line_cnt
+      FROM oms_order_items i
+      WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+    )
     INSERT INTO sku_summaries (
       sku_code, product_name, total_qty, order_count, gross_amount,
       net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, lazada_qty, line_qty, other_qty, updated_at
@@ -998,9 +1130,15 @@ BEGIN
       i.sku_code,
       MAX(i.product_name),
       COALESCE(SUM(i.quantity), 0)::int,
-      COUNT(DISTINCT COALESCE(NULLIF(i.order_uid, ''), i.order_code))::int,
+      COUNT(DISTINCT i.ord_key)::int,
       ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
-      ROUND(COALESCE(SUM(i.order_sales_amount), 0)::numeric, 2),
+      ROUND(COALESCE(SUM(
+        CASE
+          WHEN i.order_gross_sum > 0 THEN i.order_sales_amount * (i.unit_price * i.quantity) / i.order_gross_sum
+          WHEN i.order_line_cnt > 0 THEN i.order_sales_amount / i.order_line_cnt
+          ELSE i.order_sales_amount
+        END
+      ), 0)::numeric, 2),
       COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
       COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
       COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
@@ -1008,8 +1146,7 @@ BEGIN
       COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int,
       COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int,
       now()
-    FROM oms_order_items i
-    WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+    FROM order_lines i
     GROUP BY i.sku_code;
   END IF;
 
@@ -1210,12 +1347,17 @@ BEGIN
     UPDATE oms_orders o
     SET shop_name = sub.sender_name
     FROM (
-      SELECT DISTINCT ON (order_code) order_code, sender_name
+      SELECT DISTINCT ON (order_code, ym)
+        order_code,
+        SUBSTRING(COALESCE(NULLIF(paid_date, ''), created_date) FROM 1 FOR 7) AS ym,
+        sender_name
       FROM oms_order_items
       WHERE sender_name IS NOT NULL AND sender_name <> ''
-      ORDER BY order_code, line_no ASC
+      ORDER BY order_code, ym, line_no ASC
     ) sub
-    WHERE o.order_code = sub.order_code AND (o.shop_name IS NULL OR o.shop_name = '');
+    WHERE o.order_code = sub.order_code
+      AND SUBSTRING(COALESCE(NULLIF(o.paid_date, ''), o.created_date) FROM 1 FOR 7) = sub.ym
+      AND (o.shop_name IS NULL OR o.shop_name = '');
 
     UPDATE transactions t
     SET shop_name = sub.sender_name
@@ -1230,17 +1372,32 @@ BEGIN
     UPDATE transactions t
     SET shop_name = sub.sender_name
     FROM (
-      SELECT DISTINCT ON (order_code) order_code, sender_name
+      SELECT DISTINCT ON (order_code, ym)
+        order_code,
+        SUBSTRING(COALESCE(NULLIF(paid_date, ''), created_date) FROM 1 FOR 7) AS ym,
+        sender_name
       FROM oms_order_items
       WHERE sender_name IS NOT NULL AND sender_name <> ''
-      ORDER BY order_code, line_no ASC
+      ORDER BY order_code, ym, line_no ASC
     ) sub
-    WHERE t.order_code = sub.order_code AND (t.shop_name IS NULL OR t.shop_name = '');
+    WHERE t.order_code = sub.order_code
+      AND SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), t.created_date) FROM 1 FOR 7) = sub.ym
+      AND (t.shop_name IS NULL OR t.shop_name = '');
 
     UPDATE transactions t
     SET shop_name = o.shop_name
     FROM oms_orders o
-    WHERE (t.oms_order_uid = o.order_uid OR t.external_id = o.matched_external_id OR t.order_code = o.order_code OR t.related_order_id = o.marketplace_order_norm)
+    WHERE (
+      t.oms_order_uid = o.order_uid
+      OR t.external_id = o.matched_external_id
+      OR t.related_order_id = o.marketplace_order_norm
+      OR (
+        t.order_code = o.order_code
+        AND COALESCE(NULLIF(t.channel, ''), 'TikTok') = COALESCE(NULLIF(o.channel, ''), 'TikTok')
+        AND SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), t.created_date) FROM 1 FOR 7)
+          = SUBSTRING(COALESCE(NULLIF(o.paid_date, ''), o.created_date) FROM 1 FOR 7)
+      )
+    )
       AND (t.shop_name IS NULL OR t.shop_name = '')
       AND o.shop_name IS NOT NULL AND o.shop_name <> '';
   END IF;
@@ -1447,20 +1604,23 @@ BEGIN
     UPDATE transactions t
     SET product_detail = s.summary_text
     FROM (
-      SELECT DISTINCT ON (order_code)
+      SELECT DISTINCT ON (order_code, ym)
         order_code,
+        ym,
         summary_text
       FROM (
         SELECT i.order_code,
                i.order_uid,
+               SUBSTRING(COALESCE(NULLIF(i.paid_date, ''), i.created_date) FROM 1 FOR 7) AS ym,
                STRING_AGG(i.sku_code || ' · ' || i.product_name || ' × ' || i.quantity::text, '; ' ORDER BY i.line_no) AS summary_text
         FROM oms_order_items i
         WHERE i.order_code IS NOT NULL AND i.order_code <> ''
-        GROUP BY i.order_code, i.order_uid
+        GROUP BY i.order_code, i.order_uid, SUBSTRING(COALESCE(NULLIF(i.paid_date, ''), i.created_date) FROM 1 FOR 7)
       ) by_uid
-      ORDER BY order_code, order_uid DESC
+      ORDER BY order_code, ym, order_uid DESC
     ) s
     WHERE t.order_code = s.order_code
+      AND SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), t.created_date) FROM 1 FOR 7) = s.ym
       AND (t.product_detail IS NULL OR t.product_detail NOT LIKE '%·%')
       AND t.product_detail IS DISTINCT FROM s.summary_text;
   END IF;
@@ -1510,6 +1670,46 @@ BEGIN
         OR d.oms_only_count IS DISTINCT FROM s.oms_count
         OR d.unlinked_count IS DISTINCT FROM s.unlnk_count
       );
+  END IF;
+
+  -- Refresh sku_summaries with proportional net_sales_amount allocation (#21)
+  IF EXISTS (SELECT 1 FROM oms_order_items LIMIT 1) THEN
+    DELETE FROM sku_summaries;
+    WITH order_lines AS (
+      SELECT
+        i.*,
+        COALESCE(NULLIF(i.order_uid, ''), i.order_code) AS ord_key,
+        SUM(i.unit_price * i.quantity) OVER (PARTITION BY COALESCE(NULLIF(i.order_uid, ''), i.order_code)) AS order_gross_sum,
+        COUNT(*) OVER (PARTITION BY COALESCE(NULLIF(i.order_uid, ''), i.order_code)) AS order_line_cnt
+      FROM oms_order_items i
+      WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+    )
+    INSERT INTO sku_summaries (
+      sku_code, product_name, total_qty, order_count, gross_amount,
+      net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, lazada_qty, line_qty, other_qty, updated_at
+    )
+    SELECT
+      i.sku_code,
+      MAX(i.product_name),
+      COALESCE(SUM(i.quantity), 0)::int,
+      COUNT(DISTINCT i.ord_key)::int,
+      ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
+      ROUND(COALESCE(SUM(
+        CASE
+          WHEN i.order_gross_sum > 0 THEN i.order_sales_amount * (i.unit_price * i.quantity) / i.order_gross_sum
+          WHEN i.order_line_cnt > 0 THEN i.order_sales_amount / i.order_line_cnt
+          ELSE i.order_sales_amount
+        END
+      ), 0)::numeric, 2),
+      COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'Lazada' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int,
+      COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int,
+      now()
+    FROM order_lines i
+    GROUP BY i.sku_code;
   END IF;
 END $$;
 
