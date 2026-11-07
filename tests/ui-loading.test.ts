@@ -269,6 +269,11 @@ test("pwa window-controls-overlay: manifest, titlebar component, and CSS offsets
     /display_override:\s*\[\s*"window-controls-overlay"\s*,\s*"standalone"/,
     "manifest.ts must declare window-controls-overlay in display_override",
   );
+  assert.match(
+    manifestSource,
+    /theme_color:\s*"#f1f4f9"/,
+    "manifest.ts must use light surface theme_color (#f1f4f9) so OS window controls blend seamlessly without a dark top bar",
+  );
 
   const layoutSource = readSource("src/app/layout.tsx");
   assert.match(
@@ -281,13 +286,11 @@ test("pwa window-controls-overlay: manifest, titlebar component, and CSS offsets
   assert.match(titlebarSource, /windowControlsOverlay/);
   assert.match(titlebarSource, /display-mode:\s*window-controls-overlay/);
   assert.match(titlebarSource, /data-testid="window-titlebar"/);
-  assert.match(titlebarSource, /data-testid="window-titlebar-back-btn"/);
-  assert.match(titlebarSource, /data-testid="window-titlebar-forward-btn"/);
-  assert.match(titlebarSource, /data-testid="window-titlebar-refresh-btn"/);
+  assert.match(titlebarSource, /--wco-right-inset/);
   assert.match(titlebarSource, /no-print/);
 
   const globalsSource = readSource("src/app/globals.css");
-  assert.match(globalsSource, /--wco-offset:\s*env\(titlebar-area-height,\s*36px\)/);
+  assert.match(globalsSource, /--wco-offset:\s*0px/);
   assert.match(globalsSource, /width:\s*env\(titlebar-area-width,\s*100%\)/);
   assert.match(globalsSource, /-webkit-app-region:\s*drag/);
   assert.match(globalsSource, /-webkit-app-region:\s*no-drag/);

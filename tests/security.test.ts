@@ -220,8 +220,13 @@ test("PWA manifest, service worker, and icons are valid and publicly accessible 
   assert.equal(m.name, "PCMS Revenue");
   assert.equal(m.short_name, "PCMS Revenue");
   assert.equal(m.display, "standalone");
+  assert.deepEqual(m.display_override, [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui",
+  ]);
   assert.equal(m.start_url, "/");
-  assert.equal(m.theme_color, "#0f1117");
+  assert.equal(m.theme_color, "#f1f4f9");
   assert.ok(Array.isArray(m.icons) && m.icons.length >= 4);
 
   const requiredPngs = [

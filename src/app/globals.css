@@ -297,37 +297,57 @@
   width: 100%;
 }
 
-/* ---------- PWA Window Controls Overlay (Desktop App Titlebar) ---------- */
+/* ---------- PWA Window Controls Overlay (Seamless Full-Window Mode) ---------- */
 :root {
   --wco-offset: 0px;
-}
-
-@media screen and (display-mode: window-controls-overlay) {
-  :root {
-    --wco-offset: env(titlebar-area-height, 36px);
-  }
-}
-
-@media screen {
-  html[data-wco-active="true"] {
-    --wco-offset: env(titlebar-area-height, 36px);
-  }
+  --wco-right-inset: 0px;
 }
 
 .window-titlebar {
   left: env(titlebar-area-x, 0px);
   top: env(titlebar-area-y, 0px);
   width: env(titlebar-area-width, 100%);
-  height: env(titlebar-area-height, 36px);
-  min-height: 32px;
+  height: 16px;
+  background: transparent;
   -webkit-app-region: drag;
   app-region: drag;
+}
+
+@media screen and (display-mode: window-controls-overlay) {
+  .sidebar .brand,
+  .mobile-topbar {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  .mobile-topbar {
+    padding-right: calc(14px + var(--wco-right-inset, 138px));
+  }
+}
+
+@media screen {
+  html[data-wco-active="true"] .sidebar .brand,
+  html[data-wco-active="true"] .mobile-topbar {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  html[data-wco-active="true"] .mobile-topbar {
+    padding-right: calc(14px + var(--wco-right-inset, 138px));
+  }
 }
 
 .window-titlebar-no-drag,
 .window-titlebar a,
 .window-titlebar button,
-.window-titlebar [role="button"] {
+.window-titlebar [role="button"],
+.mobile-topbar a,
+.mobile-topbar button,
+.mobile-topbar [role="button"],
+.page-head a,
+.page-head button,
+.page-head input,
+.page-head [role="button"] {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
