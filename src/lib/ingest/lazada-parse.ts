@@ -431,7 +431,7 @@ export async function detectAndParseLazadaInput(
       acc.rowIndexes.push(r + 1);
       acc.netSum = round2(acc.netSum + amount);
       acc.vatSum = round2(acc.vatSum + vatAmt);
-      if (amount > 0) {
+      if (amount > 0 || (isDetailedFormat && isItemPriceTransactionName(txName) && amount < 0)) {
         acc.positiveSum = round2(acc.positiveSum + amount);
       } else if (amount < 0) {
         acc.negativeSum = round2(acc.negativeSum + amount);

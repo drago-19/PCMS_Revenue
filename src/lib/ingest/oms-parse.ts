@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { normalizeHeader } from "./catalog";
 import {
+  detectDateColumnFormat,
+  isFormulaErrorValue,
   parseDateValue,
   readInputSheets,
   toNumber,
@@ -272,6 +274,7 @@ const OMS_ORDER_ALIASES: Record<string, string[]> = {
     "ค่าส่งที่เก็บลูกค้า",
     "ค่าจัดส่งที่เก็บลูกค้า",
     "ค่าจัดส่งที่ผู้ซื้อชำระ",
+    "ค่าส่ง",
     "shipping fee paid by buyer",
   ],
   province: ["จังหวัด", "province", "state"],
@@ -308,7 +311,7 @@ const OMS_ORDER_ALIASES: Record<string, string[]> = {
     "paid date",
     "payment time",
   ],
-  printedDate: ["วันที่พิมพ์", "printed date"],
+  printedDate: ["วันที่พิมพ์", "วันที่พิมพ์2", "printed date"],
   marketplaceOrderId: [
     "เลขที่บน marketplace",
     "เลขคำสั่งซื้อ marketplace",
@@ -326,7 +329,7 @@ const OMS_ORDER_ALIASES: Record<string, string[]> = {
     "discount",
     "total discount",
   ],
-  totalQty: ["จำนวนรวม", "จำนวนชิ้นรวม", "total quantity", "total qty"],
+  totalQty: ["จำนวนรวม", "จำนวนชิ้นรวม", "จำนวน", "total quantity", "total qty"],
   salesAmount: [
     "ยอดขาย",
     "ยอดขายออเดอร์",
@@ -437,15 +440,27 @@ export async function detectAndParseOmsInput(
   let primaryHeaders: string[] = [];
   let primaryMapping: MappingEntry[] = [];
   let totalDataRows = 0;
+  const seenCrossSheetOrderUids = new Set<string>();
+  const seenCrossSheetKeylessSigs = new Set<string>();
 
   for (const sheet of sheets) {
     const rows = sheet.rows;
     if (rows.length < 1) continue;
+    if (primaryType && /\bcopy\s+of\b|สำเนา/i.test(sheet.name.trim())) {
+      warnings.push({
+        code: "DUPLICATE_SHEET_IGNORED",
+        message: `ข้ามชีตสำเนา "${sheet.name}" เพื่อป้องกันข้อมูลซ้ำซ้อน`,
+        severity: "warning",
+      });
+      continue;
+    }
     const scanLimit = Math.min(20, rows.length);
 
     let detectedSheetType: "oms_orders" | "oms_items" | null = null;
+    let hasDualOrderColumns = false;
     let headerIdx = -1;
     let colByField = new Map<string, number>();
+    let dualOrderColByField = new Map<string, number>();
     let headers: string[] = [];
 
     for (let r = 0; r < scanLimit; r++) {
@@ -453,28 +468,42 @@ export async function detectAndParseOmsInput(
       const itemMap = new Map<string, number>();
       const orderMap = new Map<string, number>();
 
+      const stdItemFieldsInRow = new Set<string>();
+      const stdOrderFieldsInRow = new Set<string>();
       for (let c = 0; c < row.length; c++) {
         const h = String(row[c] ?? "").trim();
         if (!h) continue;
+        const stdItem = matchAliasMap(h, OMS_ITEM_ALIASES);
+        if (stdItem) stdItemFieldsInRow.add(stdItem);
+        const stdOrder = matchAliasMap(h, OMS_ORDER_ALIASES);
+        if (stdOrder) stdOrderFieldsInRow.add(stdOrder);
+      }
+
+      for (let c = 0; c < row.length; c++) {
+        const h = String(row[c] ?? "").trim();
+        if (!h) continue;
+        const stdItemKey = matchAliasMap(h, OMS_ITEM_ALIASES);
+        const stdOrderKey = matchAliasMap(h, OMS_ORDER_ALIASES);
         const customField = lookupCustomFieldKey(h, customMapping);
         if (customField) {
-          if (Object.prototype.hasOwnProperty.call(OMS_ITEM_ALIASES, customField)) {
+          const isValidItemCustom =
+            Object.prototype.hasOwnProperty.call(OMS_ITEM_ALIASES, customField) &&
+            !(stdItemKey && stdItemKey !== customField && stdItemFieldsInRow.has(customField));
+          const isValidOrderCustom =
+            Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customField) &&
+            !(stdOrderKey && stdOrderKey !== customField && stdOrderFieldsInRow.has(customField));
+          if (isValidItemCustom) {
             itemMap.set(customField, c);
           }
-          if (Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customField)) {
+          if (isValidOrderCustom) {
             orderMap.set(customField, c);
           }
-          if (
-            Object.prototype.hasOwnProperty.call(OMS_ITEM_ALIASES, customField) ||
-            Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customField)
-          ) {
+          if (isValidItemCustom || isValidOrderCustom) {
             continue;
           }
         }
-        const itemKey = matchAliasMap(h, OMS_ITEM_ALIASES);
-        if (itemKey && !itemMap.has(itemKey)) itemMap.set(itemKey, c);
-        const orderKey = matchAliasMap(h, OMS_ORDER_ALIASES);
-        if (orderKey && !orderMap.has(orderKey)) orderMap.set(orderKey, c);
+        if (stdItemKey && !itemMap.has(stdItemKey)) itemMap.set(stdItemKey, c);
+        if (stdOrderKey && !orderMap.has(stdOrderKey)) orderMap.set(stdOrderKey, c);
       }
 
       if (
@@ -485,6 +514,13 @@ export async function detectAndParseOmsInput(
         detectedSheetType = "oms_items";
         headerIdx = r;
         colByField = itemMap;
+        dualOrderColByField = orderMap;
+        hasDualOrderColumns =
+          orderMap.has("orderCode") &&
+          (orderMap.has("shippingFeeSeller") ||
+            orderMap.has("profitAmount") ||
+            orderMap.has("marketplaceOrderId") ||
+            orderMap.has("discountTotal"));
         headers = row.map((v) => String(v ?? "").trim());
         break;
       }
@@ -512,19 +548,20 @@ export async function detectAndParseOmsInput(
       primaryHeaderRow = headerIdx + 1;
       primaryHeaders = headers;
       primaryMapping = headers.map((h, idx) => {
+        const stdFk =
+          detectedSheetType === "oms_items"
+            ? matchAliasMap(h, OMS_ITEM_ALIASES)
+            : matchAliasMap(h, OMS_ORDER_ALIASES);
         const customFk = lookupCustomFieldKey(h, customMapping);
         const validCustomFk =
           customFk &&
           (detectedSheetType === "oms_items"
             ? Object.prototype.hasOwnProperty.call(OMS_ITEM_ALIASES, customFk)
-            : Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customFk))
+            : Object.prototype.hasOwnProperty.call(OMS_ORDER_ALIASES, customFk)) &&
+          !(stdFk && stdFk !== customFk && colByField.has(customFk) && colByField.get(customFk) !== idx)
             ? customFk
             : null;
-        const fk =
-          validCustomFk ??
-          (detectedSheetType === "oms_items"
-            ? matchAliasMap(h, OMS_ITEM_ALIASES)
-            : matchAliasMap(h, OMS_ORDER_ALIASES));
+        const fk = validCustomFk ?? stdFk;
         return {
           col: idx,
           header: h,
@@ -537,17 +574,107 @@ export async function detectAndParseOmsInput(
       });
     }
 
-    if (detectedSheetType === "oms_orders") {
+    const extractDateColFormat = (fieldMap: Map<string, number>, key: string): "DMY" | "MDY" => {
+      const col = fieldMap.get(key);
+      if (col === undefined) return "DMY";
+      const vals: Primitive[] = [];
+      for (let sr = headerIdx + 1; sr < rows.length; sr++) {
+        vals.push(rows[sr]?.[col] ?? null);
+      }
+      return detectDateColumnFormat(vals);
+    };
+
+    if (detectedSheetType === "oms_orders" || hasDualOrderColumns) {
+      const orderFieldMap =
+        detectedSheetType === "oms_orders" ? colByField : dualOrderColByField;
+      if (!orderFieldMap.has("salesAmount") && colByField.has("orderSalesAmount")) {
+        orderFieldMap.set("salesAmount", colByField.get("orderSalesAmount")!);
+      }
+      const createdFmt = extractDateColFormat(orderFieldMap, "createdDate");
+      const paidFmt = extractDateColFormat(orderFieldMap, "paidDate");
+      const printedFmt = extractDateColFormat(orderFieldMap, "printedDate");
+
+      // Pre-scan dominant channel on the sheet (e.g., Facebook or LINE accounting summary files
+      // where some fee/exchange rows like "รายได้ค่าเปลี่ยนไซส์" leave orderCode and channel blank)
+      let sheetDefaultChannel: string | null = null;
+      const sheetNameNorm = sheet.name.toLowerCase();
+      if (sheetNameNorm.includes("facebook") || sheetNameNorm.includes("เฟส")) {
+        sheetDefaultChannel = "Facebook";
+      } else if (sheetNameNorm.includes("line") || sheetNameNorm.includes("ไลน์")) {
+        sheetDefaultChannel = "LINE";
+      }
+      for (let sr = headerIdx + 1; sr < rows.length; sr++) {
+        const srow = rows[sr] ?? [];
+        const chCol = orderFieldMap.get("channel");
+        const rawCh = chCol !== undefined ? srow[chCol] : undefined;
+        if (cleanText(rawCh)) {
+          const ch = normalizeChannel(rawCh);
+          if (ch === "Facebook" || ch === "LINE") {
+            sheetDefaultChannel = ch;
+            break;
+          }
+        }
+      }
+      const generatedCodeCounter = new Map<string, number>();
+      const sheetOrdersByUid = new Map<string, ParsedOmsOrder>();
+      const dupCodeCounter = new Map<string, number>();
+      const mappedColsSet = new Set<number>(orderFieldMap.values());
+
       for (let r = headerIdx + 1; r < rows.length; r++) {
         const row = rows[r] ?? [];
+        const excelRow = r + 1;
         const get = (key: string): Primitive | undefined => {
-          const col = colByField.get(key);
+          const col = orderFieldMap.get(key);
           return col !== undefined ? row[col] : undefined;
         };
-        const orderCode = cleanText(get("orderCode"));
-        if (!orderCode) continue;
+        let orderCode = cleanText(get("orderCode"));
+        const noteText = cleanText(get("note"));
+        const rawCreatedCell = get("createdDate");
+        const rawPaidCell = get("paidDate");
+        const rawPrintedCell = get("printedDate");
+        const rawCreatedDate = parseDateValue(rawCreatedCell, createdFmt).iso ?? "";
+        const rawPaidDate = parseDateValue(rawPaidCell, paidFmt).iso ?? "";
+        const printedDate = parseDateValue(rawPrintedCell, printedFmt).iso ?? "";
+        const rawChannelCell = get("channel");
+        let channel = normalizeChannel(rawChannelCell);
 
-        const channel = normalizeChannel(get("channel"));
+        // If staff accidentally selected 'Facebook' in Shipnity, but the note explicitly states 'line oa' / 'lineoa'
+        // (e.g. #PZ20 with channel='facebook' and note='line oa'), normalize channel to 'LINE'
+        if (
+          channel === "Facebook" &&
+          noteText &&
+          /\bline\s*oa\b|^line\b/i.test(noteText.trim())
+        ) {
+          channel = "LINE";
+        }
+
+        let isKeylessAccountingRow = false;
+        if (!orderCode) {
+          // Support accounting summary rows without orderCode (e.g. "รายได้ค่าเปลี่ยนไซส์" 50 THB)
+          // while strictly skipping summary/total footer rows (which have no note and no dates)
+          const anyDate = rawPaidDate || rawCreatedDate || printedDate;
+          const fallbackChannel = cleanText(rawChannelCell)
+            ? channel
+            : (sheetDefaultChannel ?? channel);
+          if (
+            noteText &&
+            noteText !== "-" &&
+            anyDate &&
+            (fallbackChannel === "Facebook" || fallbackChannel === "LINE")
+          ) {
+            channel = fallbackChannel;
+            isKeylessAccountingRow = true;
+            const prefix = channel === "Facebook" ? "FB" : "LN";
+            const yymmdd = anyDate.replace(/-/g, "").slice(2, 8) || String(r);
+            const baseCode = `${prefix}-${yymmdd}`;
+            const nextSeq = (generatedCodeCounter.get(baseCode) ?? 0) + 1;
+            generatedCodeCounter.set(baseCode, nextSeq);
+            orderCode = nextSeq === 1 ? baseCode : `${baseCode}-${nextSeq}`;
+          } else {
+            continue;
+          }
+        }
+
         if (
           channel !== "TikTok" &&
           channel !== "Shopee" &&
@@ -559,45 +686,95 @@ export async function detectAndParseOmsInput(
           continue;
         }
 
-        totalDataRows++;
-        const createdDate = parseDateValue(get("createdDate")).iso ?? "";
-        const parsedPaidDate = parseDateValue(get("paidDate")).iso ?? "";
+        const rawSalesCell = get("salesAmount");
+        const rawProfitCell = get("profitAmount");
+        if (isFormulaErrorValue(rawSalesCell) || isFormulaErrorValue(rawProfitCell)) {
+          warnings.push({
+            code: "FORMULA_ERROR",
+            message: `แถวที่ ${excelRow} (${orderCode}) พบข้อผิดพลาดสูตร Excel ในช่องตัวเลข ("${String(
+              isFormulaErrorValue(rawSalesCell) ? rawSalesCell : rawProfitCell,
+            )}")`,
+            severity: "warning",
+            row: excelRow,
+          });
+        }
+
+        const parsedPaidDate =
+          rawPaidDate ||
+          ((channel === "LINE" || channel === "Facebook") && !orderFieldMap.has("paidDate")
+            ? rawCreatedDate || printedDate
+            : "");
+        const createdDate =
+          rawCreatedDate ||
+          ((channel === "LINE" || channel === "Facebook") && !orderFieldMap.has("createdDate")
+            ? parsedPaidDate || printedDate
+            : "");
         const paidDate = parsedPaidDate || createdDate;
-        const printedDate = parseDateValue(get("printedDate")).iso ?? "";
         const trackingNo = cleanText(get("trackingNo"));
 
+        if (!paidDate && !createdDate) {
+          const hadNonEmptyDateCell =
+            (cleanText(rawPaidCell) && cleanText(rawPaidCell) !== "-") ||
+            (cleanText(rawCreatedCell) && cleanText(rawCreatedCell) !== "-");
+          if (hadNonEmptyDateCell) {
+            warnings.push({
+              code: "INVALID_OMS_DATE",
+              message: `แถวที่ ${excelRow} (${orderCode}) รูปแบบวันที่ไม่ถูกต้อง ("${
+                cleanText(rawPaidCell) || cleanText(rawCreatedCell)
+              }") – ข้ามแถวนี้`,
+              severity: "warning",
+              row: excelRow,
+            });
+          }
+        }
+
+        const profitCol = orderFieldMap.get("profitAmount");
+        const salesCol = orderFieldMap.get("salesAmount");
+        const rawSalesVal = round2(toNumber(rawSalesCell));
+        const nextAfterProfit = profitCol !== undefined ? row[profitCol + 1] : undefined;
+        const nextColIsUnmappedOrBlankHeader =
+          profitCol !== undefined &&
+          !mappedColsSet.has(profitCol + 1) &&
+          (!headers[profitCol + 1] || headers[profitCol + 1].trim() === "");
+        const nextCellIsNumeric =
+          nextAfterProfit !== null &&
+          nextAfterProfit !== undefined &&
+          (typeof nextAfterProfit === "number" ||
+            /^\s*[+-]?\d+(?:\.\d+)?\s*$/.test(String(nextAfterProfit)));
+        const isShiftedRow =
+          (channel === "LINE" || channel === "Facebook") &&
+          rawSalesVal === 0 &&
+          profitCol !== undefined &&
+          (salesCol === undefined || profitCol >= salesCol) &&
+          round2(toNumber(row[profitCol])) > 0 &&
+          row.length > profitCol + 1 &&
+          nextColIsUnmappedOrBlankHeader &&
+          nextCellIsNumeric;
+        const shiftedSalesVal = isShiftedRow
+          ? round2(toNumber(row[profitCol!]))
+          : rawSalesVal;
+
         // กฎการกรองบิลแยกตามช่องทาง (Strict Platform Financial Isolation):
-        // - Shopee & Facebook: ตัดบิลที่ยังไม่ได้ชำระเงิน (วันที่โอนเงิน = '-') หรือยังไม่ได้ส่งของ/ไม่มียอดขาย (ไม่มีเลขพัสดุและไม่ได้พิมพ์ใบปะหน้า) ทิ้ง
-        // - LINE (LINE OA): ต้องชำระเงินแล้วและมียอดขาย > 0 (บางออเดอร์ค้าส่งจัดส่งตรงโดยไม่พิมพ์ใบปะหน้าใน Shipnity)
-        // - Other: นำเข้าออเดอร์ที่มีวันที่โอนเงินหรือวันที่สร้าง (รองรับทั้งออเดอร์ขายและออเดอร์เบิกส่งใช้งานภายใน 0 บาท)
         if (channel === "Shopee") {
-          const salesVal = round2(toNumber(get("salesAmount")));
-          if (!parsedPaidDate || (!trackingNo && !printedDate) || salesVal <= 0) {
+          if (!parsedPaidDate || (!trackingNo && !printedDate) || rawSalesVal <= 0) {
             continue;
           }
         } else if (channel === "Facebook") {
-          const salesVal = round2(toNumber(get("salesAmount")));
-          if (!parsedPaidDate || (!trackingNo && !printedDate) || salesVal <= 0) {
+          const hasFbProof = Boolean(
+            trackingNo ||
+              printedDate ||
+              !orderFieldMap.has("printedDate") ||
+              !orderFieldMap.has("trackingNo") ||
+              (noteText && noteText !== "-"),
+          );
+          if (!parsedPaidDate || !hasFbProof || shiftedSalesVal <= 0) {
             continue;
           }
         } else if (channel === "Lazada") {
-          const salesVal = round2(toNumber(get("salesAmount")));
-          if (!parsedPaidDate || salesVal <= 0) {
+          if (!parsedPaidDate || rawSalesVal <= 0) {
             continue;
           }
         } else if (channel === "LINE") {
-          const rawSalesVal = round2(toNumber(get("salesAmount")));
-          const profitCol = colByField.get("profitAmount");
-          const shiftedSalesVal =
-            rawSalesVal === 0 &&
-            profitCol !== undefined &&
-            round2(toNumber(row[profitCol])) > 0 &&
-            row.length > profitCol + 1 &&
-            row[profitCol + 1] !== null &&
-            row[profitCol + 1] !== undefined &&
-            cleanText(row[profitCol + 1]) !== ""
-              ? round2(toNumber(row[profitCol]))
-              : rawSalesVal;
           if (!parsedPaidDate || shiftedSalesVal <= 0) {
             continue;
           }
@@ -606,31 +783,21 @@ export async function detectAndParseOmsInput(
             continue;
           }
         }
+
+        if (detectedSheetType === "oms_orders") {
+          totalDataRows++;
+        }
+
         const mp = normalizeMarketplaceId(get("marketplaceOrderId"));
-        const orderUid = buildOmsOrderUid(
-          orderCode,
-          paidDate,
-          createdDate,
-          trackingNo,
+        const shippingSellerVal = round2(toNumber(get("shippingFeeSeller")));
+        let resolvedSalesVal = rawSalesVal;
+        let resolvedProfitVal: number;
+        let resolvedTotalQty = Math.max(
+          0,
+          Math.round(toNumber(get("totalQty") ?? get("quantity"))),
         );
 
-        const rawSalesCell = get("salesAmount");
-        const rawProfitCell = get("profitAmount");
-        const profitCol = colByField.get("profitAmount");
-        const shippingSellerVal = round2(toNumber(get("shippingFeeSeller")));
-        let resolvedSalesVal = round2(toNumber(rawSalesCell));
-        let resolvedProfitVal: number;
-        let resolvedTotalQty = Math.max(0, Math.round(toNumber(get("totalQty"))));
-
-        if (
-          resolvedSalesVal === 0 &&
-          profitCol !== undefined &&
-          round2(toNumber(row[profitCol])) > 0 &&
-          row.length > profitCol + 1 &&
-          row[profitCol + 1] !== null &&
-          row[profitCol + 1] !== undefined &&
-          cleanText(row[profitCol + 1]) !== ""
-        ) {
+        if (isShiftedRow && profitCol !== undefined) {
           resolvedSalesVal = round2(toNumber(row[profitCol]));
           resolvedProfitVal = round2(toNumber(row[profitCol + 1]));
           if (resolvedTotalQty === 0 && profitCol >= 2) {
@@ -645,7 +812,74 @@ export async function detectAndParseOmsInput(
           }
         }
 
-        parsedOrders.push({
+        if (isKeylessAccountingRow) {
+          const keylessSig = `${channel}|${paidDate}|${noteText ?? ""}|${resolvedSalesVal}`;
+          if (seenCrossSheetKeylessSigs.has(keylessSig) && !sheetOrdersByUid.has(buildOmsOrderUid(orderCode, paidDate, createdDate, trackingNo))) {
+            continue;
+          }
+          seenCrossSheetKeylessSigs.add(keylessSig);
+        }
+
+        let orderUid = buildOmsOrderUid(
+          orderCode,
+          paidDate,
+          createdDate,
+          trackingNo,
+        );
+
+        if (seenCrossSheetOrderUids.has(orderUid) && !sheetOrdersByUid.has(orderUid)) {
+          continue;
+        }
+
+        const existingInSheet = sheetOrdersByUid.get(orderUid);
+        if (existingInSheet) {
+          const newCust = cleanText(get("customerName"));
+          const oldCust = existingInSheet.customerName;
+          if (
+            !hasDualOrderColumns &&
+            oldCust &&
+            newCust &&
+            oldCust.toLowerCase() !== newCust.toLowerCase()
+          ) {
+            const nextDup = (dupCodeCounter.get(orderCode) ?? 1) + 1;
+            dupCodeCounter.set(orderCode, nextDup);
+            const disambiguatedCode = `${orderCode}-${nextDup}`;
+            warnings.push({
+              code: "DUPLICATE_ORDER_CODE_CONFLICT",
+              message: `แถวที่ ${excelRow} พบเลขที่ออเดอร์ซ้ำ "${orderCode}" แต่คนละชื่อลูกค้า ("${oldCust}" vs "${newCust}") – แยกเป็น "${disambiguatedCode}" เพื่อไม่ให้ทับข้อมูลกัน`,
+              severity: "warning",
+              row: excelRow,
+            });
+            orderCode = disambiguatedCode;
+            orderUid = buildOmsOrderUid(orderCode, paidDate, createdDate, trackingNo);
+          } else if (!hasDualOrderColumns) {
+            existingInSheet.salesAmount = round2(existingInSheet.salesAmount + resolvedSalesVal);
+            existingInSheet.profitAmount = round2(existingInSheet.profitAmount + resolvedProfitVal);
+            existingInSheet.shippingFeeCustomer = round2(
+              existingInSheet.shippingFeeCustomer + round2(toNumber(get("shippingFeeCustomer"))),
+            );
+            existingInSheet.shippingFeeSeller = round2(
+              existingInSheet.shippingFeeSeller + shippingSellerVal,
+            );
+            existingInSheet.totalQty += resolvedTotalQty;
+            warnings.push({
+              code: "DUPLICATE_ORDER_MERGED",
+              message: `แถวที่ ${excelRow} พบเลขที่ออเดอร์ซ้ำ "${orderCode}" ในไฟล์เดียวกัน – รวมยอดให้แล้ว`,
+              severity: "warning",
+              row: excelRow,
+            });
+            continue;
+          } else {
+            // Dual-extraction sheet (multi-item lines for the same order): accumulate totalQty, keep order-level salesAmount
+            existingInSheet.totalQty += resolvedTotalQty;
+            if (resolvedSalesVal > existingInSheet.salesAmount) {
+              existingInSheet.salesAmount = resolvedSalesVal;
+            }
+            continue;
+          }
+        }
+
+        const newOrder: ParsedOmsOrder = {
           orderUid,
           orderCode,
           channel,
@@ -658,7 +892,7 @@ export async function detectAndParseOmsInput(
           province: cleanText(get("province")),
           bank: cleanText(get("bank")),
           trackingNo,
-          note: cleanText(get("note")),
+          note: noteText,
           createdBy: cleanText(get("createdBy")),
           createdDate,
           paidDate,
@@ -672,12 +906,20 @@ export async function detectAndParseOmsInput(
           totalQty: resolvedTotalQty,
           salesAmount: resolvedSalesVal,
           profitAmount: resolvedProfitVal,
-        });
+        };
+        sheetOrdersByUid.set(orderUid, newOrder);
+        seenCrossSheetOrderUids.add(orderUid);
+        parsedOrders.push(newOrder);
       }
-    } else if (detectedSheetType === "oms_items") {
+    }
+
+    if (detectedSheetType === "oms_items") {
+      const itemCreatedFmt = extractDateColFormat(colByField, "createdDate");
+      const itemPaidFmt = extractDateColFormat(colByField, "paidDate");
       const lineCounter = new Map<string, number>();
       for (let r = headerIdx + 1; r < rows.length; r++) {
         const row = rows[r] ?? [];
+        const excelRow = r + 1;
         const get = (key: string): Primitive | undefined => {
           const col = colByField.get(key);
           return col !== undefined ? row[col] : undefined;
@@ -686,7 +928,15 @@ export async function detectAndParseOmsInput(
         const orderCode = cleanText(get("orderCode"));
         if (!skuCode || !orderCode) continue;
 
-        const channel = normalizeChannel(get("channel"));
+        let channel = normalizeChannel(get("channel"));
+        const itemNoteText = cleanText(get("note"));
+        if (
+          channel === "Facebook" &&
+          itemNoteText &&
+          /\bline\s*oa\b|^line\b/i.test(itemNoteText.trim())
+        ) {
+          channel = "LINE";
+        }
         if (
           channel !== "TikTok" &&
           channel !== "Shopee" &&
@@ -698,9 +948,18 @@ export async function detectAndParseOmsInput(
           continue;
         }
 
+        if (isFormulaErrorValue(get("unitPrice")) || isFormulaErrorValue(get("orderSalesAmount"))) {
+          warnings.push({
+            code: "FORMULA_ERROR",
+            message: `แถวที่ ${excelRow} (${orderCode} / ${skuCode}) พบข้อผิดพลาดสูตร Excel ในช่องราคา`,
+            severity: "warning",
+            row: excelRow,
+          });
+        }
+
         totalDataRows++;
-        const createdDate = parseDateValue(get("createdDate")).iso ?? "";
-        const paidDate = parseDateValue(get("paidDate")).iso ?? createdDate;
+        const createdDate = parseDateValue(get("createdDate"), itemCreatedFmt).iso ?? "";
+        const paidDate = parseDateValue(get("paidDate"), itemPaidFmt).iso ?? createdDate;
         const trackingNo = cleanText(get("trackingNo"));
         const orderUid = buildOmsOrderUid(
           orderCode,
@@ -719,7 +978,7 @@ export async function detectAndParseOmsInput(
           productName: cleanText(get("productName")) ?? skuCode,
           unitPrice: round2(toNumber(get("unitPrice"))),
           quantity: Math.max(1, Math.round(toNumber(get("quantity")) || 1)),
-          orderSalesAmount: round2(toNumber(get("orderSalesAmount"))),
+          orderSalesAmount: round2(toNumber(get("orderSalesAmount") ?? get("salesAmount"))),
           shippingFeeCustomer: round2(toNumber(get("shippingFeeCustomer"))),
           senderName: cleanText(get("senderName")),
           customerName: cleanText(get("customerName")),

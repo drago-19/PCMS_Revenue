@@ -145,6 +145,23 @@ function isEmptyValue(value: Primitive | undefined): boolean {
   );
 }
 
+const FORMULA_ERROR_TOKENS = new Set([
+  "#REF!",
+  "#DIV/0!",
+  "#VALUE!",
+  "#NAME?",
+  "#N/A",
+  "#NUM!",
+  "#NULL!",
+  "#ERROR!",
+]);
+
+export function isFormulaErrorValue(value: Primitive | undefined): boolean {
+  if (typeof value !== "string") return false;
+  const upper = value.trim().toUpperCase();
+  return FORMULA_ERROR_TOKENS.has(upper) || /^#[A-Z0-9/!?]+$/.test(upper);
+}
+
 function cellToPrimitive(value: CellValue): Primitive {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value;
@@ -152,7 +169,10 @@ function cellToPrimitive(value: CellValue): Primitive {
     return value;
   }
   if (typeof value === "object") {
-    if ("error" in value) return null;
+    if ("error" in value) {
+      const errCode = (value as { error?: unknown }).error;
+      return typeof errCode === "string" && errCode.trim() ? errCode.trim() : "#ERROR!";
+    }
     if ("richText" in value) {
       return value.richText.map((part) => part.text ?? "").join("");
     }
@@ -184,11 +204,41 @@ function readSheetRows(sheet: ExcelJS.Worksheet): Primitive[][] {
   return rows;
 }
 
-export function parseCsvToRows(buffer: Buffer): Primitive[][] {
+export function decodeCsvBuffer(buffer: Buffer): string {
   let text = buffer.toString("utf8");
+  if (text.includes("\uFFFD")) {
+    let thaiByteCount = 0;
+    for (let i = 0; i < buffer.length; i++) {
+      const b = buffer[i];
+      if ((b >= 0xa1 && b <= 0xda) || (b >= 0xdf && b <= 0xfb)) {
+        thaiByteCount++;
+      }
+    }
+    if (thaiByteCount > 0) {
+      try {
+        text = new TextDecoder("windows-874").decode(buffer);
+      } catch {
+        const chars: string[] = [];
+        for (let i = 0; i < buffer.length; i++) {
+          const b = buffer[i];
+          if ((b >= 0xa1 && b <= 0xda) || (b >= 0xdf && b <= 0xfb)) {
+            chars.push(String.fromCharCode(b + 0x0d60));
+          } else {
+            chars.push(String.fromCharCode(b));
+          }
+        }
+        text = chars.join("");
+      }
+    }
+  }
   if (text.charCodeAt(0) === 0xfeff) {
     text = text.slice(1);
   }
+  return text;
+}
+
+export function parseCsvToRows(buffer: Buffer): Primitive[][] {
+  const text = decodeCsvBuffer(buffer);
   // Auto-detect CSV delimiter (comma vs semicolon) from the first non-empty line
   const firstLineEnd = text.search(/\r|\n/);
   const firstLine = firstLineEnd >= 0 ? text.slice(0, firstLineEnd) : text;
@@ -336,12 +386,24 @@ export function toNumber(value: Primitive | undefined): number {
   if (typeof value === "boolean") return value ? 1 : 0;
   if (value instanceof Date) return 0;
   let text = String(value ?? "").trim();
-  if (!text || text === "-" || text === "--" || text === "/" || text === "N/A") return 0;
+  if (
+    !text ||
+    text === "-" ||
+    text === "--" ||
+    text === "/" ||
+    text === "N/A" ||
+    isFormulaErrorValue(text)
+  ) {
+    return 0;
+  }
   const wrappedInParentheses = /^\(.*\)$/.test(text);
   text = text
     .replace(/[\s\u00A0]/g, "")
+    .replace(/(?:บาท|baht|thb)/gi, "")
     .replace(/[฿$]/g, "")
     .replace(/[−–—]/g, "-")
+    .replace(/\.-\s*$/, "")
+    .replace(/-\s*$/, "")
     .replace(/,/g, "")
     .replace(/[()]/g, "")
     .replace(/%$/, "");
@@ -350,8 +412,23 @@ export function toNumber(value: Primitive | undefined): number {
   return wrappedInParentheses ? -Math.abs(parsed) : parsed;
 }
 
-function isoFromParts(year: number, month: number, day: number): string | null {
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+function normalizeYear(rawYear: number): number {
+  if (!Number.isInteger(rawYear)) return rawYear;
+  if (rawYear >= 2400 && rawYear <= 2700) {
+    return rawYear - 543;
+  }
+  if (rawYear >= 40 && rawYear <= 99) {
+    return 1957 + rawYear; // พ.ศ. 2540..2599 (เช่น 68 -> 2025, 69 -> 2026)
+  }
+  if (rawYear >= 0 && rawYear < 40) {
+    return 2000 + rawYear; // ค.ศ. 2000..2039 (เช่น 25 -> 2025, 26 -> 2026)
+  }
+  return rawYear;
+}
+
+function isoFromParts(rawYear: number, month: number, day: number): string | null {
+  if (!Number.isInteger(rawYear) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  const year = normalizeYear(rawYear);
   if (year < 2000 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return null;
   const check = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -364,7 +441,75 @@ function isoFromParts(year: number, month: number, day: number): string | null {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-export function parseDateValue(value: Primitive | undefined): {
+const THAI_MONTH_MAP: ReadonlyArray<[string, number]> = [
+  ["มกราคม", 1],
+  ["กุมภาพันธ์", 2],
+  ["มีนาคม", 3],
+  ["เมษายน", 4],
+  ["พฤษภาคม", 5],
+  ["มิถุนายน", 6],
+  ["กรกฎาคม", 7],
+  ["สิงหาคม", 8],
+  ["กันยายน", 9],
+  ["ตุลาคม", 10],
+  ["พฤศจิกายน", 11],
+  ["ธันวาคม", 12],
+  ["ม.ค.", 1],
+  ["ก.พ.", 2],
+  ["มี.ค.", 3],
+  ["เม.ย.", 4],
+  ["พ.ค.", 5],
+  ["มิ.ย.", 6],
+  ["ก.ค.", 7],
+  ["ส.ค.", 8],
+  ["ก.ย.", 9],
+  ["ต.ค.", 10],
+  ["พ.ย.", 11],
+  ["ธ.ค.", 12],
+  ["มค", 1],
+  ["กพ", 2],
+  ["มีค", 3],
+  ["เมย", 4],
+  ["พค", 5],
+  ["มิย", 6],
+  ["กค", 7],
+  ["สค", 8],
+  ["กย", 9],
+  ["ตค", 10],
+  ["พย", 11],
+  ["ธค", 12],
+];
+
+export function detectDateColumnFormat(
+  values: (Primitive | undefined)[],
+): "DMY" | "MDY" {
+  let dmyEvidence = 0;
+  let mdyEvidence = 0;
+  for (const val of values) {
+    if (val === null || val === undefined || typeof val === "number" || val instanceof Date) {
+      continue;
+    }
+    const text = String(val).trim();
+    const m = /^(\d{1,2})[/. -](\d{1,2})[/. -](\d{2}|\d{4})(?:\b|\s|$)/.exec(text);
+    if (!m) continue;
+    const first = Number(m[1]);
+    const second = Number(m[2]);
+    if (first > 12 && first <= 31 && second >= 1 && second <= 12) {
+      dmyEvidence++;
+    } else if (second > 12 && second <= 31 && first >= 1 && first <= 12) {
+      mdyEvidence++;
+    }
+  }
+  if (mdyEvidence > 0 && dmyEvidence === 0) {
+    return "MDY";
+  }
+  return "DMY";
+}
+
+export function parseDateValue(
+  value: Primitive | undefined,
+  preferFormat?: "DMY" | "MDY",
+): {
   iso: string | null;
   ambiguous: boolean;
 } {
@@ -391,7 +536,7 @@ export function parseDateValue(value: Primitive | undefined): {
   const text = String(value).trim();
   if (!text) return { iso: null, ambiguous: false };
 
-  const ymd = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/.exec(text);
+  const ymd = /^(\d{4})[/. -](\d{1,2})[/. -](\d{1,2})(?:\b|\s|$)/.exec(text);
   if (ymd) {
     return {
       iso: isoFromParts(Number(ymd[1]), Number(ymd[2]), Number(ymd[3])),
@@ -407,7 +552,7 @@ export function parseDateValue(value: Primitive | undefined): {
     };
   }
 
-  const dmy = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/.exec(text);
+  const dmy = /^(\d{1,2})[/. -](\d{1,2})[/. -](\d{4}|\d{2})(?:\b|\s|$)/.exec(text);
   if (dmy) {
     const first = Number(dmy[1]);
     const second = Number(dmy[2]);
@@ -423,8 +568,30 @@ export function parseDateValue(value: Primitive | undefined): {
       month = first;
     } else {
       ambiguous = true;
+      if (preferFormat === "MDY") {
+        month = first;
+        day = second;
+      } else {
+        day = first;
+        month = second;
+      }
     }
     return { iso: isoFromParts(year, month, day), ambiguous };
+  }
+
+  // Thai month format: e.g. "15 ต.ค. 2569", "1 ตุลาคม 69"
+  for (const [mName, mNum] of THAI_MONTH_MAP) {
+    if (text.includes(mName)) {
+      const mThai = new RegExp(
+        `^(\\d{1,2})\\s*${mName.replace(/\./g, "\\.?")}\\s*(\\d{4}|\\d{2})(?:\\b|\\s|$)`,
+      ).exec(text);
+      if (mThai) {
+        return {
+          iso: isoFromParts(Number(mThai[2]), mNum, Number(mThai[1])),
+          ambiguous: false,
+        };
+      }
+    }
   }
 
   const parsed = new Date(text);
@@ -611,21 +778,45 @@ function isLikelyHeaderRow(
   };
 }
 
+function confidenceRank(c: MappingEntry["confidence"]): number {
+  if (c === "exact") return 3;
+  if (c === "canonical") return 2;
+  if (c === "fuzzy") return 1;
+  return 0;
+}
+
 function mapRow(
   row: Primitive[],
   columnCount: number,
   customMapping?: Record<string, string>,
 ): MappingEntry[] {
+  const exactBuiltInFields = new Set<string>();
+  for (let col = 0; col < columnCount; col++) {
+    const header = String(row[col] ?? "").trim();
+    if (!header) continue;
+    const std = matchHeader(header);
+    if (std?.confidence === "exact") {
+      exactBuiltInFields.add(std.fieldKey);
+    }
+  }
+
   const entries: MappingEntry[] = [];
   for (let col = 0; col < columnCount; col++) {
     const header = String(row[col] ?? "").trim();
+    const stdMatch = header ? matchHeader(header) : null;
     const customFieldKey = header ? lookupCustomFieldKey(header, customMapping) : null;
     const customDef = customFieldKey ? FIELD_BY_KEY.get(customFieldKey) : undefined;
-    const match = customDef
-      ? { fieldKey: customDef.key, confidence: "exact" as const }
-      : header
-        ? matchHeader(header)
-        : null;
+    const ignoreStaleCustom =
+      Boolean(
+        customDef &&
+          stdMatch?.confidence === "exact" &&
+          stdMatch.fieldKey !== customDef.key &&
+          exactBuiltInFields.has(customDef.key),
+      );
+    const match =
+      customDef && !ignoreStaleCustom
+        ? { fieldKey: customDef.key, confidence: "exact" as const }
+        : stdMatch;
     entries.push({
       col,
       header,
@@ -1028,7 +1219,22 @@ export async function parseWorkbook(
     if (!entry.fieldKey) continue;
     const existing = mappingByField.get(entry.fieldKey);
     if (existing) {
-      duplicateHeaders.push(`${entry.header || `คอลัมน์ ${entry.col + 1}`} ซ้ำกับ ${existing.header}`);
+      const existingRank = confidenceRank(existing.confidence);
+      const entryRank = confidenceRank(entry.confidence);
+      if (entryRank > existingRank) {
+        existing.fieldKey = null;
+        existing.label = null;
+        existing.kind = null;
+        existing.confidence = "unmapped";
+        mappingByField.set(entry.fieldKey, entry);
+      } else if (entryRank < existingRank) {
+        entry.fieldKey = null;
+        entry.label = null;
+        entry.kind = null;
+        entry.confidence = "unmapped";
+      } else {
+        duplicateHeaders.push(`${entry.header || `คอลัมน์ ${entry.col + 1}`} ซ้ำกับ ${existing.header}`);
+      }
     } else {
       mappingByField.set(entry.fieldKey, entry);
     }
@@ -1036,6 +1242,18 @@ export async function parseWorkbook(
 
   const fieldColumns = new Map<string, number>();
   for (const [key, entry] of mappingByField) fieldColumns.set(key, entry.col);
+
+  const dateColumnFormats = new Map<number, "DMY" | "MDY">();
+  for (const [key, col] of fieldColumns) {
+    const def = FIELD_BY_KEY.get(key);
+    if (def?.kind === "date") {
+      const colVals: Primitive[] = [];
+      for (let index = detail.headerRow + 1; index < detailEndRow; index++) {
+        colVals.push(detail.rows[index]?.[col] ?? null);
+      }
+      dateColumnFormats.set(col, detectDateColumnFormat(colVals));
+    }
+  }
 
   for (const entry of detail.mapping) {
     if (!entry.fieldKey) continue;
@@ -1105,7 +1323,7 @@ export async function parseWorkbook(
       if (isEmptyValue(value)) continue;
 
       if (def.kind === "date") {
-        const parsed = parseDateValue(value);
+        const parsed = parseDateValue(value, dateColumnFormats.get(col));
         if (!parsed.iso) {
           rowNotes.push({
             code: "INVALID_DATE",
@@ -1121,14 +1339,21 @@ export async function parseWorkbook(
       }
 
       if (numericField(def, value)) {
+        const trimmedVal = typeof value === "string" ? value.trim() : "";
+        const isFormulaErr = isFormulaErrorValue(value);
         const invalid =
           typeof value === "string" &&
-          !/^[\s(]*-?[\d,]+(?:\.\d+)?[\s)]*$/.test(value.trim()) &&
-          !["-", "--", "/", "N/A"].includes(value.trim());
+          (isFormulaErr ||
+            (!/^[\s(฿$]*[−–—-]?[\d,]+(?:\.\d+)?(?:\.-|-\s*)?[\s)฿$]*(?:บาท|baht|thb|%)?$/i.test(
+              trimmedVal,
+            ) &&
+              !["-", "--", "/", "N/A"].includes(trimmedVal)));
         if (invalid) {
           rowNotes.push({
-            code: "INVALID_NUMBER",
-            message: `อ่านตัวเลขของ ${def.label} ไม่ได้: "${rawValue(value)}"`,
+            code: isFormulaErr ? "FORMULA_ERROR" : "INVALID_NUMBER",
+            message: isFormulaErr
+              ? `พบข้อผิดพลาดสูตร Excel ใน ${def.label}: "${rawValue(value)}"`
+              : `อ่านตัวเลขของ ${def.label} ไม่ได้: "${rawValue(value)}"`,
             severity: "warning",
             row: excelRow,
           });
