@@ -139,6 +139,11 @@ export function isOrderEligibleForInvoice(row: {
   productDetail?: string | null;
   omsItems?: unknown[] | null;
   isNoProductPriceOrder?: boolean;
+  lineComparisonStatus?:
+    | "matched"
+    | "amount_diff"
+    | "orders_only"
+    | "shipnity_only";
 }): boolean {
   // 0. รายการชดเชยจากแพลตฟอร์ม / โลจิสติกส์ ของ TikTok ที่มียอดรับสุทธิ > 0
   if (isPlatformCompensationRow(row)) {
@@ -171,10 +176,14 @@ export function isOrderEligibleForInvoice(row: {
   } else if (ch === "Shopee") {
     if (!hasItems) return false;
   } else if (ch === "Facebook") {
+    // บิล Facebook ต้องมีรายชื่ออยู่ในไฟล์สรุปจากฝ่ายบัญชีเท่านั้นถึงจะอนุญาตให้ยื่นภาษี/ออกใบกำกับภาษีได้
+    if (row.lineComparisonStatus === "shipnity_only") return false;
     if (!hasItems) return false;
   } else if (ch === "Lazada") {
     if (!hasItems) return false;
   } else if (ch === "LINE") {
+    // บิล LINE OA ต้องมีรายชื่ออยู่ในไฟล์สรุปจากฝ่ายบัญชีเท่านั้นถึงจะอนุญาตให้ยื่นภาษี/ออกใบกำกับภาษีได้
+    if (row.lineComparisonStatus === "shipnity_only") return false;
     if (!hasItems) return false;
   } else if (ch === "Other") {
     if (!hasItems) return false;
@@ -195,8 +204,14 @@ export function buildInvoice(
     ...(sellerOverride ?? {}),
   };
   const fields = row.normalized.fields;
-  const rawIncome = Number(fields.incomeTotal ?? row.income ?? 0);
-  const rawPayout = Number(fields.payout ?? row.payout ?? 0);
+  const ch = row.channel || "TikTok";
+  const isAccountingPrimaryChannel = ch === "LINE" || ch === "Facebook";
+  const rawIncome = isAccountingPrimaryChannel
+    ? Number(row.income ?? fields.incomeTotal ?? 0)
+    : Number(fields.incomeTotal ?? row.income ?? 0);
+  const rawPayout = isAccountingPrimaryChannel
+    ? Number(row.payout ?? fields.payout ?? 0)
+    : Number(fields.payout ?? row.payout ?? 0);
   const rawRefundAfter = Number(fields.refundAfterDiscount ?? 0);
   const isPlatformCompensation = isPlatformCompensationRow({
     channel: row.channel,
@@ -213,7 +228,6 @@ export function buildInvoice(
     rawPayout <= 0 &&
     (rawRefundAfter < 0 || Number(fields.productAfterDiscount ?? 0) <= 0);
 
-  const ch = row.channel || "TikTok";
   const isOmsChannel =
     ch === "Shopee" || ch === "Facebook" || ch === "Lazada" || ch === "LINE" || ch === "Other";
   const rawProductAfter = Number(fields.productAfterDiscount ?? 0);
@@ -227,13 +241,17 @@ export function buildInvoice(
   // productAfterDiscount คือยอดรวมค่าสินค้าหลังหักส่วนลดร้านค้า (ไม่รวมค่าขนส่ง)
   // หากมี productAfterDiscount > 0 ให้บวก refundAfterDiscount (ถ้ามีคืนเงินบางส่วน) เป็นยอดขายสินค้า (salesAmount)
   // หากไม่มี ให้ใช้ rawIncome - Math.max(0, custShippingFee)
+  // สำหรับ LINE / Facebook ที่ยอด 2 ไฟล์ไม่ตรงกัน:
+  // ยึดยอดจากไฟล์สรุปฝ่ายบัญชี (rawIncome - custShippingFee) เป็นหลักในการออกใบกำกับภาษีเสมอ
   const productSalesAmount = isPlatformCompensation
     ? compAmount
-    : productAfterWithRefund > 0
-      ? productAfterWithRefund
-      : rawIncome > 0
-        ? round2(Math.max(0, rawIncome - Math.max(0, custShippingFee)))
-        : 0;
+    : isAccountingPrimaryChannel && rawIncome > 0
+      ? round2(Math.max(0, rawIncome - Math.max(0, custShippingFee)))
+      : productAfterWithRefund > 0
+        ? productAfterWithRefund
+        : rawIncome > 0
+          ? round2(Math.max(0, rawIncome - Math.max(0, custShippingFee)))
+          : 0;
 
   const salesAmount = isZeroRefundedOrder
     ? 0
@@ -275,13 +293,47 @@ export function buildInvoice(
       },
     ];
   } else if (row.omsItems && row.omsItems.length > 0) {
-    items = row.omsItems.map((it) => ({
+    const rawItems = row.omsItems.map((it) => ({
       sku: it.skuCode,
       name: it.productName,
       unitPrice: round2(it.unitPrice),
       qty: it.quantity,
       lineTotal: round2(it.unitPrice * it.quantity),
     }));
+    const rawItemsSum = round2(
+      rawItems.reduce((acc, it) => acc + (it.lineTotal ?? 0), 0),
+    );
+    // กรณี LINE OA หรือ Facebook ที่ยอดในไฟล์บัญชีและไฟล์สินค้า Shipnity ไม่ตรงกัน (amount_diff):
+    // เวลายื่นภาษีและออกใบกำกับภาษีให้ยึดยอดจากไฟล์ของบัญชี (salesAmount) เป็นหลัก 100%
+    if (
+      isAccountingPrimaryChannel &&
+      row.lineComparisonStatus === "amount_diff" &&
+      salesAmount > 0 &&
+      Math.abs(rawItemsSum - salesAmount) >= 0.01
+    ) {
+      let running = 0;
+      const totalQtyAll = Math.max(
+        1,
+        rawItems.reduce((acc, it) => acc + Math.max(1, it.qty), 0),
+      );
+      items = rawItems.map((it, idx) => {
+        const isLast = idx === rawItems.length - 1;
+        const lineAmt = isLast
+          ? round2(Math.max(0, salesAmount - running))
+          : rawItemsSum > 0
+            ? round2((salesAmount * (it.lineTotal ?? 0)) / rawItemsSum)
+            : round2((salesAmount * Math.max(1, it.qty)) / totalQtyAll);
+        running = round2(running + lineAmt);
+        const unitAmt = round2(lineAmt / Math.max(1, it.qty));
+        return {
+          ...it,
+          unitPrice: unitAmt,
+          lineTotal: lineAmt,
+        };
+      });
+    } else {
+      items = rawItems;
+    }
   } else {
     items = parseProductItems(row.productDetail);
   }
@@ -308,9 +360,11 @@ export function buildInvoice(
       : storeDiscountFromFields;
 
   const derivedDiscount =
-    grossItemsTotal > salesAmount
-      ? round2(grossItemsTotal - salesAmount)
-      : explicitDiscount;
+    isAccountingPrimaryChannel && row.lineComparisonStatus === "amount_diff"
+      ? 0
+      : grossItemsTotal > salesAmount
+        ? round2(grossItemsTotal - salesAmount)
+        : explicitDiscount;
 
   const rawPlatformDiscount = round2(Number(fields.platformDiscount ?? 0));
   const rawPlatformCofundCoupon = round2(
@@ -403,7 +457,9 @@ export function buildInvoice(
         ? round2(shippingFee + shippingCoupon)
         : 0;
 
-  const customerPayment = round2(Number(fields.customerPayment ?? 0));
+  const customerPayment = isAccountingPrimaryChannel
+    ? round2(rawIncome)
+    : round2(Number(fields.customerPayment ?? 0));
 
   const receiptSubtotal = platformCoupon > 0 ? salesAmount : grossItemsTotal;
   const receiptCoupon = platformCoupon > 0 ? platformCoupon : derivedDiscount;
