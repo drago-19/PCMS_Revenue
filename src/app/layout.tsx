@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono, Noto_Sans_Thai } from "next/font/google";
+import localFont from "next/font/local";
 import { Suspense, type ReactNode } from "react";
 import { NavigationProgress } from "@/components/NavigationProgress";
 import { Sidebar } from "@/components/Sidebar";
@@ -10,55 +10,28 @@ import { getActiveCompanyId } from "@/lib/db";
 import { getDocumentSettings } from "@/lib/settings";
 import "./globals.css";
 
-const notoSansThai = Noto_Sans_Thai({
-  subsets: ["thai", "latin"],
-  weight: ["400", "500", "600", "700"],
+const notoSansThai = localFont({
+  src: [
+    { path: "../fonts/NotoSansThai-Thai.woff2", weight: "400 700", style: "normal" },
+    { path: "../fonts/NotoSansThai-Latin.woff2", weight: "400 700", style: "normal" },
+  ],
   variable: "--font-thai",
   display: "swap",
 });
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const inter = localFont({
+  src: "../fonts/Inter-Latin.woff2",
+  weight: "400 700",
   variable: "--font-latin",
   display: "swap",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+const jetbrainsMono = localFont({
+  src: "../fonts/JetBrainsMono-Latin.woff2",
+  weight: "500 700",
   variable: "--font-mono",
   display: "swap",
 });
-
-export const metadata: Metadata = {
-  title: {
-    default: "PCMS Revenue | สรุปบิลรายได้ TikTok Shop",
-    template: "%s | PCMS Revenue",
-  },
-  description:
-    "นำเข้าไฟล์รายได้ TikTok Shop และสร้างบิลสรุปยอดชำระแยกตามหมายเลขคำสั่งซื้อ",
-  applicationName: "PCMS Revenue",
-  manifest: "/manifest.webmanifest",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "black-translucent",
-    title: "PCMS Revenue",
-  },
-  formatDetection: {
-    telephone: false,
-  },
-  icons: {
-    icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
-    ],
-    apple: [
-      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
-    ],
-  },
-};
 
 export const viewport: Viewport = {
   width: "device-width",
