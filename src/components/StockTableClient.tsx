@@ -51,12 +51,14 @@ function buildExportUrl(params: {
   channel?: string;
   q?: string;
   stockFilter?: string;
+  onlySold?: boolean;
 }) {
   const sp = new URLSearchParams();
   if (params.date) sp.set("date", params.date);
   if (params.channel && params.channel !== "all") sp.set("channel", params.channel);
   if (params.q) sp.set("q", params.q);
   if (params.stockFilter && params.stockFilter !== "all") sp.set("stockFilter", params.stockFilter);
+  if (params.onlySold) sp.set("onlySold", "true");
   const qs = sp.toString();
   return qs ? `/api/products/stock-export?${qs}` : "/api/products/stock-export";
 }
@@ -113,12 +115,14 @@ export function StockTableClient({
                 <span className="text-[10px] text-slate-400 ml-0.5">▼</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72">
+            <DropdownMenuContent align="end" className="w-[calc(100vw-32px)] max-w-[350px] p-2">
               {currentDate ? (
                 <>
-                  <DropdownMenuLabel className="text-[11px] font-bold text-slate-500">
-                    ดาวน์โหลดตามช่วงเวลาที่เลือก
+                  <DropdownMenuLabel className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    สำหรับ {formattedPeriod}
                   </DropdownMenuLabel>
+
+                  {/* ตัวเลือกที่ 1: เฉพาะสินค้าที่ขายได้ (สำหรับบัญชี COGS) */}
                   <DropdownMenuItem asChild>
                     <a
                       href={buildExportUrl({
@@ -126,41 +130,112 @@ export function StockTableClient({
                         channel: currentChannel !== "all" ? currentChannel : undefined,
                         q: currentQ || undefined,
                         stockFilter: currentStockFilter !== "all" ? currentStockFilter : undefined,
+                        onlySold: true,
                       })}
                       download
-                      className="flex items-center gap-2 cursor-pointer font-bold text-emerald-700"
+                      data-testid="stock-export-sold-only-btn"
+                      className="flex items-start gap-2.5 rounded-lg p-2.5 cursor-pointer hover:bg-emerald-50 focus:bg-emerald-50 border border-emerald-200/80 bg-emerald-50/50 my-1 transition-colors"
                     >
-                      <IconDownload size={14} />
-                      <div className="flex flex-col">
-                        <span>ดาวน์โหลดเฉพาะ {formattedPeriod}</span>
-                        <span className="text-[10.5px] font-normal text-muted-foreground">
-                          แสดงยอดขายและต้นทุนขาย (COGS) ในช่วงนี้
+                      <div className="mt-0.5 rounded-md p-1.5 bg-emerald-600 text-white shrink-0 shadow-2xs">
+                        <IconDownload size={14} />
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-xs text-emerald-950">
+                            1. เฉพาะสินค้าที่ขายได้
+                          </span>
+                          <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded">
+                            แนะนำสำหรับบัญชี
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-emerald-800 leading-snug">
+                          โชว์เฉพาะตัวที่ขายได้จริง (ตัดตัวที่ขาย 0 ออก ดูยอดต้นทุนขาย COGS ง่ายๆ)
                         </span>
                       </div>
                     </a>
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
+
+                  {/* ตัวเลือกที่ 2: สินค้าทั้งหมดในคลัง */}
+                  <DropdownMenuItem asChild>
+                    <a
+                      href={buildExportUrl({
+                        date: currentDate,
+                        channel: currentChannel !== "all" ? currentChannel : undefined,
+                        q: currentQ || undefined,
+                        stockFilter: currentStockFilter !== "all" ? currentStockFilter : undefined,
+                        onlySold: false,
+                      })}
+                      download
+                      data-testid="stock-export-all-items-btn"
+                      className="flex items-start gap-2.5 rounded-lg p-2.5 cursor-pointer hover:bg-slate-100 focus:bg-slate-100 border border-transparent my-1 transition-colors"
+                    >
+                      <div className="mt-0.5 rounded-md p-1.5 bg-slate-200 text-slate-700 shrink-0">
+                        <IconDownload size={14} />
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-bold text-xs text-slate-900">
+                          2. สินค้าทั้งหมดในคลัง (ครบทุก SKU)
+                        </span>
+                        <span className="text-[11px] text-slate-500 leading-snug">
+                          โชว์สินค้าครบทุกรหัสในระบบ พร้อมยอดขายช่วงนี้และสต็อกคงเหลือ
+                        </span>
+                      </div>
+                    </a>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator className="my-1.5" />
                 </>
               ) : null}
 
-              <DropdownMenuLabel className="text-[11px] font-bold text-slate-500">
-                ดาวน์โหลดข้อมูลทั้งหมด
+              <DropdownMenuLabel className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                ข้อมูลภาพรวมตลอดกาล (ทุกช่วงเวลา)
               </DropdownMenuLabel>
+
               <DropdownMenuItem asChild>
                 <a
                   href={buildExportUrl({
                     channel: currentChannel !== "all" ? currentChannel : undefined,
                     q: currentQ || undefined,
                     stockFilter: currentStockFilter !== "all" ? currentStockFilter : undefined,
+                    onlySold: true,
                   })}
                   download
-                  className="flex items-center gap-2 cursor-pointer"
+                  className="flex items-start gap-2.5 rounded-lg p-2 cursor-pointer hover:bg-slate-100 focus:bg-slate-100 transition-colors"
                 >
-                  <IconDownload size={14} />
-                  <div className="flex flex-col">
-                    <span className="font-bold">ดาวน์โหลดสต็อกทั้งหมด (สะสมตลอดกาล)</span>
-                    <span className="text-[10.5px] font-normal text-muted-foreground">
-                      แสดงยอดขายสะสมรวมและคงเหลือตลอดกาล
+                  <div className="mt-0.5 rounded-md p-1.5 bg-slate-100 text-slate-600 shrink-0">
+                    <IconDownload size={14} />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-bold text-xs text-slate-800">
+                      เฉพาะสินค้าที่เคยขายได้ (สะสมตลอดกาล)
+                    </span>
+                    <span className="text-[11px] text-slate-500 leading-snug">
+                      ตัดรหัสสินค้าที่ไม่เคยมีการขายออก
+                    </span>
+                  </div>
+                </a>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem asChild>
+                <a
+                  href={buildExportUrl({
+                    channel: currentChannel !== "all" ? currentChannel : undefined,
+                    q: currentQ || undefined,
+                    stockFilter: currentStockFilter !== "all" ? currentStockFilter : undefined,
+                    onlySold: false,
+                  })}
+                  download
+                  className="flex items-start gap-2.5 rounded-lg p-2 cursor-pointer hover:bg-slate-100 focus:bg-slate-100 transition-colors"
+                >
+                  <div className="mt-0.5 rounded-md p-1.5 bg-slate-100 text-slate-600 shrink-0">
+                    <IconDownload size={14} />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-bold text-xs text-slate-800">
+                      สต็อกสินค้าทั้งหมดในระบบ (สะสมตลอดกาล)
+                    </span>
+                    <span className="text-[11px] text-slate-500 leading-snug">
+                      โชว์สินค้าครบทุกรหัสในระบบ พร้อมยอดขายสะสมและมูลค่าคงเหลือรวม
                     </span>
                   </div>
                 </a>

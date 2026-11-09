@@ -4743,6 +4743,7 @@ export async function listAllProductsForStockExport(
     channel?: string;
     q?: string;
     stockFilter?: StockFilterKey;
+    onlySold?: boolean;
   },
   db?: Queryable,
 ): Promise<Array<{
@@ -4762,6 +4763,7 @@ export async function listAllProductsForStockExport(
   const channel = (options?.channel ?? "all").trim().slice(0, 32);
   const q = escapeLikePattern(options?.q ?? "");
   const stockFilter: StockFilterKey = options?.stockFilter ?? "all";
+  const onlySold = Boolean(options?.onlySold);
 
   const isFiltered = Boolean(date || (channel && channel !== "all"));
 
@@ -4846,6 +4848,9 @@ export async function listAllProductsForStockExport(
   }
 
   const whereClauses: string[] = ["1=1"];
+  if (onlySold) {
+    whereClauses.push("sold_qty > 0");
+  }
   if (q) {
     params.push(`%${q}%`);
     whereClauses.push(`(sku_code || ' ' || product_name) ILIKE $${params.length} ESCAPE '\\'`);

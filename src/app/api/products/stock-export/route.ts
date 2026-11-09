@@ -32,12 +32,16 @@ export async function GET(request: Request) {
     const channel = (url.searchParams.get("channel") ?? "all").trim();
     const q = (url.searchParams.get("q") ?? "").trim();
     const stockFilter = (url.searchParams.get("stockFilter") ?? "all").trim() as StockFilterKey;
+    const onlySoldParam = (url.searchParams.get("onlySold") ?? "").trim().toLowerCase();
+    const scopeParam = (url.searchParams.get("scope") ?? "").trim().toLowerCase();
+    const onlySold = onlySoldParam === "true" || onlySoldParam === "1" || scopeParam === "sold";
 
     const products = await listAllProductsForStockExport({
       date: date || undefined,
       channel: channel !== "all" ? channel : undefined,
       q: q || undefined,
       stockFilter: stockFilter !== "all" ? stockFilter : undefined,
+      onlySold,
     });
 
     const isPeriodFiltered = Boolean(date);
@@ -47,9 +51,9 @@ export async function GET(request: Request) {
     workbook.creator = "PCMS Revenue System";
     workbook.created = new Date();
 
-    const sheetName = isPeriodFiltered
-      ? `สต๊อก (${date.replace(/-/g, "")})`
-      : "สต๊อกสินค้าและต้นทุน";
+    const sheetName = onlySold
+      ? (isPeriodFiltered ? `ต้นทุนขาย (${date.replace(/-/g, "")})` : "ต้นทุนขาย")
+      : (isPeriodFiltered ? `สต๊อก (${date.replace(/-/g, "")})` : "สต๊อกสินค้าและต้นทุน");
     const sheet = workbook.addWorksheet(sheetName.slice(0, 31), {
       views: [{ state: "frozen", ySplit: 1 }],
     });
@@ -180,9 +184,13 @@ export async function GET(request: Request) {
     const totalRowIdx = products.length + 2;
     if (products.length > 0) {
       if (isPeriodFiltered) {
+        const summaryLabel = onlySold
+          ? `(${products.length.toLocaleString("th-TH")} รหัสสินค้าที่มีการขาย · ${periodLabel})`
+          : `(${products.length.toLocaleString("th-TH")} รหัสสินค้า · ${periodLabel})`;
+
         const totalRow = sheet.addRow({
           skuCode: "รวมทั้งหมด",
-          productName: `(${products.length.toLocaleString("th-TH")} รหัสสินค้า · ${periodLabel})`,
+          productName: summaryLabel,
           defaultPrice: "",
           costPrice: "",
           initialStock: { formula: `SUM(E2:E${totalRowIdx - 1})` },
@@ -211,9 +219,13 @@ export async function GET(request: Request) {
           totalRow.getCell(col).border = { top: { style: "thin" }, bottom: { style: "double" } };
         }
       } else {
+        const summaryLabel = onlySold
+          ? `(${products.length.toLocaleString("th-TH")} รหัสสินค้าที่มีการขาย · ตลอดกาล)`
+          : `(${products.length.toLocaleString("th-TH")} รหัสสินค้า · ตลอดกาล)`;
+
         const totalRow = sheet.addRow({
           skuCode: "รวมทั้งหมด",
-          productName: `(${products.length.toLocaleString("th-TH")} รหัสสินค้า · ตลอดกาล)`,
+          productName: summaryLabel,
           defaultPrice: "",
           costPrice: "",
           initialStock: { formula: `SUM(E2:E${totalRowIdx - 1})` },
@@ -245,16 +257,17 @@ export async function GET(request: Request) {
     const buffer = await workbook.xlsx.writeBuffer();
     const todayStr = new Date().toISOString().slice(0, 10);
 
-    let filename = `stock_inventory_all_time_${todayStr}.xlsx`;
+    const filePrefix = onlySold ? "cogs_sold" : "stock_inventory";
+    let filename = `${filePrefix}_all_time_${todayStr}.xlsx`;
     if (date) {
       if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        filename = `stock_inventory_day_${date}.xlsx`;
+        filename = `${filePrefix}_day_${date}.xlsx`;
       } else if (/^\d{4}-\d{2}$/.test(date)) {
-        filename = `stock_inventory_month_${date}.xlsx`;
+        filename = `${filePrefix}_month_${date}.xlsx`;
       } else if (/^\d{4}$/.test(date)) {
-        filename = `stock_inventory_year_${date}.xlsx`;
+        filename = `${filePrefix}_year_${date}.xlsx`;
       } else {
-        filename = `stock_inventory_${date}.xlsx`;
+        filename = `${filePrefix}_${date}.xlsx`;
       }
     }
 

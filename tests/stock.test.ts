@@ -165,6 +165,14 @@ test("stock: listAllProductsForStockExport supports date (month and day) filteri
   assert.equal(typeof dayExport[0]!.soldQty, "number");
   assert.equal(typeof dayExport[0]!.cogs, "number");
   assert.equal(typeof dayExport[0]!.totalSoldAllTime, "number");
+
+  // Test onlySold option (Option 3 for accounting: filters out products with soldQty === 0)
+  const allExport = await listAllProductsForStockExport({ onlySold: false });
+  const soldOnlyExport = await listAllProductsForStockExport({ onlySold: true });
+  assert.ok(soldOnlyExport.length <= allExport.length, "sold only export should have <= items than full export");
+  for (const item of soldOnlyExport) {
+    assert.ok(item.soldQty > 0, "every item in soldOnlyExport must have soldQty > 0");
+  }
 });
 
 test("stock: createProduct and deleteProduct manage new manual SKU lifecycle", async () => {
