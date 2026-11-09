@@ -504,6 +504,10 @@ export default async function ProductsPage({
               rows={stockResult.rows}
               page={stockResult.page}
               pageSize={stockResult.pageSize}
+              currentDate={date}
+              currentChannel={channel}
+              currentQ={q}
+              currentStockFilter={stockFilter}
             />
 
             {/* Quick stock status filter pills */}

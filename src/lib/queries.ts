@@ -4738,6 +4738,12 @@ export async function bulkUpdateProductStock(
 }
 
 export async function listAllProductsForStockExport(
+  options?: {
+    date?: string;
+    channel?: string;
+    q?: string;
+    stockFilter?: StockFilterKey;
+  },
   db?: Queryable,
 ): Promise<Array<{
   skuCode: string;
@@ -4746,29 +4752,123 @@ export async function listAllProductsForStockExport(
   costPrice: number;
   initialStock: number;
   stockIn: number;
+  soldQty: number;
   totalSoldAllTime: number;
   remainingStock: number;
   stockValue: number;
   cogs: number;
 }>> {
+  const date = (options?.date ?? "").trim().slice(0, 32);
+  const channel = (options?.channel ?? "all").trim().slice(0, 32);
+  const q = escapeLikePattern(options?.q ?? "");
+  const stockFilter: StockFilterKey = options?.stockFilter ?? "all";
+
+  const isFiltered = Boolean(date || (channel && channel !== "all"));
+
+  let cteSql = "";
+  const params: unknown[] = [];
+
+  if (isFiltered) {
+    const itemClauses: string[] = [
+      "COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')",
+    ];
+    if (channel !== "all") {
+      params.push(channel);
+      itemClauses.push(`COALESCE(NULLIF(i.channel, ''), 'TikTok') = $${params.length}`);
+    }
+    if (date) {
+      if (/^\d{4}-\d{2}$/.test(date)) {
+        params.push(date);
+        itemClauses.push(`i.paid_date LIKE $${params.length} || '%'`);
+      } else if (/^\d{4}$/.test(date)) {
+        params.push(date);
+        itemClauses.push(`i.paid_date LIKE $${params.length} || '%'`);
+      } else {
+        params.push(date);
+        itemClauses.push(`i.paid_date = $${params.length}`);
+      }
+    }
+
+    cteSql = `
+      WITH period_items AS (
+        SELECT
+          i.sku_code,
+          COALESCE(SUM(i.quantity), 0)::int AS period_sold,
+          COUNT(DISTINCT i.order_uid)::int AS order_count
+        FROM oms_order_items i
+        WHERE ${itemClauses.join(" AND ")}
+        GROUP BY i.sku_code
+      ),
+      all_time AS (
+        SELECT sku_code, total_qty AS all_time_sold FROM sku_summaries
+      ),
+      base AS (
+        SELECT
+          p.sku_code,
+          p.product_name,
+          COALESCE(p.default_price, 0) AS default_price,
+          COALESCE(p.cost_price, 0) AS cost_price,
+          COALESCE(p.initial_stock, 0) AS initial_stock,
+          COALESCE(p.stock_in, 0) AS stock_in,
+          COALESCE(pi.period_sold, 0)::int AS sold_qty,
+          COALESCE(at.all_time_sold, 0)::int AS total_sold_all_time,
+          (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(at.all_time_sold, 0))::int AS remaining_stock,
+          ROUND((CASE WHEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(at.all_time_sold, 0)) > 0
+                      THEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(at.all_time_sold, 0)) * COALESCE(p.cost_price, 0)
+                      ELSE 0 END)::numeric, 2) AS stock_value,
+          ROUND((COALESCE(pi.period_sold, 0) * COALESCE(p.cost_price, 0))::numeric, 2) AS cogs
+        FROM products p
+        LEFT JOIN period_items pi ON pi.sku_code = p.sku_code
+        LEFT JOIN all_time at ON at.sku_code = p.sku_code
+      )
+    `;
+  } else {
+    cteSql = `
+      WITH base AS (
+        SELECT
+          p.sku_code,
+          p.product_name,
+          COALESCE(p.default_price, 0) AS default_price,
+          COALESCE(p.cost_price, 0) AS cost_price,
+          COALESCE(p.initial_stock, 0) AS initial_stock,
+          COALESCE(p.stock_in, 0) AS stock_in,
+          COALESCE(s.total_qty, 0)::int AS sold_qty,
+          COALESCE(s.total_qty, 0)::int AS total_sold_all_time,
+          (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0))::int AS remaining_stock,
+          ROUND((CASE WHEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) > 0
+                      THEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) * COALESCE(p.cost_price, 0)
+                      ELSE 0 END)::numeric, 2) AS stock_value,
+          ROUND((COALESCE(s.total_qty, 0) * COALESCE(p.cost_price, 0))::numeric, 2) AS cogs
+        FROM products p
+        LEFT JOIN sku_summaries s ON s.sku_code = p.sku_code
+      )
+    `;
+  }
+
+  const whereClauses: string[] = ["1=1"];
+  if (q) {
+    params.push(`%${q}%`);
+    whereClauses.push(`(sku_code || ' ' || product_name) ILIKE $${params.length} ESCAPE '\\'`);
+  }
+  if (stockFilter === "in_stock") {
+    whereClauses.push("remaining_stock > 10");
+  } else if (stockFilter === "low_stock") {
+    whereClauses.push("remaining_stock > 0 AND remaining_stock <= 10");
+  } else if (stockFilter === "out_of_stock") {
+    whereClauses.push("remaining_stock = 0");
+  } else if (stockFilter === "negative") {
+    whereClauses.push("remaining_stock < 0");
+  } else if (stockFilter === "no_cost") {
+    whereClauses.push("cost_price = 0");
+  }
+
   const rows = await query<Record<string, unknown>>(
-    `SELECT
-       p.sku_code,
-       p.product_name,
-       COALESCE(p.default_price, 0) AS default_price,
-       COALESCE(p.cost_price, 0) AS cost_price,
-       COALESCE(p.initial_stock, 0) AS initial_stock,
-       COALESCE(p.stock_in, 0) AS stock_in,
-       COALESCE(s.total_qty, 0)::int AS total_sold_all_time,
-       (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0))::int AS remaining_stock,
-       ROUND((CASE WHEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) > 0
-                   THEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) * COALESCE(p.cost_price, 0)
-                   ELSE 0 END)::numeric, 2) AS stock_value,
-       ROUND((COALESCE(s.total_qty, 0) * COALESCE(p.cost_price, 0))::numeric, 2) AS cogs
-     FROM products p
-     LEFT JOIN sku_summaries s ON s.sku_code = p.sku_code
-     ORDER BY p.sku_code ASC`,
-    [],
+    `${cteSql}
+     SELECT *
+     FROM base
+     WHERE ${whereClauses.join(" AND ")}
+     ORDER BY sku_code ASC`,
+    params,
     db,
   );
 
@@ -4779,6 +4879,7 @@ export async function listAllProductsForStockExport(
     costPrice: Number(r.cost_price ?? 0),
     initialStock: Number(r.initial_stock ?? 0),
     stockIn: Number(r.stock_in ?? 0),
+    soldQty: Number(r.sold_qty ?? 0),
     totalSoldAllTime: Number(r.total_sold_all_time ?? 0),
     remainingStock: Number(r.remaining_stock ?? 0),
     stockValue: Number(r.stock_value ?? 0),

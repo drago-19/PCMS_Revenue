@@ -151,6 +151,22 @@ test("stock: listAllProductsForStockExport returns full inventory rows for Excel
   assert.equal(typeof sample.cogs, "number");
 });
 
+test("stock: listAllProductsForStockExport supports date (month and day) filtering for Excel export", async () => {
+  // Test month export (YYYY-MM)
+  const monthExport = await listAllProductsForStockExport({ date: "2026-10" });
+  assert.ok(monthExport.length > 0, "should return products for month export");
+  assert.equal(typeof monthExport[0]!.soldQty, "number");
+  assert.equal(typeof monthExport[0]!.cogs, "number");
+  assert.equal(typeof monthExport[0]!.totalSoldAllTime, "number");
+
+  // Test day export (YYYY-MM-DD)
+  const dayExport = await listAllProductsForStockExport({ date: "2026-10-15" });
+  assert.ok(dayExport.length > 0, "should return products for day export");
+  assert.equal(typeof dayExport[0]!.soldQty, "number");
+  assert.equal(typeof dayExport[0]!.cogs, "number");
+  assert.equal(typeof dayExport[0]!.totalSoldAllTime, "number");
+});
+
 test("stock: createProduct and deleteProduct manage new manual SKU lifecycle", async () => {
   const newSku = "NEW-TEST-SKU-999";
   const pool = getPool();

@@ -2,13 +2,19 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   IconDownload,
   IconPlus,
   IconUpload,
 } from "@/components/icons";
-import { formatTHB } from "@/lib/format";
 import type { ProductStockRow } from "@/lib/queries";
 import { StockEditDialog } from "./StockEditDialog";
 import { StockImportDialog } from "./StockImportDialog";
@@ -18,12 +24,57 @@ interface StockTableClientProps {
   rows: ProductStockRow[];
   page: number;
   pageSize: number;
+  currentDate?: string;
+  currentChannel?: string;
+  currentQ?: string;
+  currentStockFilter?: string;
 }
 
-export function StockTableClient({ rows, page, pageSize }: StockTableClientProps) {
+function formatPeriodTitle(dateStr?: string): string {
+  if (!dateStr) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [y, m, d] = dateStr.split("-");
+    return `วันที่ ${d}/${m}/${y}`;
+  }
+  if (/^\d{4}-\d{2}$/.test(dateStr)) {
+    const [y, m] = dateStr.split("-");
+    return `เดือน ${m}/${y}`;
+  }
+  if (/^\d{4}$/.test(dateStr)) {
+    return `ปี ${dateStr}`;
+  }
+  return dateStr;
+}
+
+function buildExportUrl(params: {
+  date?: string;
+  channel?: string;
+  q?: string;
+  stockFilter?: string;
+}) {
+  const sp = new URLSearchParams();
+  if (params.date) sp.set("date", params.date);
+  if (params.channel && params.channel !== "all") sp.set("channel", params.channel);
+  if (params.q) sp.set("q", params.q);
+  if (params.stockFilter && params.stockFilter !== "all") sp.set("stockFilter", params.stockFilter);
+  const qs = sp.toString();
+  return qs ? `/api/products/stock-export?${qs}` : "/api/products/stock-export";
+}
+
+export function StockTableClient({
+  rows,
+  page,
+  pageSize,
+  currentDate,
+  currentChannel,
+  currentQ,
+  currentStockFilter,
+}: StockTableClientProps) {
   const [editingProduct, setEditingProduct] = useState<ProductStockRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+
+  const formattedPeriod = formatPeriodTitle(currentDate);
 
   return (
     <>
@@ -32,6 +83,7 @@ export function StockTableClient({ rows, page, pageSize }: StockTableClientProps
           <span>การจัดการสต็อกและไฟล์</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* ปุ่มเพิ่มรหัสสินค้าใหม่ */}
           <Button
             type="button"
             variant="default"
@@ -42,11 +94,81 @@ export function StockTableClient({ rows, page, pageSize }: StockTableClientProps
           >
             <IconPlus size={15} /> เพิ่มรหัสสินค้าใหม่
           </Button>
-          <Button asChild variant="outline" size="sm" className="h-9 gap-1.5 font-bold shadow-2xs">
-            <a href="/api/products/stock-export" download>
-              <IconDownload size={15} /> ดาวน์โหลด Excel สต็อก
-            </a>
-          </Button>
+
+          {/* ปุ่มดาวน์โหลด Excel สต็อก (รองรับทั้งรายเดือน, รายวัน, และตลอดกาล) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 font-bold shadow-2xs hover:border-slate-400"
+                data-testid="stock-export-dropdown-btn"
+              >
+                <IconDownload size={15} />
+                <span>
+                  {formattedPeriod
+                    ? `ดาวน์โหลด Excel (${formattedPeriod})`
+                    : "ดาวน์โหลด Excel สต็อก"}
+                </span>
+                <span className="text-[10px] text-slate-400 ml-0.5">▼</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              {currentDate ? (
+                <>
+                  <DropdownMenuLabel className="text-[11px] font-bold text-slate-500">
+                    ดาวน์โหลดตามช่วงเวลาที่เลือก
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem asChild>
+                    <a
+                      href={buildExportUrl({
+                        date: currentDate,
+                        channel: currentChannel !== "all" ? currentChannel : undefined,
+                        q: currentQ || undefined,
+                        stockFilter: currentStockFilter !== "all" ? currentStockFilter : undefined,
+                      })}
+                      download
+                      className="flex items-center gap-2 cursor-pointer font-bold text-emerald-700"
+                    >
+                      <IconDownload size={14} />
+                      <div className="flex flex-col">
+                        <span>ดาวน์โหลดเฉพาะ {formattedPeriod}</span>
+                        <span className="text-[10.5px] font-normal text-muted-foreground">
+                          แสดงยอดขายและต้นทุนขาย (COGS) ในช่วงนี้
+                        </span>
+                      </div>
+                    </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
+
+              <DropdownMenuLabel className="text-[11px] font-bold text-slate-500">
+                ดาวน์โหลดข้อมูลทั้งหมด
+              </DropdownMenuLabel>
+              <DropdownMenuItem asChild>
+                <a
+                  href={buildExportUrl({
+                    channel: currentChannel !== "all" ? currentChannel : undefined,
+                    q: currentQ || undefined,
+                    stockFilter: currentStockFilter !== "all" ? currentStockFilter : undefined,
+                  })}
+                  download
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <IconDownload size={14} />
+                  <div className="flex flex-col">
+                    <span className="font-bold">ดาวน์โหลดสต็อกทั้งหมด (สะสมตลอดกาล)</span>
+                    <span className="text-[10.5px] font-normal text-muted-foreground">
+                      แสดงยอดขายสะสมรวมและคงเหลือตลอดกาล
+                    </span>
+                  </div>
+                </a>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* ปุ่มอัปโหลด Excel อัปเดตสต็อก */}
           <Button
             type="button"
             variant="outline"
