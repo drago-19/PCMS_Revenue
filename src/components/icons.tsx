@@ -66,6 +66,15 @@ export function IconArrowLeft(props: IconProps) {
   );
 }
 
+export function IconPlus(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
 export function IconHelp(props: IconProps) {
   return (
     <svg {...base(props)}>
@@ -257,6 +266,17 @@ export function AppMark({ size = 38 }: { size?: number }) {
           <path d="M9 16h3.5" stroke="#fe2c55" />
         </g>
       </g>
+    </svg>
+  );
+}
+
+
+export function IconDownload(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M12 4v12" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
     </svg>
   );
 }

@@ -3,11 +3,47 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-07)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-09)
 
-- **เจ้าของงาน (ACTIVE)**: ว่าง (พร้อมรับงานถัดไป)
+- **เจ้าของงาน (ACTIVE)**: ว่าง (Idle — พัฒนาระบบเพิ่มรหัสสินค้าใหม่ทั้งผ่านหน้าจอเว็บและผ่านไฟล์ Excel พร้อมระบบแก้ไข/ลบสินค้าเรียบร้อยแล้ว)
 - **เป้าหมายปัจจุบัน**:
-  - [x] ไม่มีงานค้าง
+  - [x] 1. พัฒนาระบบเพิ่มรหัสสินค้าใหม่ (Add New SKU) ผ่านปุ่ม `➕ เพิ่มรหัสสินค้าใหม่` ในแถบเครื่องมือของหน้า `/products?tab=stock`
+  - [x] 2. สร้างคอมโพเนนต์ `ProductCreateDialog.tsx` สไตล์ shadcn/ui รองรับการกรอก รหัสสินค้า, ชื่อสินค้า, ราคาทุน, สต็อกตั้งต้น, ของเข้า, ราคาขาย, หมายเหตุ พร้อมสรุปคำนวณคงเหลือ/มูลค่าแบบ Real-time
+  - [x] 3. สร้าง API `POST /api/products` (เพิ่มสินค้าใหม่) และ `DELETE /api/products/[skuCode]` (ลบสินค้าที่สร้างเองและยังไม่มีประวัติการขาย)
+  - [x] 4. อัปเกรดระบบนำเข้า Excel (`POST /api/products/stock-import` และ `bulkUpdateProductStock`) ให้เป็น UPSERT — หากพบ SKU ใหม่ในไฟล์ Excel จะเพิ่มสินค้าใหม่เข้าระบบอัตโนมัติ
+  - [x] 5. เพิ่มการแก้ไข `ชื่อสินค้า` (Product Name) ใน `StockEditDialog.tsx` และปุ่มลบสินค้าเมื่อยอดขายสะสมเป็น 0
+  - [x] 6. เพิ่มฟิลด์ `is_manual` และ `created_at` ใน `products` table schema เพื่อป้องกันการลบสินค้าที่สร้างมือ และ bump `SCHEMA_VERSION` เป็น `v53`
+  - [x] 7. ผ่าน Quality Gate ครบถ้วน: `tsc` 0 error, `pnpm test` ผ่านครบ 83 รายการ, `pnpm build` สำเร็จ, ทดสอบ Responsive ผ่านเบราว์เซอร์จริงครบ 100%
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-09 — ระบบสต๊อกสินค้าและต้นทุนสินค้า แยกแท็บในหน้า `/products` พร้อมระบบนำเข้า/ส่งออก Excel และบันทึกประวัติการเคลื่อนไหวสต็อก)**:
+  - **พัฒนาระบบสต๊อกสินค้าและต้นทุน (Stock & Cost Management System) รวมเข้ากับหน้า `/products` แยกแท็บใช้งานง่าย พร้อมระบบดึงยอดขายจริงมาตัดสต็อกอัตโนมัติ (`src/lib/db.ts`, `src/lib/queries.ts`, `src/app/api/products/*`, `src/components/*`, `src/app/products/page.tsx`, `tests/stock.test.ts`)**:
+    - [x] **1. ขยายโครงสร้างฐานข้อมูล (`src/lib/db.ts`)**:
+      - เพิ่มคอลัมน์ `cost_price DOUBLE PRECISION NOT NULL DEFAULT 0`, `initial_stock INTEGER NOT NULL DEFAULT 0`, `stock_in INTEGER NOT NULL DEFAULT 0` บนตาราง `products`
+      - สร้างตาราง `stock_movements` บันทึกประวัติการปรับปรุงสต็อก/ของเข้า (`id BIGSERIAL`, `sku_code`, `movement_type`, `quantity`, `cost_price`, `movement_date`, `note`, `created_at`)
+      - ป้องกันไม่ให้ระบบลบสินค้าที่มีราคาทุนหรือสต็อกบันทึกไว้ (`cost_price > 0 OR initial_stock > 0 OR stock_in > 0`) ในกระบวนการคลีนสินค้าสต็อกว่าง
+      - ป้องกัน Deadlock (`code: 40P01`) ใน PostgreSQL ด้วย Advisory Lock (`SELECT pg_advisory_lock(...)`) ขณะรัน DDL migration ขนานกัน
+    - [x] **2. พัฒนา Backend Query และการคำนวณทางการเงิน (`src/lib/queries.ts`)**:
+      - เพิ่มฟังก์ชัน `listProductStockPaged`: คำนวณ `remainingStock = (initialStock + stockIn) - totalSoldAllTime`, `stockValue = remainingStock * costPrice`, `cogs = soldQty * costPrice`
+      - คำนวณยอดขายออกสะสมตลอดกาล (`totalSoldAllTime`) จาก `oms_order_items` อัตโนมัติ โดยไม่นำออเดอร์ตีย้อนกลับมาตัดหลอกตาตามเงื่อนไขที่ตกลงไว้ (นับเฉพาะบิลที่เงินเข้าชัวร์แล้ว)
+      - รองรับการกรองช่วงเวลา (ปี/เดือน/วัน) และช่องทาง (TikTok, Shopee, Facebook, LINE) เพื่อดูยอดขายและต้นทุนขาย (COGS) เฉพาะช่วงเวลานั้นๆ
+      - รองรับฟิลเตอร์สถานะสต็อก 5 กลุ่ม: มีของในสต็อก, ใกล้หมด, หมดสต็อก, สต็อกติดลบ, ยังไม่ใส่ราคาทุน
+      - เพิ่ม `updateProductStock` และ `bulkUpdateProductStock` (Batch Unnest SQL เร็วสูง 2,781 SKUs ใน 5 วินาที)
+      - เพิ่ม `listAllProductsForStockExport` ดึงข้อมูลสต็อกสำหรับสร้างไฟล์ Excel
+    - [x] **3. สร้าง REST API รองรับการทำงาน (`src/app/api/products/*`)**:
+      - `PATCH /api/products/[skuCode]/stock`: อัปเดตราคาทุน สต็อกตั้งต้น ของเข้า และหมายเหตุ พร้อมบันทึกลง `stock_movements`
+      - `GET /api/products/stock-export`: ส่งออกไฟล์ Excel (.xlsx) สต็อกครบทุก SKU พร้อมใส่สูตรคำนวณ Excel อัตโนมัติ (`=E{row}+F{row}-G{row}`, `=MAX(0, H{row})*D{row}`, `=G{row}*D{row}`) และการจัดรูปแบบตัวเลข/สีหัวตาราง
+      - `POST /api/products/stock-import`: นำเข้าไฟล์ Excel / CSV อัปเดตราคาทุนและสต็อกแบบกลุ่ม ตรวจสอบหัวตารางแบบยืดหยุ่น (Aliases)
+    - [x] **4. พัฒนาคอมโพเนนต์ UI และแยกแท็บในหน้า `/products` (`src/app/products/page.tsx`, `src/components/*`)**:
+      - `ProductsTabsBar.tsx`: แถบสลับแท็บ "สรุปยอดขายสินค้า" (`tab=sales`) และ "สต๊อกและต้นทุนสินค้า" (`tab=stock`) โดยคง Query Params เดิมไว้
+      - `StockEditDialog.tsx`: ป๊อปอัปแก้ไขราคาทุนและสต็อก พร้อมแสดงตัวอย่างการคำนวณคงเหลือและมูลค่าแบบ Real-time
+      - `StockImportDialog.tsx`: ป๊อปอัปอัปโหลดไฟล์ Excel อัปเดตสต็อกพร้อมปุ่มดาวน์โหลดแม่แบบ
+      - `StockTableClient.tsx`: แถบเครื่องมือดาวน์โหลด/อัปโหลด Excel และปุ่มจัดการสต็อกรายแถว
+      - ปรับปรุงการแสดงผลแบบ Responsive ใน `src/app/products/page.tsx`: บนจอ Tablet (768px–1099px) ซ่อนคอลัมน์แจกแจง (`สต็อกตั้งต้น`, `ของเข้า`, `COGS`) เพื่อให้ตารางพอดีความกว้างหน้าจอโดยไม่ล้นแนวนอน และแสดงครบ 100% บนจอใหญ่ (Desktop >= 1100px) และจอมือถือแบบ Card List
+    - [x] **5. ผลการตรวจรับ DoD & Quality Gate**:
+      - `npx tsc --noEmit`: 0 error
+      - `pnpm test`: ผ่านครบ 83 tests (81 pass, 0 fail, 2 skipped sample files)
+      - `pnpm build`: ผ่านสมบูรณ์ 100% (ทุก Route สร้างสำเร็จ)
+      - ทดสอบ Responsive ผ่าน Headless Chrome ครบทั้ง 4 ขนาด (`360px`, `390px`, `768px`, `1280px`): `scrollWidth <= clientWidth`, Dialog fits screen, Tab switching OK.
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-07 — ตรวจสอบและแก้ไขการนำเข้าไฟล์สรุปบัญชี Facebook `เฟสบุ๊ค(1).xlsx` ครบทั้ง 17,016 ออเดอร์ พร้อมแยกสถานะเทียบ 2 ไฟล์และกู้โหมดไฟล์บัญชี)**:
   - **ตรวจสอบและแก้ไขการนำเข้าไฟล์สรุปจากฝ่ายบัญชี Facebook (`เฟสบุ๊ค(1).xlsx`, `import_id = 250`, `17,073` แถวรวม 2 ชีต `Facebook` และ `Facebook  COD`) ให้ขึ้นสถานะ `"ไฟล์สรุปจากฝ่ายบัญชี"` (`is_accounting = 1`) และผูกข้อมูลเทียบกับไฟล์สินค้า Shipnity ครบ 100% (`src/lib/ingest/oms-parse.ts`, `src/lib/ingest/import-service.ts`, `src/lib/queries.ts`, `src/lib/db.ts`)**:

@@ -1456,9 +1456,11 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
        WHERE NOT EXISTS (
          SELECT 1 FROM oms_order_items i WHERE i.sku_code = p.sku_code
        )
+       AND (p.is_manual IS NOT TRUE)
+       AND p.cost_price = 0 AND p.initial_stock = 0 AND p.stock_in = 0
        AND ($1::text[] IS NULL OR p.sku_code = ANY($1::text[]))`,
-      [affectedSkus.length > 0 ? affectedSkus : null],
-      target,
+       [affectedSkus.length > 0 ? affectedSkus : null],
+       target,
     );
 
     const remainingImports = await queryOne<{ c: string | number }>(
@@ -1470,7 +1472,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
       await query("DELETE FROM transactions", [], target);
       await query("DELETE FROM oms_orders", [], target);
       await query("DELETE FROM oms_order_items", [], target);
-      await query("DELETE FROM products", [], target);
+      await query("DELETE FROM products WHERE (is_manual IS NOT TRUE)", [], target);
       await query("DELETE FROM daily_summaries", [], target);
       await query("DELETE FROM sku_summaries", [], target);
     } else {
@@ -4229,6 +4231,559 @@ export async function listSkuSummariesPaged(
       netSalesAmount: Number(summaryRow?.net_sales_amount ?? 0),
     },
   };
+}
+
+export interface ProductStockRow {
+  skuCode: string;
+  productName: string;
+  defaultPrice: number;
+  costPrice: number;
+  initialStock: number;
+  stockIn: number;
+  soldQty: number; // ขายในงวด/ช่วงเวลาที่เลือก (หรือตลอดกาลถ้าไม่ได้เลือก)
+  totalSoldAllTime: number; // ขายสะสมตลอดกาล
+  remainingStock: number; // (initialStock + stockIn) - totalSoldAllTime
+  stockValue: number; // remainingStock * costPrice (0 if remainingStock <= 0)
+  cogs: number; // soldQty * costPrice
+  orderCount: number;
+}
+
+export type StockFilterKey =
+  | "all"
+  | "in_stock"
+  | "low_stock"
+  | "out_of_stock"
+  | "negative"
+  | "no_cost";
+
+export type StockSortKey =
+  | "remaining_asc"
+  | "remaining_desc"
+  | "qty_desc"
+  | "qty_asc"
+  | "stock_value_desc"
+  | "stock_value_asc"
+  | "cogs_desc"
+  | "cogs_asc"
+  | "cost_desc"
+  | "cost_asc"
+  | "sku_asc"
+  | "sku_desc";
+
+const STOCK_SORT_SQL: Record<StockSortKey, string> = {
+  remaining_asc: "remaining_stock ASC, sold_qty DESC, sku_code ASC",
+  remaining_desc: "remaining_stock DESC, sold_qty DESC, sku_code ASC",
+  qty_desc: "sold_qty DESC, remaining_stock ASC, sku_code ASC",
+  qty_asc: "sold_qty ASC, remaining_stock ASC, sku_code ASC",
+  stock_value_desc: "stock_value DESC, remaining_stock DESC, sku_code ASC",
+  stock_value_asc: "stock_value ASC, remaining_stock ASC, sku_code ASC",
+  cogs_desc: "cogs DESC, sold_qty DESC, sku_code ASC",
+  cogs_asc: "cogs ASC, sold_qty ASC, sku_code ASC",
+  cost_desc: "cost_price DESC, sku_code ASC",
+  cost_asc: "cost_price ASC, sku_code ASC",
+  sku_asc: "sku_code ASC",
+  sku_desc: "sku_code DESC",
+};
+
+export async function listProductStockPaged(
+  options: {
+    page?: number;
+    pageSize?: number;
+    q?: string;
+    date?: string;
+    channel?: string;
+    stockFilter?: StockFilterKey;
+    sort?: StockSortKey;
+  } = {},
+  db?: Queryable,
+): Promise<{
+  rows: ProductStockRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  totals: {
+    skuCount: number;
+    totalStockValue: number;
+    totalRemainingUnits: number;
+    totalCogs: number;
+    totalSoldQty: number;
+    inStockCount: number;
+    lowStockCount: number;
+    outOfStockCount: number;
+    negativeCount: number;
+    noCostCount: number;
+    allCount: number;
+  };
+}> {
+  const pageSize = Math.min(200, Math.max(10, options.pageSize ?? 20));
+  const rawPage = Math.max(1, options.page ?? 1);
+  const q = escapeLikePattern(options.q ?? "");
+  const date = (options.date ?? "").trim().slice(0, 32);
+  const channel = (options.channel ?? "all").trim().slice(0, 32);
+  const stockFilter: StockFilterKey = options.stockFilter ?? "all";
+  const sortKey: StockSortKey =
+    options.sort && options.sort in STOCK_SORT_SQL ? options.sort : "remaining_asc";
+  const orderBySql = STOCK_SORT_SQL[sortKey];
+
+  const isFiltered = Boolean(date || (channel && channel !== "all"));
+
+  let cteSql = "";
+  const params: unknown[] = [];
+
+  if (isFiltered) {
+    const itemClauses: string[] = [
+      "COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')",
+    ];
+    if (channel !== "all") {
+      params.push(channel);
+      itemClauses.push(`COALESCE(NULLIF(i.channel, ''), 'TikTok') = $${params.length}`);
+    }
+    if (date) {
+      if (/^\d{4}-\d{2}$/.test(date)) {
+        params.push(date);
+        itemClauses.push(`i.paid_date LIKE $${params.length} || '%'`);
+      } else if (/^\d{4}$/.test(date)) {
+        params.push(date);
+        itemClauses.push(`i.paid_date LIKE $${params.length} || '%'`);
+      } else {
+        params.push(date);
+        itemClauses.push(`i.paid_date = $${params.length}`);
+      }
+    }
+
+    cteSql = `
+      WITH period_items AS (
+        SELECT
+          i.sku_code,
+          COALESCE(SUM(i.quantity), 0)::int AS period_sold,
+          COUNT(DISTINCT i.order_uid)::int AS order_count
+        FROM oms_order_items i
+        WHERE ${itemClauses.join(" AND ")}
+        GROUP BY i.sku_code
+      ),
+      all_time AS (
+        SELECT sku_code, total_qty AS all_time_sold FROM sku_summaries
+      ),
+      base AS (
+        SELECT
+          p.sku_code,
+          p.product_name,
+          COALESCE(p.default_price, 0) AS default_price,
+          COALESCE(p.cost_price, 0) AS cost_price,
+          COALESCE(p.initial_stock, 0) AS initial_stock,
+          COALESCE(p.stock_in, 0) AS stock_in,
+          COALESCE(pi.period_sold, 0)::int AS sold_qty,
+          COALESCE(at.all_time_sold, 0)::int AS total_sold_all_time,
+          COALESCE(pi.order_count, 0)::int AS order_count,
+          (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(at.all_time_sold, 0))::int AS remaining_stock,
+          ROUND((CASE WHEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(at.all_time_sold, 0)) > 0
+                      THEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(at.all_time_sold, 0)) * COALESCE(p.cost_price, 0)
+                      ELSE 0 END)::numeric, 2) AS stock_value,
+          ROUND((COALESCE(pi.period_sold, 0) * COALESCE(p.cost_price, 0))::numeric, 2) AS cogs
+        FROM products p
+        LEFT JOIN period_items pi ON pi.sku_code = p.sku_code
+        LEFT JOIN all_time at ON at.sku_code = p.sku_code
+      )
+    `;
+  } else {
+    cteSql = `
+      WITH base AS (
+        SELECT
+          p.sku_code,
+          p.product_name,
+          COALESCE(p.default_price, 0) AS default_price,
+          COALESCE(p.cost_price, 0) AS cost_price,
+          COALESCE(p.initial_stock, 0) AS initial_stock,
+          COALESCE(p.stock_in, 0) AS stock_in,
+          COALESCE(s.total_qty, 0)::int AS sold_qty,
+          COALESCE(s.total_qty, 0)::int AS total_sold_all_time,
+          COALESCE(s.order_count, 0)::int AS order_count,
+          (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0))::int AS remaining_stock,
+          ROUND((CASE WHEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) > 0
+                      THEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) * COALESCE(p.cost_price, 0)
+                      ELSE 0 END)::numeric, 2) AS stock_value,
+          ROUND((COALESCE(s.total_qty, 0) * COALESCE(p.cost_price, 0))::numeric, 2) AS cogs
+        FROM products p
+        LEFT JOIN sku_summaries s ON s.sku_code = p.sku_code
+      )
+    `;
+  }
+
+  const baseWhereClauses: string[] = ["1=1"];
+  if (q) {
+    params.push(`%${q}%`);
+    baseWhereClauses.push(`(sku_code || ' ' || product_name) ILIKE $${params.length} ESCAPE '\\'`);
+  }
+
+  let stockFilterCondition = "1=1";
+  if (stockFilter === "in_stock") {
+    stockFilterCondition = "remaining_stock > 10";
+  } else if (stockFilter === "low_stock") {
+    stockFilterCondition = "remaining_stock > 0 AND remaining_stock <= 10";
+  } else if (stockFilter === "out_of_stock") {
+    stockFilterCondition = "remaining_stock = 0";
+  } else if (stockFilter === "negative") {
+    stockFilterCondition = "remaining_stock < 0";
+  } else if (stockFilter === "no_cost") {
+    stockFilterCondition = "cost_price = 0";
+  }
+
+  const baseWhereSql = `WHERE ${baseWhereClauses.join(" AND ")}`;
+  const filteredWhereSql = `WHERE ${baseWhereClauses.join(" AND ")} AND ${stockFilterCondition}`;
+
+  const totalsRow = await queryOne<Record<string, unknown>>(
+    `${cteSql}
+     SELECT
+       COUNT(CASE WHEN ${stockFilterCondition} THEN 1 END)::int AS sku_count,
+       COALESCE(SUM(CASE WHEN ${stockFilterCondition} THEN sold_qty ELSE 0 END), 0)::int AS total_sold_qty,
+       COALESCE(SUM(CASE WHEN ${stockFilterCondition} THEN remaining_stock ELSE 0 END), 0)::int AS total_remaining_units,
+       ROUND(COALESCE(SUM(CASE WHEN ${stockFilterCondition} THEN stock_value ELSE 0 END), 0)::numeric, 2) AS total_stock_value,
+       ROUND(COALESCE(SUM(CASE WHEN ${stockFilterCondition} THEN cogs ELSE 0 END), 0)::numeric, 2) AS total_cogs,
+       COUNT(CASE WHEN remaining_stock > 10 THEN 1 END)::int AS in_stock_count,
+       COUNT(CASE WHEN remaining_stock > 0 AND remaining_stock <= 10 THEN 1 END)::int AS low_stock_count,
+       COUNT(CASE WHEN remaining_stock = 0 THEN 1 END)::int AS out_of_stock_count,
+       COUNT(CASE WHEN remaining_stock < 0 THEN 1 END)::int AS negative_count,
+       COUNT(CASE WHEN cost_price = 0 THEN 1 END)::int AS no_cost_count,
+       COUNT(*)::int AS all_count
+     FROM base
+     ${baseWhereSql}`,
+    params,
+    db,
+  );
+
+  const total = Number(totalsRow?.sku_count ?? 0);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(rawPage, pageCount);
+
+  const rows = await query<Record<string, unknown>>(
+    `${cteSql}
+     SELECT *
+     FROM base
+     ${filteredWhereSql}
+     ORDER BY ${orderBySql}
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, pageSize, (page - 1) * pageSize],
+    db,
+  );
+
+  return {
+    rows: rows.map((r) => ({
+      skuCode: String(r.sku_code ?? ""),
+      productName: String(r.product_name ?? ""),
+      defaultPrice: Number(r.default_price ?? 0),
+      costPrice: Number(r.cost_price ?? 0),
+      initialStock: Number(r.initial_stock ?? 0),
+      stockIn: Number(r.stock_in ?? 0),
+      soldQty: Number(r.sold_qty ?? 0),
+      totalSoldAllTime: Number(r.total_sold_all_time ?? 0),
+      remainingStock: Number(r.remaining_stock ?? 0),
+      stockValue: Number(r.stock_value ?? 0),
+      cogs: Number(r.cogs ?? 0),
+      orderCount: Number(r.order_count ?? 0),
+    })),
+    total,
+    page,
+    pageSize,
+    pageCount,
+    totals: {
+      skuCount: total,
+      totalStockValue: Number(totalsRow?.total_stock_value ?? 0),
+      totalRemainingUnits: Number(totalsRow?.total_remaining_units ?? 0),
+      totalCogs: Number(totalsRow?.total_cogs ?? 0),
+      totalSoldQty: Number(totalsRow?.total_sold_qty ?? 0),
+      inStockCount: Number(totalsRow?.in_stock_count ?? 0),
+      lowStockCount: Number(totalsRow?.low_stock_count ?? 0),
+      outOfStockCount: Number(totalsRow?.out_of_stock_count ?? 0),
+      negativeCount: Number(totalsRow?.negative_count ?? 0),
+      noCostCount: Number(totalsRow?.no_cost_count ?? 0),
+      allCount: Number(totalsRow?.all_count ?? 0),
+    },
+  };
+}
+
+export async function updateProductStock(
+  skuCode: string,
+  data: {
+    productName?: string;
+    costPrice?: number;
+    initialStock?: number;
+    stockIn?: number;
+    note?: string;
+  },
+  db?: Queryable,
+): Promise<{ ok: boolean; product?: ProductStockRow }> {
+  const cleanSku = skuCode.trim();
+  if (!cleanSku) return { ok: false };
+
+  const updates: string[] = [];
+  const params: unknown[] = [cleanSku];
+
+  if (data.productName !== undefined && data.productName.trim().length > 0) {
+    params.push(data.productName.trim());
+    updates.push(`product_name = $${params.length}`);
+  }
+  if (data.costPrice !== undefined) {
+    params.push(Math.max(0, Math.round(data.costPrice * 100) / 100));
+    updates.push(`cost_price = $${params.length}`);
+  }
+  if (data.initialStock !== undefined) {
+    params.push(Math.max(0, Math.round(data.initialStock)));
+    updates.push(`initial_stock = $${params.length}`);
+  }
+  if (data.stockIn !== undefined) {
+    params.push(Math.max(0, Math.round(data.stockIn)));
+    updates.push(`stock_in = $${params.length}`);
+  }
+
+  if (updates.length === 0) return { ok: true };
+
+  updates.push("updated_at = now()");
+
+  await query(
+    `UPDATE products
+     SET ${updates.join(", ")}
+     WHERE sku_code = $1`,
+    params,
+    db,
+  );
+
+  // Log movement if stockIn or initialStock changed
+  if (data.stockIn !== undefined && data.stockIn > 0) {
+    await query(
+      `INSERT INTO stock_movements (sku_code, movement_type, quantity, cost_price, movement_date, note)
+       VALUES ($1, 'in', $2, COALESCE((SELECT cost_price FROM products WHERE sku_code = $1), 0), TO_CHAR(now(), 'YYYY-MM-DD'), $3)`,
+      [cleanSku, Math.round(data.stockIn), data.note || "ปรับปรุงยอดของเข้า"],
+      db,
+    );
+  } else if (data.initialStock !== undefined) {
+    await query(
+      `INSERT INTO stock_movements (sku_code, movement_type, quantity, cost_price, movement_date, note)
+       VALUES ($1, 'initial', $2, COALESCE((SELECT cost_price FROM products WHERE sku_code = $1), 0), TO_CHAR(now(), 'YYYY-MM-DD'), $3)`,
+      [cleanSku, Math.round(data.initialStock), data.note || "ปรับปรุงสต็อกตั้งต้น"],
+      db,
+    );
+  }
+
+  const paged = await listProductStockPaged({ q: cleanSku, pageSize: 1 }, db);
+  const found = paged.rows.find((r) => r.skuCode === cleanSku);
+  return { ok: true, product: found };
+}
+
+export async function createProduct(
+  data: {
+    skuCode: string;
+    productName: string;
+    defaultPrice?: number;
+    costPrice?: number;
+    initialStock?: number;
+    stockIn?: number;
+    note?: string;
+  },
+  db?: Queryable,
+): Promise<{ ok: boolean; product?: ProductStockRow; error?: string }> {
+  const cleanSku = (data.skuCode || "").trim();
+  const cleanName = (data.productName || "").trim();
+
+  if (!cleanSku) {
+    return { ok: false, error: "กรุณาระบุรหัสสินค้า (SKU)" };
+  }
+  if (!cleanName) {
+    return { ok: false, error: "กรุณาระบุชื่อสินค้า" };
+  }
+
+  const existing = await queryOne<{ sku_code: string }>(
+    "SELECT sku_code FROM products WHERE LOWER(BTRIM(sku_code)) = LOWER(BTRIM($1))",
+    [cleanSku],
+    db,
+  );
+  if (existing) {
+    return { ok: false, error: `รหัสสินค้า '${cleanSku}' มีอยู่ในระบบแล้ว` };
+  }
+
+  const defaultPrice = Math.max(0, Number(data.defaultPrice) || 0);
+  const costPrice = Math.max(0, Number(data.costPrice) || 0);
+  const initialStock = Math.max(0, Math.round(Number(data.initialStock) || 0));
+  const stockIn = Math.max(0, Math.round(Number(data.stockIn) || 0));
+
+  await query(
+    `INSERT INTO products (sku_code, product_name, default_price, cost_price, initial_stock, stock_in, is_manual, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, true, now())`,
+    [cleanSku, cleanName, defaultPrice, costPrice, initialStock, stockIn],
+    db,
+  );
+
+  if (initialStock > 0) {
+    await query(
+      `INSERT INTO stock_movements (sku_code, movement_type, quantity, cost_price, movement_date, note)
+       VALUES ($1, 'initial', $2, $3, TO_CHAR(now(), 'YYYY-MM-DD'), $4)`,
+      [cleanSku, initialStock, costPrice, data.note || "สต็อกตั้งต้นตอนสร้างสินค้าใหม่"],
+      db,
+    );
+  }
+  if (stockIn > 0) {
+    await query(
+      `INSERT INTO stock_movements (sku_code, movement_type, quantity, cost_price, movement_date, note)
+       VALUES ($1, 'in', $2, $3, TO_CHAR(now(), 'YYYY-MM-DD'), $4)`,
+      [cleanSku, stockIn, costPrice, data.note || "รับเข้าสต็อกตอนสร้างสินค้าใหม่"],
+      db,
+    );
+  }
+
+  const paged = await listProductStockPaged({ q: cleanSku, pageSize: 1 }, db);
+  const found = paged.rows.find((r) => r.skuCode === cleanSku);
+  return { ok: true, product: found };
+}
+
+export async function deleteProduct(
+  skuCode: string,
+  db?: Queryable,
+): Promise<{ ok: boolean; error?: string }> {
+  const cleanSku = (skuCode || "").trim();
+  if (!cleanSku) return { ok: false, error: "ไม่พบรหัสสินค้าที่ต้องการลบ" };
+
+  const hasOrders = await queryOne<{ c: string | number }>(
+    "SELECT COUNT(*) AS c FROM oms_order_items WHERE sku_code = $1",
+    [cleanSku],
+    db,
+  );
+  if (Number(hasOrders?.c ?? 0) > 0) {
+    return {
+      ok: false,
+      error: `ไม่สามารถลบรหัสสินค้า '${cleanSku}' ได้ เนื่องจากมีประวัติคำสั่งซื้อในระบบ (${hasOrders?.c} รายการ)`,
+    };
+  }
+
+  await query("DELETE FROM stock_movements WHERE sku_code = $1", [cleanSku], db);
+  await query("DELETE FROM products WHERE sku_code = $1", [cleanSku], db);
+
+  return { ok: true };
+}
+
+export async function bulkUpdateProductStock(
+  items: Array<{
+    skuCode: string;
+    productName?: string;
+    costPrice?: number;
+    initialStock?: number;
+    stockIn?: number;
+  }>,
+  db?: Queryable,
+): Promise<{ updatedCount: number; insertedCount: number }> {
+  if (!items || items.length === 0) return { updatedCount: 0, insertedCount: 0 };
+
+  const validItems = items.filter((it) => it.skuCode && it.skuCode.trim().length > 0);
+  if (validItems.length === 0) return { updatedCount: 0, insertedCount: 0 };
+
+  let totalUpdated = 0;
+  let totalInserted = 0;
+  const CHUNK_SIZE = 200;
+
+  for (let start = 0; start < validItems.length; start += CHUNK_SIZE) {
+    const chunk = validItems.slice(start, start + CHUNK_SIZE);
+    const placeholders: string[] = [];
+    const params: unknown[] = [];
+
+    for (let i = 0; i < chunk.length; i++) {
+      const it = chunk[i]!;
+      const base = i * 5;
+      placeholders.push(
+        `($${base + 1}::text, $${base + 2}::text, $${base + 3}::double precision, $${base + 4}::int, $${base + 5}::int)`,
+      );
+      params.push(
+        it.skuCode.trim(),
+        it.productName ? it.productName.trim() : null,
+        it.costPrice !== undefined ? Math.max(0, it.costPrice) : null,
+        it.initialStock !== undefined ? Math.max(0, Math.round(it.initialStock)) : null,
+        it.stockIn !== undefined ? Math.max(0, Math.round(it.stockIn)) : null,
+      );
+    }
+
+    const sql = `
+      INSERT INTO products (sku_code, product_name, cost_price, initial_stock, stock_in, is_manual, updated_at)
+      SELECT
+        v.sku_code,
+        COALESCE(NULLIF(v.product_name, ''), v.sku_code),
+        COALESCE(v.cost_price, 0),
+        COALESCE(v.initial_stock, 0),
+        COALESCE(v.stock_in, 0),
+        true,
+        now()
+      FROM (VALUES ${placeholders.join(", ")}) AS v(sku_code, product_name, cost_price, initial_stock, stock_in)
+      ON CONFLICT (sku_code) DO UPDATE
+      SET
+        product_name = CASE
+          WHEN EXCLUDED.product_name <> '' AND EXCLUDED.product_name <> EXCLUDED.sku_code
+          THEN EXCLUDED.product_name
+          ELSE products.product_name
+        END,
+        cost_price = CASE WHEN EXCLUDED.cost_price IS NOT NULL THEN EXCLUDED.cost_price ELSE products.cost_price END,
+        initial_stock = CASE WHEN EXCLUDED.initial_stock IS NOT NULL THEN EXCLUDED.initial_stock ELSE products.initial_stock END,
+        stock_in = CASE WHEN EXCLUDED.stock_in IS NOT NULL THEN EXCLUDED.stock_in ELSE products.stock_in END,
+        updated_at = now()
+      RETURNING sku_code, (xmax = 0) AS is_insert
+    `;
+
+    const res = await query<{ sku_code: string; is_insert: boolean }>(sql, params, db);
+    for (const r of res) {
+      if (r.is_insert) {
+        totalInserted++;
+      } else {
+        totalUpdated++;
+      }
+    }
+  }
+
+  return { updatedCount: totalUpdated, insertedCount: totalInserted };
+}
+
+export async function listAllProductsForStockExport(
+  db?: Queryable,
+): Promise<Array<{
+  skuCode: string;
+  productName: string;
+  defaultPrice: number;
+  costPrice: number;
+  initialStock: number;
+  stockIn: number;
+  totalSoldAllTime: number;
+  remainingStock: number;
+  stockValue: number;
+  cogs: number;
+}>> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT
+       p.sku_code,
+       p.product_name,
+       COALESCE(p.default_price, 0) AS default_price,
+       COALESCE(p.cost_price, 0) AS cost_price,
+       COALESCE(p.initial_stock, 0) AS initial_stock,
+       COALESCE(p.stock_in, 0) AS stock_in,
+       COALESCE(s.total_qty, 0)::int AS total_sold_all_time,
+       (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0))::int AS remaining_stock,
+       ROUND((CASE WHEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) > 0
+                   THEN (COALESCE(p.initial_stock, 0) + COALESCE(p.stock_in, 0) - COALESCE(s.total_qty, 0)) * COALESCE(p.cost_price, 0)
+                   ELSE 0 END)::numeric, 2) AS stock_value,
+       ROUND((COALESCE(s.total_qty, 0) * COALESCE(p.cost_price, 0))::numeric, 2) AS cogs
+     FROM products p
+     LEFT JOIN sku_summaries s ON s.sku_code = p.sku_code
+     ORDER BY p.sku_code ASC`,
+    [],
+    db,
+  );
+
+  return rows.map((r) => ({
+    skuCode: String(r.sku_code ?? ""),
+    productName: String(r.product_name ?? ""),
+    defaultPrice: Number(r.default_price ?? 0),
+    costPrice: Number(r.cost_price ?? 0),
+    initialStock: Number(r.initial_stock ?? 0),
+    stockIn: Number(r.stock_in ?? 0),
+    totalSoldAllTime: Number(r.total_sold_all_time ?? 0),
+    remainingStock: Number(r.remaining_stock ?? 0),
+    stockValue: Number(r.stock_value ?? 0),
+    cogs: Number(r.cogs ?? 0),
+  }));
 }
 
 export async function getOverallStats(

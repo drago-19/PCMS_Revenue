@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-07-v50";
+const SCHEMA_VERSION = "2026-11-09-v53";
 
 export type { CompanyId };
 
@@ -91,35 +91,37 @@ export function ensureSchema(): Promise<void> {
       const pool = getPool();
       const client = await pool.connect();
       try {
-        // Fast-path: ตรวจสอบ version ในฐานข้อมูลเพื่อหลีกเลี่ยงการรัน DDL 1,200 บรรทัดซ้ำทุกครั้งที่สตาร์ท
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS app_schema_version (
-            schema_name TEXT PRIMARY KEY,
-            version TEXT NOT NULL,
-            applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-          )
-        `);
-        const { rows } = await client.query<{
-          schema_name: string;
-          version: string;
-        }>(
-          `SELECT schema_name, version FROM app_schema_version WHERE schema_name IN ('public', 'seeheng')`,
-        );
-        const publicVer = rows.find((r) => r.schema_name === "public")?.version;
-        const seehengVer = rows.find((r) => r.schema_name === "seeheng")?.version;
-        const { rows: tableCheck } = await client.query<{ has_coa: boolean }>(
-          `SELECT (
-             EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chart_of_accounts')
-             AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'seeheng' AND table_name = 'chart_of_accounts')
-           ) AS has_coa`,
-        );
-        if (
-          publicVer === SCHEMA_VERSION &&
-          seehengVer === SCHEMA_VERSION &&
-          tableCheck[0]?.has_coa
-        ) {
-          return;
-        }
+        await client.query("SELECT pg_advisory_lock(88192842)");
+        try {
+          // Fast-path: ตรวจสอบ version ในฐานข้อมูลเพื่อหลีกเลี่ยงการรัน DDL 1,200 บรรทัดซ้ำทุกครั้งที่สตาร์ท
+          await client.query(`
+            CREATE TABLE IF NOT EXISTS app_schema_version (
+              schema_name TEXT PRIMARY KEY,
+              version TEXT NOT NULL,
+              applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+          `);
+          const { rows } = await client.query<{
+            schema_name: string;
+            version: string;
+          }>(
+            `SELECT schema_name, version FROM app_schema_version WHERE schema_name IN ('public', 'seeheng')`,
+          );
+          const publicVer = rows.find((r) => r.schema_name === "public")?.version;
+          const seehengVer = rows.find((r) => r.schema_name === "seeheng")?.version;
+          const { rows: tableCheck } = await client.query<{ has_coa: boolean }>(
+            `SELECT (
+               EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chart_of_accounts')
+               AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'seeheng' AND table_name = 'chart_of_accounts')
+             ) AS has_coa`,
+          );
+          if (
+            publicVer === SCHEMA_VERSION &&
+            seehengVer === SCHEMA_VERSION &&
+            tableCheck[0]?.has_coa
+          ) {
+            return;
+          }
 
         await client.query("SET search_path TO public");
         await client.query(SCHEMA_SQL);
@@ -300,6 +302,9 @@ export function ensureSchema(): Promise<void> {
         );
 
         await client.query("SET search_path TO public");
+        } finally {
+          await client.query("SELECT pg_advisory_unlock(88192842)").catch(() => {});
+        }
       } finally {
         client.release();
       }
@@ -688,6 +693,26 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS initial_stock INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_in INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_manual BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id BIGSERIAL PRIMARY KEY,
+  sku_code TEXT NOT NULL REFERENCES products(sku_code) ON DELETE CASCADE,
+  movement_type TEXT NOT NULL DEFAULT 'in',
+  quantity INTEGER NOT NULL DEFAULT 0,
+  cost_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+  movement_date TEXT NOT NULL DEFAULT '',
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_stock_movements_sku ON stock_movements(sku_code);
+CREATE INDEX IF NOT EXISTS ix_stock_movements_date ON stock_movements(movement_date);
+
 CREATE TABLE IF NOT EXISTS daily_summaries (
   paid_date TEXT PRIMARY KEY,
   transaction_count INTEGER NOT NULL DEFAULT 0,
@@ -1063,7 +1088,9 @@ BEGIN
     DELETE FROM products p
     WHERE NOT EXISTS (
       SELECT 1 FROM oms_order_items i WHERE i.sku_code = p.sku_code
-    );
+    )
+    AND (p.is_manual IS NOT TRUE)
+    AND p.cost_price = 0 AND p.initial_stock = 0 AND p.stock_in = 0;
 
     -- เลขที่ใบกำกับฯ ล็อกแล้ว: ไม่ลบ → void แทน
     UPDATE invoice_registry r
