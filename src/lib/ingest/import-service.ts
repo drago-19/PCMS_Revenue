@@ -4,6 +4,7 @@ import {
   isItemPriceTransactionName,
   type LazadaNormalizedTransaction,
 } from "./lazada-parse";
+import { detectAndParseShopeeInput } from "./shopee-parse";
 import {
   getActiveCompanyId,
   query,
@@ -445,7 +446,7 @@ export async function saveOmsOrdersBatch(
           ELSE EXCLUDED.profit_amount
         END,
         matched_external_id = CASE
-          WHEN EXCLUDED.channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other') THEN NULL
+          WHEN EXCLUDED.channel IN ('Facebook', 'Lazada', 'LINE', 'Other') THEN NULL
           WHEN oms_orders.marketplace_order_norm IS DISTINCT FROM EXCLUDED.marketplace_order_norm THEN NULL
           ELSE oms_orders.matched_external_id
         END,
@@ -942,13 +943,14 @@ export async function reconcileAndSyncThreeFiles(
     client,
   );
 
-  // 0b. Never allow Shopee, Facebook, LINE or Other OMS orders to hold a TikTok Settlement matched_external_id,
+  // 0b. Never allow Facebook, LINE or Other OMS orders to hold a Settlement matched_external_id,
   //     and never allow TikTok Settlement rows to have channel <> 'TikTok'
+  //     (Shopee เปลี่ยนเป็น flow 3 ไฟล์แบบ TikTok — จับคู่ไฟล์รายได้ Shopee ด้วย exact-ID ได้แล้ว)
   await query(
     `UPDATE oms_orders
      SET matched_external_id = NULL,
           updated_at = now()
-     WHERE channel IN ('Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+     WHERE channel IN ('Facebook', 'Lazada', 'LINE', 'Other')
        AND matched_external_id IS NOT NULL`,
     [],
     client,
@@ -958,7 +960,8 @@ export async function reconcileAndSyncThreeFiles(
      SET channel = 'TikTok'
      WHERE is_order = 1
        AND transaction_type <> 'คำสั่งซื้อ (OMS)'
-       AND channel <> 'TikTok'`,
+       AND channel <> 'TikTok'
+       AND channel <> 'Shopee'`,
     [],
     client,
   );
@@ -1012,6 +1015,27 @@ export async function reconcileAndSyncThreeFiles(
      FROM candidates c
      WHERE o.order_uid = c.order_uid`,
     [],
+    client,
+  );
+
+  // 2b. Shopee (ไฟล์รายได้ Shopee แบบ 3 ไฟล์): exact-ID match เท่านั้น
+  //     (oms_orders.marketplace_order_norm = transactions.external_id เรียงตามตัวอักษร)
+  //     — ห้ามเดาด้วยยอดเงิน+วันที่ และแยกขอบเขตแพลตฟอร์มชัดเจนทั้งสองฝั่ง (AGENTS.md ข้อ 3)
+  await query(
+    `UPDATE oms_orders o
+     SET matched_external_id = t.external_id,
+         updated_at = now()
+     FROM transactions t
+     WHERE (o.matched_external_id IS NULL OR o.import_id = $1 OR t.import_id = $1)
+       AND t.is_order = 1
+       AND t.transaction_type <> 'คำสั่งซื้อ (OMS)'
+       AND o.channel = 'Shopee'
+       AND t.channel = 'Shopee'
+       AND o.marketplace_order_norm IS NOT NULL
+       AND o.marketplace_order_norm <> ''
+       AND t.external_id = o.marketplace_order_norm
+       AND (o.matched_external_id IS DISTINCT FROM t.external_id)`,
+    [fallbackImportId],
     client,
   );
 
@@ -1427,6 +1451,7 @@ export async function reconcileAndSyncThreeFiles(
 
   //    TikTok Settlement rows (transaction_type <> 'คำสั่งซื้อ (OMS)') strictly match via external_id = o.matched_external_id
   //    and ALWAYS keep channel = 'TikTok'
+  //    (Shopee settlement rows ถูก merge ใน 5a-Shopee แยกต่างหาก — ห้ามบังคับเป็น TikTok)
   await query(
     `UPDATE transactions t
      SET order_code = o.order_code,
@@ -1439,6 +1464,7 @@ export async function reconcileAndSyncThreeFiles(
      FROM oms_orders o
      WHERE t.is_order = 1
        AND t.transaction_type <> 'คำสั่งซื้อ (OMS)'
+       AND t.channel <> 'Shopee'
        AND o.matched_external_id IS NOT NULL
        AND t.external_id = o.matched_external_id
        AND (
@@ -1446,6 +1472,29 @@ export async function reconcileAndSyncThreeFiles(
          OR t.oms_order_uid IS DISTINCT FROM o.order_uid
          OR t.shop_name IS DISTINCT FROM COALESCE(NULLIF(o.shop_name, ''), t.shop_name)
          OR t.channel IS DISTINCT FROM 'TikTok'
+       )`,
+    [],
+    client,
+  );
+
+  //    5a-Shopee: merge native Shopee settlement rows with their Shopee OMS order
+  //    (exact-ID match only — channel คงเป็น 'Shopee' ทั้งสองฝั่ง ห้ามปนกับ TikTok)
+  await query(
+    `UPDATE transactions t
+     SET order_code = o.order_code,
+         oms_order_uid = o.order_uid,
+         shop_name = COALESCE(NULLIF(o.shop_name, ''), t.shop_name)
+     FROM oms_orders o
+     WHERE t.is_order = 1
+       AND t.transaction_type <> 'คำสั่งซื้อ (OMS)'
+       AND t.channel = 'Shopee'
+       AND o.channel = 'Shopee'
+       AND o.matched_external_id IS NOT NULL
+       AND t.external_id = o.matched_external_id
+       AND (
+         t.order_code IS DISTINCT FROM o.order_code
+         OR t.oms_order_uid IS DISTINCT FROM o.order_uid
+         OR t.shop_name IS DISTINCT FROM COALESCE(NULLIF(o.shop_name, ''), t.shop_name)
        )`,
     [],
     client,
@@ -1523,6 +1572,7 @@ export async function reconcileAndSyncThreeFiles(
   );
 
   // 5c. Link TikTok Platform Compensation rows ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') to oms_orders and shop_name
+  //     ห้ามดึงแถวของ Shopee มาเปลี่ยนเป็น TikTok (Strict Platform Financial Isolation)
   await query(
     `UPDATE transactions t
      SET order_code = o.order_code,
@@ -1532,6 +1582,7 @@ export async function reconcileAndSyncThreeFiles(
      FROM oms_orders o
      WHERE t.is_order = 0
        AND t.transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์')
+       AND COALESCE(NULLIF(t.channel, ''), 'TikTok') <> 'Shopee'
        AND (t.import_id = $1 OR o.import_id = $1 OR t.order_code IS NULL OR t.shop_name IS NULL)
        AND o.marketplace_order_norm IS NOT NULL
        AND o.marketplace_order_norm <> ''
@@ -1954,6 +2005,7 @@ export async function refreshSummaryTables(
        FROM transactions
        WHERE paid_date = ANY($1::text[])
          AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+         AND NOT (channel = 'Shopee' AND transaction_type = 'คำสั่งซื้อ (OMS)')
        GROUP BY paid_date`,
       [targetDates],
       client,
@@ -2000,6 +2052,7 @@ export async function refreshSummaryTables(
        FROM transactions
        WHERE paid_date <> '' AND paid_date <> 'unknown'
          AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+         AND NOT (channel = 'Shopee' AND transaction_type = 'คำสั่งซื้อ (OMS)')
        GROUP BY paid_date`,
       [],
       client,
@@ -2717,6 +2770,234 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
       newFormat: false,
       warnings: lazadaParsed.warnings,
       reconciliation: emptyReconciliation,
+    };
+  }
+
+  const shopeeParsed = await detectAndParseShopeeInput(
+    options.buffer,
+    preloadedSheets,
+  );
+  if (shopeeParsed) {
+    const now = new Date().toISOString();
+    const fileLabel = "ไฟล์รายได้ Shopee (Shopee Settlement)";
+
+    reportProgress?.({
+      stage: "reconciling",
+      percent: 45,
+      message: `ตรวจพบ${fileLabel} จำนวน ${shopeeParsed.dataRowCount.toLocaleString("th-TH")} แถว (${shopeeParsed.orderCount.toLocaleString("th-TH")} คำสั่งซื้อ) กำลังบันทึกเข้าสู่ระบบ...`,
+    });
+
+    const shopeeReport: ReportSummary = {
+      found: true,
+      sheetName: shopeeParsed.sheetName,
+      periodStart: shopeeParsed.periodStart,
+      periodEnd: shopeeParsed.periodEnd,
+      timezone: "UTC+7",
+      currency: "THB",
+      totals: {},
+      raw: [],
+    };
+    const shopeeReconciliation: Reconciliation = {
+      matched: null,
+      orderCheckFailures: 0,
+      metrics: [],
+      reportAvailable: false,
+    };
+
+    const { importId } = await withTransaction(async (client) => {
+      const inserted = await queryOne<{ id: string | number }>(
+        `INSERT INTO imports (
+          filename, file_hash, file_size, imported_at, source, sheet_name, header_row,
+          period_start, period_end, timezone, currency, header_signature, status,
+          row_count, transaction_count, order_count, warnings_json, mapping_json,
+          unknown_columns_json, report_json, reconciliation_json, file_type, file_blob
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+        RETURNING id`,
+        [
+          options.filename,
+          hash,
+          options.buffer.length,
+          now,
+          options.source ?? "upload",
+          shopeeParsed.sheetName,
+          shopeeParsed.headerRow,
+          shopeeParsed.periodStart,
+          shopeeParsed.periodEnd,
+          "UTC+7",
+          "THB",
+          shopeeParsed.headerSignature,
+          "ok",
+          shopeeParsed.dataRowCount,
+          shopeeParsed.transactions.length,
+          shopeeParsed.orderCount,
+          JSON.stringify(shopeeParsed.warnings),
+          JSON.stringify([]),
+          JSON.stringify([]),
+          JSON.stringify(shopeeReport),
+          JSON.stringify(shopeeReconciliation),
+          shopeeParsed.fileType,
+          compressFileBlob(options.buffer),
+        ],
+        client,
+      );
+      const id = Number(inserted!.id);
+
+      reportProgress?.({
+        stage: "saving",
+        percent: 70,
+        message: `กำลังบันทึก${fileLabel} และผูกข้อมูลร้านค้า...`,
+      });
+
+      // Batch Insert (ห้ามเขียน DB ทีละแถว — AGENTS.md ข้อ 3): ลบแถว Shopee settlement เดิมของ external_id เดียวกัน
+      // แล้ว insert ก้อนละ 300 แถว — ขอบเขต channel='Shopee' เท่านั้น (Strict Platform Financial Isolation)
+      const touchedShopeePaidDates = new Set<string>();
+      const BATCH_SIZE = 300;
+      for (
+        let start = 0;
+        start < shopeeParsed.transactions.length;
+        start += BATCH_SIZE
+      ) {
+        const chunk = shopeeParsed.transactions.slice(start, start + BATCH_SIZE);
+        const extIds = chunk.map((t) => t.externalId);
+
+        // แถวที่จะถูกแทนที่ = แถวรายได้ Shopee เดิม + placeholder OMS ของคำสั่งซื้อเดียวกัน
+        // placeholder OMS เป็น is_order=1 ตัวเดียวกับบิล จึงชน ux_transactions_order ถ้าไม่ลบก่อน insert
+        // และต้องยกชื่อ/เลขภาษี/ที่อยู่ผู้ซื้อที่ผู้ใช้กรอกไว้ในแถว OMS มาด้วย ไม่งั้นใบกำกับฯ ของ Shopee จะหายข้อมูลผู้ซื้อ
+        const replacedRows = await query<{
+          external_id: string;
+          paid_date: string | null;
+          buyer_name: string | null;
+          buyer_tax_id: string | null;
+          buyer_address: string | null;
+        }>(
+          `SELECT external_id, paid_date, buyer_name, buyer_tax_id, buyer_address
+           FROM transactions
+           WHERE channel = 'Shopee'
+             AND external_id = ANY($1::text[])
+             AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR is_order = 1)`,
+          [extIds],
+          client,
+        );
+        const buyerByExternalId = new Map<
+          string,
+          { name: string | null; tax: string | null; address: string | null }
+        >();
+        for (const r of replacedRows) {
+          if (r.paid_date) touchedShopeePaidDates.add(String(r.paid_date));
+          const prev = buyerByExternalId.get(r.external_id) ?? {
+            name: null,
+            tax: null,
+            address: null,
+          };
+          buyerByExternalId.set(r.external_id, {
+            name: prev.name ?? r.buyer_name ?? null,
+            tax: prev.tax ?? r.buyer_tax_id ?? null,
+            address: prev.address ?? r.buyer_address ?? null,
+          });
+        }
+
+        const params: unknown[] = [];
+        const placeholders: string[] = [];
+        for (let i = 0; i < chunk.length; i++) {
+          const tx = chunk[i]!;
+          const base = i * 26;
+          placeholders.push(
+            `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16}::jsonb,$${base + 17}::jsonb,$${base + 18}::jsonb,$${base + 19},$${base + 20},$${base + 21},$${base + 22},$${base + 23},$${base + 24},$${base + 25},$${base + 26})`,
+          );
+          params.push(
+            id,
+            tx.externalId,
+            tx.transactionType,
+            tx.isOrder ? 1 : 0,
+            tx.createdAt,
+            tx.paidAt,
+            "THB",
+            round2(Number(tx.fields.incomeTotal ?? 0)),
+            round2(Number(tx.fields.feeTotal ?? 0)),
+            round2(Number(tx.fields.adjustment ?? 0)),
+            round2(Number(tx.fields.payout ?? 0)),
+            typeof tx.fields.relatedOrderId === "string"
+              ? tx.fields.relatedOrderId
+              : null,
+            // product_detail/น้ำหนัก มาจาก oms_order_items ผ่าน step 6 ของ reconcileAndSyncThreeFiles
+            null,
+            null,
+            null,
+            JSON.stringify(tx.checks),
+            JSON.stringify(tx.warnings),
+            JSON.stringify({ ...tx, raw: {} }),
+            now,
+            "Shopee",
+            null,
+            null,
+            shopeeParsed.shopName,
+            buyerByExternalId.get(tx.externalId)?.name ?? null,
+            buyerByExternalId.get(tx.externalId)?.tax ?? null,
+            buyerByExternalId.get(tx.externalId)?.address ?? null,
+          );
+          if (tx.paidAt) touchedShopeePaidDates.add(tx.paidAt);
+        }
+
+        await query(
+          `DELETE FROM transactions
+           WHERE channel = 'Shopee'
+             AND external_id = ANY($1::text[])
+             AND (transaction_type <> 'คำสั่งซื้อ (OMS)' OR is_order = 1)`,
+          [extIds],
+          client,
+        );
+
+        await query(
+          `INSERT INTO transactions (
+            import_id, external_id, transaction_type, is_order, created_date, paid_date,
+            currency, income, fee_total, adjustment, payout, related_order_id,
+            product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
+            normalized_json, created_at, channel, order_code, oms_order_uid, shop_name,
+            buyer_name, buyer_tax_id, buyer_address
+          ) VALUES ${placeholders.join(", ")}`,
+          params,
+          client,
+        );
+      }
+
+      if (shopeeParsed.transactions.length > 0) {
+        await reconcileAndSyncThreeFiles(client, id, now);
+        if (touchedShopeePaidDates.size > 0) {
+          await refreshSummaryTables(client, {
+            dates: [...touchedShopeePaidDates],
+          });
+        }
+      }
+
+      return { importId: id };
+    });
+
+    reportProgress?.({
+      stage: "done",
+      percent: 100,
+      message: `นำเข้า${fileLabel} สำเร็จ (${shopeeParsed.dataRowCount.toLocaleString("th-TH")} แถว · ${shopeeParsed.orderCount.toLocaleString("th-TH")} คำสั่งซื้อ)`,
+      current: shopeeParsed.dataRowCount,
+      total: shopeeParsed.dataRowCount,
+    });
+
+    const systemOrderCount = await readSystemOrderCount();
+
+    return {
+      importId,
+      duplicate: false,
+      filename: options.filename,
+      fileType: shopeeParsed.fileType,
+      status: "ok",
+      rowCount: shopeeParsed.dataRowCount,
+      orderCount: shopeeParsed.orderCount,
+      transactionCount: shopeeParsed.transactions.length,
+      systemOrderCount,
+      periodStart: shopeeParsed.periodStart,
+      periodEnd: shopeeParsed.periodEnd,
+      headerSignature: shopeeParsed.headerSignature,
+      newFormat: false,
+      warnings: shopeeParsed.warnings,
+      reconciliation: shopeeReconciliation,
     };
   }
 

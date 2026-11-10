@@ -21,6 +21,15 @@ export const BILLABLE_COMPENSATION_SQL = buildBillableCompensationSql("t");
 export const BILLABLE_ORDER_OR_COMPENSATION_SQL = `(t.is_order = 1 OR ${BILLABLE_COMPENSATION_SQL})`;
 
 /**
+ * Shopee ใช้ flow 3 ไฟล์ (เหมือน TikTok): แถว OMS placeholder ของ Shopee ยัง "ไม่ใช่บิล"
+ * จนกว่าจะนำเข้าไฟล์รายได้ Shopee (Shopee Settlement) และจับคู่ได้
+ * → ใช้เงื่อนไขนี้กับ surface ที่เป็น "บิล" (รายการบิล / สรุปยอด / สรุปรายวัน / แดชบอร์ด)
+ *   แต่ "ไม่ใช้" กับ invoice_registry / หน้าพิมพ์ใบกำกับฯ (เลขที่ออกไปแล้วต้องไม่หาย)
+ * หมายเหตุ: ต้อง alias ตาราง transactions ว่า `t`
+ */
+export const EXCLUDE_PENDING_SHOPEE_BILL_SQL = `NOT (t.channel = 'Shopee' AND t.transaction_type = 'คำสั่งซื้อ (OMS)')`;
+
+/**
  * เงื่อนไขบิลที่ "ออกใบกำกับภาษีได้" (ใช้ร่วมกันทั้งการออกเลขที่และหน้าพิมพ์รวม)
  * — บิลขายปกติเท่านั้น: ไม่รวมคืนเงิน / ตีกลับ / ยกเลิก (income/payout ≤ 0)
  *   และบิลเปลี่ยนสินค้าไม่มีราคา (link_priority = 3)

@@ -13,7 +13,12 @@ import {
 import { round2 } from "../format";
 import { lookupCustomFieldKey } from "../column-mapping-settings";
 
-export type DetectedFileType = "settlement" | "oms_orders" | "oms_items" | "lazada_orders";
+export type DetectedFileType =
+  | "settlement"
+  | "oms_orders"
+  | "oms_items"
+  | "lazada_orders"
+  | "shopee_settlement";
 
 export function buildOmsOrderUid(
   orderCode: string,

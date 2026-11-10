@@ -10,6 +10,7 @@ import { formatInvoiceNoWithPrefix, type SellerInfo } from "./seller";
 import {
   BILLABLE_COMPENSATION_SQL,
   BILLABLE_ORDER_OR_COMPENSATION_SQL,
+  EXCLUDE_PENDING_SHOPEE_BILL_SQL,
   INVOICE_ELIGIBLE_SQL,
   isCompensationTransactionType,
 } from "./invoice-eligibility";
@@ -429,11 +430,10 @@ export function mapTransaction(
   const txIncome = Number(row.income ?? 0);
   const txPayout = Number(row.payout ?? 0);
   const resolvedTxChannel =
-    txType !== "คำสั่งซื้อ (OMS)"
-      ? "TikTok"
-      : row.channel
-        ? String(row.channel)
-        : "TikTok";
+    // channel จาก DB เป็นหลักเสมอ — non-OMS rows อาจเป็น 'Shopee' จากไฟล์รายได้ Shopee (Strict Platform Isolation)
+    row.channel
+      ? String(row.channel)
+      : "TikTok";
   const isNoProductPriceOrder =
     Number(row.is_order ?? 0) === 1 &&
     resolvedTxChannel === "Facebook" &&
@@ -680,8 +680,11 @@ async function enrichTransactionsWithOms(
           itemByCode.get(`*||${tx.orderCode}`)
         : undefined);
     const resolvedChannel =
+      // non-OMS rows (ไฟล์รายได้ TikTok/Shopee) ใช้ channel จากแถว DB ตรงๆ
       tx.transactionType !== "คำสั่งซื้อ (OMS)"
-        ? "TikTok"
+        ? tx.channel
+          ? tx.channel
+          : "TikTok"
         : o?.channel
           ? String(o.channel)
           : tx.channel;
@@ -2802,6 +2805,8 @@ export async function listBills(
   const page = Math.max(1, options.page ?? 1);
   const baseClausesWithoutShop = [
     BILLABLE_ORDER_OR_COMPENSATION_SQL,
+    // Shopee 3-file flow: ออเดอร์ Shopee ที่ยังไม่มีไฟล์รายได้ Shopee ไม่นับเป็นบิล
+    EXCLUDE_PENDING_SHOPEE_BILL_SQL,
     "t.channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')",
   ];
   const baseParamsWithoutShop: unknown[] = [];
@@ -4921,6 +4926,7 @@ export async function getOverallStats(
        ROUND(SUM(t.fee_total)::numeric, 2) AS total_fees
      FROM transactions t
      WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+       AND ${EXCLUDE_PENDING_SHOPEE_BILL_SQL}
        AND ${ORDER_LINK_PRIORITY_SQL} <> 3
      GROUP BY COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า')
      ORDER BY order_count DESC`,
@@ -4948,6 +4954,7 @@ export async function getOverallStats(
        ROUND(SUM(CASE WHEN ${BILLABLE_COMPENSATION_SQL} THEN t.payout ELSE 0 END)::numeric, 2) AS comp_payout
      FROM transactions t
      WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+       AND ${EXCLUDE_PENDING_SHOPEE_BILL_SQL}
        AND ${ORDER_LINK_PRIORITY_SQL} <> 3
        ${shopWhereClause}
      GROUP BY COALESCE(NULLIF(t.channel, ''), 'TikTok')
@@ -5011,12 +5018,12 @@ export async function getOverallStats(
     );
     const latestRow = isUnlinkedShop
       ? await queryOne<{ latest_paid_date: string | null }>(
-          `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND (t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')`,
+          `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND ${EXCLUDE_PENDING_SHOPEE_BILL_SQL} AND (t.shop_name IS NULL OR t.shop_name = '' OR t.shop_name = 'อื่นๆ' OR t.shop_name = 'รอผูกไฟล์ร้านค้า')`,
           [],
           db,
         )
       : await queryOne<{ latest_paid_date: string | null }>(
-          `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND t.shop_name = $1`,
+          `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND ${EXCLUDE_PENDING_SHOPEE_BILL_SQL} AND t.shop_name = $1`,
           [activeShop],
           db,
         );
@@ -5046,7 +5053,7 @@ export async function getOverallStats(
   }
 
   const latestRow = await queryOne<{ latest_paid_date: string | null }>(
-    `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL}`,
+    `SELECT MAX(t.paid_date) AS latest_paid_date FROM transactions t WHERE ${BILLABLE_ORDER_OR_COMPENSATION_SQL} AND ${EXCLUDE_PENDING_SHOPEE_BILL_SQL}`,
     [],
     db,
   );
@@ -5086,9 +5093,17 @@ export interface DailyUploadCompletenessRow {
   missingFile1Count: number;
   missingFile2Count: number;
   missingFile3Count: number;
+  missingShopeeFile3Count: number;
+  // ตัวเลขที่ขาดจริง (ก่อนใช้เกณฑ์ผ่อนผัน 5% / หน้าต่าง 7 วัน) — ต้องแสดงคู่กับสถานะเสมอ
+  rawMissingFile3Count: number;
+  rawMissingShopeeFile3Count: number;
+  // true = วันนั้นผ่านสถานะ "มีไฟล์ 3" ได้ด้วยเกณฑ์ผ่อนผัน ทั้งที่ยังมีบิลรอไฟล์อยู่
+  file3ToleranceApplied: boolean;
+  shopeeFile3ToleranceApplied: boolean;
   hasFile1: boolean;
   hasFile2: boolean;
   hasFile3: boolean;
+  hasShopeeFile3: boolean;
   isComplete: boolean;
   kiddeeOrders?: number;
   kissiOrders?: number;
@@ -5115,6 +5130,10 @@ export interface MonthlyCompletenessOverview {
   missingFile1: number;
   missingFile2: number;
   missingFile3: number;
+  missingShopeeFile3: number;
+  // จำนวนบิลที่ยังรอไฟล์รายได้จริง (ไม่ถูกกลบด้วยเกณฑ์ผ่อนผัน)
+  rawMissingFile3: number;
+  rawMissingShopeeFile3: number;
   hasUploadedSettlement?: boolean;
   status: "complete" | "incomplete" | "empty";
 }
@@ -5143,6 +5162,9 @@ export interface DailyUploadCompletenessReport {
     totalMissingFile1: number;
     totalMissingFile2: number;
     totalMissingFile3: number;
+    totalMissingShopeeFile3: number;
+    totalRawMissingFile3: number;
+    totalRawMissingShopeeFile3: number;
   };
   recentImports: {
     id: number;
@@ -5318,6 +5340,13 @@ export async function getDailyUploadCompleteness(
            ELSE 0
          END
        )::int AS missing_file3_count,
+       SUM(
+         CASE
+           WHEN t.channel = 'Shopee' AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+           THEN 1
+           ELSE 0
+         END
+       )::int AS missing_shopee_file3_count,
        SUM(CASE WHEN t.shop_name = 'Kiddee Shop' THEN 1 ELSE 0 END)::int AS kiddee_orders,
        SUM(CASE WHEN t.shop_name = 'Kissi Studio' THEN 1 ELSE 0 END)::int AS kissi_orders,
        SUM(
@@ -5431,7 +5460,7 @@ export async function getDailyUploadCompleteness(
     const start = String(r.period_start ?? "");
     const end = String(r.period_end ?? "");
     if (
-      ft === "settlement" &&
+      (ft === "settlement" || ft === "shopee_settlement") &&
       /^\d{4}-\d{2}-\d{2}$/.test(start) &&
       /^\d{4}-\d{2}-\d{2}$/.test(end)
     ) {
@@ -5484,11 +5513,13 @@ export async function getDailyUploadCompleteness(
     const rawMissingFile1 = Number(r.missing_file1_count ?? 0);
     const rawMissingFile2 = Number(r.missing_file2_count ?? 0);
     const rawMissingFile3 = Number(r.missing_file3_count ?? 0);
+    const rawMissingShopeeFile3 = Number(r.missing_shopee_file3_count ?? 0);
     const hasPaidSettlement = Number(r.has_paid_settlement ?? 0) > 0;
 
     const hasFile1Orders = normalOrders - rawMissingFile1;
     const hasFile2Orders = hasFile1Orders - rawMissingFile2;
     const tiktokSettledOrders = Math.max(0, tiktokOrders - rawMissingFile3);
+    const shopeeSettledOrders = Math.max(0, shopeeOrders - rawMissingShopeeFile3);
 
     // แยกตรวจสอบ TikTok, Shopee และ Facebook ตามกฎของระบบ:
     // - ไฟล์ 1 (ออเดอร์ Shipnity — TikTok + Shopee + Facebook): มีออเดอร์ที่มี order_code ในวันนั้น (และขาดไม่เกิน 5%)
@@ -5514,11 +5545,26 @@ export async function getDailyUploadCompleteness(
         ? true
         : (tiktokSettledOrders > 0 && rawMissingFile3 / tiktokOrders < 0.05) ||
           (isRecentInTransitWindow && hasPaidSettlement));
+    // ไฟล์รายได้ Shopee (Shopee Settlement): เกณฑ์เดียวกับ TikTok — บิล Shopee ต้องจับคู่รายได้แล้ว >= 95%
+    // (วันที่มีแต่ออเดอร์ช่องทางอื่น (shopeeOrders === 0) ถือว่าครบ)
+    const hasShopeeFile3 =
+      normalOrders > 0 &&
+      (shopeeOrders === 0
+        ? true
+        : (shopeeSettledOrders > 0 &&
+            rawMissingShopeeFile3 / shopeeOrders < 0.05) ||
+          (isRecentInTransitWindow && hasPaidSettlement));
 
     const missingFile1Count = hasFile1 ? 0 : rawMissingFile1;
     const missingFile2Count = hasFile2 ? 0 : rawMissingFile2;
     const missingFile3Count = hasFile3 ? 0 : rawMissingFile3;
-    const isComplete = normalOrders > 0 && hasFile1 && hasFile2 && hasFile3;
+    const missingShopeeFile3Count = hasShopeeFile3 ? 0 : rawMissingShopeeFile3;
+    // เกณฑ์ผ่อนผัน (ขาดไม่เกิน 5% / อยู่ในหน้าต่างรอขนส่ง 7 วัน) ยังคุมสถานะสีเหมือนเดิม
+    // แต่ตัวเลขที่ขาดต้องไม่ถูกเซ็ตเป็น 0 — เก็บ raw ไว้ให้หน้าจอแสดงของจริง
+    const file3ToleranceApplied = hasFile3 && rawMissingFile3 > 0;
+    const shopeeFile3ToleranceApplied = hasShopeeFile3 && rawMissingShopeeFile3 > 0;
+    const isComplete =
+      normalOrders > 0 && hasFile1 && hasFile2 && hasFile3 && hasShopeeFile3;
     const completeCount = isComplete
       ? normalOrders
       : Number(r.complete_count ?? 0);
@@ -5536,9 +5582,15 @@ export async function getDailyUploadCompleteness(
       missingFile1Count,
       missingFile2Count,
       missingFile3Count,
+      missingShopeeFile3Count,
+      rawMissingFile3Count: rawMissingFile3,
+      rawMissingShopeeFile3Count: rawMissingShopeeFile3,
+      file3ToleranceApplied,
+      shopeeFile3ToleranceApplied,
       hasFile1,
       hasFile2,
       hasFile3,
+      hasShopeeFile3,
       isComplete,
       kiddeeOrders: Number(r.kiddee_orders ?? 0),
       kissiOrders: Number(r.kissi_orders ?? 0),
@@ -5577,6 +5629,9 @@ export async function getDailyUploadCompleteness(
     let missingFile1 = 0;
     let missingFile2 = 0;
     let missingFile3 = 0;
+    let missingShopeeFile3 = 0;
+    let rawMissingFile3 = 0;
+    let rawMissingShopeeFile3 = 0;
 
     for (let day = 1; day <= totalDaysForMonth; day++) {
       const dd = String(day).padStart(2, "0");
@@ -5595,9 +5650,15 @@ export async function getDailyUploadCompleteness(
         missingFile1Count: 0,
         missingFile2Count: 0,
         missingFile3Count: 0,
+        missingShopeeFile3Count: 0,
+        rawMissingFile3Count: 0,
+        rawMissingShopeeFile3Count: 0,
+        file3ToleranceApplied: false,
+        shopeeFile3ToleranceApplied: false,
         hasFile1: false,
         hasFile2: false,
         hasFile3: isDateInSettlementPeriods(iso),
+        hasShopeeFile3: isDateInSettlementPeriods(iso),
         isComplete: false,
       };
       mRows.push(row);
@@ -5618,6 +5679,9 @@ export async function getDailyUploadCompleteness(
       missingFile1 += row.missingFile1Count;
       missingFile2 += row.missingFile2Count;
       missingFile3 += row.missingFile3Count;
+      missingShopeeFile3 += row.missingShopeeFile3Count;
+      rawMissingFile3 += row.rawMissingFile3Count;
+      rawMissingShopeeFile3 += row.rawMissingShopeeFile3Count;
     }
 
     // วันที่ไม่มีออเดอร์เลย (normalOrders === 0 เช่น วันหยุดหรือวันที่ไม่มีคำสั่งซื้อ)
@@ -5636,6 +5700,7 @@ export async function getDailyUploadCompleteness(
       missingFile1 === 0 &&
       missingFile2 === 0 &&
       missingFile3 === 0 &&
+      missingShopeeFile3 === 0 &&
       emptyDays > 0
     ) {
       let newlyCompletedEmpty = 0;
@@ -5649,6 +5714,7 @@ export async function getDailyUploadCompleteness(
           r.hasFile1 = true;
           r.hasFile2 = true;
           r.hasFile3 = true;
+          r.hasShopeeFile3 = true;
           r.isComplete = true;
           newlyCompletedEmpty += 1;
         }
@@ -5685,6 +5751,9 @@ export async function getDailyUploadCompleteness(
       missingFile1,
       missingFile2,
       missingFile3,
+      missingShopeeFile3,
+      rawMissingFile3,
+      rawMissingShopeeFile3,
       hasUploadedSettlement: mRows.some((r) => r.hasFile3),
       status,
     });
@@ -5712,6 +5781,9 @@ export async function getDailyUploadCompleteness(
       acc.totalMissingFile1 += r.missingFile1Count;
       acc.totalMissingFile2 += r.missingFile2Count;
       acc.totalMissingFile3 += r.missingFile3Count;
+      acc.totalMissingShopeeFile3 += r.missingShopeeFile3Count;
+      acc.totalRawMissingFile3 += r.rawMissingFile3Count;
+      acc.totalRawMissingShopeeFile3 += r.rawMissingShopeeFile3Count;
       return acc;
     },
     {
@@ -5730,6 +5802,9 @@ export async function getDailyUploadCompleteness(
       totalMissingFile1: 0,
       totalMissingFile2: 0,
       totalMissingFile3: 0,
+      totalMissingShopeeFile3: 0,
+      totalRawMissingFile3: 0,
+      totalRawMissingShopeeFile3: 0,
     },
   );
 
