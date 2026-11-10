@@ -1,20 +1,50 @@
-# docs/PROGRESS.md — บันทึกความคืบหน้า PCMS_Revenue
+﻿# docs/PROGRESS.md — บันทึกความคืบหน้า PCMS_Revenue
 
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-09)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-10)
 
-- **เจ้าของงาน (ACTIVE)**: ว่าง (Idle — พัฒนาระบบส่งออก Excel สต็อกและต้นทุนตัวเลือกที่ 3: รองรับทั้งแบบเฉพาะสินค้าที่ขายได้สำหรับบัญชี COGS และแบบสินค้าทั้งหมดในคลัง เรียบร้อยแล้ว)
+- **เจ้าของงาน (ACTIVE)**: ผู้ใช้ (เทสต์การนำเข้าไฟล์รายได้ Shopee ด้วยตนเอง — โค้ด + เทสต์ + Quality Gate เสร็จแล้ว รอผู้ใช้ยืนยันผลจริงบนเบราว์เซอร์และนำเข้าไฟล์จริงในระบบ production เอง)
 - **เป้าหมายปัจจุบัน**:
-  - [x] 1. ตรวจสอบระบบดาวน์โหลด Excel สต็อกเดิม (พบว่าเดิมส่งออกเฉพาะยอดสะสมตลอดกาล ยังไม่มีตัวเลือกส่งออกเป็นรายเดือนหรือรายวัน)
-  - [x] 2. อัปเกรดฟังก์ชันคิวรี `listAllProductsForStockExport` ใน `src/lib/queries.ts` ให้รองรับพารามิเตอร์ `date` (เดือน `YYYY-MM` หรือวัน `YYYY-MM-DD`), `channel`, `q`, `stockFilter`, และ `onlySold` โดยคำนวณยอดขายและต้นทุนขาย (COGS) ของช่วงเวลานั้นๆ
-  - [x] 3. พัฒนา API `GET /api/products/stock-export` ให้รองรับ Query Parameters `onlySold=true` พร้อมตั้งชื่อไฟล์อัตโนมัติตามช่วงเวลาและโหมด (`cogs_sold_day_YYYY-MM-DD.xlsx` / `cogs_sold_month_YYYY-MM.xlsx` / `stock_inventory_day_YYYY-MM-DD.xlsx`), เพิ่มคอลัมน์ของออกและ COGS ในช่วงเวลา, และเพิ่มแถวสูตรผลรวม `=SUM(...)` ท้ายตาราง
-  - [x] 4. อัปเกรดคอมโพเนนต์ `StockTableClient.tsx` ให้มีปุ่ม Dropdown Menu ตาม **ทางเลือกที่ 3**:
-    - ตัวเลือกที่ 1: `เฉพาะสินค้าที่ขายได้ (สำหรับบัญชี COGS)` — ตัดแถวที่ขาย 0 ตัวออก เหลือเฉพาะรายการที่ขายได้จริงเพื่อลงบัญชีต้นทุนขายได้ทันที ไม่อืด ไม่รก
-    - ตัวเลือกที่ 2: `สินค้าทั้งหมดในคลัง (ครบทุก SKU)` — โชว์สินค้าทุกตัวในระบบ พร้อมยอดขายช่วงนี้และสต็อกคงเหลือ
-    - ส่วนภาพรวมตลอดกาล: รองรับทั้งแบบเฉพาะที่เคยขายได้ และสต็อกทั้งหมดในระบบ
-  - [x] 5. ผ่าน Quality Gate ครบถ้วน: `tsc` 0 error, `pnpm test` ผ่านครบ 84 รายการ (เพิ่มเทสต์ `onlySold` กรอง `soldQty > 0`), `pnpm build` สำเร็จ, และทดสอบการสร้างไฟล์ Excel ทั้ง 2 โหมดจริงผ่าน API เรียบร้อย 100%
+  - [x] 1. รองรับไฟล์รายได้ Shopee (Shopee Settlement — `Income.โอนเงินสำเร็จ.th.*.xlsx`) แบบ 3 ไฟล์ แทน flow เดิม 2 ไฟล์จาก Shipnity เพียงอย่างเดียว
+  - [x] 2. สร้าง parser ใหม่ `src/lib/ingest/shopee-parse.ts` (จับคอลัมน์ตามชื่อหัวตาราง, รวมหลายแถวต่อคำสั่งซื้อ, ตรวจอัตลักษณ์ `income + refund + fees = payout`, เตือน drift คอลัมน์ที่ยังไม่ถูกนับ, อ่านชีต Adjustment เป็นรายการหักนอกคำสั่งซื้อ)
+  - [x] 3. จับคู่กับ `oms_orders` ด้วย **exact-ID เท่านั้น** (`marketplace_order_norm = external_id`, ทั้งสองฝั่ง `channel = 'Shopee'`) — ไม่เดาด้วยยอดเงิน+วันที่
+  - [x] 4. บันทึกลง `transactions` แบบ Batch Insert (300 แถว/ครั้ง) + `reconcileAndSyncThreeFiles` + `refreshSummaryTables` (ห้ามเขียน DB ทีละแถว)
+  - [x] 5. แก้ `queries.ts` / ปฏิทินความครบถ้วน / label ใน UI ให้รองรับช่องทาง Shopee แยกจาก TikTok ตาม Strict Platform Financial Isolation
+  - [x] 6. ผ่าน Quality Gate: `npx tsc --noEmit` 0 error · `pnpm test` 89 tests (87 pass, 0 fail, 2 skipped) · `pnpm build` สำเร็จ
+  - [x] 7. ปรับกฎการนับบิล Shopee ตามที่ผู้ใช้ยืนยัน: **แถว OMS placeholder ของ Shopee ยังไม่ใช่บิลจนกว่าจะมีไฟล์รายได้ Shopee** (ชิป Shopee = 0 จนกว่าจะอัปโหลดไฟล์) โดยใช้ `EXCLUDE_PENDING_SHOPEE_BILL_SQL` ใน `listBills` + `getOverallStats` + `daily_summaries` — ไม่แตะ `invoice_registry`/หน้าพิมพ์ใบกำกับฯ และปฏิทินยังเตือน "ขาดรายได้ Shopee" ตามเดิม
+  - [ ] 8. (ผู้ใช้) นำเข้าไฟล์รายได้ Shopee จริงที่ `localhost:3001` บริษัทชีเฮง + ยืนยัน: บิล Shopee ยอดโอนตามไฟล์ (รวมแถวติดลบ), แถว Adjustment -447 ฿ ในหน้าแรก, แท็ก "ขาดรายได้ Shopee" ในปฏิทิน, และ Responsive 360/390/768/1280px
+  - [ ] 9. (ผู้ใช้) นำเข้าไฟล์ย้อนหลังรายเดือนของ Shopee เองในระบบ production (ห้าม deploy จาก AI — ผู้ใช้เป็นผู้ deploy) และรัน full rebuild `daily_summaries` หนึ่งครั้งหลัง deploy (สคริปต์/ขั้นตอนแจ้งในรายงาน)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-10 — รองรับไฟล์รายได้ Shopee (Shopee Settlement) แบบ 3 ไฟล์ ตั้งแต่ parser จนถึงปฏิทินความครบถ้วน)**:
+  - **เพิ่มช่องทาง Shopee แบบ flow 3 ไฟล์ (ไฟล์รายได้ Shopee) โดยคงกฎเดิมของแต่ละแพลตฟอร์มแยกกัน (`src/lib/ingest/shopee-parse.ts` ใหม่, `import-service.ts`, `queries.ts`, `UploadCompletenessCalendar.tsx`, `UploadForm.tsx`, `ExcelPreviewDialog.tsx`, `invoices/[orderId]/page.tsx`, `import/page.tsx`)**:
+    - [x] **1. Parser ใหม่ `src/lib/ingest/shopee-parse.ts` (`detectAndParseShopeeInput`)**:
+      - ตรวจจับไฟล์ด้วย 2 เงื่อนไขร่วมกัน: ชีต Summary ที่มีข้อความ "รายงานรายรับของฉัน" + ชีต Income ที่มีหัว "หมายเลขคำสั่งซื้อ" / "จำนวนเงินทั้งหมดที่โอนแล้ว…" / "วันที่โอนชำระเงินสำเร็จ" / "วันที่ทำการสั่งซื้อ" (กัน false positive กับไฟล์แพลตฟอร์มอื่น)
+      - จับคอลัมน์ตาม **ชื่อหัวตาราง** (normalize NBSP/ช่องว่าง) ไม่ผูกกับเลขคอลัมน์ → ทนต่อการแทรกคอลัมน์ใหม่ของ Shopee
+      - แบ่งกลุ่มมูลค่า: `INCOME` (7 คอลัมน์) / `REFUND` (1) / `FEES` (13) / `PAYOUT` (1) และ **คอลัมน์ที่ยังไม่ถูกนับ 10 คอลัมน์** → เตือน `SHOPEE_UNTRACKED_COLUMN` เมื่อค่ารวม ≠ 0 (เฝ้าดูสูตรไฟล์ Shopee เปลี่ยน)
+      - ตรวจอัตลักษณ์รายแถว `income + refund + feeTotal = payout` เก็บใน `checks.payoutDiff` และเตือน `SHOPEE_PAYOUT_MISMATCH` (พิสูจน์กับไฟล์จริงเดือน 10/2026: residual = 0 ทุก 161 แถว รวม payout 85,780 ฿)
+      - รวมหลายแถวต่อคำสั่งซื้อเป็น 1 บิล (`createdAt` = วันที่เร็วสุด, `paidAt` = วันที่โอนล่าสุด)
+      - อ่านชีต `Adjustment` เป็นรายการหักนอกคำสั่งซื้อ: `is_order = 0`, `external_id = {รหัสคำสั่งซื้อ}-ADJ-{วันที่โอนยอดที่ปรับปรุง}`, `transaction_type` = ประเภทการปรับปรุงจากไฟล์, ข้ามแถว "ยอดรวม" (ยืนยันจากไฟล์จริงว่า "ยอดรวม" อยู่คอลัมน์ 1)
+      - ไม่นำเข้าชีต `Service Fee Details` (เป็น breakdown ของคอลัมน์ "ค่าบริการ" → นำเข้าซ้ำจะนับเงินซ้อน)
+    - [x] **2. บันทึกข้อมูล (`src/lib/ingest/import-service.ts`)**:
+      - เพิ่มบล็อก dispatch ของ Shopee **หลังบล็อก Lazada และก่อน `parseWorkbook`** (กัน false positive จากชื่อชีต "Income")
+      - Batch Insert 300 แถว/ครั้ง + `DELETE` เฉพาะ `channel = 'Shopee' AND transaction_type <> 'คำสั่งซื้อ (OMS)'` (ไม่แตะแพลตฟอร์มอื่น) → เขียน DB ไม่ทีละแถว
+      - `reconcileAndSyncThreeFiles` → เพิ่ม **step 2b** (exact-ID match ของ Shopee ทั้งสองฝั่ง `channel = 'Shopee'`) และ **step 5a-Shopee** (merge settlement row กับ OMS order โดยคง `channel = 'Shopee'`), พร้อมกันกับบล็อก merge ของ TikTok ไม่ให้กินแถว Shopee
+      - ปลดล็อกกฎ "บังคับ Shopee เป็น TikTok" ในข้อ 0b และ `saveOmsOrdersBatch` (Shopee ต้องผูกไฟล์รายได้ของตัวเองได้แล้ว)
+      - `refreshSummaryTables` เฉพาะวันที่ที่ถูกแตะ (paid date) เพื่อไม่เขียน DB ทั้งตาราง
+    - [x] **3. Query/UI (`src/lib/queries.ts`, `src/components/UploadCompletenessCalendar.tsx`, `src/components/UploadForm.tsx`, `src/components/ExcelPreviewDialog.tsx`, `src/app/invoices/[orderId]/page.tsx`, `src/app/import/page.tsx`)**:
+      - แก้ `resolvedTxChannel` / `resolvedChannel` ให้ใช้ `channel` จากแถว DB ของ non-OMS rows (เดิม hardcode `TikTok`) → บิล Shopee ไม่ถูกปนกับ TikTok
+      - เพิ่ม `missing_shopee_file3_count` ใน SQL ปฏิทิน + `hasShopeeFile3` / `missingShopeeFile3Count` / `totalMissingShopeeFile3` (เกณฑ์ครบ ≥ 95% เหมือน TikTok, วันที่ที่มีแต่ช่องทางอื่นถือว่าครบ)
+      - เพิ่มแท็ก "ขาดรายได้ Shopee" ในปฏิทิน (รายวัน/รายเดือน) + แถวสถานะ "ไฟล์รายได้ Shopee (เฉพาะบิล Shopee)" ในกล่องรายละเอียดวัน
+      - ป้ายไฟล์ใน UI: "2. รายได้ Shopee (Shopee Settlement)" + หน้าใบกำกับภาษีแสดง "รอไฟล์รายได้จาก Shopee" สำหรับแถว OMS placeholder ของ Shopee
+    - [x] **4. เทสต์ + Quality Gate (`tests/ingest.test.ts`)**:
+      - เทสต์ A (synthetic `preloadedSheets`): ตรวจจับไฟล์, อัตลักษณ์รายแถว, payout ติดลบตามไฟล์, การรวม 2 แถวเป็น 1 บิล, การเตือน drift คอลัมน์ "โค้ดส่วนลด" (และไม่เตือนคอลัมน์ข้อความขนส่ง), แถว Adjustment `-ADJ-` พร้อมข้ามแถว "ยอดรวม", และไม่นำเข้าชีต decoy
+      - เทสต์ B (ไฟล์ .xlsx จริงผ่าน `readInputSheets` streaming + เซลล์วันที่แบบ Date object)
+      - เทสต์ C (regression): แปลงวันที่ได้ครบ 3 รูปแบบ — text ISO / `Date` object / **Excel serial number**
+      - **แก้บั๊กที่เจอระหว่างทาง (silent bug)**: `readInputSheets` คืนเซลล์วันที่แบบ date-formatted เป็น **Excel serial number** (เช่น `46315`) ไม่ใช่ `Date` → เดิม `cellDateIso()` แปลงเป็นข้อความก่อน ทำให้ `parseDateValue("46315")` = null และ **วันที่กลายเป็นค่าว่างโดยไม่มี error** → แก้ให้ส่งค่าดิบเข้า `parseDateValue` (รองรับ Date / serial / text) ทั้งในชีต Income และชีต Summary
+      - `npx tsc --noEmit`: 0 error · `pnpm test`: 89 tests (87 pass, 0 fail, 2 skipped) · `pnpm build`: ผ่าน
+    - [ ] 5. ค้าง: ผู้ใช้ทดสอบนำเข้าไฟล์จริงที่ `localhost:3001` (บริษัทชีเฮง) และนำเข้าไฟล์ย้อนหลังในระบบ production เอง (ห้าม deploy จาก AI)
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-09 — ระบบสต๊อกสินค้าและต้นทุนสินค้า แยกแท็บในหน้า `/products` พร้อมระบบนำเข้า/ส่งออก Excel และบันทึกประวัติการเคลื่อนไหวสต็อก)**:
   - **พัฒนาระบบสต๊อกสินค้าและต้นทุน (Stock & Cost Management System) รวมเข้ากับหน้า `/products` แยกแท็บใช้งานง่าย พร้อมระบบดึงยอดขายจริงมาตัดสต็อกอัตโนมัติ (`src/lib/db.ts`, `src/lib/queries.ts`, `src/app/api/products/*`, `src/components/*`, `src/app/products/page.tsx`, `tests/stock.test.ts`)**:
