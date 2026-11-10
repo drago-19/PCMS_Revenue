@@ -38,7 +38,7 @@ interface UploadResult {
   importId: number;
   duplicate: boolean;
   filename: string;
-  fileType?: "settlement" | "oms_orders" | "oms_items";
+  fileType?: "settlement" | "oms_orders" | "oms_items" | "shopee_settlement";
   status: "ok" | "warning";
   rowCount: number;
   orderCount: number;
@@ -564,6 +564,9 @@ export function UploadForm() {
   const batchOmsItemsCount = batchResults.filter(
     (r) => r.fileType === "oms_items",
   ).length;
+  const batchShopeeSettlementCount = batchResults.filter(
+    (r) => r.fileType === "shopee_settlement",
+  ).length;
   const batchStartDates = batchResults
     .map((r) => r.periodStart)
     .filter((d): d is string => Boolean(d))
@@ -653,7 +656,7 @@ export function UploadForm() {
                   : "text-[#334155] hover:bg-[#f1f5f9] hover:text-[#0f172a]",
               )}
             >
-              <span>📦 ไฟล์ระบบปกติ (Shipnity / TikTok / Lazada)</span>
+              <span>📦 ไฟล์ระบบปกติ (Shipnity / TikTok / Shopee / Lazada)</span>
             </button>
 
             <button
@@ -676,7 +679,7 @@ export function UploadForm() {
         <span className="text-[11px] font-medium text-[#64748b]">
           {uploadCategory === "accounting"
             ? "ใช้เทียบยอดกับ Shipnity และสร้างบิลสินค้าโล๊ะสต๊อก · หากอัปผิดสลับโหมดภายหลังได้ที่หน้าประวัติการนำเข้า"
-            : "รองรับไฟล์ออเดอร์/สินค้า Shipnity, รายได้ TikTok และ Lazada · หากอัปผิดสลับโหมดภายหลังได้ใน 1 คลิก"}
+            : "รองรับไฟล์ออเดอร์/สินค้า Shipnity, รายได้ TikTok, Shopee และ Lazada · หากอัปผิดสลับโหมดภายหลังได้ใน 1 คลิก"}
         </span>
       </div>
 
@@ -1158,7 +1161,7 @@ export function UploadForm() {
               </strong>
               <p>
                 {isBatch
-                  ? `แยกเป็น: ไฟล์รายได้ TikTok ${batchSettlementCount} ไฟล์ · ออเดอร์ Shipnity ${batchOmsOrdersCount} ไฟล์ · สินค้า Shipnity ${batchOmsItemsCount} ไฟล์ (รวม ${batchTotalRows.toLocaleString("th-TH")} แถวข้อมูล)`
+                  ? `แยกเป็น: ไฟล์รายได้ TikTok ${batchSettlementCount} ไฟล์${batchShopeeSettlementCount > 0 ? ` · ไฟล์รายได้ Shopee ${batchShopeeSettlementCount} ไฟล์` : ""} · ออเดอร์ Shipnity ${batchOmsOrdersCount} ไฟล์ · สินค้า Shipnity ${batchOmsItemsCount} ไฟล์ (รวม ${batchTotalRows.toLocaleString("th-TH")} แถวข้อมูล)`
                   : result.duplicate
                     ? "ระบบตรวจพบไฟล์เดิมจาก hash จึงไม่บันทึกซ้ำ"
                     : `ประมวลผล ${result.orderCount.toLocaleString("th-TH")} ออเดอร์ จาก ${result.rowCount.toLocaleString("th-TH")} แถวข้อมูล`}

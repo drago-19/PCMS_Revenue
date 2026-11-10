@@ -72,6 +72,7 @@ function getShortDayMissingTags(row: DailyUploadCompletenessRow): string[] {
     if (!row.hasFile1) tags.push("ขาดออเดอร์");
     if (!row.hasFile2) tags.push("ขาดสินค้า");
     if (!row.hasFile3) tags.push("ขาดรายได้ TikTok");
+    if (!row.hasShopeeFile3) tags.push("ขาดรายได้ Shopee");
     return tags;
   }
   const tags: string[] = [];
@@ -98,6 +99,18 @@ function getShortDayMissingTags(row: DailyUploadCompletenessRow): string[] {
     } else {
       tags.push("ขาดรายได้ TikTok");
     }
+  }
+  if (row.missingShopeeFile3Count > 0) {
+    tags.push(
+      `ขาดรายได้ Shopee (${formatNumber(row.missingShopeeFile3Count)} บิล)`,
+    );
+  }
+  // ผ่านเกณฑ์ผ่อนผันแล้ว แต่ของจริงยังมีบิลรอไฟล์อยู่ — ต้องบอกให้เห็น ไม่ใช่ซ่อน
+  if (row.file3ToleranceApplied && row.rawMissingFile3Count > 0) {
+    tags.push(`รอไฟล์ TikTok ${formatNumber(row.rawMissingFile3Count)} ใบ`);
+  }
+  if (row.shopeeFile3ToleranceApplied && row.rawMissingShopeeFile3Count > 0) {
+    tags.push(`รอไฟล์ Shopee ${formatNumber(row.rawMissingShopeeFile3Count)} ใบ`);
   }
   return tags;
 }
@@ -376,6 +389,8 @@ export function UploadCompletenessCalendar({
                 if (m.missingFile1 + m.missingFile2 > 0)
                   shortMissing.push("ขาดสินค้า");
                 if (m.missingFile3 > 0) shortMissing.push("ขาดรายได้ TikTok");
+                if (m.missingShopeeFile3 > 0)
+                  shortMissing.push("ขาดรายได้ Shopee");
                 if (shortMissing.length === 0 && m.emptyDays > 0) {
                   shortMissing.push(
                     `ยังไม่อัป ${m.emptyDays} วัน (ครบแล้ว ${m.completeDays} วัน)`,
@@ -417,9 +432,16 @@ export function UploadCompletenessCalendar({
 
                   <div className="mt-1.5 text-[11px] leading-snug">
                     {isMonthComplete ? (
-                      <span className="font-semibold text-emerald-800 dark:text-emerald-300">
-                        ครบทุกวัน ({formatNumber(m.completeDays)} วัน)
-                      </span>
+                      m.rawMissingFile3 + m.rawMissingShopeeFile3 > 0 ? (
+                        <span className="font-semibold text-amber-800 dark:text-amber-300">
+                          ครบตามเกณฑ์ · ยังรอไฟล์รายได้{" "}
+                          {formatNumber(m.rawMissingFile3 + m.rawMissingShopeeFile3)} ใบ
+                        </span>
+                      ) : (
+                        <span className="font-semibold text-emerald-800 dark:text-emerald-300">
+                          ครบทุกวัน ({formatNumber(m.completeDays)} วัน)
+                        </span>
+                      )
                     ) : (
                       <span className="font-semibold text-rose-800 dark:text-rose-300">
                         {shortMissing.join(" · ")}
@@ -451,6 +473,20 @@ export function UploadCompletenessCalendar({
               </strong>{" "}
               (แตะที่ช่องวันที่เพื่อดูรายละเอียด)
             </p>
+            {report.summary.totalRawMissingFile3 +
+            report.summary.totalRawMissingShopeeFile3 >
+            0 ? (
+              <p className="mt-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                ยังรอไฟล์รายได้{" "}
+                {formatNumber(
+                  report.summary.totalRawMissingFile3 +
+                    report.summary.totalRawMissingShopeeFile3,
+                )}{" "}
+                ใบ (TikTok {formatNumber(report.summary.totalRawMissingFile3)} · Shopee{" "}
+                {formatNumber(report.summary.totalRawMissingShopeeFile3)}) — ผ่านเกณฑ์ผ่อนผัน
+                จึงไม่ถูกนับเป็นวันขาด
+              </p>
+            ) : null}
           </div>
 
           {selectedMonthOverview && !selectedMonthOverview.completeDays && selectedMonthOverview.totalNormalOrders === 0 ? (
@@ -526,7 +562,9 @@ export function UploadCompletenessCalendar({
                     {row.isComplete
                       ? row.normalOrders === 0
                         ? "✓ ไม่มีบิล"
-                        : "✓ ครบ"
+                        : row.file3ToleranceApplied || row.shopeeFile3ToleranceApplied
+                          ? "✓ ผ่านเกณฑ์"
+                          : "✓ ครบ"
                       : "ไม่ครบ"}
                   </span>
                 </div>
@@ -534,14 +572,23 @@ export function UploadCompletenessCalendar({
                 {/* แถวล่าง: บอกชัดๆ ว่าครบหรือขาดอะไร */}
                 <div className="mt-2 w-full">
                   {row.isComplete ? (
-                    <div className="text-[11px] font-bold leading-tight text-emerald-800 dark:text-emerald-300">
+                    <div
+                      className={cn(
+                        "text-[11px] font-bold leading-tight",
+                        row.file3ToleranceApplied || row.shopeeFile3ToleranceApplied
+                          ? "text-amber-800 dark:text-amber-300"
+                          : "text-emerald-800 dark:text-emerald-300",
+                      )}
+                    >
                       {row.normalOrders === 0
                         ? "ไม่มีคำสั่งซื้อ (0 บิล)"
-                        : row.tiktokOrders === 0 && (row.lazadaOrders ?? 0) > 0 && row.shopeeOrders === 0 && row.facebookOrders === 0 && (row.lineOrders ?? 0) === 0
-                          ? `ครบตามไฟล์ Lazada (${formatNumber(row.normalOrders)} บิล)`
-                          : row.tiktokOrders === 0
-                            ? `ครบ 2 ไฟล์ Shipnity (${formatNumber(row.normalOrders)} บิล)`
-                            : `ครบ 3 ไฟล์ (${formatNumber(row.normalOrders)} บิล)`}
+                        : row.file3ToleranceApplied || row.shopeeFile3ToleranceApplied
+                          ? `ผ่านเกณฑ์ · รอไฟล์ ${formatNumber(row.rawMissingFile3Count + row.rawMissingShopeeFile3Count)} ใบ`
+                          : row.tiktokOrders === 0 && (row.lazadaOrders ?? 0) > 0 && row.shopeeOrders === 0 && row.facebookOrders === 0 && (row.lineOrders ?? 0) === 0
+                            ? `ครบตามไฟล์ Lazada (${formatNumber(row.normalOrders)} บิล)`
+                            : row.tiktokOrders === 0
+                              ? `ครบ 2 ไฟล์ Shipnity (${formatNumber(row.normalOrders)} บิล)`
+                              : `ครบ 3 ไฟล์ (${formatNumber(row.normalOrders)} บิล)`}
                     </div>
                   ) : (
                     <div className="space-y-0.5">
@@ -684,6 +731,11 @@ export function UploadCompletenessCalendar({
                   if (row.missingFile3Count > 0) {
                     missingParts.push(
                       `ขาดไฟล์รายได้ TikTok (${formatNumber(row.missingFile3Count)} บิล TikTok)`,
+                    );
+                  }
+                  if (row.missingShopeeFile3Count > 0) {
+                    missingParts.push(
+                      `ขาดไฟล์รายได้ Shopee (${formatNumber(row.missingShopeeFile3Count)} บิล Shopee)`,
                     );
                   }
                 }
@@ -856,8 +908,44 @@ export function UploadCompletenessCalendar({
                     : selectedDay.tiktokOrders === 0
                       ? `✓ ไม่ต้องใช้ (มีเฉพาะช่องทางอื่น ${formatNumber(selectedDay.normalOrders)} บิล)`
                       : selectedDay.hasFile3
-                        ? `✓ ครบ (${formatNumber(selectedDay.tiktokOrders)} บิล)`
+                        ? selectedDay.rawMissingFile3Count > 0
+                          ? `✓ ผ่านเกณฑ์ · ยังรอไฟล์ ${formatNumber(selectedDay.rawMissingFile3Count)} จาก ${formatNumber(selectedDay.tiktokOrders)} บิล TikTok`
+                          : `✓ ครบ (${formatNumber(selectedDay.tiktokOrders)} บิล)`
                         : `✕ ขาด ${formatNumber(selectedDay.missingFile3Count)} จาก ${formatNumber(selectedDay.tiktokOrders)} บิล TikTok`}
+                </span>
+              </div>
+
+              {/* ไฟล์รายได้ Shopee (Shopee Settlement — เฉพาะบิล Shopee) */}
+              <div
+                className={cn(
+                  "flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5",
+                  selectedDay.hasShopeeFile3
+                    ? "border-emerald-500/40 bg-emerald-500/[0.08]"
+                    : "border-rose-500/40 bg-rose-500/[0.08]",
+                )}
+              >
+                <span className="text-xs font-bold text-foreground">
+                  ไฟล์รายได้ Shopee (เฉพาะบิล Shopee)
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 text-xs font-extrabold",
+                    selectedDay.hasShopeeFile3
+                      ? "text-emerald-700 dark:text-emerald-300"
+                      : "text-rose-700 dark:text-rose-300",
+                  )}
+                >
+                  {selectedDay.normalOrders === 0
+                    ? selectedDay.hasShopeeFile3
+                      ? "✓ อัปโหลดแล้ว (ไม่มีบิลในวันนี้)"
+                      : "ยังไม่อัปโหลด"
+                    : selectedDay.shopeeOrders === 0
+                      ? `✓ ไม่ต้องใช้ (มีเฉพาะช่องทางอื่น ${formatNumber(selectedDay.normalOrders)} บิล)`
+                      : selectedDay.hasShopeeFile3
+                        ? selectedDay.rawMissingShopeeFile3Count > 0
+                          ? `✓ ผ่านเกณฑ์ · ยังรอไฟล์ ${formatNumber(selectedDay.rawMissingShopeeFile3Count)} จาก ${formatNumber(selectedDay.shopeeOrders)} บิล Shopee`
+                          : `✓ ครบ (${formatNumber(selectedDay.shopeeOrders)} บิล)`
+                        : `✕ ขาด ${formatNumber(selectedDay.missingShopeeFile3Count)} จาก ${formatNumber(selectedDay.shopeeOrders)} บิล Shopee`}
                 </span>
               </div>
             </div>

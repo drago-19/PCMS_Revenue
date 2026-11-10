@@ -548,7 +548,9 @@ export function ExcelFilePreviewDialog({
                       ? "1. ออเดอร์ใน shipnity"
                       : fileType === "oms_items"
                         ? "3. สินค้าในออเดอร์ shipnity"
-                        : "2. รายได้ TikTok"}
+                        : fileType === "shopee_settlement"
+                          ? "2. รายได้ Shopee (Shopee Settlement)"
+                          : "2. รายได้ TikTok"}
                   </Badge>
                 </DialogTitle>
                 <DialogDescription className="mt-0.5 text-xs text-slate-300">
