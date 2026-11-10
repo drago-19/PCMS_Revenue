@@ -56,6 +56,8 @@ export default async function InvoicePage({
     const isMissingOms = !row.orderCode || row.orderCode.trim() === "";
     const isTiktokOmsPlaceholder =
       row.channel === "TikTok" && row.transactionType === "คำสั่งซื้อ (OMS)";
+    const isShopeeOmsPlaceholder =
+      row.channel === "Shopee" && row.transactionType === "คำสั่งซื้อ (OMS)";
     const isPendingAccountingApproval =
       (row.channel === "LINE" || row.channel === "Facebook") &&
       row.lineComparisonStatus === "shipnity_only";
@@ -66,11 +68,13 @@ export default async function InvoicePage({
         ? "ไม่ออกใบกำกับภาษี (คืนเงิน / ตีกลับ / ขาดทุน)"
         : isTiktokOmsPlaceholder
           ? "ไม่ออกใบกำกับภาษี (รอไฟล์ Settlement จาก TikTok)"
-          : isPendingAccountingApproval
-            ? "ไม่ออกใบกำกับภาษี (รอไฟล์สรุปจากฝ่ายบัญชีอนุมัติก่อน)"
-            : isMissingOms
-              ? "ไม่ออกใบกำกับภาษี (ยังไม่ผูกออเดอร์ Shipnity)"
-              : "ไม่ออกใบกำกับภาษี (รอไฟล์สินค้าในออเดอร์ Shipnity)";
+          : isShopeeOmsPlaceholder
+            ? "ไม่ออกใบกำกับภาษี (รอไฟล์รายได้จาก Shopee)"
+            : isPendingAccountingApproval
+              ? "ไม่ออกใบกำกับภาษี (รอไฟล์สรุปจากฝ่ายบัญชีอนุมัติก่อน)"
+              : isMissingOms
+                ? "ไม่ออกใบกำกับภาษี (ยังไม่ผูกออเดอร์ Shipnity)"
+                : "ไม่ออกใบกำกับภาษี (รอไฟล์สินค้าในออเดอร์ Shipnity)";
 
     const reason = isNoPrice
       ? "รายการนี้เป็นออเดอร์เปลี่ยนสินค้า / ไม่มีราคาสินค้า (ยอดขาย ฿0.00) ตามหลักเกณฑ์จะไม่นำมายื่นภาษีขายและไม่ออกใบกำกับภาษี"
@@ -78,11 +82,13 @@ export default async function InvoicePage({
         ? "รายการนี้เป็นออเดอร์คืนเงิน ตีกลับ หรือขาดทุน (ยอดขายหรือยอดชำระสุทธิติดลบหรือ ฿0.00) ตามหลักเกณฑ์จะไม่นำมายื่นภาษีขาย เพื่อป้องกันการยื่นภาษีเกินจริง"
         : isTiktokOmsPlaceholder
           ? "รายการนี้เป็นออเดอร์ TikTok ที่ยังไม่มีไฟล์ Settlement รายได้รอบโอนเงินจริง (มีเฉพาะข้อมูลเบื้องต้นจาก Shipnity) กรุณานำเข้าไฟล์ Settlement จาก TikTok เพื่อให้ข้อมูลครบถ้วนก่อนออกใบกำกับภาษี"
-          : isPendingAccountingApproval
-            ? "รายการนี้มีเฉพาะข้อมูลจากระบบ Shipnity แต่ยังไม่มีรายชื่ออยู่ในไฟล์สรุปจากฝ่ายบัญชี ตามหลักเกณฑ์จะยังไม่นำมายื่นภาษีขายและไม่ออกใบกำกับภาษีจนกว่าจะมีข้อมูลในไฟล์สรุปจากฝ่ายบัญชี"
-            : isMissingOms
-              ? "รายการนี้ยังไม่ได้ผูกกับเลขออเดอร์ใน Shipnity กรุณาผูกข้อมูลหรือนำเข้าไฟล์ให้เรียบร้อยก่อนออกใบกำกับภาษี"
-              : "รายการนี้ผูกเลขออเดอร์และยอดโอนแล้ว แต่ยังไม่มีไฟล์สินค้าในออเดอร์จาก Shipnity (ยังไม่มีชื่อสินค้าและรหัส SKU) กรุณาอัปโหลดไฟล์สินค้าในออเดอร์ Shipnity ให้ครบถ้วนก่อนออกใบกำกับภาษี";
+          : isShopeeOmsPlaceholder
+            ? "รายการนี้เป็นออเดอร์ Shopee ที่ยังไม่มีไฟล์รายได้ Shopee (Shopee Settlement) รอบโอนเงินจริง (มีเฉพาะข้อมูลเบื้องต้นจาก Shipnity) กรุณานำเข้าไฟล์รายได้ Shopee เพื่อให้ข้อมูลครบถ้วนก่อนออกใบกำกับภาษี"
+            : isPendingAccountingApproval
+              ? "รายการนี้มีเฉพาะข้อมูลจากระบบ Shipnity แต่ยังไม่มีรายชื่ออยู่ในไฟล์สรุปจากฝ่ายบัญชี ตามหลักเกณฑ์จะยังไม่นำมายื่นภาษีขายและไม่ออกใบกำกับภาษีจนกว่าจะมีข้อมูลในไฟล์สรุปจากฝ่ายบัญชี"
+              : isMissingOms
+                ? "รายการนี้ยังไม่ได้ผูกกับเลขออเดอร์ใน Shipnity กรุณาผูกข้อมูลหรือนำเข้าไฟล์ให้เรียบร้อยก่อนออกใบกำกับภาษี"
+                : "รายการนี้ผูกเลขออเดอร์และยอดโอนแล้ว แต่ยังไม่มีไฟล์สินค้าในออเดอร์จาก Shipnity (ยังไม่มีชื่อสินค้าและรหัส SKU) กรุณาอัปโหลดไฟล์สินค้าในออเดอร์ Shipnity ให้ครบถ้วนก่อนออกใบกำกับภาษี";
 
     return (
       <div className="flex min-h-[75dvh] w-full items-center justify-center p-4">

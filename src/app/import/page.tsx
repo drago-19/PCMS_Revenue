@@ -40,7 +40,7 @@ export default async function ImportPage({
       <PageHeader
         eyebrow="TikTok Shop, Shopee & Facebook · นำเข้าและแมปข้อมูล 3 ไฟล์"
         title="หมวดอัปโหลดไฟล์รายได้ & รายการสินค้า"
-        description="รองรับทั้งไฟล์ .xlsx และ .csv จากทั้ง 3 ส่วน: (1) ไฟล์ออเดอร์ใน shipnity  (2) ไฟล์รายได้ TikTok Shop  (3) ไฟล์สินค้าในออเดอร์ shipnity (รองรับทั้งช่องทาง TikTok, Shopee และ Facebook)"
+        description="รองรับทั้งไฟล์ .xlsx และ .csv จากทั้ง 3 ส่วน: (1) ไฟล์ออเดอร์ใน shipnity  (2) ไฟล์รายได้ TikTok Shop / ไฟล์รายได้ Shopee (Shopee Settlement)  (3) ไฟล์สินค้าในออเดอร์ shipnity (รองรับทั้งช่องทาง TikTok, Shopee และ Facebook)"
         actions={
           <>
             <Button asChild variant="outline">
@@ -63,8 +63,8 @@ export default async function ImportPage({
             นำเข้าไฟล์ .xlsx หรือ .csv (เลือกพร้อมกันได้)
           </h2>
           <p className="card-sub">
-            อัปโหลดไฟล์รายได้ TikTok Shop, ไฟล์ออเดอร์ใน shipnity
-            และไฟล์สินค้าในออเดอร์ shipnity
+            อัปโหลดไฟล์รายได้ TikTok Shop, ไฟล์รายได้ Shopee (Shopee Settlement),
+            ไฟล์ออเดอร์ใน shipnity และไฟล์สินค้าในออเดอร์ shipnity
             ระบบจะตรวจสอบชนิดไฟล์และเชื่อมข้อมูลเข้าด้วยกันให้อัตโนมัติ
           </p>
           <UploadForm />

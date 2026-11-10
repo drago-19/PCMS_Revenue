@@ -92,11 +92,11 @@ export default async function DashboardPage({
     heroLabel:
       activeShop !== "all"
         ? `ยอดชำระสุทธิสะสม (${activeShop})`
-        : "ยอดชำระสุทธิสะสม (คำสั่งซื้อ + ชดเชยแพลตฟอร์ม)",
+        : "ยอดชำระสุทธิสะสม (บิล + ชดเชย · ก่อนหักค่าโฆษณา GMV)",
     heroValue: formatTHB(stats.totalPayout),
     heroTone: "positive",
     formulaNote:
-      "รวมยอดเงินโอนจากบิลขายปกติ หักออเดอร์ตีกลับ/คืนเงิน และรวมเงินชดเชยแพลตฟอร์ม",
+      "รวมยอดเงินโอนจากบิลขายปกติ หักออเดอร์ตีกลับ/คืนเงิน และรวมเงินชดเชยแพลตฟอร์ม — ยอดนี้ยังไม่หักค่าโฆษณา GMV / รายการปรับยอดนอกคำสั่งซื้อ (หักในข้อ 4)",
     sections: [
       {
         title: "1. แยกตามหมวดหมู่บิลคำสั่งซื้อ",
@@ -193,7 +193,8 @@ export default async function DashboardPage({
                   tone: "negative" as const,
                 })),
                 {
-                  label: "ยอดโอนสุทธิรวมหลังหักค่าโฆษณา GMV / ปรับยอดทั้งหมด",
+                  label:
+                    "= ยอดสุทธิหลังหักค่าโฆษณา GMV / ปรับยอด (ยอดเดียวกับตารางรายวัน)",
                   valueText: formatTHB(netSettlementWithAllNonOrder),
                   tone: "positive" as const,
                   isSubtotal: true,
@@ -498,7 +499,11 @@ export default async function DashboardPage({
             <StatCard
               label={activeShop !== "all" ? `ยอดชำระสุทธิสะสม (${activeShop})` : "ยอดชำระสุทธิสะสม"}
               value={formatTHB(stats.totalPayout)}
-              hint={activeShop !== "all" ? `ยอดเงินโอนจากบิลเฉพาะร้าน ${activeShop}` : "ยอดเงินโอนจากบิลคำสั่งซื้อทั้งหมด"}
+              hint={
+                activeShop !== "all"
+                  ? `ยอดเงินโอนจากบิลเฉพาะร้าน ${activeShop} · ยังไม่หักค่าโฆษณา GMV`
+                  : "ยอดเงินโอนจากบิลคำสั่งซื้อ + ชดเชย · ยังไม่หักค่าโฆษณา GMV / ปรับยอด"
+              }
               tone="positive"
               icon={<IconWallet size={19} />}
               breakdown={dashboardPayoutBreakdown}
@@ -599,7 +604,7 @@ export default async function DashboardPage({
             </div>
             <div className="hero-side">
               <div className="hero-side-item">
-                <span>ยอดสุทธิทั้งรอบ (รวม GMV / ปรับยอด)</span>
+                <span>ยอดสุทธิหลังหัก GMV / ปรับยอด</span>
                 <strong>
                   <AnimatedValueText value={formatTHB(latest.totalPayout)} />
                 </strong>
