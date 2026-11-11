@@ -214,9 +214,42 @@ export function startShipnityBackgroundSync(accounts: readonly ConnectedShipnity
   handle.unref?.();
 }
 
-/** บังคับซิงก์เดี๋ยวนี้ (ปุ่ม “ดึงใหม่เลย”) — ไม่ล้างข้อมูลเดิม */
-export async function forceSyncShipnity(accounts: readonly ConnectedShipnityAccount[]): Promise<void> {
+export interface ForceSyncResult {
+  account: string;
+  /** จำนวนออเดอร์ที่ดึงได้ในรอบนี้ */
+  fetched: number;
+  /** ข้อความ error ของรอบนี้ (null = สำเร็จ) */
+  error: string | null;
+  /** ออเดอร์ที่ยังไม่ปิดรายการที่มีในฐานข้อมูล (เทียบกับ fetched เพื่อดูว่าดึงครบหรือไม่) */
+  storedOpen: number;
+}
+
+/** บังคับซิงก์เดี๋ยวนี้ (ปุ่ม “ดึงใหม่เลย”) — ไม่ล้างข้อมูลเดิม และคืนผลของแต่ละบัญชี */
+export async function forceSyncShipnity(
+  accounts: readonly ConnectedShipnityAccount[],
+): Promise<ForceSyncResult[]> {
   runtime.pausedUntil = 0;
   runtime.rateLimitStreak = 0;
-  await Promise.all(accounts.map((account) => syncOpenOrders(account).catch(() => 0)));
+
+  return Promise.all(
+    accounts.map(async (account) => {
+      try {
+        await syncOpenOrders(account);
+        const state = await readSyncState(account.id);
+        return {
+          account: account.label,
+          fetched: state?.orderCount ?? 0,
+          error: state?.lastError ?? null,
+          storedOpen: await countOpenStored(account.id),
+        };
+      } catch (error) {
+        return {
+          account: account.label,
+          fetched: 0,
+          error: error instanceof Error ? error.message : "ซิงก์ไม่สำเร็จ",
+          storedOpen: 0,
+        };
+      }
+    }),
+  );
 }

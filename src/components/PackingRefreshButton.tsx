@@ -20,8 +20,30 @@ export function PackingRefreshButton() {
         toast.error(payload.error ?? "ดึงข้อมูลใหม่ไม่สำเร็จ");
         return;
       }
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        results?: { account: string; fetched: number; error: string | null; storedOpen: number }[];
+      };
+      const results = payload.results ?? [];
+      const failed = results.filter((item) => item.error);
+      const summary = results
+        .filter((item) => !item.error)
+        .map((item) => `${item.account} ${item.fetched} ใบ`)
+        .join(" · ");
+
       router.refresh();
-      toast.success("กำลังดึงออเดอร์ล่าสุดจาก Shipnity");
+      if (failed.length > 0) {
+        toast.error(
+          failed.map((item) => `${item.account}: ${item.error}`).join(" · ") || "ดึงข้อมูลใหม่ไม่สำเร็จ",
+        );
+      } else if (results.length === 0) {
+        toast.warning("ยังไม่ได้เชื่อม Shipnity — ไปเชื่อมที่หน้าตั้งค่าบริษัทก่อน");
+      } else {
+        const short = results.some((item) => item.storedOpen > item.fetched);
+        (short ? toast.warning : toast.success)(
+          short ? `ดึงได้ไม่ครบ: ${summary} (Shipnity จำกัดการเรียก)` : `ดึงแล้ว: ${summary}`,
+        );
+      }
     } catch {
       toast.error("ดึงข้อมูลใหม่ไม่สำเร็จ");
     } finally {

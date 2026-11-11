@@ -12,10 +12,10 @@ export async function POST(request: Request) {
   if (!auth.ok) return auth.response;
 
   const accounts = await resolveShipnityAccounts(await getActiveCompanyId());
-  await forceSyncShipnity(accounts);
+  const results = await forceSyncShipnity(accounts);
 
   return Response.json(
-    { ok: true, accounts: accounts.length, requestId: auth.requestId },
+    { ok: true, accounts: accounts.length, results, requestId: auth.requestId },
     { status: 200, headers: { "x-request-id": auth.requestId } },
   );
 }
