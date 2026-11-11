@@ -186,6 +186,42 @@ export async function fetchOrdersPage(
 /** จำนวนหน้าที่ดึงพร้อมกัน (เร็วขึ้น ~2–3 เท่า แต่ยังไม่กระหน่ำ API) */
 const PAGE_FETCH_CONCURRENCY = 3;
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** ดึงหน้าหนึ่ง — เจอ 429 ระหว่างไล่หลายหน้า ให้รอแล้วลองซ้ำหนึ่งครั้ง */
+async function fetchPageWithRetry(
+  fetchPage: (page: number) => Promise<ShipnityOrdersPage>,
+  page: number,
+): Promise<ShipnityOrdersPage> {
+  try {
+    return await fetchPage(page);
+  } catch (error) {
+    if (error instanceof ShipnityError && error.status === 429) {
+      await sleep(2000);
+      return fetchPage(page);
+    }
+    throw error;
+  }
+}
+
+/**
+ * ดึงหน้าหนึ่งแบบกันข้อมูลขาด
+ * หน้าสั้นอาจไม่ใช่หน้าสุดท้ายจริง — Shipnity เคยตอบไม่ครบ 15 ใบตอนถูกจำกัดอัตรา
+ * ทำให้ไล่หน้าหยุดกลางทางและเก็บออเดอร์ได้ไม่ครบ จึงลองซ้ำอีกครั้งก่อนสรุปว่าจบ
+ */
+async function fetchFullPage(
+  fetchPage: (page: number) => Promise<ShipnityOrdersPage>,
+  page: number,
+): Promise<ShipnityOrdersPage> {
+  const first = await fetchPageWithRetry(fetchPage, page);
+  if (first.orders.length >= SHIPNITY_PAGE_SIZE) return first;
+  await sleep(600);
+  const retry = await fetchPageWithRetry(fetchPage, page).catch(() => first);
+  return retry.orders.length > first.orders.length ? retry : first;
+}
+
 export async function listAllOrders(
   params: FetchOrdersParams & { maxPages?: number },
   fetchPage: (page: number) => Promise<ShipnityOrdersPage> = (page) =>
@@ -196,7 +232,7 @@ export async function listAllOrders(
   const seen = new Set<number>();
 
   // หน้าแรกดูก่อนเสมอ — ถ้ามีไม่ถึงหนึ่งหน้าเต็มก็จบเลย ไม่ต้องยิงเพิ่ม
-  const first = await fetchPage(1);
+  const first = await fetchFullPage(fetchPage, 1);
   for (const order of first.orders) {
     if (seen.has(order.id)) continue;
     seen.add(order.id);
@@ -213,7 +249,7 @@ export async function listAllOrders(
       batch.push(page + i);
     }
 
-    const results = await Promise.all(batch.map((target) => fetchPage(target)));
+    const results = await Promise.all(batch.map((target) => fetchFullPage(fetchPage, target)));
 
     for (const result of results) {
       for (const order of result.orders) {

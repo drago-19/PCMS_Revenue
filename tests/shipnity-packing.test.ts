@@ -296,8 +296,9 @@ test("วนทุกหน้าจนครบ และไม่เก็บ�
   }).then((orders) => {
     assert.equal(orders.length, 33);
     // ดึงทีละ 3 หน้าพร้อมกัน จึงอาจมีหน้าที่ 4 ถูกเรียกค้างมาก่อนรู้ว่าหน้า 3 เป็นหน้าสุดท้าย
+    // และหน้าสั้น (3, 4) จะถูกขอย้ำอีกครั้งเพื่อกันข้อมูลขาด
     assert.equal(requested[0], 1);
-    assert.equal(requested.length <= 4, true);
+    assert.equal(requested.length <= 6, true);
     assert.equal(new Set(orders.map((order) => order.id)).size, 33);
   });
 });
@@ -309,7 +310,27 @@ test("หยุดวนเมื่อหน้ามีน้อยกว่�
     return { orders: [rawOrder({ id: page })], options: {} };
   }).then((orders) => {
     assert.equal(orders.length, 1);
-    assert.deepEqual(requested, [1]);
+    // หน้าสั้นถูกขอย้ำหนึ่งครั้งก่อนสรุปว่าจบ
+    assert.deepEqual(requested, [1, 1]);
+  });
+});
+
+test("หน้าสั้นที่เกิดจากการถูกจำกัดอัตรา: ขอย้ำแล้วได้ครบ จึงไล่หน้าต่อ", () => {
+  const requested: number[] = [];
+  return listAllOrders({ credentials: CREDS, maxPages: 2 }, async (page) => {
+    requested.push(page);
+    const times = requested.filter((seen) => seen === page).length;
+    // หน้า 1 ตอบสั้น 4 ใบในครั้งแรก (จำกัดอัตรา) ครั้งที่สองได้ครบ 15 ใบ
+    // หน้า 2 เป็นหน้าสุดท้ายจริง (4 ใบ) — ขอย้ำแล้วยังได้ 4 ใบ จึงจบ
+    const length = page === 1 ? (times === 1 ? 4 : 15) : 4;
+    return {
+      orders: Array.from({ length }, (_, index) => rawOrder({ id: page * 100 + index })),
+      options: {},
+    } as ShipnityOrdersPage;
+  }).then((orders) => {
+    assert.equal(orders.length, 19);
+    assert.equal(requested[0], 1);
+    assert.equal(requested.filter((page) => page === 1).length, 2);
   });
 });
 
