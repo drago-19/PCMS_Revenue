@@ -15,3 +15,6 @@ samples/*.xlsx
 output/
 shipnity-orders-sample.json
 .aetox/
+
+# สคริปต์ตรวจชั่วคราว (ขึ้นต้นด้วย _) ไม่ commit
+scripts/_*.ts
