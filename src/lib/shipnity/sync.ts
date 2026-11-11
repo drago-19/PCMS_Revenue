@@ -28,16 +28,21 @@ import {
   writeSyncState,
 } from "@/lib/shipnity/store";
 
-/** ข้อมูลถือว่าสดภายในเวลานี้ — เปิดหน้าถี่ ๆ จึงไม่ยิง Shipnity ซ้ำ */
-const FRESH_MS = 120_000;
-/** หลังโดน 429 ให้หยุดยิงชั่วคราว (ข้อมูลเก่ายังแสดงได้) */
-const RATE_LIMIT_PAUSE_MS = 120_000;
+/**
+ * ข้อมูลถือว่าสดภายในเวลานี้ — เปิดหน้าถี่ ๆ จึงไม่ยิง Shipnity ซ้ำ
+ * ตั้ง 5 นาทีเพราะการไล่ทั้งกองทุก 2 นาทีทำให้ Shipnity จำกัดการเรียก (429) ทั้งบัญชี
+ */
+const FRESH_MS = 300_000;
+/** หลังโดน 429 ครั้งแรกหยุด 2 นาที โดนซ้ำจะถอยร่นขึ้นเป็น 5 และ 15 นาที (ข้อมูลเก่ายังแสดงได้) */
+const RATE_LIMIT_STEPS_MS = [120_000, 300_000, 900_000];
 /** เพดานหน้าต่อการดึงหนึ่งครั้ง (15 ใบ/หน้า) — 60 หน้า = 900 ใบ เกินพอสำหรับร้านนี้ */
 const SYNC_MAX_PAGES = Math.max(60, OPEN_MAX_PAGES);
 
 interface SyncRuntime {
   inFlight: Map<string, Promise<number>>;
   pausedUntil: number;
+  /** โดน 429 ติดกันกี่ครั้ง (ใช้เลือกเวลาถอยร่น) */
+  rateLimitStreak: number;
   timer: ReturnType<typeof setInterval> | null;
 }
 
@@ -45,6 +50,7 @@ const globalForSync = globalThis as unknown as { __shipnitySyncRuntime?: SyncRun
 const runtime: SyncRuntime = (globalForSync.__shipnitySyncRuntime ??= {
   inFlight: new Map(),
   pausedUntil: 0,
+  rateLimitStreak: 0,
   timer: null,
 });
 
@@ -83,9 +89,14 @@ export async function syncOpenOrders(account: ConnectedShipnityAccount): Promise
       const written = await saveStoredOrders(account.id, orders);
       await pruneStoredOrders(account.id);
       await writeSyncState(account.id, { orderCount: orders.length, lastError: null });
+      runtime.rateLimitStreak = 0;
       return written;
     } catch (error) {
-      if (isRateLimit(error)) runtime.pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+      if (isRateLimit(error)) {
+        const step = RATE_LIMIT_STEPS_MS[Math.min(runtime.rateLimitStreak, RATE_LIMIT_STEPS_MS.length - 1)];
+        runtime.rateLimitStreak += 1;
+        runtime.pausedUntil = Date.now() + step;
+      }
       const message = error instanceof Error ? error.message : "ซิงก์ไม่สำเร็จ";
       await writeSyncState(account.id, {
         orderCount: (await readSyncState(account.id))?.orderCount ?? 0,
@@ -176,6 +187,7 @@ export function startShipnityBackgroundSync(accounts: readonly ConnectedShipnity
   if (runtime.timer || accounts.length === 0) return;
 
   runtime.timer = setInterval(() => {
+    if (runtime.pausedUntil > Date.now()) return;
     for (const account of accounts) {
       void (async () => {
         const state = await readSyncState(account.id).catch(() => null);
@@ -195,5 +207,6 @@ export function startShipnityBackgroundSync(accounts: readonly ConnectedShipnity
 /** บังคับซิงก์เดี๋ยวนี้ (ปุ่ม “ดึงใหม่เลย”) — ไม่ล้างข้อมูลเดิม */
 export async function forceSyncShipnity(accounts: readonly ConnectedShipnityAccount[]): Promise<void> {
   runtime.pausedUntil = 0;
+  runtime.rateLimitStreak = 0;
   await Promise.all(accounts.map((account) => syncOpenOrders(account).catch(() => 0)));
 }

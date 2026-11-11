@@ -820,9 +820,11 @@ function ShopPanel({
 
       <div className="grid grid-cols-2 gap-3 no-print @min-[760px]:grid-cols-3">
         <StatCard
-          label="ต้องส่ง (ร้านนี้)"
+          label="ต้องแพ็คของวันนี้"
           value={`${summary.totalOrders} ออเดอร์`}
-          hint={`${summary.totalItems} ชิ้น · ${currentProducts.length + nextProducts.length} รายการสินค้า`}
+          hint={`${summary.totalItems} ชิ้น · ${currentProducts.length + nextProducts.length} รายการสินค้า${
+            item.carryOrders.length > 0 ? ` · ไม่รวมของค้าง ${item.carryOrders.length} ใบ` : ""
+          }`}
           tone="brand"
           icon={<IconTruck size={19} />}
         />
@@ -1277,8 +1279,9 @@ function ShipnityChips({ orders, fetchedAt }: { orders: ShipnityOrder[]; fetched
         ))}
       </div>
       <p className="text-xs text-muted-foreground">
-        นับจากออเดอร์ที่ยังไม่ปิดรายการของทั้งร้าน (ไม่จำกัดวันที่ — ต่างจากตารางแพ็คของวันนี้)
-        {stamp ? ` · ณ ${stamp} น.` : ""} — เปิดหน้า Shipnity เทียบได้เลย แต่ต้องดูเลขของจังหวะเดียวกัน
+        นับจากออเดอร์ที่ยังไม่ปิดรายการของทั้งร้าน (ทุกวันที่ รวมของค้าง) — จึงมากกว่าการ์ด
+        “ต้องแพ็คของวันนี้” ที่นับเฉพาะออเดอร์ที่สั่งวันนี้
+        {stamp ? ` · ณ ${stamp} น.` : ""} — เทียบกับหน้า Shipnity ได้ แต่ต้องดูเลขของจังหวะเดียวกัน
         เพราะออเดอร์ใหม่เข้ามาตลอด
       </p>
     </div>
