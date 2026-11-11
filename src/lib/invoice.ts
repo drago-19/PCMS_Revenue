@@ -61,6 +61,8 @@ export interface InvoiceModel {
   salesAmount: number;
   shippingFee: number;
   shippingCustomerFee?: number;
+  /** ค่าจัดส่งสินค้าที่ออกโดย Shopee (จากไฟล์รายได้ Shopee) — Shopee เท่านั้น */
+  shippingIssuedByShopee?: number;
   shippingGross: number;
   shippingCoupon: number;
   shippingPlatformDiscount: number;
@@ -236,6 +238,24 @@ export function buildInvoice(
   const custShippingFee = round2(
     Number(row.shippingFeeCustomer ?? fields.shippingCustomerFee ?? 0),
   );
+  // ค่าจัดส่งที่ Shopee ออกให้ เก็บแยกช่องทางตามกฎ Strict Platform Isolation
+  // แถวที่นำเข้าก่อนมีฟิลด์นี้ยังอ่านได้จาก unknownValues ที่บันทึกไว้เดิม (ไม่ต้องนำเข้าไฟล์ซ้ำ)
+  const shopeeIssuedShippingHeader = "ค่าจัดส่งสินค้าที่ออกโดย Shopee";
+  const shopeeIssuedFromUnknown =
+    ch === "Shopee"
+      ? round2(
+          (row.normalized.unknownValues ?? [])
+            .filter((uv) => uv.header === shopeeIssuedShippingHeader)
+            .reduce((sum, uv) => sum + Number(uv.amount ?? 0), 0),
+        )
+      : 0;
+  const shippingIssuedByShopee =
+    ch === "Shopee"
+      ? fields.shippingIssuedByShopee !== undefined
+        ? round2(Number(fields.shippingIssuedByShopee))
+        : shopeeIssuedFromUnknown
+      : 0;
+  const shippingIssuedOffset = Math.max(0, shippingIssuedByShopee);
 
   // สำหรับ TikTok:
   // productAfterDiscount คือยอดรวมค่าสินค้าหลังหักส่วนลดร้านค้า (ไม่รวมค่าขนส่ง)
@@ -250,7 +270,12 @@ export function buildInvoice(
       : productAfterWithRefund > 0
         ? productAfterWithRefund
         : rawIncome > 0
-          ? round2(Math.max(0, rawIncome - Math.max(0, custShippingFee)))
+          ? round2(
+              Math.max(
+                0,
+                rawIncome - Math.max(0, custShippingFee) - shippingIssuedOffset,
+              ),
+            )
           : 0;
 
   const salesAmount = isZeroRefundedOrder
@@ -606,6 +631,7 @@ export function buildInvoice(
     salesAmount,
     shippingFee,
     shippingCustomerFee,
+    shippingIssuedByShopee,
     shippingGross,
     shippingCoupon,
     shippingPlatformDiscount,

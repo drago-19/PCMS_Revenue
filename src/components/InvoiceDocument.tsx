@@ -75,16 +75,26 @@ export function computeAbbreviatedSummary(
   );
 
   // ค่าขนส่งที่นำขึ้นไปแสดงในตารางรายละเอียด:
-  // - Shopee / Facebook: ดึงจาก "ค่าส่งที่เก็บลูกค้า" (shippingCustomerFee / shippingFee) เท่านั้น เพราะ shippingActual (-154) ใน Shipnity คือค่าธรรมเนียมรวมที่ร้านจ่าย
+  // - Shopee: "ค่าส่งที่เก็บลูกค้า" + "ค่าจัดส่งสินค้าที่ออกโดย Shopee" (ไฟล์รายได้ Shopee)
+  //   เพราะค่าจัดส่งที่ Shopee ออกให้นั้นถูกนับเป็นรายได้ใน incomeTotal ของไฟล์อยู่แล้ว
+  // - Facebook / Lazada / LINE / Other: ดึงจาก "ค่าส่งที่เก็บลูกค้า" (shippingCustomerFee / shippingFee) เท่านั้น เพราะ shippingActual (-154) ใน Shipnity คือค่าธรรมเนียมรวมที่ร้านจ่าย
   // - TikTok: ดึงจาก "การจัดส่ง" (Math.abs(shippingActual))
-  const shippingLineAmount = isOmsChannel
-    ? round2(
-        Math.max(
-          0,
-          invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
-        ),
-      )
-    : round2(
+  const shippingLineAmount =
+    invoice.channel === "Shopee"
+      ? round2(
+          Math.max(
+            0,
+            invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
+          ) + Math.max(0, invoice.shippingIssuedByShopee ?? 0),
+        )
+      : isOmsChannel
+        ? round2(
+            Math.max(
+              0,
+              invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
+            ),
+          )
+        : round2(
         Math.abs(invoice.shippingActual) > 0
           ? (invoice.shippingPlatformDiscount ?? 0) > 0
             ? Math.min(
@@ -204,6 +214,27 @@ export function getOrderedInvoiceBreakdownLines(
     invoice.channel === "Other";
   if (invoice.channel === "Lazada") {
     return (invoice.extraBreakdownLines ?? []).filter((line) => line.amount !== 0);
+  }
+  if (invoice.channel === "Shopee") {
+    const custShippingFee = round2(
+      invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
+    );
+    const shippedByShopee = round2(invoice.shippingIssuedByShopee ?? 0);
+    const lines = [
+      {
+        key: "shippingCustomerFee",
+        label: "ค่าธรรมเนียมการจัดส่งของลูกค้า",
+        amount: custShippingFee,
+      },
+    ];
+    if (shippedByShopee !== 0) {
+      lines.push({
+        key: "shippingIssuedByShopee",
+        label: "ค่าจัดส่งสินค้าที่ออกโดย Shopee",
+        amount: shippedByShopee,
+      });
+    }
+    return lines;
   }
   if (isOmsChannel) {
     const custShippingFee = round2(

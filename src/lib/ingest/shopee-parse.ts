@@ -508,6 +508,12 @@ export async function detectAndParseShopeeInput(
     const productBeforeDiscount = sumColumn(acc, "สินค้าราคาปกติ");
     const storeDiscount = sumColumn(acc, "ส่วนลดสินค้าจากผู้ขาย");
     const shippingCustomerFee = sumColumn(acc, "ค่าจัดส่งที่ชำระโดยผู้ซื้อ");
+    // ค่าจัดส่งที่ Shopee ออกให้ (ผู้ซื้อได้ส่งฟรี) — อยู่ในกลุ่มรายได้ของไฟล์ Shopee
+    // ต้องแยกเป็นฟิลด์ของตัวเองเพื่อให้ใบกำกับภาษีแสดงเป็นบรรทัดค่าจัดส่ง เหมือน TikTok
+    const shippingIssuedByShopee = sumColumn(
+      acc,
+      "ค่าจัดส่งสินค้าที่ออกโดย Shopee",
+    );
     const productAfterDiscount = round2(productBeforeDiscount + storeDiscount);
 
     // ค่าธรรมเนียม/รายได้ที่เหลือ: ส่งเป็น unknownValues เพื่อให้บิลแจกแจงทีละบรรทัด
@@ -543,6 +549,7 @@ export async function detectAndParseShopeeInput(
         storeDiscount,
         productAfterDiscount,
         shippingCustomerFee,
+        shippingIssuedByShopee,
         customerPayment: round2(productAfterDiscount + shippingCustomerFee),
         ...(returnCodeCol !== undefined
           ? { returnCode: cellText(firstRowValues[returnCodeCol]) }

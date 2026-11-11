@@ -3,7 +3,7 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-10)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-11)
 
 - **เจ้าของงาน (ACTIVE)**: ผู้ใช้ (เทสต์การนำเข้าไฟล์รายได้ Shopee ด้วยตนเอง — โค้ด + เทสต์ + Quality Gate เสร็จแล้ว รอผู้ใช้ยืนยันผลจริงบนเบราว์เซอร์และนำเข้าไฟล์จริงในระบบ production เอง)
 - **เป้าหมายปัจจุบัน**:
@@ -16,6 +16,16 @@
   - [x] 7. ปรับกฎการนับบิล Shopee ตามที่ผู้ใช้ยืนยัน: **แถว OMS placeholder ของ Shopee ยังไม่ใช่บิลจนกว่าจะมีไฟล์รายได้ Shopee** (ชิป Shopee = 0 จนกว่าจะอัปโหลดไฟล์) โดยใช้ `EXCLUDE_PENDING_SHOPEE_BILL_SQL` ใน `listBills` + `getOverallStats` + `daily_summaries` — ไม่แตะ `invoice_registry`/หน้าพิมพ์ใบกำกับฯ และปฏิทินยังเตือน "ขาดรายได้ Shopee" ตามเดิม
   - [ ] 8. (ผู้ใช้) นำเข้าไฟล์รายได้ Shopee จริงที่ `localhost:3001` บริษัทชีเฮง + ยืนยัน: บิล Shopee ยอดโอนตามไฟล์ (รวมแถวติดลบ), แถว Adjustment -447 ฿ ในหน้าแรก, แท็ก "ขาดรายได้ Shopee" ในปฏิทิน, และ Responsive 360/390/768/1280px
   - [ ] 9. (ผู้ใช้) นำเข้าไฟล์ย้อนหลังรายเดือนของ Shopee เองในระบบ production (ห้าม deploy จาก AI — ผู้ใช้เป็นผู้ deploy) และรัน full rebuild `daily_summaries` หนึ่งครั้งหลัง deploy (สคริปต์/ขั้นตอนแจ้งในรายงาน)
+
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-11 — Shopee: เพิ่มบรรทัด "ค่าจัดส่งสินค้าที่ออกโดย Shopee" ในใบกำกับภาษี ให้เหมือน TikTok)**:
+  - **อาการ**: ใบกำกับภาษีของออเดอร์ Shopee ขึ้น "รายได้ / ยอดรวมทั้งหมด (รวมภาษีมูลค่าเพิ่ม)" = `incomeTotal` (เช่น ฿105.00) แต่ตารางด้านบนแสดงแค่ค่าสินค้า + ค่าจัดส่งของลูกค้า (70 + 10 = 80) → บรรทัดค่าจัดส่งที่ Shopee ออกให้หายไป 25 บาท ยอดรวมบรรทัดไม่เท่ายอดรวมเอกสาร
+  - **การแก้ไข (แยกเฉพาะ Shopee ตาม Strict Platform Financial Isolation)**:
+    - `src/lib/ingest/shopee-parse.ts`: เก็บ `ค่าจัดส่งสินค้าที่ออกโดย Shopee` เป็นฟิลด์ `shippingIssuedByShopee` (บวกตามไฟล์) — ไม่แตะ `incomeTotal` / `feeTotal` / `payout` / `customerPayment`; อัตลักษณ์ `income + refund + feeTotal = payout` ยังลงตัว (`checks.payoutDiff = 0`)
+    - `src/lib/invoice.ts`: เพิ่ม `shippingIssuedByShopee` ใน `InvoiceModel` (เฉพาะ `channel === 'Shopee'`), หักออกจากยอดขายสินค้าสำรอง (`rawIncome - custShippingFee`) และอ่านถอยหลังจาก `unknownValues` เดิมได้ → บิลที่นำเข้าก่อนหน้านี้แสดงบรรทัดนี้ได้โดยไม่ต้องนำเข้าไฟล์ซ้ำ
+    - `src/components/InvoiceDocument.tsx`: `getOrderedInvoiceBreakdownLines` ของ Shopee คืน 2 บรรทัด (`ค่าธรรมเนียมการจัดส่งของลูกค้า` + `ค่าจัดส่งสินค้าที่ออกโดย Shopee` เฉพาะเมื่อ ≠ 0) และ `computeAbbreviatedSummary` นับค่านี้เข้า `shippingLineAmount` เฉพาะ Shopee
+  - **การตรวจสอบ**: `npx tsc --noEmit` 0 error · `pnpm build` ผ่าน · เทสต์ใหม่ `tests/shopee-issued-shipping.test.ts` 5/5 ผ่าน (parser, ใบกำกับ, ไม่มีคอลัมน์, ไม่รั่วไป TikTok/Facebook, บิลเก่าที่อ่านจาก unknownValues) · วัดกับไฟล์จริง `Income.โอนเงินสำเร็จ.th.20261001_20261031 (2).xlsx` (161 ออเดอร์) ด้วย `scripts/_verify-shopee-issued-shipping.ts`: **ก่อนแก้ 4 ออเดอร์บรรทัดรวมไม่เท่ายอดรวม (หาย 146.00 บาท) → หลังแก้ 0 ออเดอร์**
+    - `pnpm test` ทั้งชุด: 122 tests (118 pass, 2 fail ที่มีอยู่ก่อนแล้วบนโค้ด baseline — เทสต์ `reconcileAndSyncThreeFiles` / `daily_summaries` ไม่เกี่ยวกับงานนี้)
+  - **ค้าง**: (ผู้ใช้) ตรวจตาในเบราว์เซอร์ที่หน้าใบกำกับของออเดอร์ Shopee ที่มีคอลัมน์นี้ (เช่น `261026KYSDP0C3` ค่าจัดส่งที่ Shopee ออกให้ ฿35.00) — รอบนี้ตรวจด้วยตัวเลข/เทสต์/build เท่านั้น ยังไม่ได้เปิดเบราว์เซอร์
 
 - ✅ **เสร็จสมบูรณ์แล้ว (2026-11-10 — รองรับไฟล์รายได้ Shopee (Shopee Settlement) แบบ 3 ไฟล์ ตั้งแต่ parser จนถึงปฏิทินความครบถ้วน)**:
   - **เพิ่มช่องทาง Shopee แบบ flow 3 ไฟล์ (ไฟล์รายได้ Shopee) โดยคงกฎเดิมของแต่ละแพลตฟอร์มแยกกัน (`src/lib/ingest/shopee-parse.ts` ใหม่, `import-service.ts`, `queries.ts`, `UploadCompletenessCalendar.tsx`, `UploadForm.tsx`, `ExcelPreviewDialog.tsx`, `invoices/[orderId]/page.tsx`, `import/page.tsx`)**:
