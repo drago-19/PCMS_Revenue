@@ -128,8 +128,11 @@ test("Shopee invoice shows ค่าจัดส่งสินค้าที�
   });
 
   assert.equal(invoice.shippingIssuedByShopee, 25);
+  assert.equal(invoice.shippingDeductedByShopee, -25);
   assert.equal(invoice.salesAmount, 70);
-  assert.equal(invoice.receiptTotal, 105);
+  // Shopee หักค่าจัดส่งที่ออกให้คืนเท่ากัน → ยอดรวมใบกำกับ = เงินที่ลูกค้าจ่าย (70 + 10)
+  assert.equal(invoice.receiptTotal, 80);
+  assert.equal(invoice.receiptTotal, tx.fields.customerPayment);
 
   const lines = getOrderedInvoiceBreakdownLines(invoice).map((line) => ({
     key: line.key,
@@ -139,7 +142,10 @@ test("Shopee invoice shows ค่าจัดส่งสินค้าที�
   assert.deepEqual(lines, [
     { key: "shippingCustomerFee", label: "ค่าธรรมเนียมการจัดส่งของลูกค้า", amount: 10 },
     { key: "shippingIssuedByShopee", label: "ค่าจัดส่งสินค้าที่ออกโดย Shopee", amount: 25 },
+    { key: "shippingDeductedByShopee", label: "หักค่าจัดส่งสินค้าที่ออก โดย Shopee", amount: -25 },
   ]);
+  // คู่ค่าจัดส่งที่ Shopee ออกให้ต้องหักลบกันเอง (เหมือน TikTok)
+  assert.equal(lines[1]!.amount + lines[2]!.amount, 0);
 
   const linesTotal = lines.reduce((sum, line) => sum + line.amount, 0);
   assert.equal(invoice.salesAmount + linesTotal, invoice.receiptTotal);
@@ -274,6 +280,7 @@ test("Shopee invoices imported before the new field still show the line from sto
   });
 
   assert.equal(invoice.shippingIssuedByShopee, 25);
+  assert.equal(invoice.shippingDeductedByShopee, -25);
   assert.deepEqual(
     getOrderedInvoiceBreakdownLines(invoice).map((line) => ({
       key: line.key,
@@ -282,7 +289,8 @@ test("Shopee invoices imported before the new field still show the line from sto
     [
       { key: "shippingCustomerFee", amount: 10 },
       { key: "shippingIssuedByShopee", amount: 25 },
+      { key: "shippingDeductedByShopee", amount: -25 },
     ],
   );
-  assert.equal(invoice.receiptTotal, 105);
+  assert.equal(invoice.receiptTotal, 80);
 });

@@ -82,36 +82,36 @@ export function computeAbbreviatedSummary(
   const shippingLineAmount =
     invoice.channel === "Shopee"
       ? round2(
+        Math.max(
+          0,
+          invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
+        ) + Math.max(0, invoice.shippingIssuedByShopee ?? 0),
+      )
+      : isOmsChannel
+        ? round2(
           Math.max(
             0,
             invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
-          ) + Math.max(0, invoice.shippingIssuedByShopee ?? 0),
+          ),
         )
-      : isOmsChannel
-        ? round2(
-            Math.max(
-              0,
-              invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
-            ),
-          )
         : round2(
-        Math.abs(invoice.shippingActual) > 0
-          ? (invoice.shippingPlatformDiscount ?? 0) > 0
-            ? Math.min(
+          Math.abs(invoice.shippingActual) > 0
+            ? (invoice.shippingPlatformDiscount ?? 0) > 0
+              ? Math.min(
                 Math.abs(invoice.shippingActual),
                 round2(
                   Math.max(0, invoice.shippingPlatformDiscount ?? 0) +
-                    Math.max(
-                      0,
-                      invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
-                    ),
+                  Math.max(
+                    0,
+                    invoice.shippingCustomerFee ?? invoice.shippingFee ?? 0,
+                  ),
                 ),
               )
-            : Math.abs(invoice.shippingActual)
-          : invoice.shippingGross > 0
-            ? invoice.shippingGross
-            : Math.max(0, invoice.shippingFee),
-      );
+              : Math.abs(invoice.shippingActual)
+            : invoice.shippingGross > 0
+              ? invoice.shippingGross
+              : Math.max(0, invoice.shippingFee),
+        );
 
   // รวมเป็นเงิน = ราคาขายสินค้า (รวมส่วนลดที่แพลตฟอร์มชดเชยเป็นรายได้ร้าน) + ค่าขนส่ง
   const subtotalBeforeFee = round2(
@@ -140,8 +140,8 @@ export function computeAbbreviatedSummary(
   const paymentTotal = isOmsChannel
     ? grandTotal
     : round2(
-        typeof invoice.payout === "number" ? invoice.payout : grandTotal,
-      );
+      typeof invoice.payout === "number" ? invoice.payout : grandTotal,
+    );
   const specialDiscountAmount = isOmsChannel
     ? 0
     : round2(paymentTotal - grandTotal);
@@ -232,6 +232,12 @@ export function getOrderedInvoiceBreakdownLines(
         key: "shippingIssuedByShopee",
         label: "ค่าจัดส่งสินค้าที่ออกโดย Shopee",
         amount: shippedByShopee,
+      });
+      // Shopee หักค่าจัดส่งที่ออกให้คืนเท่ากัน → แสดงบรรทัดหักให้จับคู่ (±) เหมือน TikTok
+      lines.push({
+        key: "shippingDeductedByShopee",
+        label: "หักค่าจัดส่งสินค้าที่ออก โดย Shopee",
+        amount: -shippedByShopee,
       });
     }
     return lines;
@@ -525,7 +531,7 @@ export function InvoiceDocument({
       : invoice.items.reduce((acc, item) => acc + item.qty, 0);
   const isCompensationInvoice = Boolean(
     invoice.isPlatformCompensation ||
-      invoice.items.some((item) => item.isCompensation),
+    invoice.items.some((item) => item.isCompensation),
   );
   const quantityUnitLabel = isCompensationInvoice ? "รายการ" : "ตัว";
   const itemsNetTotal = round2(
@@ -938,9 +944,8 @@ export function InvoiceDocument({
             ) : null}
             {showInvoiceNo ? (
               <div
-                className={`flex items-baseline gap-1.5 ${
-                  showReceiptNo ? "sm:justify-end print:justify-end" : ""
-                }`}
+                className={`flex items-baseline gap-1.5 ${showReceiptNo ? "sm:justify-end print:justify-end" : ""
+                  }`}
               >
                 <span className="shrink-0 font-semibold text-[#475569]">
                   เลขที่ใบกำกับภาษี :
@@ -961,11 +966,10 @@ export function InvoiceDocument({
               </span>
             </div>
             <div
-              className={`flex items-baseline gap-1.5 ${
-                showInvoiceNo || showReceiptNo
+              className={`flex items-baseline gap-1.5 ${showInvoiceNo || showReceiptNo
                   ? "sm:justify-end print:justify-end"
                   : ""
-              }`}
+                }`}
             >
               <span className="shrink-0 font-semibold text-[#475569]">
                 ช่องทางจำหน่าย :

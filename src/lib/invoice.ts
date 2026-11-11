@@ -63,6 +63,8 @@ export interface InvoiceModel {
   shippingCustomerFee?: number;
   /** ค่าจัดส่งสินค้าที่ออกโดย Shopee (จากไฟล์รายได้ Shopee) — Shopee เท่านั้น */
   shippingIssuedByShopee?: number;
+  /** บรรทัดหักค่าจัดส่งสินค้าที่ออก โดย Shopee (ติดลบ เท่ากับที่ Shopee หักคืน) — Shopee เท่านั้น */
+  shippingDeductedByShopee?: number;
   shippingGross: number;
   shippingCoupon: number;
   shippingPlatformDiscount: number;
@@ -142,10 +144,10 @@ export function isOrderEligibleForInvoice(row: {
   omsItems?: unknown[] | null;
   isNoProductPriceOrder?: boolean;
   lineComparisonStatus?:
-    | "matched"
-    | "amount_diff"
-    | "orders_only"
-    | "shipnity_only";
+  | "matched"
+  | "amount_diff"
+  | "orders_only"
+  | "shipnity_only";
 }): boolean {
   // 0. รายการชดเชยจากแพลตฟอร์ม / โลจิสติกส์ ของ TikTok ที่มียอดรับสุทธิ > 0
   if (isPlatformCompensationRow(row)) {
@@ -164,9 +166,9 @@ export function isOrderEligibleForInvoice(row: {
   const ch = row.channel || "TikTok";
   const hasRealProductDetail = Boolean(
     row.productDetail &&
-      row.productDetail.trim() !== "" &&
-      row.productDetail.trim() !== "/" &&
-      (ch === "Lazada" || row.productDetail.includes("·")),
+    row.productDetail.trim() !== "" &&
+    row.productDetail.trim() !== "/" &&
+    (ch === "Lazada" || row.productDetail.includes("·")),
   );
   const hasItems = Boolean(
     hasRealProductDetail || (row.omsItems && row.omsItems.length > 0),
@@ -244,10 +246,10 @@ export function buildInvoice(
   const shopeeIssuedFromUnknown =
     ch === "Shopee"
       ? round2(
-          (row.normalized.unknownValues ?? [])
-            .filter((uv) => uv.header === shopeeIssuedShippingHeader)
-            .reduce((sum, uv) => sum + Number(uv.amount ?? 0), 0),
-        )
+        (row.normalized.unknownValues ?? [])
+          .filter((uv) => uv.header === shopeeIssuedShippingHeader)
+          .reduce((sum, uv) => sum + Number(uv.amount ?? 0), 0),
+      )
       : 0;
   const shippingIssuedByShopee =
     ch === "Shopee"
@@ -256,6 +258,10 @@ export function buildInvoice(
         : shopeeIssuedFromUnknown
       : 0;
   const shippingIssuedOffset = Math.max(0, shippingIssuedByShopee);
+  // Shopee หักค่าจัดส่งที่ตัวเองออกให้คืนจากยอดโอนเท่ากัน → ใบกำกับต้องมีบรรทัดหักลบ
+  // ให้จับคู่กับบรรทัดบวก (เหมือนคู่ ±「ส่วนลดค่าจัดส่ง」/「การจัดส่ง」ของ TikTok)
+  const shippingDeductedByShopee =
+    ch === "Shopee" ? -shippingIssuedOffset : 0;
 
   // สำหรับ TikTok:
   // productAfterDiscount คือยอดรวมค่าสินค้าหลังหักส่วนลดร้านค้า (ไม่รวมค่าขนส่ง)
@@ -271,11 +277,11 @@ export function buildInvoice(
         ? productAfterWithRefund
         : rawIncome > 0
           ? round2(
-              Math.max(
-                0,
-                rawIncome - Math.max(0, custShippingFee) - shippingIssuedOffset,
-              ),
-            )
+            Math.max(
+              0,
+              rawIncome - Math.max(0, custShippingFee) - shippingIssuedOffset,
+            ),
+          )
           : 0;
 
   const salesAmount = isZeroRefundedOrder
@@ -376,7 +382,7 @@ export function buildInvoice(
 
   const storeDiscountFromFields = round2(
     Math.abs(Number(fields.storeDiscount ?? 0)) +
-      Math.abs(Number(fields.sellerCofundCoupon ?? 0)),
+    Math.abs(Number(fields.sellerCofundCoupon ?? 0)),
   );
 
   const explicitDiscount =
@@ -415,8 +421,8 @@ export function buildInvoice(
   const platformCofundCoupon =
     platformCofundCouponRefund < 0 && rawPlatformCofundCoupon > 0
       ? round2(
-          Math.max(0, rawPlatformCofundCoupon + platformCofundCouponRefund),
-        )
+        Math.max(0, rawPlatformCofundCoupon + platformCofundCouponRefund),
+      )
       : rawPlatformCofundCoupon;
   const sellerCofundCoupon =
     sellerCofundCouponRefund !== 0 && rawSellerCofundCoupon !== 0
@@ -495,11 +501,11 @@ export function buildInvoice(
     : customerPayment > 0
       ? customerPayment
       : round2(
-          Math.max(
-            0,
-            salesAmount + shippingFee - platformCoupon,
-          ),
-        );
+        Math.max(
+          0,
+          salesAmount + shippingFee - platformCoupon,
+        ),
+      );
 
   const feeTotal = round2(Number(row.feeTotal ?? fields.feeTotal ?? 0));
   const adjustment = isPlatformCompensation
@@ -517,7 +523,9 @@ export function buildInvoice(
       : round2(salesAmount + shippingFee);
 
   const omsReceiptTotal = round2(
-    rawIncome > 0 ? rawIncome : salesAmount + Math.max(0, shippingFee),
+    rawIncome > 0
+      ? rawIncome + shippingDeductedByShopee
+      : salesAmount + Math.max(0, shippingFee),
   );
 
   const shipPlatformDiscount = Math.max(0, shippingPlatformDiscount);
@@ -632,6 +640,7 @@ export function buildInvoice(
     shippingFee,
     shippingCustomerFee,
     shippingIssuedByShopee,
+    shippingDeductedByShopee,
     shippingGross,
     shippingCoupon,
     shippingPlatformDiscount,
