@@ -10,7 +10,8 @@
     "deploy:app": "docker compose up -d --build app",
     "test": "tsx --env-file-if-exists=.env --test tests/*.test.ts",
     "import:file": "tsx scripts/import-file.ts",
-    "import:dir": "tsx scripts/import-dir.ts"
+    "import:dir": "tsx scripts/import-dir.ts",
+    "shipnity:probe": "tsx --env-file-if-exists=.env scripts/shipnity-probe.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

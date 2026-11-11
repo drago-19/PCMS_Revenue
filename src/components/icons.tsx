@@ -280,3 +280,21 @@ export function IconDownload(props: IconProps) {
     </svg>
   );
 }
+
+export function IconSpinner(props: IconProps) {
+  return (
+    <svg {...base(props)} className={`animate-spin ${props.className ?? ""}`} aria-hidden="true">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+export function IconInfo(props: IconProps) {
+  return (
+    <svg {...base(props)} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 7.6h.01" />
+    </svg>
+  );
+}

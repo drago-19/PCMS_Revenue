@@ -55,6 +55,7 @@ import {
   IconHome,
   IconLedger,
   IconReceipt,
+  IconTruck,
   IconUpload,
   IconWallet,
 } from "./icons";
@@ -78,6 +79,14 @@ const items = [
       pathname.startsWith("/invoices/") ||
       pathname === "/days" ||
       pathname.startsWith("/days/"),
+  },
+  {
+    href: "/orders",
+    label: "ออเดอร์รอแพ็ค",
+    sub: "ตัดรอบ 14.00 น. แยกตามขนส่ง",
+    icon: IconTruck,
+    match: (pathname: string) =>
+      pathname === "/orders" || pathname.startsWith("/orders/"),
   },
   {
     href: "/products",

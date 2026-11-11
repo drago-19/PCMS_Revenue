@@ -11,3 +11,6 @@ samples/*.xlsx
 /imports/
 .shots/
 .tmp-*
+# ผลลัพธ์ชั่วคราวจากการตรวจหน้าเว็บ/สคริปต์ probe (มีข้อมูลลูกค้าจริง ห้าม commit)
+output/
+shipnity-orders-sample.json
