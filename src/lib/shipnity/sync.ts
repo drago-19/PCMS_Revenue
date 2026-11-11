@@ -19,6 +19,7 @@ import {
 } from "@/lib/shipnity/client";
 import type { ConnectedShipnityAccount } from "@/lib/shipnity/config";
 import {
+  countOpenStored,
   hasSyncedClosedDay,
   loadStoredOrders,
   markClosedDaySynced,
@@ -142,6 +143,10 @@ export async function syncClosedDay(
 export interface DayOrdersFromStore extends DayOrdersResult {
   /** แถวที่ถูกเขียนเพิ่ม/แก้ในการซิงก์ล่าสุด (0 = ไม่มีอะไรเปลี่ยน) */
   written: number;
+  /** จำนวนออเดอร์ที่ดึงได้ในรอบซิงก์ล่าสุด (null = ยังไม่เคยซิงก์) */
+  syncedCount: number | null;
+  /** จำนวนออเดอร์ที่ยังไม่ปิดรายการที่มีในฐานข้อมูล */
+  storedOpen: number;
 }
 
 /**
@@ -170,12 +175,17 @@ export async function loadDayOrdersFromStore(
   const stored = await loadStoredOrders(account.id, options.isoDay, {
     includeClosed: options.includeClosed,
   });
+  const latest = await readSyncState(account.id);
+  const storedOpen = await countOpenStored(account.id);
 
   return {
     orders: stored.orders,
     complete: true,
-    fetchedAt: stored.fetchedAt ?? new Date().toISOString(),
+    // ใช้เวลาของรอบซิงก์ล่าสุด — ไม่ใช่เวลาที่แถวถูกเขียนล่าสุด (แถวที่ไม่เปลี่ยนจะค้างเวลาเก่า)
+    fetchedAt: latest?.lastSyncAt ?? stored.fetchedAt ?? new Date().toISOString(),
     written,
+    syncedCount: latest?.orderCount ?? null,
+    storedOpen,
   };
 }
 

@@ -226,6 +226,15 @@ export async function loadStoredOrders(
   };
 }
 
+/** จำนวนออเดอร์ที่ยังไม่ปิดรายการที่เก็บไว้ (ใช้เทียบกับจำนวนที่ดึงได้ในรอบล่าสุด) */
+export async function countOpenStored(accountKey: string): Promise<number> {
+  const row = await queryOne<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM shipnity_orders WHERE account_key = $1 AND closed = false`,
+    [accountKey],
+  );
+  return Number(row?.n ?? 0);
+}
+
 /** ลบออเดอร์ที่ปิดรายการแล้วและเก่ากว่า N วัน (ของที่ยังไม่ปิดรายการไม่ลบ) */
 export async function pruneStoredOrders(
   accountKey: string,

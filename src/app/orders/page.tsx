@@ -68,6 +68,10 @@ interface ShopResult {
   error: string | null;
   fetchedAt: string | null;
   complete: boolean;
+  /** จำนวนออเดอร์ที่ดึงได้ในรอบซิงก์ล่าสุด (null = ยังไม่เคยซิงก์) */
+  syncedCount: number | null;
+  /** จำนวนออเดอร์ที่ยังไม่ปิดรายการที่มีในฐานข้อมูล */
+  storedOpen: number;
   /** จำนวนออเดอร์ดิบที่ดึงมาได้จาก Shipnity */
   rawCount: number;
   /** ออเดอร์ดิบไว้สร้างสรุปตามตัวกรองสถานะ */
@@ -459,6 +463,8 @@ export default async function PackingOrdersPage({
         summary: buildDayPackingSummary(day.orders, isoDay, { includeClosed: !isToday }),
         waiting: collectWaitingPaymentOrders(day.orders, isoDay),
         rawCount: day.orders.length,
+        syncedCount: day.syncedCount,
+        storedOpen: day.storedOpen,
         orders: day.orders,
         carryOrders: carry,
         carrySummary:
@@ -477,6 +483,8 @@ export default async function PackingOrdersPage({
         summary: null,
         waiting: [],
         rawCount: 0,
+        syncedCount: null,
+        storedOpen: 0,
         orders: [],
         carryOrders: [],
         carrySummary: null,
@@ -826,7 +834,12 @@ function ShopPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <ShipnityChips orders={item.orders} fetchedAt={item.fetchedAt} />
+      <ShipnityChips
+        orders={item.orders}
+        fetchedAt={item.fetchedAt}
+        syncedCount={item.syncedCount}
+        storedOpen={item.storedOpen}
+      />
 
       <div className="grid grid-cols-2 gap-3 no-print @min-[760px]:grid-cols-3">
         <StatCard
@@ -1256,7 +1269,18 @@ function WaitingTable({ rows }: { rows: (WaitingPaymentOrder & { shop: string })
   );
 }
 
-function ShipnityChips({ orders, fetchedAt }: { orders: ShipnityOrder[]; fetchedAt: string | null }) {
+function ShipnityChips({
+  orders,
+  fetchedAt,
+  syncedCount,
+  storedOpen,
+}: {
+  orders: ShipnityOrder[];
+  fetchedAt: string | null;
+  syncedCount: number | null;
+  storedOpen: number;
+}) {
+  const incomplete = syncedCount !== null && storedOpen > 0 && syncedCount < storedOpen;
   const counts = countShipnityStatuses(orders);
   const stamp = fetchedAt
     ? new Date(fetchedAt).toLocaleTimeString("th-TH", {
@@ -1294,6 +1318,12 @@ function ShipnityChips({ orders, fetchedAt }: { orders: ShipnityOrder[]; fetched
         {stamp ? ` · ณ ${stamp} น.` : ""} — เทียบกับหน้า Shipnity ได้ แต่ต้องดูเลขของจังหวะเดียวกัน
         เพราะออเดอร์ใหม่เข้ามาตลอด
       </p>
+      {incomplete ? (
+        <p className="rounded-lg bg-[#fff7ed] px-2 py-1 text-xs font-semibold text-[#9a3412]">
+          รอบล่าสุดดึงได้เพียง {syncedCount} จาก {storedOpen} ใบ — Shipnity จำกัดการเรียก
+          ข้อมูลส่วนที่เหลือจึงเป็นชุดเดิม
+        </p>
+      ) : null}
     </div>
   );
 }
