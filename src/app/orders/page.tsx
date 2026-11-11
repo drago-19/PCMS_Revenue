@@ -603,7 +603,13 @@ export default async function PackingOrdersPage({
     .map((item) => item.fetchedAt)
     .filter((value): value is string => value !== null)
     .sort();
+  // หัวหน้าแสดงเวลาที่ "ใหม่ที่สุด" — แต่ละร้านมีเวลาของตัวเองอยู่ในการ์ดร้านอยู่แล้ว
+  const newestFetch = fetchedAts.at(-1) ?? null;
   const oldestFetch = fetchedAts[0] ?? null;
+  const staleShop =
+    oldestFetch && newestFetch && Date.parse(newestFetch) - Date.parse(oldestFetch) > 10 * 60_000
+      ? results.find((item) => item.fetchedAt === oldestFetch)?.account.label ?? null
+      : null;
 
   return (
     <div className="workspace-page @container">
@@ -622,9 +628,13 @@ export default async function PackingOrdersPage({
 
       {summaries.length > 0 ? (
         <>
-          {oldestFetch ? (
+          {newestFetch ? (
             <p className="no-print text-xs text-muted-foreground">
-              ข้อมูลจาก Shipnity ณ {formatDateTime(oldestFetch)} · เก็บไว้ในเซิร์ฟเวอร์เรา และอัปเดตอัตโนมัติทุก 2 นาที
+              ข้อมูลจาก Shipnity ณ {formatDateTime(newestFetch)} · เก็บไว้ในเซิร์ฟเวอร์เรา
+              และอัปเดตอัตโนมัติทุก 5 นาที
+              {staleShop && oldestFetch
+                ? ` · ${staleShop} ยังไม่ได้อัปเดตตั้งแต่ ${formatDateTime(oldestFetch)}`
+                : ""}
             </p>
           ) : null}
 
