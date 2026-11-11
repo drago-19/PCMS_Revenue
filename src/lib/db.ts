@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-09-v53";
+const SCHEMA_VERSION = "2026-11-11-v54";
 
 export type { CompanyId };
 
@@ -1744,6 +1744,47 @@ BEGIN
     GROUP BY i.sku_code;
   END IF;
 END $$;
+
+-- ออเดอร์ Shipnity ที่ดึงมาเก็บไว้ในเซิร์ฟเวอร์ (หน้า /orders อ่านจากตารางนี้ ไม่ไล่ดึง Shipnity ตอนเปิดหน้า)
+CREATE TABLE IF NOT EXISTS shipnity_orders (
+  account_key TEXT NOT NULL,
+  order_id BIGINT NOT NULL,
+  invoice_number TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  paid BOOLEAN NOT NULL DEFAULT false,
+  printed BOOLEAN NOT NULL DEFAULT false,
+  payment_accepted BOOLEAN NOT NULL DEFAULT false,
+  transferred BOOLEAN NOT NULL DEFAULT false,
+  closed BOOLEAN NOT NULL DEFAULT false,
+  cancelled BOOLEAN NOT NULL DEFAULT false,
+  packed BOOLEAN NOT NULL DEFAULT false,
+  order_bank TEXT,
+  shipping_type TEXT,
+  price NUMERIC(14,2),
+  content_hash TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (account_key, order_id)
+);
+CREATE INDEX IF NOT EXISTS ix_shipnity_orders_open
+  ON shipnity_orders (account_key, closed, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_shipnity_orders_created
+  ON shipnity_orders (account_key, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS shipnity_sync_state (
+  account_key TEXT PRIMARY KEY,
+  last_sync_at TIMESTAMPTZ,
+  order_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS shipnity_closed_days (
+  account_key TEXT NOT NULL,
+  iso_day TEXT NOT NULL,
+  synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (account_key, iso_day)
+);
 
 ANALYZE transactions;
 `;

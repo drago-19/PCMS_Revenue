@@ -1,0 +1,199 @@
+// ซิงก์ออเดอร์ Shipnity เข้าฐานข้อมูลของเรา (งานเบื้องหลัง)
+//
+// กติกา:
+// - หน้าเว็บไม่ยิง Shipnity เอง — อ่านจากตาราง shipnity_orders (ดู store.ts)
+// - รอบแรกของแต่ละบัญชี: ดึงชุดที่ยังไม่ปิดรายการทั้งหมดแล้วบันทึก
+// - รอบถัดไป: ดึงชุดเดิมซ้ำทุก 2 นาที แต่เขียนเฉพาะแถวที่เปลี่ยน (content_hash)
+// - ดูย้อนหลัง: ดึงเฉพาะออเดอร์ที่ปิดแล้วของวันนั้นครั้งเดียว แล้วเก็บไว้
+// - ออเดอร์ที่ปิดแล้วและเก่ากว่า 7 วัน ถูกลบออกจากเซิร์ฟเวอร์ (Shipnity ยังมีข้อมูลอยู่)
+
+import {
+  OPEN_MAX_PAGES,
+  PAY_LATER_MAX_PAGES,
+  ShipnityError,
+  listClosedOrdersForDay,
+  listOpenOnly,
+  listPayLaterOrders,
+  type DayOrdersResult,
+  type ShipnityOrder,
+} from "@/lib/shipnity/client";
+import type { ConnectedShipnityAccount } from "@/lib/shipnity/config";
+import {
+  hasSyncedClosedDay,
+  loadStoredOrders,
+  markClosedDaySynced,
+  pruneStoredOrders,
+  readSyncState,
+  saveStoredOrders,
+  writeSyncState,
+} from "@/lib/shipnity/store";
+
+/** ข้อมูลถือว่าสดภายในเวลานี้ — เปิดหน้าถี่ ๆ จึงไม่ยิง Shipnity ซ้ำ */
+const FRESH_MS = 120_000;
+/** หลังโดน 429 ให้หยุดยิงชั่วคราว (ข้อมูลเก่ายังแสดงได้) */
+const RATE_LIMIT_PAUSE_MS = 120_000;
+/** เพดานหน้าต่อการดึงหนึ่งครั้ง (15 ใบ/หน้า) — 60 หน้า = 900 ใบ เกินพอสำหรับร้านนี้ */
+const SYNC_MAX_PAGES = Math.max(60, OPEN_MAX_PAGES);
+
+interface SyncRuntime {
+  inFlight: Map<string, Promise<number>>;
+  pausedUntil: number;
+  timer: ReturnType<typeof setInterval> | null;
+}
+
+const globalForSync = globalThis as unknown as { __shipnitySyncRuntime?: SyncRuntime };
+const runtime: SyncRuntime = (globalForSync.__shipnitySyncRuntime ??= {
+  inFlight: new Map(),
+  pausedUntil: 0,
+  timer: null,
+});
+
+function credentialsOf(account: ConnectedShipnityAccount) {
+  return { email: account.email, token: account.token };
+}
+
+function isRateLimit(error: unknown): boolean {
+  return error instanceof ShipnityError && error.status === 429;
+}
+
+/**
+ * ดึงออเดอร์ที่ยังไม่ปิดรายการของบัญชีหนึ่งแล้วบันทึกลงฐานข้อมูล
+ * คืนจำนวนแถวที่ถูกเขียนจริง (ไม่ใช่จำนวนที่ดึงมา)
+ */
+export async function syncOpenOrders(account: ConnectedShipnityAccount): Promise<number> {
+  const inFlight = runtime.inFlight.get(account.id);
+  if (inFlight) return inFlight;
+
+  const task = (async () => {
+    if (runtime.pausedUntil > Date.now()) {
+      return 0;
+    }
+
+    try {
+      const [open, payLater] = await Promise.all([
+        listOpenOnly(credentialsOf(account), SYNC_MAX_PAGES),
+        listPayLaterOrders(credentialsOf(account)),
+      ]);
+
+      const merged = new Map<number, ShipnityOrder>();
+      for (const order of open) merged.set(order.id, order);
+      for (const order of payLater) merged.set(order.id, order);
+      const orders = [...merged.values()];
+
+      const written = await saveStoredOrders(account.id, orders);
+      await pruneStoredOrders(account.id);
+      await writeSyncState(account.id, { orderCount: orders.length, lastError: null });
+      return written;
+    } catch (error) {
+      if (isRateLimit(error)) runtime.pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+      const message = error instanceof Error ? error.message : "ซิงก์ไม่สำเร็จ";
+      await writeSyncState(account.id, {
+        orderCount: (await readSyncState(account.id))?.orderCount ?? 0,
+        lastError: message,
+      }).catch(() => {});
+      throw error;
+    }
+  })().finally(() => {
+    runtime.inFlight.delete(account.id);
+  });
+
+  runtime.inFlight.set(account.id, task);
+  return task;
+}
+
+/** ดึงออเดอร์ที่ปิดแล้วของวันหนึ่ง (ครั้งเดียวต่อวัน) เพื่อดูย้อนหลังได้ */
+export async function syncClosedDay(
+  account: ConnectedShipnityAccount,
+  isoDay: string,
+): Promise<void> {
+  if (await hasSyncedClosedDay(account.id, isoDay)) return;
+
+  const key = `closed|${account.id}|${isoDay}`;
+  const inFlight = runtime.inFlight.get(key);
+  if (inFlight) {
+    await inFlight.catch(() => {});
+    return;
+  }
+
+  const task = (async () => {
+    const closed = await listClosedOrdersForDay(credentialsOf(account), isoDay, SYNC_MAX_PAGES);
+    await saveStoredOrders(account.id, closed);
+    await markClosedDaySynced(account.id, isoDay);
+    return closed.length;
+  })().finally(() => {
+    runtime.inFlight.delete(key);
+  });
+
+  runtime.inFlight.set(key, task);
+  await task.catch(() => {});
+}
+
+export interface DayOrdersFromStore extends DayOrdersResult {
+  /** แถวที่ถูกเขียนเพิ่ม/แก้ในการซิงก์ล่าสุด (0 = ไม่มีอะไรเปลี่ยน) */
+  written: number;
+}
+
+/**
+ * ออเดอร์ของวันหนึ่งจากฐานข้อมูล — ทางเดียวที่หน้าเว็บใช้
+ * - ไม่มีข้อมูลในฐานข้อมูลเลย → ซิงก์รอเลย (ครั้งแรกของบัญชี)
+ * - ข้อมูลเก่าเกิน 2 นาที → คืนข้อมูลเดิมทันที แล้วซิงก์ต่อในเบื้องหลัง
+ */
+export async function loadDayOrdersFromStore(
+  account: ConnectedShipnityAccount,
+  options: { isoDay: string; includeClosed: boolean },
+): Promise<DayOrdersFromStore> {
+  const state = await readSyncState(account.id);
+  const stale = !state?.lastSyncAt || Date.now() - new Date(state.lastSyncAt).getTime() > FRESH_MS;
+  let written = 0;
+
+  if (!state) {
+    written = await syncOpenOrders(account).catch(() => 0);
+  } else if (stale) {
+    void syncOpenOrders(account).catch(() => {});
+  }
+
+  if (options.includeClosed) {
+    await syncClosedDay(account, options.isoDay).catch(() => {});
+  }
+
+  const stored = await loadStoredOrders(account.id, options.isoDay, {
+    includeClosed: options.includeClosed,
+  });
+
+  return {
+    orders: stored.orders,
+    complete: true,
+    fetchedAt: stored.fetchedAt ?? new Date().toISOString(),
+    written,
+  };
+}
+
+/**
+ * เปิดงานซิงก์เบื้องหลังของทุกบัญชี — เรียกซ้ำได้ ไม่สร้างตัวใหม่
+ * ทุก 2 นาที: บัญชีที่ข้อมูลเก่าเกินกำหนดจะถูกดึงใหม่ (เขียนเฉพาะแถวที่เปลี่ยน)
+ */
+export function startShipnityBackgroundSync(accounts: readonly ConnectedShipnityAccount[]): void {
+  if (runtime.timer || accounts.length === 0) return;
+
+  runtime.timer = setInterval(() => {
+    for (const account of accounts) {
+      void (async () => {
+        const state = await readSyncState(account.id).catch(() => null);
+        const stale =
+          !state?.lastSyncAt || Date.now() - new Date(state.lastSyncAt).getTime() > FRESH_MS;
+        if (!stale) return;
+        await syncOpenOrders(account).catch(() => {});
+      })();
+    }
+  }, FRESH_MS);
+
+  // ไม่ให้ interval ค้างโปรเซสตอน build/ปิดเซิร์ฟเวอร์
+  const handle = runtime.timer as unknown as { unref?: () => void };
+  handle.unref?.();
+}
+
+/** บังคับซิงก์เดี๋ยวนี้ (ปุ่ม “ดึงใหม่เลย”) — ไม่ล้างข้อมูลเดิม */
+export async function forceSyncShipnity(accounts: readonly ConnectedShipnityAccount[]): Promise<void> {
+  runtime.pausedUntil = 0;
+  await Promise.all(accounts.map((account) => syncOpenOrders(account).catch(() => 0)));
+}
