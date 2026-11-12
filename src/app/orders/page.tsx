@@ -871,9 +871,9 @@ function ShopPanel({
         <StatCard
           label="ต้องแพ็คของวันนี้"
           value={`${summary.totalOrders} ออเดอร์`}
-          hint={`สั่งวันนี้ · ชำระแล้วหรือ COD · ยังไม่ปิดรายการ — ${summary.totalItems} ชิ้น${
-            dayUnprinted > 0 ? ` · ยังไม่พิมพ์ ${dayUnprinted} ใบ` : ""
-          }${item.carryOrders.length > 0 ? ` · ไม่รวมของค้าง ${item.carryOrders.length} ใบ` : ""}`}
+          hint={`${summary.totalItems} ชิ้น จาก ${currentProducts.length + nextProducts.length} รายการสินค้า${
+            dayUnprinted > 0 ? ` · ยังไม่ได้พิมพ์ใบปะหน้า ${dayUnprinted} ใบ` : ""
+          }`}
           tone="brand"
           icon={<IconTruck size={19} />}
         />
