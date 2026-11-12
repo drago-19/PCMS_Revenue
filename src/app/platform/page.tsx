@@ -154,6 +154,15 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
               ))}
             </div>
           ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" asChild>
+              <Link href="/platform/orders">ดูรายละเอียดรายออเดอร์</Link>
+            </Button>
+            <span className="text-[12px] text-muted-foreground">
+              ค้นหาเลขคำสั่งซื้อ · กรองตามสถานะ · เปิดดูสินค้าและยอดเงินทีละออเดอร์
+            </span>
+          </div>
+
           <PlatformDashboardView analytics={analytics} />
         </section>
       ) : null}
