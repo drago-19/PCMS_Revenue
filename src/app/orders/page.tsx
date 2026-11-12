@@ -816,6 +816,15 @@ function ShopPanel({
 
   const currentOrders = summary.rounds.current.flatMap((group) => group.orders);
   const nextOrders = summary.rounds.next.flatMap((group) => group.orders);
+  // ของวันนี้ที่ยังไม่ได้พิมพ์ใบปะหน้า — ตรงกับชิป "พิมพ์ที่อยู่" ของ Shipnity
+  const dayUnprinted = item.orders.filter(
+    (order) =>
+      !order.cancelled &&
+      !order.closed &&
+      !order.printed &&
+      (order.paid || order.order_bank === "pay_later") &&
+      isOrderFromDay(order, summary.isoDay),
+  ).length;
   const currentProducts = summarizeProducts(currentOrders).filter(match);
   const nextProducts = summarizeProducts(nextOrders).filter(match);
   const waitingRows = item.waiting.map((row) => ({ ...row, shop: item.account.label }));
@@ -862,9 +871,9 @@ function ShopPanel({
         <StatCard
           label="ต้องแพ็คของวันนี้"
           value={`${summary.totalOrders} ออเดอร์`}
-          hint={`${summary.totalItems} ชิ้น · ${currentProducts.length + nextProducts.length} รายการสินค้า${
-            item.carryOrders.length > 0 ? ` · ไม่รวมของค้าง ${item.carryOrders.length} ใบ` : ""
-          }`}
+          hint={`สั่งวันนี้ · ชำระแล้วหรือ COD · ยังไม่ปิดรายการ — ${summary.totalItems} ชิ้น${
+            dayUnprinted > 0 ? ` · ยังไม่พิมพ์ ${dayUnprinted} ใบ` : ""
+          }${item.carryOrders.length > 0 ? ` · ไม่รวมของค้าง ${item.carryOrders.length} ใบ` : ""}`}
           tone="brand"
           icon={<IconTruck size={19} />}
         />
