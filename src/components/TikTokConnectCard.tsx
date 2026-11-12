@@ -1,0 +1,264 @@
+"use client";
+
+import { useState, type ComponentType } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { IconCheckCircle, IconInfo, IconWallet } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+
+export interface TikTokAccountView {
+  accountKey: string;
+  shopName: string | null;
+  shopCipher: string | null;
+  region: string | null;
+  status: string;
+  lastError: string | null;
+  accessTokenExpiresAt: string | null;
+  connectedAt: string | null;
+}
+
+export interface TikTokConfigView {
+  configured: boolean;
+  appKey: string | null;
+  serviceId: string | null;
+  accounts: TikTokAccountView[];
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+}
+
+export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
+  const router = useRouter();
+  const accounts = config.accounts;
+
+  const [editing, setEditing] = useState(!config.configured);
+  const [appKey, setAppKey] = useState(config.appKey ?? "");
+  const [appSecret, setAppSecret] = useState("");
+  const [serviceId, setServiceId] = useState(config.serviceId ?? "");
+  const [saving, setSaving] = useState(false);
+  const [testingKey, setTestingKey] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, string>>({});
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/platform/tiktok/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ appKey, appSecret, serviceId }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "บันทึกไม่สำเร็จ");
+      toast.success("บันทึกค่าเชื่อมต่อ TikTok แล้ว");
+      setAppSecret("");
+      setEditing(false);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTest(accountKey: string) {
+    setTestingKey(accountKey);
+    setTestResult((previous) => ({ ...previous, [accountKey]: "" }));
+    try {
+      const response = await fetch("/api/platform/tiktok/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accountKey }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        count?: number;
+        totalSettlement?: string;
+        latest?: { statementTime: number; settlementAmount: string; currency: string; paymentStatus: string } | null;
+      };
+      if (!response.ok) throw new Error(payload.error || "ทดสอบไม่สำเร็จ");
+
+      const latest = payload.latest;
+      const message = latest
+        ? `ดึงได้ ${payload.count ?? 0} statement · รวม ${payload.totalSettlement} ${latest.currency} · ล่าสุด ${new Date(latest.statementTime * 1000).toLocaleDateString("th-TH")} (${latest.paymentStatus})`
+        : "ดึงได้ 0 statement ใน 30 วันล่าสุด";
+      setTestResult((previous) => ({ ...previous, [accountKey]: message }));
+      toast.success("ดึงข้อมูลจาก TikTok สำเร็จ");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "ทดสอบไม่สำเร็จ";
+      setTestResult((previous) => ({ ...previous, [accountKey]: message }));
+      toast.error(message);
+    } finally {
+      setTestingKey(null);
+    }
+  }
+
+  return (
+    <Card padding="padded" className="flex min-w-0 flex-col gap-4">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground"
+          >
+            <IconWallet size={16} />
+          </span>
+          <span className="truncate text-[15px] font-bold">TikTok Shop</span>
+        </div>
+        {accounts.length > 0 ? (
+          <Badge variant="success">เชื่อมแล้ว {accounts.length} ร้าน</Badge>
+        ) : config.configured ? (
+          <Badge variant="warning">ยังไม่เชื่อมร้าน</Badge>
+        ) : (
+          <Badge variant="neutral">ยังไม่ตั้งค่า</Badge>
+        )}
+      </div>
+
+      {!editing && config.configured ? (
+        <dl className="grid grid-cols-1 gap-x-3 gap-y-2 text-[13px] min-[420px]:grid-cols-2">
+          <div className="min-w-0">
+            <dt className="text-muted-foreground">App Key</dt>
+            <dd className="mono truncate font-bold">{config.appKey}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-muted-foreground">Service ID</dt>
+            <dd className="mono truncate font-bold">{config.serviceId}</dd>
+          </div>
+        </dl>
+      ) : null}
+
+      {accounts.length > 0 ? (
+        <ul className="flex list-none flex-col gap-2 p-0">
+          {accounts.map((account) => (
+            <li
+              key={account.accountKey}
+              className="flex min-w-0 flex-col gap-2 rounded-xl border border-border p-3"
+            >
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-[14px] font-bold">
+                    {account.shopName ?? account.accountKey}
+                  </p>
+                  <p className="text-[12.5px] text-muted-foreground">
+                    {account.region ?? "—"} · เชื่อม {formatDateTime(account.connectedAt)} · token ถึง{" "}
+                    {formatDateTime(account.accessTokenExpiresAt)}
+                  </p>
+                </div>
+                <Badge variant={account.status === "error" ? "destructive" : "success"}>
+                  {account.status === "error" ? "มีปัญหา" : "ใช้งานได้"}
+                </Badge>
+              </div>
+
+              {account.lastError ? (
+                <p className="flex items-start gap-1.5 rounded-lg border border-[#f5dfae] bg-[#fffbeb] px-3 py-2 text-[12.5px] leading-6 text-[#7a4b0a]">
+                  <IconInfo size={14} aria-hidden="true" className="mt-1 shrink-0" />
+                  <span className="min-w-0 break-words">{account.lastError}</span>
+                </p>
+              ) : null}
+
+              {testResult[account.accountKey] ? (
+                <p className="flex items-start gap-1.5 rounded-lg border border-border bg-muted/50 px-3 py-2 text-[12.5px] leading-6">
+                  <IconCheckCircle
+                    size={14}
+                    aria-hidden="true"
+                    className="mt-1 shrink-0 text-[#0d8a47]"
+                  />
+                  <span className="min-w-0 break-words">{testResult[account.accountKey]}</span>
+                </p>
+              ) : null}
+
+              <div>
+                <Button
+                  variant="outline"
+                  onClick={() => handleTest(account.accountKey)}
+                  disabled={testingKey !== null}
+                  aria-busy={testingKey === account.accountKey}
+                >
+                  {testingKey === account.accountKey ? "กำลังดึง…" : "ทดสอบดึง Statement"}
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {editing ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="tt-app-key" className="text-[13px] font-bold">
+              App Key
+            </label>
+            <Input
+              id="tt-app-key"
+              value={appKey}
+              onChange={(event) => setAppKey(event.target.value)}
+              placeholder="จาก Partner Center → App & Service"
+              autoComplete="off"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="tt-app-secret" className="text-[13px] font-bold">
+              App Secret
+            </label>
+            <Input
+              id="tt-app-secret"
+              type="password"
+              value={appSecret}
+              onChange={(event) => setAppSecret(event.target.value)}
+              placeholder={config.configured ? "กรอกใหม่เมื่อต้องการเปลี่ยน" : "คัดลอกมาจากหน้าแอป"}
+              autoComplete="off"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="tt-service-id" className="text-[13px] font-bold">
+              Service ID
+            </label>
+            <Input
+              id="tt-service-id"
+              value={serviceId}
+              onChange={(event) => setServiceId(event.target.value)}
+              placeholder="ใช้สร้างลิงก์ authorize"
+              autoComplete="off"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSave} disabled={saving} aria-busy={saving}>
+              {saving ? "กำลังบันทึก…" : "บันทึกค่า"}
+            </Button>
+            {config.configured ? (
+              <Button variant="outline" onClick={() => setEditing(false)} disabled={saving}>
+                ยกเลิก
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {config.configured ? (
+            <Button asChild>
+              <a href="/api/platform/tiktok/authorize">
+                {accounts.length > 0 ? "เชื่อมร้านเพิ่ม" : "เชื่อมร้าน TikTok"}
+              </a>
+            </Button>
+          ) : null}
+          <Button variant="ghost" onClick={() => setEditing(true)}>
+            แก้ไขค่าแอป
+          </Button>
+        </div>
+      )}
+
+      {accounts.length > 1 ? (
+        <p className="text-[12.5px] leading-6 text-muted-foreground">
+          เชื่อมร้านเพิ่มได้ทุกบัญชี seller ของบริษัท — ล็อกอินบัญชีที่จะเชื่อมแล้วกด
+          &ldquo;เชื่อมร้านเพิ่ม&rdquo; ระบบจะเก็บ token แยกร้าน
+        </p>
+      ) : null}
+    </Card>
+  );
+}

@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-11-v54";
+const SCHEMA_VERSION = "2026-11-12-v55";
 
 export type { CompanyId };
 
@@ -890,6 +890,29 @@ CREATE TABLE IF NOT EXISTS app_settings (
   value_json JSONB NOT NULL DEFAULT '{}',
   updated_by TEXT NOT NULL DEFAULT 'system',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- การเชื่อมต่อแพลตฟอร์มผ่าน Open API (แยกจากตาราง transactions/oms_orders เดิมโดยสิ้นเชิง)
+-- หนึ่งแถว = หนึ่งร้านที่ authorize ไว้; credential ของ app เก็บใน app_settings (คีย์ platform_api)
+CREATE TABLE IF NOT EXISTS platform_accounts (
+  id BIGSERIAL PRIMARY KEY,
+  platform TEXT NOT NULL,
+  account_key TEXT NOT NULL,
+  shop_id TEXT,
+  shop_cipher TEXT,
+  shop_name TEXT,
+  seller_name TEXT,
+  region TEXT,
+  access_token TEXT,
+  refresh_token TEXT,
+  access_token_expires_at TIMESTAMPTZ,
+  refresh_token_expires_at TIMESTAMPTZ,
+  granted_scopes TEXT[] NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',
+  last_error TEXT,
+  connected_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (platform, account_key)
 );
 
 CREATE TABLE IF NOT EXISTS auth_rate_limits (

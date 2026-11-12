@@ -14,6 +14,7 @@ import {
   BookOpenTextIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CloudDownloadIcon,
   FileBarChart2Icon,
   FileTextIcon,
   FolderKanbanIcon,
@@ -60,6 +61,8 @@ import {
   IconWallet,
 } from "./icons";
 
+// เมนูหลักของระบบ (เรียงตามลำดับที่ผู้ใช้เห็น) — /platform คือทางเข้าหน้าดึงข้อมูลตรงจากแพลตฟอร์ม
+// ซึ่งทำงานคู่ขนานกับ /import (อัปโหลดไฟล์) โดยยังไม่แทนที่กัน
 const items = [
   {
     href: "/",
@@ -113,6 +116,14 @@ const items = [
     sub: "นำเข้าไฟล์รายงาน",
     icon: IconUpload,
     match: (pathname: string) => pathname === "/import",
+  },
+  {
+    href: "/platform",
+    label: "ดึงข้อมูลจากแพลตฟอร์ม",
+    sub: "TikTok · Shopee (API)",
+    icon: CloudDownloadIcon,
+    match: (pathname: string) =>
+      pathname === "/platform" || pathname.startsWith("/platform/"),
   },
   {
     href: "/history",
