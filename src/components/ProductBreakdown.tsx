@@ -57,7 +57,9 @@ export function ProductBreakdown({ product }: { product: ProductPackingRow }) {
               </tr>
             </thead>
             <tbody>
-              {lines.map((line, index) => (
+              {[...lines]
+                .sort((a, b) => Date.parse(b.paidAt) - Date.parse(a.paidAt))
+                .map((line, index) => (
                 <tr
                   key={`${line.orderCode}-${line.channel}-${line.paidAt}-${index}`}
                   className="border-t border-border"
