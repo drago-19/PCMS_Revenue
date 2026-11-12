@@ -27,7 +27,7 @@ export interface OrderDetail {
   shippingProvider: string | null;
   totalAmount: number;
   currency: string | null;
-  items: Array<{ name: string; sku: string | null; quantity: number; price: number }>;
+  items: Array<{ name: string; sku: string | null; imageUrl: string | null; quantity: number; price: number }>;
   money: { revenue: number; fee: number; settlement: number; statementId: string | null };
 }
 
@@ -152,10 +152,11 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     product_name: string | null;
     sku_id: string | null;
     sku_name: string | null;
+    image_url: string | null;
     quantity: number;
     sale_price: string | null;
   }>(
-    `SELECT product_name, sku_id, sku_name, quantity, sale_price::text AS sale_price
+    `SELECT product_name, sku_id, sku_name, image_url, quantity, sale_price::text AS sale_price
      FROM platform_order_items WHERE shop_id = $1 AND order_id = $2 ORDER BY line_item_id`,
     [order.shop_id, orderId],
   );
@@ -188,6 +189,7 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     items: items.map((item) => ({
       name: item.product_name ?? item.sku_name ?? "ไม่ระบุ",
       sku: item.sku_id,
+      imageUrl: item.image_url,
       quantity: num(item.quantity),
       price: num(item.sale_price),
     })),

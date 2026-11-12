@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-12-v56";
+const SCHEMA_VERSION = "2026-11-12-v57";
 
 export type { CompanyId };
 
@@ -960,6 +960,7 @@ CREATE TABLE IF NOT EXISTS platform_order_items (
   sku_id TEXT,
   product_name TEXT,
   sku_name TEXT,
+  image_url TEXT,
   quantity INTEGER NOT NULL DEFAULT 0,
   sale_price NUMERIC(14,2),
   currency TEXT,

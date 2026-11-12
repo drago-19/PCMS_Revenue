@@ -79,6 +79,7 @@ export default async function OrderDetailPage({
               <table className="w-full min-w-[420px] text-[12.5px]">
                 <thead>
                   <tr className="border-b border-border text-[11.5px] text-muted-foreground">
+                    <th scope="col" className="py-1.5 text-left font-bold">รูป</th>
                     <th scope="col" className="py-1.5 text-left font-bold">สินค้า</th>
                     <th scope="col" className="py-1.5 text-left font-bold">SKU</th>
                     <th scope="col" className="py-1.5 text-right font-bold">จำนวน</th>
@@ -88,6 +89,22 @@ export default async function OrderDetailPage({
                 <tbody>
                   {order.items.map((item, index) => (
                     <tr key={`${item.sku ?? "item"}-${index}`} className="border-b border-border last:border-0">
+                      <td className="py-2 pr-2">
+                        {item.imageUrl ? (
+                          // รูปจาก CDN ของ TikTok — ใช้ <img> ธรรมดาเพราะ domain นอก config ของ next/image
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.imageUrl}
+                            alt={item.name}
+                            width={44}
+                            height={44}
+                            loading="lazy"
+                            className="size-11 rounded-lg border border-border object-cover"
+                          />
+                        ) : (
+                          <span className="block size-11 rounded-lg bg-muted" aria-hidden="true" />
+                        )}
+                      </td>
                       <td className="py-2 pr-2">{item.name}</td>
                       <td className="mono py-2 pr-2 text-[11.5px] text-muted-foreground">{item.sku ?? "—"}</td>
                       <td className="mono py-2 pr-2 text-right">{item.quantity}</td>

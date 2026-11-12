@@ -134,7 +134,7 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
     if (items.length > 0) {
       const itemValues: unknown[] = [];
       const itemTuples = items.map((entry, rowIndex) => {
-        const base = rowIndex * 10;
+        const base = rowIndex * 11;
         itemValues.push(
           PLATFORM,
           shopId,
@@ -143,22 +143,24 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
           entry.item.skuId,
           entry.item.productName,
           entry.item.skuName,
+          entry.item.imageUrl,
           entry.item.quantity,
           entry.item.salePrice === null ? null : num(entry.item.salePrice),
           entry.item.currency,
         );
-        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10})`;
+        return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11})`;
       });
 
       await query(
         `INSERT INTO platform_order_items (
            platform, shop_id, order_id, line_item_id, sku_id, product_name, sku_name,
-           quantity, sale_price, currency
+           image_url, quantity, sale_price, currency
          ) VALUES ${itemTuples.join(",")}
          ON CONFLICT (platform, shop_id, order_id, line_item_id) DO UPDATE SET
            sku_id = EXCLUDED.sku_id,
            product_name = EXCLUDED.product_name,
            sku_name = EXCLUDED.sku_name,
+           image_url = COALESCE(EXCLUDED.image_url, platform_order_items.image_url),
            quantity = EXCLUDED.quantity,
            sale_price = EXCLUDED.sale_price,
            currency = EXCLUDED.currency,

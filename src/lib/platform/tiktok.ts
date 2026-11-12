@@ -386,6 +386,7 @@ export interface TikTokOrder {
     skuId: string | null;
     productName: string | null;
     skuName: string | null;
+    imageUrl: string | null;
     quantity: number;
     salePrice: string | null;
     currency: string | null;
@@ -463,6 +464,7 @@ export async function searchOrders({
         skuId: str(item.sku_id),
         productName: str(item.product_name),
         skuName: str(item.sku_name),
+        imageUrl: str(item.sku_image),
         // TikTok ไม่ส่ง quantity มาใน line_items บางออเดอร์ — ถือเป็น 1 ชิ้น
         quantity:
           typeof item.quantity === "number"
