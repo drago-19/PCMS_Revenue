@@ -204,3 +204,35 @@
 3. **สร้าง role สำหรับแอป** (ไม่ใช้ `postgres`) ให้สิทธิ์เฉพาะ database `pcms_revenue` + schema ที่ใช้ แล้วเปลี่ยน `DATABASE_URL` ของแอป
 4. **หมุน (rotate) App Secret ของ TikTok** ใน Partner Center — ค่าเดิมเคยถูกเก็บเป็นข้อความธรรมดาในช่วงสั้น ๆ
 5. **backup ของ DB** (`C:\deploy\backups` / `Documents\GitHub\db-backups`) มีค่า credential ติดไปด้วย — ต้องจำกัดสิทธิ์ไฟล์และเก็บแยกจากเครื่องที่ใช้งานทั่วไป
+
+---
+
+## 13. สถานะจริงและบันทึกส่งต่อ (ณ 12 พ.ย. 2026)
+
+### ฝั่ง TikTok ที่ทำไปแล้ว
+- แอป **PCMS Revenue** สร้างใน Partner Center แล้ว: ประเภท **Custom**, หมวด **Seller inhouse developer / TikTok Shop Seller**, ตลาด **Thailand / Local sellers**, เปิด API
+  - **Service ID (= App ID): `7706978520091232018`** · **App key: `6lsssud4rl5us`** · App secret: อยู่ใน Partner Center (กด Manage app secret) และบันทึกไว้ในหน้า `/settings` ของระบบแล้ว
+  - Redirect URL ที่ตั้งในแอป: `https://revenue.goldpulse-ai.com/api/platform/tiktok/callback`
+  - สถานะแอป: **Draft** — ปุ่ม Publish ถูกบล็อกด้วย checklist "Partner registration review"
+- **ลงทะเบียน partner ส่งแล้ว 12 พ.ย. 2026 15:18** → สถานะ **Under review** (3–5 วันทำการ)
+  - Partner name: `Dragon19` · บริษัท: บริษัท ดราก้อน 19 จำกัด · ทะเบียน `0655566003499` · ที่อยู่ 27/54 ถนนเอกาทศรฐ ต.ในเมือง อ.เมืองพิษณุโลก จ.พิษณุโลก · ช่วงทะเบียน: Permanent
+  - แนบหนังสือรับรองบริษัท **เฉพาะหน้าแรก** (ไฟล์อยู่ `C:\Users\Dev-dragon19\Desktop\เอกสารบริษัท\หนังสือรับรอง 12.11.69_page-0001_0.jpg` — มี 5 หน้า ถ้ารีวิวขอเพิ่มให้กด Edit แล้วเพิ่มหน้า 2–5)
+  - หมายเหตุ: กด Submit ครั้งแรกขึ้น "Something went wrong" ของ AI pre-check → กด **Retry** แล้วผ่าน
+
+### ฝั่งระบบเรา (อยู่บน production แล้ว)
+- หน้า `/platform` (สรุปสถานะ + แท็บ ออเดอร์/ประวัติ) และ `/settings` แท็บ "เชื่อมต่อแพลตฟอร์ม"
+- API: `GET/POST /api/platform/tiktok/config`, `GET /authorize`, `GET /callback`, `POST /test`
+- ตาราง `platform_accounts` (schema v55 ทั้ง `public` และ `seeheng`) · credential เข้ารหัส AES-256-GCM (`PLATFORM_SECRET_KEY`)
+- เทสต์: `tests/platform-tiktok.test.ts` (8) + `tests/platform-secrets.test.ts` (6)
+
+### บทเรียนการ deploy (สำคัญ)
+- บนเซิร์ฟเวอร์ docker compose อ่าน **`C:\Users\DEV\Documents\GitHub\PCMS_Revenue\docker-compose.yml` + `.env`** (ไม่ใช่ `C:\deploy`)
+- สคริปต์ deploy ข้ามการสร้าง container ใหม่เมื่อ **ไม่มี commit ใหม่** → env ที่แก้ใน `.env` จะไม่ถูกอ่านจนกว่าจะมี commit หรือสั่ง `docker compose up -d app` เอง
+- เครื่องมือของ session เข้า path บนเซิร์ฟเวอร์ไม่ได้ (ถูกกั้น) → งานที่ต้องแก้ `.env` บนเซิร์ฟเวอร์ต้องให้ผู้ใช้รันเอง
+
+### ค้างอยู่ / ลำดับถัดไป
+1. รอผลรีวิว partner (3–5 วันทำการ) → กด **Publish** แอป → ได้ Authorize link
+2. เชื่อมร้าน (บัญชี seller แรก) → ทดสอบ "ดึง Statement" ในหน้า `/settings`
+3. เชื่อมบัญชี seller ที่สอง (บริษัทเดียวกัน) — ถ้าหมวด Seller inhouse ไม่ยอมให้ authorize บัญชีที่สอง ให้สร้างแอปที่ 2 ใต้ partner เดิม (เอกสารชุดเดิม)
+4. Shopee: ต้องเช็กก่อนว่าร้านเป็น **Mall หรือ Managed** (เงื่อนไขของ TH) ถ้าไม่ใช่ → ทางเลือก ISV หรือคงใช้ไฟล์ Income
+5. งานปรับความปลอดภัยที่ยังไม่ทำ: rotate App Secret หลัง publish · เปลี่ยนรหัส postgres · ผูกพอร์ต 5432 กับ localhost/Tailscale · สร้าง role แอป (ดู §12)
