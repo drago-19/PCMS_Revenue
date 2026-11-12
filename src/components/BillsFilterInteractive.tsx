@@ -271,6 +271,7 @@ export function BillsChannelBar({
                 )}
               >
                 <Link
+                  prefetch={false}
                   href={statusHrefs.all}
                   scroll={false}
                   onClick={(e) =>
@@ -292,6 +293,7 @@ export function BillsChannelBar({
                 )}
               >
                 <Link
+                  prefetch={false}
                   href={statusHrefs.ok}
                   scroll={false}
                   onClick={(e) =>
@@ -311,6 +313,7 @@ export function BillsChannelBar({
                 )}
               >
                 <Link
+                  prefetch={false}
                   href={statusHrefs.mismatch}
                   scroll={false}
                   onClick={(e) =>
@@ -360,6 +363,7 @@ export function BillsChannelBar({
           return (
             <Link
               key={ch.key}
+              prefetch={false}
               href={href}
               scroll={false}
               onClick={(e) =>
@@ -491,6 +495,7 @@ export function BillsCategoryTabs({
               role="tab"
               aria-selected={active}
               scroll={false}
+              prefetch={false}
               href={href}
               onClick={(e) =>
                 navigateWithOptimistic(e, href, {
@@ -979,6 +984,7 @@ export function BillsSubFilters({
           return (
             <Link
               key={item.key}
+              prefetch={false}
               href={href}
               scroll={false}
               onClick={(e) =>

@@ -103,6 +103,7 @@ export function BillsShopTabs({
               )}
             >
               <Link
+                prefetch={false}
                 href={s.href}
                 scroll={false}
                 className={cn("flex items-center gap-1.5", isActive && "!text-white")}
@@ -129,6 +130,7 @@ export function BillsShopTabs({
       </div>
       {activeShop !== "all" ? (
         <Link
+          prefetch={false}
           href={getShopHref("all")}
           scroll={false}
           className="text-[11px] font-semibold text-primary hover:underline shrink-0"

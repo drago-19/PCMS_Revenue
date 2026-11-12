@@ -1419,6 +1419,7 @@ export default async function BillsPage({
                     <TableRow>
                       <TableHead className={colOrderClass}>
                         <Link
+                          prefetch={false}
                           href={buildHref({
                             nextSort: sort === "latest" ? "oldest" : "latest",
                             nextPage: 1,
@@ -1441,6 +1442,7 @@ export default async function BillsPage({
                       </TableHead>
                       <TableHead className={colIncomeClass}>
                         <Link
+                          prefetch={false}
                           href={buildHref({
                             nextSort:
                               sort === "income_asc"
@@ -1477,6 +1479,7 @@ export default async function BillsPage({
                       {!hideFeeColumn ? (
                         <TableHead className={colFeeClass}>
                           <Link
+                            prefetch={false}
                             href={buildHref({
                               nextSort:
                                 sort === "fee_asc" ? "fee_desc" : "fee_asc",
@@ -1498,6 +1501,7 @@ export default async function BillsPage({
                       ) : null}
                       <TableHead className={colPayoutClass}>
                         <Link
+                          prefetch={false}
                           href={buildHref({
                             nextSort:
                               sort === "payout_asc"
@@ -1527,7 +1531,7 @@ export default async function BillsPage({
                     Math.abs(row.checks.feeDiff) < 0.01 &&
                     Math.abs(row.checks.payoutDiff) < 0.01;
                   return (
-                    <BillTableRow key={row.id} row={row} className="min-[768px]:[&>td]:align-top">
+                    <BillTableRow key={row.id} orderId={row.externalId} className="min-[768px]:[&>td]:align-top">
                       <TableCell
                         data-label="หมายเลขคำสั่งซื้อ / ช่องทาง"
                         className={colOrderClass}
@@ -1766,7 +1770,7 @@ export default async function BillsPage({
                             ))}
                             {row.omsItems.length > 2 ? (
                               <BillPreviewTrigger
-                                row={row}
+                                orderId={row.externalId}
                                 defaultTab="bill"
                                 triggerVariant="link"
                                 label={`+${row.omsItems.length - 2} รายการอื่นในบิลนี้`}

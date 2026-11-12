@@ -3753,6 +3753,32 @@ export async function getBill(
   return enriched ?? null;
 }
 
+/**
+ * แถวเดียวสำหรับเปิดป๊อปอัปดูบิล — ต้องได้ข้อมูลชุดเดียวกับที่แถวในตาราง /bills มี
+ * (invoiceNo ที่จัดรูปแบบตาม settings + sellerSettings) ไม่ใช่ค่าดิบจากตาราง
+ */
+export async function getBillForPreview(
+  orderId: string,
+  db?: Queryable,
+): Promise<TransactionRow | null> {
+  const [row, sellerSettings] = await Promise.all([
+    getBill(orderId, db),
+    getDocumentSettings(db),
+  ]);
+  if (!row) return null;
+  return {
+    ...row,
+    invoiceNo: formatInvoiceNoWithPrefix(
+      row.invoiceNo,
+      sellerSettings.invoicePrefix,
+      row.paidDate || row.createdDate,
+      row.channel,
+      sellerSettings.channelInvoicePrefixes,
+    ),
+    sellerSettings,
+  };
+}
+
 export async function getInvoiceNo(
   orderId: string,
   db?: Queryable,

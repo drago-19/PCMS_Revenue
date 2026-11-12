@@ -21,7 +21,6 @@ import { StockImportDialog } from "./StockImportDialog";
 import { ProductCreateDialog } from "./ProductCreateDialog";
 
 interface StockTableClientProps {
-  rows: ProductStockRow[];
   page: number;
   pageSize: number;
   currentDate?: string;
@@ -64,7 +63,6 @@ function buildExportUrl(params: {
 }
 
 export function StockTableClient({
-  rows,
   page,
   pageSize,
   currentDate,

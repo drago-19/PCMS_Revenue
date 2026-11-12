@@ -398,6 +398,7 @@ export default async function ProductsPage({
                         nextPage: 1,
                       })}
                       scroll={false}
+                      prefetch={false}
                       className="inline-flex min-h-[36px] items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <Badge
@@ -477,6 +478,7 @@ export default async function ProductsPage({
                   <Link
                     href={currentTab === "stock" ? "/products?tab=stock" : "/products"}
                     scroll={false}
+                    prefetch={false}
                   >
                     ล้างตัวกรอง
                   </Link>
@@ -501,7 +503,6 @@ export default async function ProductsPage({
         {currentTab === "stock" && stockResult ? (
           <>
             <StockTableClient
-              rows={stockResult.rows}
               page={stockResult.page}
               pageSize={stockResult.pageSize}
               currentDate={date}
@@ -557,6 +558,7 @@ export default async function ProductsPage({
                     key={pill.key}
                     href={buildHref({ nextStockFilter: pill.key as StockFilterKey, nextPage: 1 })}
                     scroll={false}
+                    prefetch={false}
                     className="inline-flex min-h-[30px] items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Badge
@@ -596,7 +598,7 @@ export default async function ProductsPage({
                   description="ลองเปลี่ยนคำค้นหา หรือกดปุ่ม 'ล้างตัวกรอง' เพื่อดูสินค้าทั้งหมด"
                   action={
                     <Button asChild variant="outline">
-                      <Link href="/products?tab=stock" scroll={false}>
+                      <Link href="/products?tab=stock" scroll={false} prefetch={false}>
                         ล้างตัวกรอง
                       </Link>
                     </Button>
@@ -620,6 +622,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>รหัสสินค้า (SKU)</span>
@@ -638,6 +641,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>ราคาทุน/ชิ้น</span>
@@ -659,6 +663,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>ของออก (ขาย)</span>
@@ -675,6 +680,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>คงเหลือ</span>
@@ -697,6 +703,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>มูลค่าคงเหลือ</span>
@@ -716,6 +723,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>ต้นทุนขาย (COGS)</span>
@@ -948,6 +956,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>ราคาตั้งต้น/ชิ้น</span>
@@ -963,6 +972,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>รวมจำนวนชิ้น</span>
@@ -978,6 +988,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>จำนวนออเดอร์</span>
@@ -993,6 +1004,7 @@ export default async function ProductsPage({
                             nextPage: 1,
                           })}
                           scroll={false}
+                          prefetch={false}
                           className="inline-flex items-center justify-end gap-1 text-[#0f172a] hover:text-primary"
                         >
                           <span>มูลค่ารวมตั้งต้น</span>
@@ -1059,6 +1071,7 @@ export default async function ProductsPage({
                           <TableCell data-label="ดูบิล" className="num">
                             <Button asChild variant="outline" size="xs">
                               <Link
+                                prefetch={false}
                                 href={(() => {
                                   const billQs = new URLSearchParams();
                                   billQs.set("q", row.skuCode);

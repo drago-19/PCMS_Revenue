@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
+import { TableLoadingBoundary } from "@/components/TableLoadingBoundary";
 import { UploadCompletenessCalendar } from "@/components/UploadCompletenessCalendar";
 import { UploadForm } from "@/components/UploadForm";
 import { IconHistory, IconReceipt } from "@/components/icons";
@@ -71,7 +72,13 @@ export default async function ImportPage({
         </Card>
       </div>
 
-      <UploadCompletenessCalendar report={report} />
+      <TableLoadingBoundary
+        rows={8}
+        columns={4}
+        label="กำลังโหลดปฏิทินความครบถ้วนของไฟล์รายได้"
+      >
+        <UploadCompletenessCalendar report={report} />
+      </TableLoadingBoundary>
     </div>
   );
 }

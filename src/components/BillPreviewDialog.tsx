@@ -36,6 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TableRow } from "@/components/ui/table";
 import { buildBill } from "@/lib/bill";
 import { buildInvoice, isOrderEligibleForInvoice } from "@/lib/invoice";
@@ -45,7 +46,7 @@ import { cn } from "@/lib/utils";
 type PreviewTab = "bill" | "invoice" | "invoice_full";
 
 interface BillPreviewContextType {
-  openPreview: (row: TransactionRow, defaultTab?: PreviewTab) => void;
+  openPreview: (orderId: string, defaultTab?: PreviewTab) => void;
 }
 
 const BillPreviewContext = createContext<BillPreviewContextType | null>(null);
@@ -54,18 +55,125 @@ export function useBillPreview() {
   return useContext(BillPreviewContext);
 }
 
+type OrderRowState = "idle" | "loading" | "ready" | "error";
+
+/**
+ * โหลดข้อมูลบิลเต็มก้อน “ตอนเปิดป๊อปอัป” แทนการฝังทั้งออบเจกต์ลงใน payload ของทุกแถว
+ * ใช้ loader ตัวเดียวกับที่หน้า /bills ใช้ (`getBillForPreview`) ข้อมูลจึงเป็นชุดเดียวกัน
+ */
+function useOrderRow(orderId: string | null, open: boolean) {
+  const [row, setRow] = useState<TransactionRow | null>(null);
+  const [state, setState] = useState<OrderRowState>("idle");
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!open || !orderId) return;
+    // รหัสออเดอร์มาจาก DB อยู่แล้ว แต่กันไม่ให้ค่าที่มีอักขระเปลี่ยนเส้นทางถูกต่อเป็น URL
+    if (/[\\/?#%\u0000-\u001F]/.test(orderId) || orderId.length > 120) {
+      setState("error");
+      return;
+    }
+    let cancelled = false;
+    setState("loading");
+    setRow(null);
+    fetch(`/api/bills/${encodeURIComponent(orderId)}/preview`, {
+      cache: "no-store",
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`preview_failed_${res.status}`);
+        return (await res.json()) as { row?: TransactionRow };
+      })
+      .then((data) => {
+        if (cancelled) return;
+        if (!data.row) {
+          setState("error");
+          return;
+        }
+        setRow(data.row);
+        setState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, open, attempt]);
+
+  return { row, state, retry: () => setAttempt((n) => n + 1) };
+}
+
+function OrderPreviewDialog({
+  orderId,
+  open,
+  onOpenChange,
+  initialTab = "bill",
+}: {
+  orderId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialTab?: PreviewTab;
+}) {
+  const { row, state, retry } = useOrderRow(orderId, open);
+
+  if (row && state === "ready") {
+    return (
+      <BillPreviewModal
+        key={row.id}
+        row={row}
+        open={open}
+        onOpenChange={onOpenChange}
+        initialTab={initialTab}
+      />
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader className="pr-11">
+          <DialogTitle>กำลังเปิดบิล</DialogTitle>
+          <DialogDescription>
+            {state === "error"
+              ? "โหลดข้อมูลบิลไม่สำเร็จ"
+              : "กำลังดึงรายละเอียดบิลจากเซิร์ฟเวอร์…"}
+          </DialogDescription>
+        </DialogHeader>
+        {state === "error" ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              ตรวจการเชื่อมต่อแล้วลองอีกครั้ง — ข้อมูลบิลไม่ถูกแก้ไขใด ๆ
+            </p>
+            <Button type="button" variant="outline" onClick={retry}>
+              ลองอีกครั้ง
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2" role="status" aria-busy="true">
+            <span className="sr-only">กำลังโหลดข้อมูลบิล</span>
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="mt-2 h-24 w-full" />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function BillPreviewProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [activeRow, setActiveRow] = useState<TransactionRow | null>(null);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PreviewTab>("bill");
 
   const openPreview = useCallback(
-    (row: TransactionRow, defaultTab: PreviewTab = "bill") => {
-      setActiveRow(row);
+    (orderId: string, defaultTab: PreviewTab = "bill") => {
+      setActiveOrderId(orderId);
       setTab(defaultTab);
       setOpen(true);
     },
@@ -75,10 +183,9 @@ export function BillPreviewProvider({
   return (
     <BillPreviewContext.Provider value={{ openPreview }}>
       {children}
-      {activeRow ? (
-        <BillPreviewModal
-          key={activeRow.id}
-          row={activeRow}
+      {activeOrderId ? (
+        <OrderPreviewDialog
+          orderId={activeOrderId}
           open={open}
           onOpenChange={setOpen}
           initialTab={tab}
@@ -89,11 +196,11 @@ export function BillPreviewProvider({
 }
 
 export function BillTableRow({
-  row,
+  orderId,
   className,
   children,
 }: {
-  row: TransactionRow;
+  orderId: string;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -111,7 +218,7 @@ export function BillTableRow({
       return;
     }
     if (previewCtx) {
-      previewCtx.openPreview(row, "bill");
+      previewCtx.openPreview(orderId, "bill");
     }
   };
 
@@ -129,14 +236,16 @@ export function BillTableRow({
 }
 
 export function BillPreviewTrigger({
-  row,
+  orderId,
+  displayOrderId,
   defaultTab = "bill",
   triggerVariant = "button",
   label,
   className,
   children,
 }: {
-  row: TransactionRow;
+  orderId: string;
+  displayOrderId?: string;
   defaultTab?: PreviewTab;
   triggerVariant?: "button" | "ghost" | "outline" | "link";
   label?: string;
@@ -149,15 +258,13 @@ export function BillPreviewTrigger({
   function handleOpen(e?: React.MouseEvent) {
     e?.stopPropagation();
     if (previewCtx) {
-      previewCtx.openPreview(row, defaultTab);
+      previewCtx.openPreview(orderId, defaultTab);
       return;
     }
     setLocalOpen(true);
   }
 
-  const displayOrderId = row.externalId.includes("|")
-    ? row.orderCode || row.externalId.split("|")[0] || row.externalId
-    : row.externalId;
+  const triggerText = label ?? displayOrderId ?? orderId;
 
   return (
     <>
@@ -185,7 +292,7 @@ export function BillPreviewTrigger({
             className,
           )}
         >
-          {label ?? displayOrderId}
+          {triggerText}
         </button>
       ) : (
         <Button
@@ -211,8 +318,8 @@ export function BillPreviewTrigger({
       )}
 
       {!previewCtx ? (
-        <BillPreviewModal
-          row={row}
+        <OrderPreviewDialog
+          orderId={orderId}
           open={localOpen}
           onOpenChange={setLocalOpen}
           initialTab={defaultTab}

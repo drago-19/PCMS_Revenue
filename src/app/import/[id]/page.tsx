@@ -560,7 +560,7 @@ export default async function ImportReportPage({
                           <TableCell data-label="ตรวจสอบบิล" className="num">
                             <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
                               <BillPreviewTrigger
-                                row={tx}
+                                orderId={tx.externalId}
                                 defaultTab="bill"
                                 triggerVariant="outline"
                                 label="เปิดดูบิล"

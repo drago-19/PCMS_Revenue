@@ -128,6 +128,7 @@ export function BillsShippingHeaderFilter({
 
         <DropdownMenuItem asChild>
           <Link
+            prefetch={false}
             href={hrefAll}
             scroll={false}
             className={cn(
@@ -149,6 +150,7 @@ export function BillsShippingHeaderFilter({
 
         <DropdownMenuItem asChild>
           <Link
+            prefetch={false}
             href={hrefProfit}
             scroll={false}
             className={cn(
@@ -170,6 +172,7 @@ export function BillsShippingHeaderFilter({
 
         <DropdownMenuItem asChild>
           <Link
+            prefetch={false}
             href={hrefEven}
             scroll={false}
             className={cn(
@@ -191,6 +194,7 @@ export function BillsShippingHeaderFilter({
 
         <DropdownMenuItem asChild>
           <Link
+            prefetch={false}
             href={hrefLoss}
             scroll={false}
             className={cn(
@@ -212,6 +216,7 @@ export function BillsShippingHeaderFilter({
 
         <DropdownMenuItem asChild>
           <Link
+            prefetch={false}
             href={hrefDiff}
             scroll={false}
             className={cn(
@@ -239,6 +244,7 @@ export function BillsShippingHeaderFilter({
 
         <DropdownMenuItem asChild>
           <Link
+            prefetch={false}
             href={hrefSortDesc}
             scroll={false}
             className={cn(
@@ -257,6 +263,7 @@ export function BillsShippingHeaderFilter({
 
         <DropdownMenuItem asChild>
           <Link
+            prefetch={false}
             href={hrefSortAsc}
             scroll={false}
             className={cn(

@@ -355,13 +355,13 @@ export default async function ImportHistoryPage({
                         />
                         {item.periodStart ? (
                           <Button asChild variant="outline" size="xs">
-                            <Link href={`/bills?date=${encodeURIComponent(item.periodStart)}`}>
+                            <Link prefetch={false} href={`/bills?date=${encodeURIComponent(item.periodStart)}`}>
                               ดูบิลรอบนี้
                             </Link>
                           </Button>
                         ) : null}
                         <Button asChild variant="secondary" size="xs">
-                          <Link href={`/import/${item.id}`}>รายงาน / ลบ</Link>
+                          <Link prefetch={false} href={`/import/${item.id}`}>รายงาน / ลบ</Link>
                         </Button>
                       </span>
                     </TableCell>
