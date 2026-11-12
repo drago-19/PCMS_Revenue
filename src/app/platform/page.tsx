@@ -89,20 +89,9 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
       ) : null}
 
       <PlatformSetupPanel
-        tiktok={{
+        status={{
           configured: Boolean(config.tiktok),
-          appKey: config.tiktok?.appKey ?? null,
-          serviceId: config.tiktok?.serviceId ?? null,
-          accounts: accounts.map((account) => ({
-            accountKey: account.accountKey,
-            shopName: account.shopName,
-            shopCipher: account.shopCipher,
-            region: account.region,
-            status: account.status,
-            lastError: account.lastError,
-            accessTokenExpiresAt: account.accessTokenExpiresAt,
-            connectedAt: account.connectedAt,
-          })),
+          shopNames: accounts.map((account) => account.shopName ?? account.accountKey),
         }}
       />
     </div>
