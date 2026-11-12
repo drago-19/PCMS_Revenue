@@ -18,6 +18,9 @@ services:
       AUTH_SEEHENG_PASSWORD: ${AUTH_SEEHENG_PASSWORD:-}
       AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
       SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+      # คีย์เข้ารหัส credential ของการเชื่อมต่อแพลตฟอร์ม (base64 32 ไบต์)
+      # ถ้าไม่ตั้ง หน้า /platform จะไม่ยอมบันทึก credential ใน production
+      PLATFORM_SECRET_KEY: ${PLATFORM_SECRET_KEY:-}
     ports:
       - "3002:3000"
 
