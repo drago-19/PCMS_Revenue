@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { appUrl } from "@/lib/platform/base-url";
 import {
   exchangeAuthCode,
   getAuthorizedShops,
@@ -11,8 +12,9 @@ import { getPlatformConfig, saveTikTokShop } from "@/lib/platform/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// ใช้โดเมนจริงที่ผู้ใช้เรียกเข้ามา ไม่ใช่ 0.0.0.0:3000 ของคอนเทนเนอร์
 function back(request: Request, query: string) {
-  return NextResponse.redirect(new URL(`/platform?${query}`, request.url));
+  return NextResponse.redirect(appUrl(request, `/platform?${query}`));
 }
 
 /**

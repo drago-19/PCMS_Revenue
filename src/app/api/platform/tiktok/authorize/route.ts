@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/auth";
+import { appUrl } from "@/lib/platform/base-url";
 import {
   buildAuthorizeUrl,
   createOAuthState,
@@ -20,9 +21,7 @@ export async function GET(request: Request) {
 
   const config = await getPlatformConfig();
   if (!config.tiktok) {
-    return NextResponse.redirect(
-      new URL("/platform?tiktok=missing_config", request.url),
-    );
+    return NextResponse.redirect(appUrl(request, "/platform?tiktok=missing_config"));
   }
 
   const state = createOAuthState();
