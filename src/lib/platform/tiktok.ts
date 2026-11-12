@@ -106,8 +106,10 @@ let queue: Promise<void> = Promise.resolve();
 
 // อ่านค่าจาก env ตอนเรียก เพื่อให้เทสต์ปรับได้โดยไม่ต้อง import ใหม่
 function minIntervalMs(): number {
-  const value = Number(process.env.TIKTOK_MIN_INTERVAL_MS ?? 350);
-  return Number.isFinite(value) && value >= 0 ? value : 350;
+  // 500 ms ≈ 2 คำขอ/วินาที — ต่ำกว่าช่วงที่ TikTok แนะนำสำหรับ read/sync (3–10 rps)
+  // เพื่อเหลือระยะปลอดภัยและไม่ให้ถูกมองว่าเป็น burst
+  const value = Number(process.env.TIKTOK_MIN_INTERVAL_MS ?? 500);
+  return Number.isFinite(value) && value >= 0 ? value : 500;
 }
 
 async function throttle(): Promise<void> {

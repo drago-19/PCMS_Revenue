@@ -91,6 +91,8 @@ async function main() {
       throw err;
     }
     cursor = windowTo;
+    // เว้นจังหวะระหว่างช่วง เพื่อไม่ให้เป็นการยิงต่อเนื่องแบบ burst
+    if (cursor < toUnix) await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
   // statement ทั้งช่วงครั้งเดียว (API รองรับช่วงกว้าง + แบ่งหน้าเอง)
