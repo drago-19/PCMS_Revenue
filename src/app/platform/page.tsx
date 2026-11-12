@@ -6,7 +6,7 @@ import { IconInfo, IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { getTikTokDashboard } from "@/lib/platform/dashboard";
+import { getTikTokAnalytics } from "@/lib/platform/analytics";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { cn } from "@/lib/utils";
 
@@ -66,10 +66,10 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
   const activePlatform = readPlatform(params.platform);
   const flash = buildFlash(params);
 
-  const [config, accounts, dashboard] = await Promise.all([
+  const [config, accounts, analytics] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
-    getTikTokDashboard(30),
+    getTikTokAnalytics(30),
   ]);
 
   return (
@@ -125,19 +125,7 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
 
       {activePlatform === "tiktok" ? (
         <section aria-label="แดชบอร์ด TikTok Shop" className="flex min-w-0 flex-col gap-4">
-          <PlatformDashboardView
-            dashboard={dashboard}
-            configured={Boolean(config.tiktok)}
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/settings?tab=platforms">จัดการการเชื่อมต่อ / ทดสอบดึง Statement</Link>
-            </Button>
-            <span className="text-[12px] text-muted-foreground">
-              ตัวเลขบนหน้านี้คำนวณสดจาก TikTok ทุกครั้งที่เปิด (ไม่บันทึกลงตารางของระบบบิล)
-            </span>
-          </div>
+          <PlatformDashboardView analytics={analytics} />
         </section>
       ) : null}
 

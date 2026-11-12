@@ -463,7 +463,13 @@ export async function searchOrders({
         skuId: str(item.sku_id),
         productName: str(item.product_name),
         skuName: str(item.sku_name),
-        quantity: typeof item.quantity === "number" ? item.quantity : 0,
+        // TikTok ไม่ส่ง quantity มาใน line_items บางออเดอร์ — ถือเป็น 1 ชิ้น
+        quantity:
+          typeof item.quantity === "number"
+            ? item.quantity
+            : typeof item.item_quantity === "number"
+              ? item.item_quantity
+              : 1,
         salePrice: str(item.sale_price),
         currency: str(item.currency),
       })),
@@ -537,7 +543,8 @@ export async function listStatementTransactions({
     orderCreateTime: num(row.order_create_time) ?? num(row.create_time),
     settlementAmount: str(row.settlement_amount) ?? "0",
     revenueAmount: str(row.revenue_amount) ?? "0",
-    feeAndTaxAmount: str(row.fee_and_tax_amount) ?? "0",
+    // TikTok ใช้ชื่อฟิลด์ fee_tax_amount (ไม่ใช่ fee_and_tax_amount)
+    feeAndTaxAmount: str(row.fee_tax_amount) ?? str(row.fee_and_tax_amount) ?? "0",
     shippingCostAmount: str(row.shipping_cost_amount) ?? "0",
     currency: str(row.currency) ?? str(data.currency) ?? "THB",
     raw: row,
@@ -658,6 +665,7 @@ export async function listStatements({
   fromUnix,
   toUnix,
   pageSize = 20,
+  pageToken,
 }: {
   config: TikTokAppConfig;
   accessToken: string;
@@ -665,6 +673,7 @@ export async function listStatements({
   fromUnix?: number;
   toUnix?: number;
   pageSize?: number;
+  pageToken?: string;
 }): Promise<{ statements: TikTokStatement[]; nextPageToken: string | null }> {
   const query: Record<string, string> = {
     shop_cipher: shopCipher,
@@ -674,6 +683,7 @@ export async function listStatements({
   };
   if (fromUnix) query.statement_time_ge = String(fromUnix);
   if (toUnix) query.statement_time_lt = String(toUnix);
+  if (pageToken) query.page_token = pageToken;
 
   const data = await callTikTokApi<RawStatementsData>({
     config,

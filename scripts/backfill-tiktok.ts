@@ -13,7 +13,6 @@ import {
   finishSyncRun,
   startSyncRun,
   syncOrders,
-  syncPackages,
   syncStatements,
   type SyncContext,
 } from "../src/lib/platform/sync";
@@ -79,11 +78,11 @@ async function main() {
     const runId = await startSyncRun("TikTok", `backfill ${label}`, new Date(cursor * 1000), new Date(windowTo * 1000));
     try {
       const orders = await syncOrders(ctx, cursor, windowTo);
-      const packages = await syncPackages(ctx, cursor, windowTo);
       totalOrders += orders;
-      totalPackages += packages;
-      await finishSyncRun(runId, orders + packages, null);
-      console.log(`  ✓ ${label}: ออเดอร์ ${orders} · พัสดุ ${packages}`);
+      // หมายเหตุ: ไม่ดึงพัสดุย้อนหลัง เพราะการค้นพัสดุไม่กรองตามวันที่ (ได้ชุดล่าสุดซ้ำ)
+      // สถานะขนส่ง/เลขพัสดุใช้จากออเดอร์แทน
+      await finishSyncRun(runId, orders, null);
+      console.log(`  ✓ ${label}: ออเดอร์ ${orders}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await finishSyncRun(runId, 0, message);

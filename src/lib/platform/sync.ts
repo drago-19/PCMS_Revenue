@@ -277,21 +277,41 @@ export interface SyncResult {
 
 /** ดึง statement + รายการเงินต่อออเดอร์ในช่วงเวลา (ช่วงไม่ควรเกิน ~1 เดือนต่อครั้ง) */
 export async function syncStatements(ctx: SyncContext, fromUnix: number, toUnix: number): Promise<{ statements: number; orderFinance: number }> {
-  const list = await listStatements({
-    config: ctx.config,
-    accessToken: ctx.accessToken,
-    shopCipher: ctx.shopCipher,
-    fromUnix,
-    toUnix,
-    pageSize: 100,
-  });
+  // ไล่ทุกหน้าของรายการ statement (API คืนครั้งละไม่เกิน 100 ใบ)
+  const allStatements: TikTokStatement[] = [];
+  let statementPage: string | undefined;
+  const seenPages = new Set<string>();
+  let statementPages = 0;
 
-  const statements = await upsertStatements(ctx.shopId, list.statements);
+  while (statementPages < 100) {
+    const page = await listStatements({
+      config: ctx.config,
+      accessToken: ctx.accessToken,
+      shopCipher: ctx.shopCipher,
+      fromUnix,
+      toUnix,
+      pageToken: statementPage,
+      pageSize: 100,
+    });
+    allStatements.push(...page.statements);
+    statementPages += 1;
+
+    const next = page.nextPageToken ?? undefined;
+    if (!next || seenPages.has(next)) break;
+    seenPages.add(next);
+    statementPage = next;
+  }
+
+  const statements = await upsertStatements(ctx.shopId, allStatements);
 
   let orderFinance = 0;
-  for (const statement of list.statements) {
+  for (const statement of allStatements) {
     let pageToken: string | undefined;
-    do {
+    const seen = new Set<string>();
+    let pages = 0;
+
+    // กันวนไม่จบ: หยุดเมื่อ token หน้าถัดไปซ้ำ หรือครบ 500 หน้า
+    while (pages < 500) {
       const page = await listStatementTransactions({
         config: ctx.config,
         accessToken: ctx.accessToken,
@@ -301,8 +321,13 @@ export async function syncStatements(ctx: SyncContext, fromUnix: number, toUnix:
         pageSize: 100,
       });
       orderFinance += await upsertOrderFinance(ctx.shopId, page.transactions);
-      pageToken = page.nextPageToken ?? undefined;
-    } while (pageToken);
+      pages += 1;
+
+      const next = page.nextPageToken ?? undefined;
+      if (!next || seen.has(next)) break;
+      seen.add(next);
+      pageToken = next;
+    }
   }
 
   return { statements, orderFinance };
@@ -312,8 +337,10 @@ export async function syncStatements(ctx: SyncContext, fromUnix: number, toUnix:
 export async function syncOrders(ctx: SyncContext, fromUnix: number, toUnix: number): Promise<number> {
   let pageToken: string | undefined;
   let written = 0;
+  let pages = 0;
+  const seen = new Set<string>();
 
-  do {
+  while (pages < 500) {
     const page = await searchOrders({
       config: ctx.config,
       accessToken: ctx.accessToken,
@@ -324,8 +351,13 @@ export async function syncOrders(ctx: SyncContext, fromUnix: number, toUnix: num
       pageSize: 100,
     });
     written += await upsertOrders(ctx.shopId, page.orders);
-    pageToken = page.nextPageToken ?? undefined;
-  } while (pageToken);
+    pages += 1;
+
+    const next = page.nextPageToken ?? undefined;
+    if (!next || seen.has(next)) break;
+    seen.add(next);
+    pageToken = next;
+  }
 
   return written;
 }
@@ -334,8 +366,10 @@ export async function syncOrders(ctx: SyncContext, fromUnix: number, toUnix: num
 export async function syncPackages(ctx: SyncContext, fromUnix: number, toUnix: number): Promise<number> {
   let pageToken: string | undefined;
   let written = 0;
+  let pages = 0;
+  const seen = new Set<string>();
 
-  do {
+  while (pages < 500) {
     const page = await searchPackages({
       config: ctx.config,
       accessToken: ctx.accessToken,
@@ -345,8 +379,13 @@ export async function syncPackages(ctx: SyncContext, fromUnix: number, toUnix: n
       pageSize: 50,
     });
     written += await upsertPackages(ctx.shopId, page.packages);
-    pageToken = page.nextPageToken ?? undefined;
-  } while (pageToken);
+    pages += 1;
+
+    const next = page.nextPageToken ?? undefined;
+    if (!next || seen.has(next)) break;
+    seen.add(next);
+    pageToken = next;
+  }
 
   return written;
 }
