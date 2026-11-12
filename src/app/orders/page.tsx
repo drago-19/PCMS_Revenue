@@ -175,7 +175,7 @@ function ProductsTable({ products }: { products: ProductPackingRow[] }) {
               <TableCell data-label="ช่องทาง" className="text-[12px] text-muted-foreground">
                 {product.channels.map((channel) => (
                   <span key={channel.channel} className="block whitespace-nowrap">
-                    {channel.channel} · {channel.quantity}
+                    {channel.channel} · {channel.quantity} ชิ้น
                   </span>
                 ))}
               </TableCell>
