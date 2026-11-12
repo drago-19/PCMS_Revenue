@@ -236,3 +236,16 @@
 3. เชื่อมบัญชี seller ที่สอง (บริษัทเดียวกัน) — ถ้าหมวด Seller inhouse ไม่ยอมให้ authorize บัญชีที่สอง ให้สร้างแอปที่ 2 ใต้ partner เดิม (เอกสารชุดเดิม)
 4. Shopee: ต้องเช็กก่อนว่าร้านเป็น **Mall หรือ Managed** (เงื่อนไขของ TH) ถ้าไม่ใช่ → ทางเลือก ISV หรือคงใช้ไฟล์ Income
 5. งานปรับความปลอดภัยที่ยังไม่ทำ: rotate App Secret หลัง publish · เปลี่ยนรหัส postgres · ผูกพอร์ต 5432 กับ localhost/Tailscale · สร้าง role แอป (ดู §12)
+
+### อัปเดตท้ายวัน 12 พ.ย. 2026 (16:10)
+
+- **Partner registration: Approved 15:26** (เร็วกว่าที่ระบบแจ้ง 3–5 วัน)
+- **แอป Publish แล้ว สถานะ "On"**
+- **Scope ที่เปิด (Active 6):** Finance Information · Fulfillment Basic · Logistics Basic · Product Basic · Global Shop Information · Shop Authorized Information
+  - หมายเหตุ: `Shop Authorized Information` อยู่ท้ายรายการ 31 ตัว (ต้องเลื่อนถึงจะเห็น) และเป็น scope ของ endpoint `/authorization/202309/shops`
+- **ร้านที่ authorize: Kissi Studio · Shop ID 7495390224773123065** (สิทธิ์แบบไม่จำกัดเวลา, grant 15:37 และ re-grant 16:0x)
+- **ยังค้างที่จุดเดียว:** callback แลก token ผ่าน แต่ `GET /authorization/202309/shops` ตอบ `Access denied. This app has not been granted any access scope required by this endpoint…` → ไม่มีร้านถูกบันทึกลง `platform_accounts`
+  - แก้ไปแล้ว: redirect ที่เคยไป `https://0.0.0.0:3000` (ใช้ `x-forwarded-host`), แยกข้อความ error เป็น `token:` / `shops:`
+  - เอกสาร TikTok ระบุให้เทียบ scope ของ endpoint กับ **`granted_scopes` ของ token**; สมมติฐานที่ยังไม่ปิด: token อาจยังไม่รับ scope ใหม่ (รอ/authorize ใหม่) หรือ endpoint ต้องใช้ scope อื่น
+  - ขั้นต่อไป: (1) รอ ~30 นาทีแล้ว authorize ซ้ำ หรือ (2) log `granted_scopes` ของ token เพื่อพิสูจน์ หรือ (3) เปิด ticket กับ TikTok
+- **Shopee:** ยังไม่เริ่ม — ติดเงื่อนไข TH (Mall/Managed seller) และยังไม่ได้สมัคร developer account
