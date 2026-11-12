@@ -639,7 +639,7 @@ export default async function PackingOrdersPage({
 
   return (
     <div className="workspace-page @container">
-      <PackingAutoRefresh intervalMs={120_000} />
+      <PackingAutoRefresh intervalMs={300_000} />
       {header({ imageUrls: printImageUrls, rounds: printRounds })}
       {results
         .filter((item) => item.error)
@@ -749,11 +749,10 @@ export default async function PackingOrdersPage({
               })}
             </nav>
 
-            {results.map((item) => (
-              <div
-                key={item.account.id}
-                className={item.account.id === activeShopId ? "block" : "hidden print:block"}
-              >
+            {results
+              .filter((item) => item.account.id === activeShopId)
+              .map((item) => (
+              <div key={item.account.id} className="block">
                 {item.summary ? (
                   <ShopPanel
                     item={item}
