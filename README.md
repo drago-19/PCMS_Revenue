@@ -115,6 +115,22 @@ pnpm run import:dir -- C:\path\to\folder                 # นำเข้าท
 | `SELLER_VAT_RATE` | 7 |
 | `INVOICE_PREFIX` | TT (เลขที่ใบ = `TT{YYMM}/{ลำดับ}`) |
 
+### 8.1 คีย์เข้ารหัส credential ของการเชื่อมต่อแพลตฟอร์ม (หน้า `/platform`)
+
+ระบบเก็บ App Secret ของ TikTok/Shopee แบบเข้ารหัส (AES-256-GCM) คีย์อยู่ที่ `PLATFORM_SECRET_KEY`
+เป็น base64 ของ 32 ไบต์ — **ถ้าไม่ตั้งค่า หน้า `/platform` จะไม่ยอมบันทึก credential ใน production**
+(ระบบบิล/ใบกำกับเดิมทำงานปกติ) สร้างคีย์ใหม่ด้วย PowerShell:
+
+```powershell
+$b = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+[Convert]::ToBase64String($b)
+```
+
+แล้วเพิ่มบรรทัด `PLATFORM_SECRET_KEY=<ค่าที่ได้>` ใน `.env` (ที่เดียวกับ `docker-compose.yml`) และสั่ง
+`docker compose up -d app` ให้ container รับค่าใหม่ · ตรวจสถานะได้ด้วย
+`pnpm exec tsx --env-file=.env scripts/check-platform-secret.ts`
+
 ---
 
 ## 9. แก้ปัญหาเบื้องต้น
