@@ -226,6 +226,24 @@ export async function loadStoredOrders(
   };
 }
 
+/**
+ * ปิดรายการออเดอร์ที่เคยเปิดอยู่แต่หายไปจากรายการล่าสุดของ Shipnity
+ * เรียกเฉพาะเมื่อดึง "ครบ" แล้ว (เห็นหน้าสุดท้ายจริง) ไม่อย่างนั้นอาจปิดของที่แค่ยังไม่ได้ดึง
+ */
+export async function markMissingClosed(accountKey: string, seenOrderIds: number[]): Promise<number> {
+  if (seenOrderIds.length === 0) return 0;
+  const rows = await query<{ order_id: string }>(
+    `UPDATE shipnity_orders
+     SET closed = true, last_synced_at = now()
+     WHERE account_key = $1
+       AND closed = false
+       AND NOT (order_id = ANY($2::bigint[]))
+     RETURNING order_id::text`,
+    [accountKey, seenOrderIds],
+  );
+  return rows.length;
+}
+
 /** จำนวนออเดอร์ที่ยังไม่ปิดรายการที่เก็บไว้ (ใช้เทียบกับจำนวนที่ดึงได้ในรอบล่าสุด) */
 export async function countOpenStored(accountKey: string): Promise<number> {
   const row = await queryOne<{ n: number }>(

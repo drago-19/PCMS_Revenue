@@ -222,11 +222,11 @@ async function fetchFullPage(
   return retry.orders.length > first.orders.length ? retry : first;
 }
 
-export async function listAllOrders(
+export async function listAllOrdersDetailed(
   params: FetchOrdersParams & { maxPages?: number },
   fetchPage: (page: number) => Promise<ShipnityOrdersPage> = (page) =>
     fetchOrdersPage({ ...params, page }),
-): Promise<ShipnityOrder[]> {
+): Promise<{ orders: ShipnityOrder[]; complete: boolean }> {
   const maxPages = params.maxPages ?? 20;
   const collected: ShipnityOrder[] = [];
   const seen = new Set<number>();
@@ -238,7 +238,8 @@ export async function listAllOrders(
     seen.add(order.id);
     collected.push(order);
   }
-  if (first.orders.length < SHIPNITY_PAGE_SIZE) return collected;
+  let completed = true;
+  if (first.orders.length < SHIPNITY_PAGE_SIZE) return { orders: collected, complete: completed };
 
   let page = 2;
   let finished = false;
@@ -263,7 +264,10 @@ export async function listAllOrders(
     page += batch.length;
   }
 
-  return collected;
+  // ยังวนไม่จบเพราะชนเพดานหน้า = ข้อมูลอาจยังไม่ครบ
+  if (!finished) completed = false;
+
+  return { orders: collected, complete: completed };
 }
 
 export interface DayOrdersResult {
@@ -306,11 +310,27 @@ function bangkokToday(): string {
  * และเพดาน PAY_LATER_MAX_PAGES หน้า
  */
 /** ออเดอร์ที่ยังไม่ส่ง (filter=open) */
+export async function listAllOrders(
+  params: FetchOrdersParams & { maxPages?: number },
+  fetchPage?: (page: number) => Promise<ShipnityOrdersPage>,
+): Promise<ShipnityOrder[]> {
+  const result = await listAllOrdersDetailed(params, fetchPage);
+  return result.orders;
+}
+
 export async function listOpenOnly(
   credentials: ShipnityCredentials,
   maxPages: number = OPEN_MAX_PAGES,
 ): Promise<ShipnityOrder[]> {
   return listAllOrders({ credentials, filter: "open", maxPages });
+}
+
+/** เหมือน listOpenOnly แต่บอกด้วยว่าดึงจนจบหรือชนเพดานหน้า (ใช้ตัดสินว่าข้อมูลครบไหม) */
+export function listOpenOnlyDetailed(
+  credentials: ShipnityCredentials,
+  maxPages: number = OPEN_MAX_PAGES,
+): Promise<{ orders: ShipnityOrder[]; complete: boolean }> {
+  return listAllOrdersDetailed({ credentials, filter: "open", maxPages });
 }
 
 /** ออเดอร์ COD/เครดิต (filter=pay_later) ในหน้าต่างที่กำหนด */

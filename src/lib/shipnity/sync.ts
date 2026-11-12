@@ -12,7 +12,7 @@ import {
   PAY_LATER_MAX_PAGES,
   ShipnityError,
   listClosedOrdersForDay,
-  listOpenOnly,
+  listOpenOnlyDetailed,
   listPayLaterOrders,
   type DayOrdersResult,
   type ShipnityOrder,
@@ -23,6 +23,7 @@ import {
   hasSyncedClosedDay,
   loadStoredOrders,
   markClosedDaySynced,
+  markMissingClosed,
   pruneStoredOrders,
   readSyncState,
   saveStoredOrders,
@@ -78,16 +79,18 @@ export async function syncOpenOrders(account: ConnectedShipnityAccount): Promise
 
     try {
       const [open, payLater] = await Promise.all([
-        listOpenOnly(credentialsOf(account), SYNC_MAX_PAGES),
+        listOpenOnlyDetailed(credentialsOf(account), SYNC_MAX_PAGES),
         listPayLaterOrders(credentialsOf(account)),
       ]);
 
       const merged = new Map<number, ShipnityOrder>();
-      for (const order of open) merged.set(order.id, order);
+      for (const order of open.orders) merged.set(order.id, order);
       for (const order of payLater) merged.set(order.id, order);
       const orders = [...merged.values()];
 
       const written = await saveStoredOrders(account.id, orders);
+      // ดึงครบแล้ว: ออเดอร์ที่เคยเปิดแต่ไม่อยู่ในรายการนี้ถูกปิดไปแล้วที่ Shipnity
+      if (open.complete) await markMissingClosed(account.id, [...merged.keys()]);
       await pruneStoredOrders(account.id);
       await writeSyncState(account.id, { orderCount: orders.length, lastError: null });
       runtime.rateLimitStreak = 0;
