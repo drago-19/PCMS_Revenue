@@ -45,8 +45,17 @@ export async function GET(request: Request) {
   const config = await getPlatformConfig();
   if (!config.tiktok) return back(request, "tiktok=missing_config");
 
+  let token: Awaited<ReturnType<typeof exchangeAuthCode>>;
   try {
-    const token = await exchangeAuthCode(config.tiktok, code);
+    token = await exchangeAuthCode(config.tiktok, code);
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : "แลก token ไม่สำเร็จ";
+    const message = `token: ${redactSecret(raw, config.tiktok.appSecret)}`.slice(0, 180);
+    console.error("[tiktok/callback] token exchange failed", { message });
+    return back(request, `tiktok=error&message=${encodeURIComponent(message)}`);
+  }
+
+  try {
     const shops = await getAuthorizedShops(config.tiktok, token.accessToken);
 
     if (shops.length === 0) return back(request, "tiktok=no_shop");
@@ -68,7 +77,7 @@ export async function GET(request: Request) {
   } catch (err) {
     const raw = err instanceof Error ? err.message : "เชื่อมต่อไม่สำเร็จ";
     // ห้ามให้ app_secret / token หลุดออกมาทาง URL หรือ log
-    const message = redactSecret(raw, config.tiktok.appSecret).slice(0, 180);
+    const message = `shops: ${redactSecret(raw, config.tiktok.appSecret)}`.slice(0, 180);
     console.error("[tiktok/callback] failed", { message });
     return back(request, `tiktok=error&message=${encodeURIComponent(message)}`);
   }
