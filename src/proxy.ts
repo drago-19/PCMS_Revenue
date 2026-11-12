@@ -15,6 +15,23 @@ function applySecurityHeaders(response: NextResponse, requestId: string): NextRe
   return response;
 }
 
+/**
+ * ปลายทางหลังล็อกอินต้องอยู่โดเมนนี้เท่านั้น — กัน `//evil.com` และ `/\evil.com`
+ * ที่ new URL() ตีความ backslash เป็น slash แล้วกลายเป็น host ภายนอก
+ */
+function safeRedirectTarget(rawTarget: string | null, baseUrl: string): string {
+  if (!rawTarget || !rawTarget.startsWith("/") || rawTarget.startsWith("//")) {
+    return "/";
+  }
+  try {
+    const target = new URL(rawTarget, baseUrl);
+    if (target.host !== new URL(baseUrl).host) return "/";
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const requestId =
@@ -64,10 +81,7 @@ export function proxy(request: NextRequest) {
   if (pathname === "/login") {
     if (session) {
       const nextParam = request.nextUrl.searchParams.get("next");
-      const safeTarget =
-        nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
-          ? nextParam
-          : "/";
+      const safeTarget = safeRedirectTarget(nextParam, request.url);
       return applySecurityHeaders(
         NextResponse.redirect(new URL(safeTarget, request.url)),
         requestId,

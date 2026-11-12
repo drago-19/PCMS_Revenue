@@ -86,15 +86,39 @@ export async function getInitialPasswordHash(): Promise<string> {
   return FALLBACK_ADMIN_HASH;
 }
 
+export class AuthConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthConfigurationError";
+  }
+}
+
 let cachedSeehengDefaultHash: string | null = null;
 
+// ไม่มีรหัสผ่าน default อีกต่อไป: ต้องตั้ง AUTH_SEEHENG_PASSWORD ให้ครบก่อนสร้าง/รีเซ็ตบัญชี seeheng
 export async function getSeehengInitialPasswordHash(): Promise<string> {
-  const initialPlain =
-    (process.env.AUTH_SEEHENG_PASSWORD ?? "seeheng").trim() || "seeheng";
+  const initialPlain = process.env.AUTH_SEEHENG_PASSWORD?.trim() ?? "";
+  if (!initialPlain) {
+    throw new AuthConfigurationError(
+      "AUTH_SEEHENG_PASSWORD ยังไม่ได้ตั้ง — บัญชี seeheng จะถูกสร้างหรือรีเซ็ตไม่ได้จนกว่าจะตั้งรหัสผ่านใน env",
+    );
+  }
   if (!cachedSeehengDefaultHash) {
     cachedSeehengDefaultHash = await hashPassword(initialPlain, BCRYPT_COST);
   }
   return cachedSeehengDefaultHash;
+}
+
+// รหัสผ่าน default เดิมที่เคยฝังอยู่ในโค้ด (รั่วแล้ว) — ห้ามใช้เข้าสู่ระบบอีก
+const RETIRED_DEFAULT_CREDENTIALS: ReadonlyArray<{ username: string; password: string }> = [
+  { username: "seeheng", password: "seeheng" },
+];
+
+export function isRetiredDefaultCredential(username: string, password: string): boolean {
+  const user = username.trim().toLowerCase();
+  return RETIRED_DEFAULT_CREDENTIALS.some(
+    (entry) => entry.username === user && entry.password === password,
+  );
 }
 
 export async function ensureAdminUser(

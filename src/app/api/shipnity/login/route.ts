@@ -77,8 +77,18 @@ export async function POST(request: Request) {
     if (error instanceof ShipnityLoginError) {
       return json({ error: error.message, requestId: auth.requestId }, 400, auth.requestId);
     }
-    const message = error instanceof Error ? error.message : "เชื่อมต่อ Shipnity ไม่สำเร็จ";
-    return json({ error: message, requestId: auth.requestId }, 400, auth.requestId);
+    console.error("[POST /api/shipnity/login] unexpected failure", {
+      requestId: auth.requestId,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    return json(
+      {
+        error: "เชื่อมต่อ Shipnity ไม่สำเร็จ กรุณาตรวจสอบอีเมล/รหัสผ่านแล้วลองใหม่",
+        requestId: auth.requestId,
+      },
+      400,
+      auth.requestId,
+    );
   }
 }
 

@@ -27,7 +27,10 @@ export async function DELETE(request: Request) {
     );
   }
 
-  const deletedCount = await deleteAllImports();
+  const deletedCount = await runWithCompany(
+    auth.session.companyId ?? "dragon19",
+    () => deleteAllImports(),
+  );
   await recordAuditLog({
     actor: auth.session.sub,
     action: "imports.delete_all",

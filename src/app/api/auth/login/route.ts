@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
 import {
+  AuthConfigurationError,
   checkLoginBruteForce,
   clearLoginFailures,
   ensureAdminUser,
   getInitialPasswordHash,
   getSeehengInitialPasswordHash,
+  isRetiredDefaultCredential,
   recordAuditLog,
   recordLoginFailure,
   verifyPassword,
@@ -120,6 +122,26 @@ export async function POST(request: Request) {
     );
   }
 
+  // รหัสผ่าน default ที่เคยฝังในโค้ดถือว่ารั่วแล้ว — ปฏิเสธก่อนตรวจ hash ในฐานข้อมูล
+  if (isRetiredDefaultCredential(username, password)) {
+    await recordAuditLog({
+      actor: username,
+      action: "auth.login",
+      ipAddress: ip,
+      outcome: "blocked",
+      details: { reason: "retired_default_credential" },
+      requestId,
+    });
+    return Response.json(
+      {
+        error:
+          "รหัสผ่านนี้ถูกยกเลิกเพื่อความปลอดภัย กรุณาติดต่อผู้ดูแลระบบเพื่อตั้งรหัสผ่านใหม่",
+        requestId,
+      },
+      { status: 403, headers: { "x-request-id": requestId } },
+    );
+  }
+
   try {
     const admin = await ensureAdminUser(undefined, username);
     const usernameMatches =
@@ -129,11 +151,17 @@ export async function POST(request: Request) {
 
     // If .env AUTH_INITIAL_PASSWORD / AUTH_PASSWORD_HASH was updated, sync it to DB seamlessly
     if (usernameMatches && !passwordValid) {
-      const envHash =
-        admin.companyId === "seeheng"
-          ? await getSeehengInitialPasswordHash()
-          : await getInitialPasswordHash();
-      if (envHash !== admin.passwordHash && (await verifyPassword(password, envHash))) {
+      let envHash: string | null = null;
+      try {
+        envHash =
+          admin.companyId === "seeheng"
+            ? await getSeehengInitialPasswordHash()
+            : await getInitialPasswordHash();
+      } catch (error) {
+        if (!(error instanceof AuthConfigurationError)) throw error;
+        console.error("seeheng env password is not configured", { requestId });
+      }
+      if (envHash && envHash !== admin.passwordHash && (await verifyPassword(password, envHash))) {
         passwordValid = true;
         await getPool().query(
           "UPDATE public.app_users SET password_hash = $2, updated_at = now() WHERE username = $1",
@@ -221,6 +249,16 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
+    if (error instanceof AuthConfigurationError) {
+      console.error("login configuration error", {
+        requestId,
+        message: error.message,
+      });
+      return Response.json(
+        { error: "บัญชีนี้ยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ", requestId },
+        { status: 503, headers: { "x-request-id": requestId } },
+      );
+    }
     console.error("login error", {
       requestId,
       error: error instanceof Error ? error.message : "unknown",

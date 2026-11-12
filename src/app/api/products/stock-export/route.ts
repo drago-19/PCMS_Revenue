@@ -267,7 +267,8 @@ export async function GET(request: Request) {
       } else if (/^\d{4}$/.test(date)) {
         filename = `${filePrefix}_year_${date}.xlsx`;
       } else {
-        filename = `${filePrefix}_${date}.xlsx`;
+        // ค่าที่ไม่ใช่รูปแบบวันที่ถูกตัดอักขระพิเศษออกก่อนใส่ใน header ชื่อไฟล์
+        filename = `${filePrefix}_${date.replace(/[^0-9A-Za-z._-]/g, "")}.xlsx`;
       }
     }
 

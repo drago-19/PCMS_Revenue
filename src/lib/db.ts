@@ -21,13 +21,9 @@ export async function getActiveCompanyId(): Promise<CompanyId> {
   if (fromStorage === "seeheng" || fromStorage === "dragon19") {
     return fromStorage;
   }
+  // บริษัทที่ใช้งานต้องมาจาก session ที่เซ็นชื่อเท่านั้น — ห้ามเชื่อ header จาก client
   try {
-    const { cookies, headers } = await import("next/headers");
-    const hdrs = await headers();
-    const fromHeader = hdrs.get("x-auth-company");
-    if (fromHeader === "seeheng" || fromHeader === "dragon19") {
-      return fromHeader;
-    }
+    const { cookies } = await import("next/headers");
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
     const session = verifySessionToken(token);

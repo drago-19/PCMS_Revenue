@@ -9,7 +9,9 @@ import {
   BLOCK_DURATION_MS,
   checkMemoryBruteForce,
   clearMemoryLoginFailures,
+  getSeehengInitialPasswordHash,
   hashPassword,
+  isRetiredDefaultCredential,
   MAX_LOGIN_ATTEMPTS,
   recordMemoryLoginFailure,
   requireApiAuth,
@@ -19,6 +21,7 @@ import { escapeLikePattern } from "../src/lib/queries";
 import {
   createSessionToken,
   MAX_SESSION_TTL_SECONDS,
+  SECURITY_HEADERS,
   SESSION_COOKIE_NAME,
   verifyCsrfOrigin,
   verifySessionToken,
@@ -262,4 +265,58 @@ test("PWA manifest, service worker, and icons are valid and publicly accessible 
     const res = proxy(req);
     assert.equal(res.status, 200, `PWA asset ${p} must not redirect to /login`);
   }
+});
+
+test("blocks open redirect through /login?next= including the backslash bypass", () => {
+  const token = createSessionToken({ username: "admin", role: "admin" });
+  const cookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`;
+
+  for (const attack of ["/\\evil.com", "//evil.com", "https://evil.com", "/%2F%2Fevil.com"]) {
+    const res = proxy(
+      new NextRequest(`http://localhost:3001/login?next=${encodeURIComponent(attack)}`, {
+        headers: { cookie },
+      }),
+    );
+    assert.equal(res.status, 307);
+    const location = res.headers.get("location") ?? "";
+    assert.ok(
+      location.startsWith("http://localhost:3001/"),
+      `next=${attack} must stay on this host, got ${location}`,
+    );
+  }
+
+  // เส้นทางปกติยังต้องทำงานเหมือนเดิม
+  const ok = proxy(
+    new NextRequest(
+      `http://localhost:3001/login?next=${encodeURIComponent("/bills?channel=TikTok")}`,
+      { headers: { cookie } },
+    ),
+  );
+  assert.equal(ok.headers.get("location"), "http://localhost:3001/bills?channel=TikTok");
+});
+
+test("refuses the retired default credential of the seeheng account", () => {
+  assert.equal(isRetiredDefaultCredential("seeheng", "seeheng"), true);
+  assert.equal(isRetiredDefaultCredential("SEEHENG", "seeheng"), true);
+  assert.equal(isRetiredDefaultCredential("seeheng", "seeheng-2026!"), false);
+  assert.equal(isRetiredDefaultCredential("admin", "seeheng"), false);
+});
+
+test("never falls back to a hardcoded seeheng password when the env var is missing", async () => {
+  const saved = process.env.AUTH_SEEHENG_PASSWORD;
+  delete process.env.AUTH_SEEHENG_PASSWORD;
+  try {
+    await assert.rejects(() => getSeehengInitialPasswordHash(), /AUTH_SEEHENG_PASSWORD/);
+  } finally {
+    if (saved !== undefined) process.env.AUTH_SEEHENG_PASSWORD = saved;
+  }
+});
+
+test("CSP no longer allows eval and company scope never comes from a client header", () => {
+  assert.ok(!SECURITY_HEADERS["Content-Security-Policy"]!.includes("unsafe-eval"));
+  const dbSource = fs.readFileSync(path.resolve(process.cwd(), "src/lib/db.ts"), "utf8");
+  assert.ok(
+    !dbSource.includes("x-auth-company"),
+    "src/lib/db.ts ต้องไม่เชื่อ header x-auth-company จาก client",
+  );
 });
