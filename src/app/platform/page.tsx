@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { PlatformDashboardView } from "@/components/PlatformDashboard";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { PeriodPicker } from "@/components/PeriodPicker";
+import { SyncNowButton } from "@/components/SyncNowButton";
 import { IconInfo, IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -230,6 +231,7 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
               ค้นหาเลขคำสั่งซื้อ · กรองตามสถานะ · เปิดดูสินค้าและยอดเงินทีละออเดอร์
             </span>
             <PlatformAutoRefresh seconds={60} />
+            <SyncNowButton />
           </div>
 
           <PlatformDashboardView analytics={analytics} />

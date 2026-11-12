@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-12-v57";
+const SCHEMA_VERSION = "2026-11-12-v58";
 
 export type { CompanyId };
 
@@ -999,6 +999,14 @@ CREATE TABLE IF NOT EXISTS platform_order_finance (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (platform, shop_id, statement_id, order_id, transaction_type)
 );
+
+CREATE INDEX IF NOT EXISTS platform_orders_shop_time_idx ON platform_orders (shop_id, create_time DESC);
+CREATE INDEX IF NOT EXISTS platform_orders_status_idx ON platform_orders (order_status);
+CREATE INDEX IF NOT EXISTS platform_orders_order_id_idx ON platform_orders (order_id);
+CREATE INDEX IF NOT EXISTS platform_order_items_order_idx ON platform_order_items (order_id);
+CREATE INDEX IF NOT EXISTS platform_order_finance_time_idx ON platform_order_finance (shop_id, order_create_time DESC);
+CREATE INDEX IF NOT EXISTS platform_order_finance_order_idx ON platform_order_finance (order_id);
+CREATE INDEX IF NOT EXISTS platform_statements_time_idx ON platform_statements (shop_id, statement_time DESC);
 
 CREATE TABLE IF NOT EXISTS platform_sync_runs (
   id BIGSERIAL PRIMARY KEY,
