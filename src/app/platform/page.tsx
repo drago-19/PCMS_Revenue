@@ -2,6 +2,7 @@ import Link from "next/link";
 import { EmptyState } from "@/components/PageHeader";
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformDashboardView } from "@/components/PlatformDashboard";
+import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { IconInfo, IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -161,6 +162,7 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
             <span className="text-[12px] text-muted-foreground">
               ค้นหาเลขคำสั่งซื้อ · กรองตามสถานะ · เปิดดูสินค้าและยอดเงินทีละออเดอร์
             </span>
+            <PlatformAutoRefresh seconds={60} />
           </div>
 
           <PlatformDashboardView analytics={analytics} />

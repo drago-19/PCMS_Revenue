@@ -51,9 +51,14 @@ async function cycle() {
     try {
       const orders = await syncOrders(ctx, from, to);
       const money = await syncStatements(ctx, from, to);
-      await finishSyncRun(runId, orders + money.statements + money.orderFinance, null);
+      const changed = orders + money.statements + money.orderFinance;
+      await finishSyncRun(runId, changed, null);
+
+      // ถ้าไม่มีอะไรเปลี่ยน ให้บันทึกสั้น ๆ ว่าเงียบ ไม่ใช่ error
       console.log(
-        `[${stamp()}] ${account.shopName ?? account.accountKey}: ออเดอร์ ${orders} · statement ${money.statements} · รายการเงิน ${money.orderFinance}`,
+        changed === 0
+          ? `[${stamp()}] ${account.shopName ?? account.accountKey}: ไม่มีข้อมูลใหม่ (รอรอบถัดไป)`
+          : `[${stamp()}] ${account.shopName ?? account.accountKey}: ออเดอร์ ${orders} · statement ${money.statements} · รายการเงิน ${money.orderFinance}`,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
