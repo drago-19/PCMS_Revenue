@@ -42,6 +42,8 @@ export interface OrderFilter {
   shopId?: string;
   status?: string;
   search?: string;
+  from?: string; // YYYY-MM-DD
+  to?: string; // YYYY-MM-DD
   page?: number;
   pageSize?: number;
 }
@@ -65,6 +67,14 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
       WHERE i2.shop_id = o.shop_id AND i2.order_id = o.order_id
         AND (i2.product_name ILIKE $${params.length} OR i2.sku_id ILIKE $${params.length})
     ))`);
+  }
+  if (filter.from) {
+    params.push(`${filter.from}T00:00:00Z`);
+    where.push(`o.create_time >= $${params.length}::timestamptz`);
+  }
+  if (filter.to) {
+    params.push(`${filter.to}T23:59:59Z`);
+    where.push(`o.create_time <= $${params.length}::timestamptz`);
   }
 
   const pageSize = Math.min(Math.max(filter.pageSize ?? 25, 1), 100);
@@ -174,6 +184,14 @@ export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary
       WHERE i2.shop_id = o.shop_id AND i2.order_id = o.order_id
         AND (i2.product_name ILIKE $${params.length} OR i2.sku_id ILIKE $${params.length})
     ))`);
+  }
+  if (filter.from) {
+    params.push(`${filter.from}T00:00:00Z`);
+    where.push(`o.create_time >= $${params.length}::timestamptz`);
+  }
+  if (filter.to) {
+    params.push(`${filter.to}T23:59:59Z`);
+    where.push(`o.create_time <= $${params.length}::timestamptz`);
   }
 
   // แยกเป็น 2 คำสั่งง่าย ๆ — เดิมนับรายการสินค้าแบบถามซ้ำทีละออเดอร์จนใช้เวลา ~57 วินาที

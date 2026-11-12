@@ -13,10 +13,14 @@ export function PeriodPicker({
   from,
   to,
   shop,
+  basePath = "/platform",
+  extraParams,
 }: {
   from?: string;
   to?: string;
   shop?: string;
+  basePath?: string;
+  extraParams?: Record<string, string>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState<"from" | "to" | null>(null);
@@ -24,9 +28,12 @@ export function PeriodPicker({
   function go(nextFrom?: string, nextTo?: string) {
     const qs = new URLSearchParams();
     if (shop) qs.set("shop", shop);
+    for (const [key, value] of Object.entries(extraParams ?? {})) {
+      if (value) qs.set(key, value);
+    }
     if (nextFrom) qs.set("from", nextFrom);
     if (nextTo) qs.set("to", nextTo);
-    router.push(qs.toString() ? `/platform?${qs.toString()}` : "/platform");
+    router.push(qs.toString() ? `${basePath}?${qs.toString()}` : basePath);
   }
 
   return (

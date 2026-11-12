@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
 import { CopyButton } from "@/components/CopyButton";
+import { PeriodPicker } from "@/components/PeriodPicker";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -56,10 +57,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const status = read(params, "status");
   const search = read(params, "q").trim();
   const shop = read(params, "shop") || undefined;
+  const fromParam = read(params, "from") || undefined;
+  const toParam = read(params, "to") || undefined;
   const page = Math.max(Number(read(params, "page") || "1") || 1, 1);
 
   const detailId = read(params, "order");
-  const filter = { shopId: shop, status: status || undefined, search: search || undefined };
+  const filter = { shopId: shop, status: status || undefined, search: search || undefined, from: fromParam, to: toParam };
 
   const [config, accounts, result, summary, detail] = await Promise.all([
     getPlatformConfig(),
@@ -71,13 +74,16 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
 
   const pages = Math.max(Math.ceil(result.total / 25), 1);
 
-  const queryFor = (next: { status?: string; page?: number }) => {
+  const queryFor = (next: { status?: string; page?: number; keepDates?: boolean }) => {
     const qs = new URLSearchParams();
     const nextStatus = next.status ?? status;
     const nextPage = next.page ?? page;
+    const keepDates = next.keepDates ?? true;
     if (shop) qs.set("shop", shop);
     if (nextStatus) qs.set("status", nextStatus);
     if (search) qs.set("q", search);
+    if (keepDates && fromParam) qs.set("from", fromParam);
+    if (keepDates && toParam) qs.set("to", toParam);
     if (nextPage > 1) qs.set("page", String(nextPage));
     return qs.toString() ? `/platform/orders?${qs.toString()}` : "/platform/orders";
   };
@@ -121,6 +127,22 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               ค้นหา
             </Button>
           </form>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12.5px] text-muted-foreground">ช่วงวันที่:</span>
+            <PeriodPicker
+              from={fromParam}
+              to={toParam}
+              shop={shop}
+              basePath="/platform/orders"
+              extraParams={{ status, q: search }}
+            />
+            {fromParam || toParam ? (
+              <Link href={queryFor({ keepDates: false })} className="text-[12.5px] underline underline-offset-2">
+                ล้างช่วงวันที่
+              </Link>
+            ) : null}
+          </div>
 
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="กรองตามสถานะ">
             {STATUS_TABS.map((tab) => {
