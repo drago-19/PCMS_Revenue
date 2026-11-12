@@ -365,6 +365,80 @@ export async function getAuthorizedShops(
     }));
 }
 
+export interface TikTokPackage {
+  id: string;
+  status: string;
+  createTime: number;
+  updateTime: number;
+  trackingNumber: string | null;
+  shippingProvider: string | null;
+  orderIds: string[];
+}
+
+interface RawPackagesData {
+  packages?: Array<{
+    id?: string;
+    status?: string;
+    create_time?: number;
+    update_time?: number;
+    tracking_number?: string;
+    shipping_provider_name?: string;
+    orders?: Array<{ id?: string }>;
+  }>;
+  total_count?: number;
+  next_page_token?: string;
+}
+
+/** ค้นหาพัสดุตามช่วงเวลาที่สร้าง — ใช้ทำสรุปสถานะขนส่ง (ไม่ต้องใช้ Order Information) */
+export async function searchPackages({
+  config,
+  accessToken,
+  shopCipher,
+  createTimeGe,
+  createTimeLt,
+  pageSize = 100,
+  packageStatus,
+}: {
+  config: TikTokAppConfig;
+  accessToken: string;
+  shopCipher: string;
+  createTimeGe: number;
+  createTimeLt: number;
+  pageSize?: number;
+  packageStatus?: string;
+}): Promise<{ packages: TikTokPackage[]; totalCount: number }> {
+  const data = await callTikTokApi<RawPackagesData>({
+    config,
+    path: "/fulfillment/202309/packages/search",
+    method: "POST",
+    query: {
+      shop_cipher: shopCipher,
+      page_size: String(pageSize),
+      sort_field: "create_time",
+      sort_order: "DESC",
+    },
+    body: {
+      create_time_ge: createTimeGe,
+      create_time_lt: createTimeLt,
+      ...(packageStatus ? { package_status: packageStatus } : {}),
+    },
+    accessToken,
+  });
+
+  return {
+    packages: (data.packages ?? []).map((row) => ({
+      id: row.id ?? "",
+      status: row.status ?? "UNKNOWN",
+      createTime: row.create_time ?? 0,
+      updateTime: row.update_time ?? 0,
+      trackingNumber: row.tracking_number ?? null,
+      shippingProvider: row.shipping_provider_name ?? null,
+      orderIds: (row.orders ?? []).map((order) => order.id ?? "").filter(Boolean),
+    })),
+    totalCount: data.total_count ?? 0,
+  };
+}
+
 export interface TikTokStatement {
   id: string;
   statementTime: number;
