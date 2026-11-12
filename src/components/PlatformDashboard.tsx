@@ -18,6 +18,10 @@ function shortDate(iso: string): string {
 function change(currentValue: number, previousValue: number): { text: string; up: boolean } | null {
   if (!previousValue) return null;
   const diff = ((currentValue - previousValue) / previousValue) * 100;
+  // ฐานเทียบเล็กมาก (เช่นเริ่มขายกลางปี) ทำให้ % พุ่งเป็นหลักแสน — แสดงเป็นข้อความแทนตัวเลขหลอกตา
+  if (Math.abs(diff) >= 999) {
+    return { text: "ฐานเทียบน้อย", up: diff >= 0 };
+  }
   return {
     text: `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`,
     up: diff >= 0,
@@ -167,7 +171,11 @@ const ALERT_STYLES: Record<string, string> = {
 export function PlatformDashboardView({
   analytics,
 }: {
-  analytics: TikTokAnalytics & { perShop?: Array<{ shopId: string; settlement: number; orders: number; cancelled: number }> };
+  analytics: TikTokAnalytics & {
+    perShop?: Array<{ shopId: string; settlement: number; orders: number; cancelled: number }>;
+    periodLabel: string;
+    compareLabel: string;
+  };
 }) {
   if (!analytics.hasData) {
     return (
@@ -193,8 +201,8 @@ export function PlatformDashboardView({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-        <Badge variant="success">ช่วง {rangeDays} วันล่าสุด</Badge>
-        <span>เทียบกับ {rangeDays} วันก่อนหน้า</span>
+        <Badge variant="success">ช่วง {analytics.periodLabel}</Badge>
+        <span>เทียบกับ {analytics.compareLabel}</span>
         {analytics.lastSyncedAt ? (
           <span>
             · ข้อมูลถึง{" "}

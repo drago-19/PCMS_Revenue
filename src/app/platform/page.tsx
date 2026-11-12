@@ -24,6 +24,37 @@ const PLATFORM_TABS = [
 
 type PlatformKey = (typeof PLATFORM_TABS)[number]["key"];
 
+/** วันที่แบบ YYYY-MM-DD (อิงเวลาท้องถิ่น) สำหรับปุ่มเลือกช่วงเวลา */
+function isoDay(date: Date): string {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+function daysAgo(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return isoDay(date);
+}
+
+function monthStart(): string {
+  const date = new Date();
+  date.setDate(1);
+  return isoDay(date);
+}
+
+function prevMonthStart(): string {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() - 1);
+  return isoDay(date);
+}
+
+function prevMonthEnd(): string {
+  const date = new Date();
+  date.setDate(0);
+  return isoDay(date);
+}
+
 function readParam(params: Record<string, string | string[] | undefined>, key: string) {
   const value = params[key];
   return Array.isArray(value) ? value[0] : value;
@@ -66,12 +97,14 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
   const params = await searchParams;
   const activePlatform = readPlatform(params.platform);
   const selectedShop = readParam(params, "shop") ?? undefined;
+  const fromParam = readParam(params, "from") ?? undefined;
+  const toParam = readParam(params, "to") ?? undefined;
   const flash = buildFlash(params);
 
   const [config, accounts, analytics] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
-    getTikTokAnalytics(30, selectedShop),
+    getTikTokAnalytics({ from: fromParam, to: toParam, rangeDays: 30, shopId: selectedShop }),
   ]);
 
   return (
@@ -155,6 +188,61 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
               ))}
             </div>
           ) : null}
+          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="เลือกช่วงเวลา">
+            {[
+              { key: "7d", label: "7 วัน", from: daysAgo(7) },
+              { key: "30d", label: "30 วัน", from: daysAgo(30) },
+              { key: "month", label: "เดือนนี้", from: monthStart() },
+              { key: "prevmonth", label: "เดือนก่อน", from: prevMonthStart(), to: prevMonthEnd() },
+              { key: "year", label: "ทั้งปี 69", from: "2026-01-01" },
+            ].map((preset) => {
+              const active = (fromParam ?? "") === preset.from && (toParam ?? "") === (preset.to ?? "");
+              const qs = new URLSearchParams();
+              if (preset.from) qs.set("from", preset.from);
+              if (preset.to) qs.set("to", preset.to);
+              if (selectedShop) qs.set("shop", selectedShop);
+              return (
+                <Link
+                  key={preset.key}
+                  href={qs.toString() ? `/platform?${qs.toString()}` : "/platform"}
+                  scroll={false}
+                  role="tab"
+                  aria-selected={active}
+                  className={cn(
+                    "inline-flex min-h-[36px] items-center rounded-full border px-3 text-[12px] font-bold",
+                    active ? "border-slate-900 bg-slate-900 text-white" : "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {preset.label}
+                </Link>
+              );
+            })}
+
+            <form action="/platform" className="flex flex-wrap items-center gap-1.5">
+              {selectedShop ? <input type="hidden" name="shop" value={selectedShop} /> : null}
+              <label className="sr-only" htmlFor="from-date">จากวันที่</label>
+              <input
+                id="from-date"
+                type="date"
+                name="from"
+                defaultValue={fromParam ?? ""}
+                className="h-9 rounded-lg border border-border bg-background px-2 text-[12px]"
+              />
+              <span className="text-[12px] text-muted-foreground">ถึง</span>
+              <label className="sr-only" htmlFor="to-date">ถึงวันที่</label>
+              <input
+                id="to-date"
+                type="date"
+                name="to"
+                defaultValue={toParam ?? ""}
+                className="h-9 rounded-lg border border-border bg-background px-2 text-[12px]"
+              />
+              <Button type="submit" size="sm" variant="outline">
+                ดูช่วงนี้
+              </Button>
+            </form>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" asChild>
               <Link href="/platform/orders">ดูรายละเอียดรายออเดอร์</Link>

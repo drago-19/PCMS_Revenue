@@ -112,11 +112,28 @@ export interface ShopTotal {
   cancelled: number;
 }
 
-export async function getTikTokAnalytics(rangeDays = 30, shopId?: string): Promise<TikTokAnalytics & { perShop: ShopTotal[] }> {
-  const now = new Date();
-  const toIso = now.toISOString();
-  const from = new Date(now.getTime() - rangeDays * 86400_000);
-  const prevFrom = new Date(now.getTime() - rangeDays * 2 * 86400_000);
+export interface AnalyticsOptions {
+  rangeDays?: number;
+  from?: string; // YYYY-MM-DD
+  to?: string; // YYYY-MM-DD
+  shopId?: string;
+}
+
+export async function getTikTokAnalytics(
+  options: AnalyticsOptions = {},
+): Promise<TikTokAnalytics & { perShop: ShopTotal[]; periodLabel: string; compareLabel: string }> {
+  const shopId = options.shopId;
+  const toDate = options.to ? new Date(`${options.to}T23:59:59Z`) : new Date();
+  const fromDate = options.from
+    ? new Date(`${options.from}T00:00:00Z`)
+    : new Date(toDate.getTime() - (options.rangeDays ?? 30) * 86400_000);
+  const spanMs = Math.max(toDate.getTime() - fromDate.getTime(), 86400_000);
+  const rangeDays = Math.max(1, Math.round(spanMs / 86400_000));
+  const toIso = toDate.toISOString();
+  const from = fromDate;
+  const prevFrom = new Date(from.getTime() - spanMs);
+  const periodLabel = `${fromDate.toISOString().slice(0, 10)} → ${toDate.toISOString().slice(0, 10)}`;
+  const compareLabel = `${prevFrom.toISOString().slice(0, 10)} → ${fromDate.toISOString().slice(0, 10)}`;
 
   const [current, previous] = await Promise.all([
     periodTotals(from.toISOString(), toIso, shopId),
@@ -292,5 +309,7 @@ export async function getTikTokAnalytics(rangeDays = 30, shopId?: string): Promi
     hasData,
     lastSyncedAt: lastRun[0]?.finished_at ?? null,
     perShop: shopId ? [] : perShop,
+    periodLabel,
+    compareLabel,
   };
 }
