@@ -243,32 +243,6 @@ export function PlatformDashboardView({
         />
       </div>
 
-      {/* สรุปประโยคเดียว — อ่านก่อนอย่างอื่น */}
-      {analytics.insights.length > 0 ? (
-        <div className="rounded-xl border border-border bg-muted/40 px-4 py-3">
-          <p className="text-[12.5px] font-bold uppercase tracking-wide text-muted-foreground">
-            สรุปสั้น ๆ
-          </p>
-          <p className="mt-1 text-[17px] font-bold leading-relaxed">{analytics.insights[0]}</p>
-        </div>
-      ) : null}
-
-      {/* 2) สิ่งที่ต้องกังวล (Alert) */}
-      <div className="grid grid-cols-1 gap-2 min-[900px]:grid-cols-2">
-        {analytics.alerts.map((alert) => (
-          <div
-            key={alert.title}
-            className={`flex items-start gap-2 rounded-xl border px-3.5 py-3 text-[14px] leading-7 ${ALERT_STYLES[alert.level]}`}
-            role="status"
-          >
-            <IconInfo size={15} aria-hidden="true" className="mt-1 shrink-0" />
-            <span className="min-w-0">
-              <span className="block font-bold">{alert.title}</span>
-              <span className="block text-[13px] leading-6 opacity-85">{alert.detail}</span>
-            </span>
-          </div>
-        ))}
-      </div>
 
       {/* 3) แนวโน้ม */}
       <Card padding="padded" className="flex min-w-0 flex-col gap-3">
@@ -283,6 +257,11 @@ export function PlatformDashboardView({
         {/* 4) เปรียบเทียบ */}
         <Card padding="padded" className="flex min-w-0 flex-col gap-2">
           <h2 className="text-[14.5px] font-bold">เทียบช่วงก่อนหน้า</h2>
+          {analytics.insights.length > 0 ? (
+            <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[14px] font-bold leading-7">
+              {analytics.insights[0]}
+            </p>
+          ) : null}
           <table className="w-full table-fixed text-[12.5px]">
             <thead>
               <tr className="border-b border-border text-[11.5px] text-muted-foreground">
@@ -338,6 +317,18 @@ export function PlatformDashboardView({
         {/* 5) สาเหตุ — เหตุผลยกเลิก */}
         <Card padding="padded" className="flex min-w-0 flex-col gap-2">
           <h2 className="text-[14.5px] font-bold">ยกเลิกเพราะอะไร</h2>
+          {analytics.alerts.length > 0 ? (
+            <p
+              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px] leading-6 ${ALERT_STYLES[analytics.alerts[0].level]}`}
+              role="status"
+            >
+              <IconInfo size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+              <span className="min-w-0">
+                <span className="block font-bold">{analytics.alerts[0].title}</span>
+                <span className="block text-[12px] opacity-85">{analytics.alerts[0].detail}</span>
+              </span>
+            </p>
+          ) : null}
           {analytics.cancelReasons.length === 0 ? (
             <p className="text-[13px] text-muted-foreground">ไม่มีออเดอร์ยกเลิกในช่วงนี้</p>
           ) : (
