@@ -74,14 +74,16 @@ function money(value: number): string {
   return value.toLocaleString("th-TH", { maximumFractionDigits: 0 });
 }
 
-async function periodTotals(fromIso: string, toIso: string): Promise<PeriodTotals> {
+async function periodTotals(fromIso: string, toIso: string, shopId?: string): Promise<PeriodTotals> {
+  const shopClause = shopId ? " AND shop_id = $3::text" : "";
+  const params = shopId ? [fromIso, toIso, shopId] : [fromIso, toIso];
   const finance = await query<{ settlement: string; revenue: string; fee: string }>(
     `SELECT COALESCE(sum(settlement_amount),0)::text AS settlement,
             COALESCE(sum(revenue_amount),0)::text AS revenue,
             COALESCE(sum(fee_and_tax_amount),0)::text AS fee
      FROM platform_order_finance
-     WHERE order_create_time >= $1::timestamptz AND order_create_time < $2::timestamptz`,
-    [fromIso, toIso],
+     WHERE order_create_time >= $1::timestamptz AND order_create_time < $2::timestamptz${shopClause}`,
+    params,
   );
 
   const orders = await query<{ total: string; cancelled: string; delivered: string }>(
@@ -89,8 +91,8 @@ async function periodTotals(fromIso: string, toIso: string): Promise<PeriodTotal
             count(*) FILTER (WHERE order_status = 'CANCELLED')::text AS cancelled,
             count(*) FILTER (WHERE order_status = 'DELIVERED' OR order_status = 'COMPLETED')::text AS delivered
      FROM platform_orders
-     WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz`,
-    [fromIso, toIso],
+     WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz${shopClause}`,
+    params,
   );
 
   return {
@@ -103,25 +105,58 @@ async function periodTotals(fromIso: string, toIso: string): Promise<PeriodTotal
   };
 }
 
-export async function getTikTokAnalytics(rangeDays = 30): Promise<TikTokAnalytics> {
+export interface ShopTotal {
+  shopId: string;
+  settlement: number;
+  orders: number;
+  cancelled: number;
+}
+
+export async function getTikTokAnalytics(rangeDays = 30, shopId?: string): Promise<TikTokAnalytics & { perShop: ShopTotal[] }> {
   const now = new Date();
   const toIso = now.toISOString();
   const from = new Date(now.getTime() - rangeDays * 86400_000);
   const prevFrom = new Date(now.getTime() - rangeDays * 2 * 86400_000);
 
   const [current, previous] = await Promise.all([
-    periodTotals(from.toISOString(), toIso),
-    periodTotals(prevFrom.toISOString(), from.toISOString()),
+    periodTotals(from.toISOString(), toIso, shopId),
+    periodTotals(prevFrom.toISOString(), from.toISOString(), shopId),
   ]);
+
+  // ยอดรวมแยกร้าน (ใช้เมื่อดูแบบ "ทุกร้าน")
+  const perShopRows = await query<{
+    shop_id: string;
+    settlement: string;
+    orders: string;
+    cancelled: string;
+  }>(
+    `SELECT o.shop_id,
+            COALESCE(sum(f.settlement_amount),0)::text AS settlement,
+            count(DISTINCT o.order_id)::text AS orders,
+            count(DISTINCT o.order_id) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled
+     FROM platform_orders o
+     LEFT JOIN platform_order_finance f
+       ON f.shop_id = o.shop_id AND f.order_id = o.order_id
+     WHERE o.create_time >= $1::timestamptz
+     GROUP BY 1 ORDER BY sum(f.settlement_amount) DESC NULLS LAST`,
+    [from.toISOString()],
+  );
+
+  const perShop: ShopTotal[] = perShopRows.map((row) => ({
+    shopId: row.shop_id,
+    settlement: toNumber(row.settlement),
+    orders: toNumber(row.orders),
+    cancelled: toNumber(row.cancelled),
+  }));
 
   const dailyRows = await query<{ day: string; settlement: string; orders: string }>(
     `SELECT to_char(date_trunc('day', f.order_create_time), 'YYYY-MM-DD') AS day,
             COALESCE(sum(f.settlement_amount),0)::text AS settlement,
             COALESCE(count(DISTINCT f.order_id),0)::text AS orders
      FROM platform_order_finance f
-     WHERE f.order_create_time >= $1::timestamptz
+     WHERE f.order_create_time >= $1::timestamptz${shopId ? " AND f.shop_id = $2::text" : ""}
      GROUP BY 1 ORDER BY 1`,
-    [from.toISOString()],
+    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
   );
 
   const productRows = await query<{ name: string; revenue: string; quantity: string }>(
@@ -130,24 +165,24 @@ export async function getTikTokAnalytics(rangeDays = 30): Promise<TikTokAnalytic
             COALESCE(sum(i.quantity),0)::text AS quantity
      FROM platform_order_items i
      JOIN platform_orders o ON o.order_id = i.order_id
-     WHERE o.create_time >= $1::timestamptz AND o.order_status <> 'CANCELLED'
+     WHERE o.create_time >= $1::timestamptz AND o.order_status <> 'CANCELLED'${shopId ? " AND o.shop_id = $2::text" : ""}
      GROUP BY 1 ORDER BY sum(i.sale_price * i.quantity) DESC NULLS LAST LIMIT 8`,
-    [from.toISOString()],
+    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
   );
 
   const cancelRows = await query<{ reason: string; count: string }>(
     `SELECT COALESCE(NULLIF(cancel_reason, ''), 'ไม่ระบุเหตุผล') AS reason, count(*)::text AS count
      FROM platform_orders
-     WHERE create_time >= $1::timestamptz AND order_status = 'CANCELLED'
+     WHERE create_time >= $1::timestamptz AND order_status = 'CANCELLED'${shopId ? " AND shop_id = $2::text" : ""}
      GROUP BY 1 ORDER BY count(*) DESC LIMIT 6`,
-    [from.toISOString()],
+    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
   );
 
   const statusRows = await query<{ status: string; count: string }>(
     `SELECT order_status AS status, count(*)::text AS count
-     FROM platform_orders WHERE create_time >= $1::timestamptz
+     FROM platform_orders WHERE create_time >= $1::timestamptz${shopId ? " AND shop_id = $2::text" : ""}
      GROUP BY 1 ORDER BY count(*) DESC LIMIT 8`,
-    [from.toISOString()],
+    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
   );
 
   const lastRun = await query<{ finished_at: string | null }>(
@@ -256,5 +291,6 @@ export async function getTikTokAnalytics(rangeDays = 30): Promise<TikTokAnalytic
     insights,
     hasData,
     lastSyncedAt: lastRun[0]?.finished_at ?? null,
+    perShop: shopId ? [] : perShop,
   };
 }

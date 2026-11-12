@@ -164,7 +164,11 @@ const ALERT_STYLES: Record<string, string> = {
   green: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
 };
 
-export function PlatformDashboardView({ analytics }: { analytics: TikTokAnalytics }) {
+export function PlatformDashboardView({
+  analytics,
+}: {
+  analytics: TikTokAnalytics & { perShop?: Array<{ shopId: string; settlement: number; orders: number; cancelled: number }> };
+}) {
   if (!analytics.hasData) {
     return (
       <EmptyState
@@ -343,6 +347,36 @@ export function PlatformDashboardView({ analytics }: { analytics: TikTokAnalytic
           )}
         </Card>
       </div>
+
+      {/* แยกตามร้าน (แสดงเมื่อดู "ทุกร้าน" และมีมากกว่า 1 ร้าน) */}
+      {(analytics.perShop?.length ?? 0) > 1 ? (
+        <Card padding="padded" className="flex min-w-0 flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-[14.5px] font-bold">แยกตามร้าน</h2>
+            <span className="text-[12px] text-muted-foreground">ช่วง {analytics.rangeDays} วัน</span>
+          </div>
+          <table className="w-full table-fixed text-[12.5px]">
+            <thead>
+              <tr className="border-b border-border text-[11.5px] text-muted-foreground">
+                <th scope="col" className="py-1.5 pr-2 text-left font-bold">ร้าน (shop id)</th>
+                <th scope="col" className="py-1.5 pr-2 text-right font-bold">ยอดโอน</th>
+                <th scope="col" className="py-1.5 pr-2 text-right font-bold">ออเดอร์</th>
+                <th scope="col" className="py-1.5 text-right font-bold">ยกเลิก</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analytics.perShop!.map((shop) => (
+                <tr key={shop.shopId} className="border-b border-border last:border-0">
+                  <td className="mono py-1.5 pr-2 truncate">{shop.shopId}</td>
+                  <td className="mono py-1.5 pr-2 text-right">฿{money(shop.settlement)}</td>
+                  <td className="mono py-1.5 pr-2 text-right">{shop.orders.toLocaleString("th-TH")}</td>
+                  <td className="mono py-1.5 text-right">{shop.cancelled.toLocaleString("th-TH")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      ) : null}
 
       {/* 5b) สาเหตุ — สินค้าทำยอด */}
       <Card padding="padded" className="flex min-w-0 flex-col gap-3">

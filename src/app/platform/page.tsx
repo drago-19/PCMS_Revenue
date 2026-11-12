@@ -64,12 +64,13 @@ function buildFlash(params: Record<string, string | string[] | undefined>) {
 export default async function PlatformSyncPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const activePlatform = readPlatform(params.platform);
+  const selectedShop = readParam(params, "shop") ?? undefined;
   const flash = buildFlash(params);
 
   const [config, accounts, analytics] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
-    getTikTokAnalytics(30),
+    getTikTokAnalytics(30, selectedShop),
   ]);
 
   return (
@@ -125,6 +126,34 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
 
       {activePlatform === "tiktok" ? (
         <section aria-label="แดชบอร์ด TikTok Shop" className="flex min-w-0 flex-col gap-4">
+          {accounts.length > 1 ? (
+            <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+              <span className="text-muted-foreground">ดู:</span>
+              <Link
+                href="/platform"
+                className={
+                  selectedShop
+                    ? "rounded-full border border-border px-3 py-1"
+                    : "rounded-full bg-slate-900 px-3 py-1 font-bold text-white"
+                }
+              >
+                ทุกร้านรวมกัน
+              </Link>
+              {accounts.map((account) => (
+                <Link
+                  key={account.accountKey}
+                  href={`/platform?shop=${encodeURIComponent(account.accountKey)}`}
+                  className={
+                    selectedShop === account.accountKey
+                      ? "rounded-full bg-slate-900 px-3 py-1 font-bold text-white"
+                      : "rounded-full border border-border px-3 py-1"
+                  }
+                >
+                  {account.shopName ?? account.accountKey}
+                </Link>
+              ))}
+            </div>
+          ) : null}
           <PlatformDashboardView analytics={analytics} />
         </section>
       ) : null}
