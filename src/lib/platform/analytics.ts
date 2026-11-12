@@ -246,10 +246,17 @@ export async function getTikTokAnalytics(
     });
   }
   if (cancelRate >= 5) {
+    const top = cancelReasons.slice(0, 2);
+    const reasonText =
+      top.length > 0
+        ? `สาเหตุหลัก: ${top
+            .map((entry) => `${entry.reason} (${entry.count.toLocaleString("th-TH")})`)
+            .join(" · ")}`
+        : "ยังไม่มีเหตุผลที่ระบุไว้ในออเดอร์";
     alerts.push({
       level: "red",
       title: `อัตรายกเลิก ${cancelRate.toFixed(1)}% สูงกว่าเกณฑ์ 5%`,
-      detail: `ยกเลิก ${current.cancelled} จาก ${current.orders} ออเดอร์ — ดูเหตุผลอันดับต้นด้านล่าง`,
+      detail: `ยกเลิก ${current.cancelled.toLocaleString("th-TH")} จาก ${current.orders.toLocaleString("th-TH")} ออเดอร์ — ${reasonText}`,
     });
   } else if (cancelRate > prevCancelRate + 1) {
     alerts.push({
