@@ -117,6 +117,63 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
   };
 }
 
+export interface OrderSummary {
+  orders: number;
+  settlement: number;
+  cancelled: number;
+  items: number;
+}
+
+/** สรุปตามเงื่อนไขกรองเดียวกับรายการ — ใช้แสดงแถบสรุปเหนือตาราง */
+export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary> {
+  const where: string[] = ["1 = 1"];
+  const params: unknown[] = [];
+
+  if (filter.shopId) {
+    params.push(filter.shopId);
+    where.push(`o.shop_id = $${params.length}::text`);
+  }
+  if (filter.status) {
+    params.push(filter.status);
+    where.push(`o.order_status = $${params.length}::text`);
+  }
+  if (filter.search) {
+    params.push(`%${filter.search}%`);
+    where.push(`(o.order_id ILIKE $${params.length} OR EXISTS (
+      SELECT 1 FROM platform_order_items i2
+      WHERE i2.shop_id = o.shop_id AND i2.order_id = o.order_id
+        AND (i2.product_name ILIKE $${params.length} OR i2.sku_id ILIKE $${params.length})
+    ))`);
+  }
+
+  // แยกเป็น 2 คำสั่งง่าย ๆ — เดิมนับรายการสินค้าแบบถามซ้ำทีละออเดอร์จนใช้เวลา ~57 วินาที
+  const totals = await query<{ orders: string; settlement: string; cancelled: string }>(
+    `SELECT count(DISTINCT o.order_id)::text AS orders,
+            COALESCE(sum(f.settlement_amount),0)::text AS settlement,
+            count(DISTINCT o.order_id) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled
+     FROM platform_orders o
+     LEFT JOIN platform_order_finance f
+       ON f.shop_id = o.shop_id AND f.order_id = o.order_id
+     WHERE ${where.join(" AND ")}`,
+    params,
+  );
+
+  const itemRow = await query<{ items: string }>(
+    `SELECT count(*)::text AS items
+     FROM platform_order_items i
+     JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
+     WHERE ${where.join(" AND ")}`,
+    params,
+  );
+
+  return {
+    orders: num(totals[0]?.orders),
+    settlement: num(totals[0]?.settlement),
+    cancelled: num(totals[0]?.cancelled),
+    items: num(itemRow[0]?.items),
+  };
+}
+
 export async function getPlatformOrder(orderId: string, shopId?: string): Promise<OrderDetail | null> {
   const params: unknown[] = [orderId];
   const shopClause = shopId ? " AND shop_id = $2::text" : "";

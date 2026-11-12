@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
-import { listPlatformOrders } from "@/lib/platform/orders";
+import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -56,10 +57,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const shop = read(params, "shop") || undefined;
   const page = Math.max(Number(read(params, "page") || "1") || 1, 1);
 
-  const [config, accounts, result] = await Promise.all([
+  const detailId = read(params, "order");
+  const filter = { shopId: shop, status: status || undefined, search: search || undefined };
+
+  const [config, accounts, result, summary, detail] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
-    listPlatformOrders({ shopId: shop, status: status || undefined, search: search || undefined, page, pageSize: 25 }),
+    listPlatformOrders({ ...filter, page, pageSize: 25 }),
+    getOrderSummary(filter),
+    detailId ? getPlatformOrder(detailId, shop) : Promise.resolve(null),
   ]);
 
   const pages = Math.max(Math.ceil(result.total / 25), 1);
@@ -138,6 +144,26 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
             })}
           </div>
 
+          {/* สรุปตามเงื่อนไขที่กรองอยู่ */}
+          <div className="grid grid-cols-2 gap-2 min-[820px]:grid-cols-4">
+            <Card padding="padded" className="flex flex-col gap-0.5">
+              <span className="text-[13px] font-bold text-muted-foreground">ออเดอร์</span>
+              <span className="mono text-[22px] font-bold">{summary.orders.toLocaleString("th-TH")}</span>
+            </Card>
+            <Card padding="padded" className="flex flex-col gap-0.5">
+              <span className="text-[13px] font-bold text-muted-foreground">ยอดโอนรวม</span>
+              <span className="mono text-[22px] font-bold text-[#0d8a47]">฿{money(summary.settlement)}</span>
+            </Card>
+            <Card padding="padded" className="flex flex-col gap-0.5">
+              <span className="text-[13px] font-bold text-muted-foreground">ยกเลิก</span>
+              <span className="mono text-[22px] font-bold text-[#b42318]">{summary.cancelled.toLocaleString("th-TH")}</span>
+            </Card>
+            <Card padding="padded" className="flex flex-col gap-0.5">
+              <span className="text-[13px] font-bold text-muted-foreground">รายการสินค้า</span>
+              <span className="mono text-[22px] font-bold">{summary.items.toLocaleString("th-TH")}</span>
+            </Card>
+          </div>
+
           <Card padding="padded" className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center justify-between gap-2 text-[12.5px] text-muted-foreground">
               <span>{result.total.toLocaleString("th-TH")} ออเดอร์</span>
@@ -150,7 +176,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               {result.rows.map((row) => (
                 <li key={row.orderId}>
                   <Link
-                    href={`/platform/orders/${encodeURIComponent(row.orderId)}${shop ? `?shop=${encodeURIComponent(shop)}` : ""}`}
+                    href={`${queryFor({})}&order=${encodeURIComponent(row.orderId)}`.replace(/\?&/, "?").replace(/^\/platform\/orders&/, "/platform/orders?")}
                     className="flex min-w-0 flex-col gap-1 py-2.5 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -188,6 +214,81 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
           </Card>
         </div>
       )}
+
+      {detail ? (
+        <Dialog open>
+          <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader className="pr-11">
+              <DialogTitle className="text-[16px]">
+                ออเดอร์ {detail.orderId}
+              </DialogTitle>
+              <p className="text-[13px] text-muted-foreground">
+                {detail.items.length} รายการ · ยอดสั่งซื้อ ฿{money(detail.totalAmount)} ·{" "}
+                {STATUS_LABEL[detail.status] ?? detail.status}
+              </p>
+            </DialogHeader>
+
+            <div className="flex flex-col gap-3">
+              <ul className="flex list-none flex-col gap-2 p-0">
+                {detail.items.map((item, index) => (
+                  <li key={`${item.sku ?? "item"}-${index}`} className="flex items-center gap-3">
+                    {item.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        width={48}
+                        height={48}
+                        loading="lazy"
+                        className="size-12 shrink-0 rounded-lg border border-border object-cover"
+                      />
+                    ) : (
+                      <span className="size-12 shrink-0 rounded-lg bg-muted" aria-hidden="true" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13.5px] font-bold">{item.name}</p>
+                      <p className="mono text-[12px] text-muted-foreground">
+                        {item.sku ?? "—"} · {item.quantity} ชิ้น · ฿{money(item.price)}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="flex flex-col gap-1.5 rounded-xl border border-border p-3 text-[13px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">ยอดขาย (revenue)</span>
+                  <span className="mono">฿{money(detail.money.revenue)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">ค่าธรรมเนียม/ภาษี</span>
+                  <span className="mono text-[#b42318]">฿{money(detail.money.fee)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 border-t border-border pt-1.5">
+                  <span className="font-bold">โอนจริง</span>
+                  <span className="mono font-bold text-[#0d8a47]">฿{money(detail.money.settlement)}</span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-muted-foreground">
+                <span>{detail.shippingProvider ?? "—"} · {detail.trackingNumber ?? "ไม่มีเลขพัสดุ"}</span>
+                {detail.cancelReason ? (
+                  <span className="text-[#b42318]">ยกเลิก: {detail.cancelReason}</span>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link href={queryFor({})}>ปิด</Link>
+                </Button>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/platform/orders/${encodeURIComponent(detail.orderId)}`}>เปิดหน้าเต็ม</Link>
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
