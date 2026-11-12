@@ -271,12 +271,29 @@ export function checkApiRateLimit(
   };
 }
 
+// React dev overlay (Turbopack) ต้องใช้ eval() เพื่อ reconstruct callstack
+// อนุญาตเฉพาะโหมด dev — production ไม่ใช้ eval จึงคง script-src เข้มไว้เหมือนเดิม
+const SCRIPT_SRC = [
+  "script-src 'self' 'unsafe-inline'",
+  ...(process.env.NODE_ENV === "production" ? [] : ["'unsafe-eval'"]),
+  "https://static.cloudflareinsights.com",
+].join(" ");
+
 export const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-  "Content-Security-Policy":
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://s3-ap-southeast-1.amazonaws.com; font-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://static.cloudflareinsights.com ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    SCRIPT_SRC,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https://s3-ap-southeast-1.amazonaws.com",
+    "font-src 'self' data:",
+    "connect-src 'self' https://cloudflareinsights.com https://static.cloudflareinsights.com ws: wss:",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; "),
 };
