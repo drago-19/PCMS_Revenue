@@ -244,8 +244,14 @@ function finalizeProduct(name: string, bucket: ProductBucket): ProductPackingRow
   };
 }
 
+/** เรียงสินค้า: บิลล่าสุดก่อน (ใหม่ → เก่า) แล้วจึงจำนวนชิ้นมาก → น้อย */
 function sortProducts(rows: ProductPackingRow[]): ProductPackingRow[] {
-  return rows.sort((a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name, "th"));
+  return rows.sort((a, b) => {
+    const timeA = a.latestOrderAt ? Date.parse(a.latestOrderAt) : Number.NEGATIVE_INFINITY;
+    const timeB = b.latestOrderAt ? Date.parse(b.latestOrderAt) : Number.NEGATIVE_INFINITY;
+    if (timeA !== timeB) return timeB - timeA;
+    return b.quantity - a.quantity || a.name.localeCompare(b.name, "th");
+  });
 }
 
 export function summarizeProducts(orders: readonly PackingOrder[]): ProductPackingRow[] {
