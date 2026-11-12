@@ -3,6 +3,7 @@ import { EmptyState } from "@/components/PageHeader";
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformDashboardView } from "@/components/PlatformDashboard";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
+import { PeriodPicker } from "@/components/PeriodPicker";
 import { IconInfo, IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -218,29 +219,7 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
               );
             })}
 
-            <form action="/platform" className="flex flex-wrap items-center gap-1.5">
-              {selectedShop ? <input type="hidden" name="shop" value={selectedShop} /> : null}
-              <label className="sr-only" htmlFor="from-date">จากวันที่</label>
-              <input
-                id="from-date"
-                type="date"
-                name="from"
-                defaultValue={fromParam ?? ""}
-                className="h-9 rounded-lg border border-border bg-background px-2 text-[12px]"
-              />
-              <span className="text-[12px] text-muted-foreground">ถึง</span>
-              <label className="sr-only" htmlFor="to-date">ถึงวันที่</label>
-              <input
-                id="to-date"
-                type="date"
-                name="to"
-                defaultValue={toParam ?? ""}
-                className="h-9 rounded-lg border border-border bg-background px-2 text-[12px]"
-              />
-              <Button type="submit" size="sm" variant="outline">
-                ดูช่วงนี้
-              </Button>
-            </form>
+            <PeriodPicker from={fromParam} to={toParam} shop={selectedShop} />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
