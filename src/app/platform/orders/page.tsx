@@ -26,6 +26,19 @@ const STATUS_TABS = [
   { key: "CANCELLED", label: "ยกเลิก" },
 ] as const;
 
+/** สีของป้ายสถานะ — แบ่งหมวดให้กวาดตาแล้วรู้ทันที */
+const STATUS_STYLE: Record<string, string> = {
+  AWAITING_SHIPMENT: "border-[#f5dfae] bg-[#fffbeb] text-[#7a4b0a]",
+  AWAITING_COLLECTION: "border-[#f5dfae] bg-[#fffbeb] text-[#7a4b0a]",
+  PARTIALLY_SHIPPING: "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]",
+  IN_TRANSIT: "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]",
+  DELIVERED: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
+  COMPLETED: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
+  CANCELLED: "border-[#f5c2bd] bg-[#fdf3f2] text-[#8a1c14]",
+  UNPAID: "border-border bg-muted text-muted-foreground",
+  ON_HOLD: "border-border bg-muted text-muted-foreground",
+};
+
 const STATUS_LABEL: Record<string, string> = {
   UNPAID: "รอชำระ",
   ON_HOLD: "พักไว้",
@@ -221,7 +234,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                           <span className="mono truncate text-[12.5px]">{row.orderId}</span>
                           <CopyButton value={row.orderId} label="คัดลอกเลขคำสั่งซื้อ" />
-                          <Badge variant={row.status === "CANCELLED" ? "destructive" : "outline"}>
+                          <Badge
+                            variant="outline"
+                            className={STATUS_STYLE[row.status] ?? "border-border bg-muted text-muted-foreground"}
+                          >
                             {STATUS_LABEL[row.status] ?? row.status}
                           </Badge>
                         </div>
@@ -236,8 +252,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                       <span className="mono">ยอดสั่ง ฿{money(row.totalAmount)}</span>
                       <span className="mono font-bold text-foreground">โอนจริง ฿{money(row.settlement)}</span>
                     </div>
-                    {row.cancelReason ? (
+                    {row.cancelReason && row.status === "CANCELLED" ? (
                       <span className="text-[11.5px] text-[#b42318]">ยกเลิก: {row.cancelReason}</span>
+                    ) : null}
+                    {row.cancelReason && row.status !== "CANCELLED" ? (
+                      <span className="text-[11.5px] text-muted-foreground">
+                        มีรายการสินค้าถูกยกเลิก: {row.cancelReason}
+                      </span>
                     ) : null}
                   </Link>
                 </li>
