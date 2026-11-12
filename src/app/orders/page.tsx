@@ -874,6 +874,61 @@ function ShopPanel({
           hint={`${summary.totalItems} ชิ้น จาก ${currentProducts.length + nextProducts.length} รายการสินค้า${
             dayUnprinted > 0 ? ` · ยังไม่ได้พิมพ์ใบปะหน้า ${dayUnprinted} ใบ` : ""
           }`}
+          breakdown={{
+            title: "ตัวเลขนี้มาจากไหน",
+            subtitle: `${item.account.label} · ${formatDate(summary.isoDay)}`,
+            heroLabel: "ต้องแพ็คของวันนี้",
+            heroValue: `${summary.totalOrders} ออเดอร์`,
+            heroTone: "brand",
+            formulaNote:
+              "นับเฉพาะบิลที่สั่งวันนี้ ลูกค้าจ่ายเงินแล้วหรือเป็นเก็บเงินปลายทาง (COD) และยังไม่ถูกปิดรายการใน Shipnity",
+            sections: [
+              {
+                title: "แยกตามการพิมพ์ใบปะหน้า",
+                description: "ตัวเลขเดียวกันนี้คือชิป “พิมพ์ที่อยู่” รวมกับส่วนหนึ่งของ “รอส่ง” ใน Shipnity",
+                rows: [
+                  {
+                    label: "ยังไม่ได้พิมพ์ใบปะหน้า",
+                    subLabel: "เทียบได้กับชิป “พิมพ์ที่อยู่”",
+                    valueText: `${dayUnprinted} ใบ`,
+                  },
+                  {
+                    label: "พิมพ์แล้ว ยังไม่ปิดรายการ",
+                    subLabel: "อยู่ในชิป “รอส่ง”",
+                    valueText: `${summary.totalOrders - dayUnprinted} ใบ`,
+                  },
+                  { label: "รวม", valueText: `${summary.totalOrders} ใบ`, isTotal: true },
+                ],
+              },
+              {
+                title: "ของในบิลเหล่านี้",
+                rows: [
+                  { label: "จำนวนชิ้นรวม", valueText: `${summary.totalItems} ชิ้น` },
+                  {
+                    label: "จำนวนรายการสินค้า",
+                    valueText: `${currentProducts.length + nextProducts.length} รายการ`,
+                  },
+                ],
+              },
+              {
+                title: "ที่ไม่นับในการ์ดนี้",
+                rows: [
+                  {
+                    label: "ของค้างจากวันก่อน",
+                    subLabel: "แยกอยู่ในแท็บ “ค้างจากวันก่อน”",
+                    valueText: `${item.carryOrders.length} ใบ`,
+                    tone: "muted",
+                  },
+                  {
+                    label: "ยังไม่ชำระเงินของวันนี้",
+                    subLabel: "อยู่ในแท็บ “ค้างจ่าย”",
+                    valueText: `${summary.waitingPaymentCount} ใบ`,
+                    tone: "muted",
+                  },
+                ],
+              },
+            ],
+          }}
           tone="brand"
           icon={<IconTruck size={19} />}
         />
