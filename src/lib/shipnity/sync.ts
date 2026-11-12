@@ -56,6 +56,14 @@ const runtime: SyncRuntime = (globalForSync.__shipnitySyncRuntime ??= {
   timer: null,
 });
 
+/**
+ * เครื่อง dev ที่เปิดพร้อม prod ไม่ควรซิงก์อัตโนมัติ (จะยิง Shipnity สองเท่าและติดลิมิต)
+ * ตั้ง SHIPNITY_SYNC_DISABLED=1 ใน .env ของเครื่องนั้น — ยังกด “ดึงใหม่เลย” เองได้
+ */
+function autoSyncDisabled(): boolean {
+  return process.env.SHIPNITY_SYNC_DISABLED === "1";
+}
+
 function credentialsOf(account: ConnectedShipnityAccount) {
   return { email: account.email, token: account.token };
 }
@@ -165,10 +173,12 @@ export async function loadDayOrdersFromStore(
   const stale = !state?.lastSyncAt || Date.now() - new Date(state.lastSyncAt).getTime() > FRESH_MS;
   let written = 0;
 
-  if (!state) {
-    written = await syncOpenOrders(account).catch(() => 0);
-  } else if (stale) {
-    void syncOpenOrders(account).catch(() => {});
+  if (!autoSyncDisabled()) {
+    if (!state) {
+      written = await syncOpenOrders(account).catch(() => 0);
+    } else if (stale) {
+      void syncOpenOrders(account).catch(() => {});
+    }
   }
 
   if (options.includeClosed) {
@@ -197,7 +207,7 @@ export async function loadDayOrdersFromStore(
  * ทุก 2 นาที: บัญชีที่ข้อมูลเก่าเกินกำหนดจะถูกดึงใหม่ (เขียนเฉพาะแถวที่เปลี่ยน)
  */
 export function startShipnityBackgroundSync(accounts: readonly ConnectedShipnityAccount[]): void {
-  if (runtime.timer || accounts.length === 0) return;
+  if (autoSyncDisabled() || runtime.timer || accounts.length === 0) return;
 
   runtime.timer = setInterval(() => {
     if (runtime.pausedUntil > Date.now()) return;
