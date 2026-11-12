@@ -157,13 +157,53 @@ test("redactSecret: ตัด app_secret / auth_code / refresh_token ออก�
   assert.match(out, /app_secret=\[redacted\]/);
 });
 
+test("listStatements: เจอ 429 แล้วถอยและลองใหม่จนสำเร็จ (ไม่โยน error ทิ้ง)", async () => {
+  const previousInterval = process.env.TIKTOK_MIN_INTERVAL_MS;
+  const previousRetry = process.env.TIKTOK_RETRY_BASE_MS;
+  process.env.TIKTOK_MIN_INTERVAL_MS = "0";
+  process.env.TIKTOK_RETRY_BASE_MS = "1";
+
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response("too many requests", {
+        status: 429,
+        headers: { "retry-after": "0" },
+      });
+    }
+    return new Response(
+      JSON.stringify({ code: 0, message: "Success", data: { statements: [], next_page_token: "" } }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const result = await listStatements({
+      config: CONFIG,
+      accessToken: "access-1",
+      shopCipher: "CIPHER-1",
+      pageSize: 1,
+    });
+    assert.equal(calls, 2);
+    assert.deepEqual(result.statements, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousInterval === undefined) delete process.env.TIKTOK_MIN_INTERVAL_MS;
+    else process.env.TIKTOK_MIN_INTERVAL_MS = previousInterval;
+    if (previousRetry === undefined) delete process.env.TIKTOK_RETRY_BASE_MS;
+    else process.env.TIKTOK_RETRY_BASE_MS = previousRetry;
+  }
+});
+
 test("callTikTokApi: envelope ที่ code ไม่ใช่ 0 ต้องโยน TikTokApiError พร้อมข้อความของ TikTok", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
     new Response(
       JSON.stringify({
-        code: 36009002,
-        message: "too many requests",
+        code: 105001,
+        message: "invalid parameter",
         request_id: "req-1",
       }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -180,9 +220,9 @@ test("callTikTokApi: envelope ที่ code ไม่ใช่ 0 ต้อง�
         }),
       (err: unknown) => {
         assert.ok(err instanceof TikTokApiError);
-        assert.equal(err.code, 36009002);
+        assert.equal(err.code, 105001);
         assert.equal(err.requestId, "req-1");
-        assert.match(err.message, /too many requests/);
+        assert.match(err.message, /invalid parameter/);
         return true;
       },
     );

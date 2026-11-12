@@ -95,6 +95,43 @@ async function safeFetch(url: URL, secret: string, init?: RequestInit): Promise<
   }
 }
 
+/**
+ * กันยิงถี่เกินลิมิตของ TikTok (Dynamic QPS — แนะนำ 3–10 req/s สำหรับ read/sync)
+ * ทุกคำขอจะต่อคิวกันในโปรเซสนี้ ไม่ยิงขนาน และเว้นระยะขั้นต่ำระหว่างคำขอ
+ */
+const MAX_RETRIES = 5;
+
+let lastCallAt = 0;
+let queue: Promise<void> = Promise.resolve();
+
+// อ่านค่าจาก env ตอนเรียก เพื่อให้เทสต์ปรับได้โดยไม่ต้อง import ใหม่
+function minIntervalMs(): number {
+  const value = Number(process.env.TIKTOK_MIN_INTERVAL_MS ?? 350);
+  return Number.isFinite(value) && value >= 0 ? value : 350;
+}
+
+async function throttle(): Promise<void> {
+  const interval = minIntervalMs();
+  const turn = queue.then(async () => {
+    const wait = lastCallAt + interval - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastCallAt = Date.now();
+  });
+  queue = turn.catch(() => undefined);
+  await turn;
+}
+
+function backoffDelay(attempt: number, retryAfterHeader: string | null): number {
+  const baseMs = Number(process.env.TIKTOK_RETRY_BASE_MS ?? 1000);
+  const retryAfter = Number(retryAfterHeader);
+  const base =
+    Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : (Number.isFinite(baseMs) ? baseMs : 1000) * 2 ** attempt;
+  const jitter = Math.floor(Math.random() * Math.min(500, base));
+  return Math.min(base + jitter, 60_000);
+}
+
 interface TikTokEnvelope<T> {
   code: number;
   message: string;
@@ -110,6 +147,25 @@ async function readEnvelope<T>(response: Response): Promise<T> {
     throw new TikTokApiError(`TikTok ตอบกลับไม่ใช่ JSON (HTTP ${response.status})`);
   }
 
+  if (!response.ok || !payload || payload.code !== 0) {
+    throw new TikTokApiError(
+      payload?.message || `TikTok API error (HTTP ${response.status})`,
+      payload?.code ?? null,
+      payload?.request_id ?? null,
+    );
+  }
+  return (payload.data ?? {}) as T;
+}
+
+async function readJson<T>(response: Response): Promise<TikTokEnvelope<T> | null> {
+  try {
+    return (await response.json()) as TikTokEnvelope<T>;
+  } catch {
+    return null;
+  }
+}
+
+function unwrapEnvelope<T>(response: Response, payload: TikTokEnvelope<T> | null): T {
   if (!response.ok || !payload || payload.code !== 0) {
     throw new TikTokApiError(
       payload?.message || `TikTok API error (HTTP ${response.status})`,
@@ -157,17 +213,44 @@ export async function callTikTokApi<T>({
   }
   url.searchParams.set("sign", sign);
 
-  const response = await safeFetch(url, config.appSecret, {
-    method,
-    cache: "no-store",
-    headers: {
-      "content-type": "application/json",
-      ...(accessToken ? { "x-tts-access-token": accessToken } : {}),
-    },
-    ...(method === "GET" ? {} : { body: rawBody }),
-  });
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+    await throttle();
 
-  return readEnvelope<T>(response);
+    const response = await safeFetch(url, config.appSecret, {
+      method,
+      cache: "no-store",
+      headers: {
+        "content-type": "application/json",
+        ...(accessToken ? { "x-tts-access-token": accessToken } : {}),
+      },
+      ...(method === "GET" ? {} : { body: rawBody }),
+    });
+
+    // 429 = ถูกจำกัดอัตรา (ฝั่ง transport) — ถอยแล้วลองใหม่ ไม่นับเป็น error
+    if (response.status === 429) {
+      if (attempt === MAX_RETRIES - 1) {
+        throw new TikTokApiError("ถูกจำกัดอัตราการเรียก (429) — ลองใหม่ภายหลัง", 429);
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, backoffDelay(attempt, response.headers.get("retry-after"))),
+      );
+      continue;
+    }
+
+    const payload = await readJson<T>(response);
+
+    // 36009002 = TikTok แจ้งว่ายิงถี่เกิน — ถอยแล้วลองใหม่เช่นกัน
+    if (payload?.code === 36009002 && attempt < MAX_RETRIES - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, backoffDelay(attempt, response.headers.get("retry-after"))),
+      );
+      continue;
+    }
+
+    return unwrapEnvelope<T>(response, payload);
+  }
+
+  throw new TikTokApiError("เรียก TikTok API ไม่สำเร็จหลังลองซ้ำครบจำนวน");
 }
 
 export interface TikTokTokenResult {
@@ -218,6 +301,7 @@ export async function exchangeAuthCode(
   // ค่าที่ TikTok กำหนดไว้จริงคือ authorized_code (ไม่ใช่ authorization_code)
   url.searchParams.set("grant_type", "authorized_code");
 
+  await throttle();
   const response = await safeFetch(url, config.appSecret, { cache: "no-store" });
   const data = await readEnvelope<RawTokenData>(response);
   return toTokenResult(data);
@@ -233,6 +317,7 @@ export async function refreshAccessToken(
   url.searchParams.set("refresh_token", refreshToken);
   url.searchParams.set("grant_type", "refresh_token");
 
+  await throttle();
   const response = await safeFetch(url, config.appSecret, { cache: "no-store" });
   const data = await readEnvelope<RawTokenData>(response);
   return toTokenResult(data);
