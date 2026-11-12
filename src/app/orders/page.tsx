@@ -119,6 +119,19 @@ function TickBox({ label }: { label: string }) {
   );
 }
 
+/** เวลาไทยแบบ ชม.·น. — ใช้โชว์เวลาสั่งในตารางสินค้า */
+function formatClock(iso: string | null): string {
+  if (!iso) return "—";
+  const instant = new Date(iso);
+  if (Number.isNaN(instant.getTime())) return "—";
+  return `${new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(instant)} น.`;
+}
+
 function ProductsTable({ products }: { products: ProductPackingRow[] }) {
   if (products.length === 0) {
     return <Card className="p-6 text-center text-sm text-muted-foreground">ยังไม่มีสินค้าที่ต้องแพ็คในวันนี้</Card>;
@@ -134,11 +147,12 @@ function ProductsTable({ products }: { products: ProductPackingRow[] }) {
       >
         <TableHeader sticky={false}>
           <TableRow>
-            <TableHead className="w-[42%]">สินค้า</TableHead>
-            <TableHead className="w-[18%]">ช่องทาง</TableHead>
-            <TableHead className="num w-[10%]">คำสั่งซื้อ</TableHead>
-            <TableHead className="num w-[14%]">ต้องส่ง (ชิ้น)</TableHead>
-            <TableHead className="num w-[16%]">แพ็คแล้ว</TableHead>
+            <TableHead className="w-[38%]">สินค้า</TableHead>
+            <TableHead className="w-[16%]">ช่องทาง</TableHead>
+            <TableHead className="num w-[9%]">คำสั่งซื้อ</TableHead>
+            <TableHead className="num w-[12%]">เวลาสั่ง (ล่าสุด)</TableHead>
+            <TableHead className="num w-[12%]">ต้องส่ง (ชิ้น)</TableHead>
+            <TableHead className="num w-[13%]">แพ็คแล้ว</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -168,6 +182,9 @@ function ProductsTable({ products }: { products: ProductPackingRow[] }) {
               <TableCell data-label="คำสั่งซื้อ" className="num text-[13px] font-semibold">
                 {product.orderCount} บิล
               </TableCell>
+              <TableCell data-label="เวลาสั่ง (ล่าสุด)" className="num text-[13px] text-muted-foreground">
+                {formatClock(product.latestOrderAt)}
+              </TableCell>
               <TableCell data-label="ต้องส่ง (ชิ้น)" className="num text-[15px] font-bold">
                 {product.quantity}
               </TableCell>
@@ -186,6 +203,7 @@ function ProductsTable({ products }: { products: ProductPackingRow[] }) {
             <TableCell data-label="รวม (บิล)" className="num text-[13px] font-bold">
               {products.reduce((sum, product) => sum + product.orderCount, 0)} บิล
             </TableCell>
+            <TableCell data-label="" />
             <TableCell data-label="รวม (ชิ้น)" className="num text-[15px] font-bold">
               {total}
             </TableCell>

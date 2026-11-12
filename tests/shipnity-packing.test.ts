@@ -421,6 +421,7 @@ test("รวมสรุปสินค้าของหลายร้าน�
         orderCount: 1,
         orderCodes: ["A1"],
         image: "https://cdn.example.com/barrel.jpg",
+        latestOrderAt: "2026-11-11T02:00:00.000Z",
         channels: [{ channel: "Tiktok", quantity: 2, orderCount: 1 }],
         lines: [
           {
@@ -440,6 +441,7 @@ test("รวมสรุปสินค้าของหลายร้าน�
         quantity: 1,
         orderCount: 1,
         orderCodes: ["B9"],
+        latestOrderAt: "2026-11-11T03:00:00.000Z",
         channels: [{ channel: "Shopee", quantity: 1, orderCount: 1 }],
         lines: [
           {
