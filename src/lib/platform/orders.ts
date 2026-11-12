@@ -11,6 +11,8 @@ export interface OrderRow {
   itemCount: number;
   settlement: number;
   cancelReason: string | null;
+  firstName: string | null;
+  firstImage: string | null;
 }
 
 export interface OrderDetail {
@@ -102,6 +104,32 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
     params,
   );
 
+  // ดึงชื่อ/รูปของรายการแรกเฉพาะออเดอร์ในหน้านี้ (ไม่ทำแบบต่อออเดอร์ทั้งตาราง)
+  const orderIds = rows.map((row) => row.order_id);
+  const firstItems = new Map<string, { name: string | null; image: string | null }>();
+
+  if (orderIds.length > 0) {
+    const itemRows = await query<{
+      order_id: string;
+      product_name: string | null;
+      sku_name: string | null;
+      image_url: string | null;
+    }>(
+      `SELECT DISTINCT ON (order_id) order_id, product_name, sku_name, image_url
+       FROM platform_order_items
+       WHERE order_id = ANY($1::text[])
+       ORDER BY order_id, line_item_id`,
+      [orderIds],
+    );
+
+    for (const item of itemRows) {
+      firstItems.set(item.order_id, {
+        name: item.product_name ?? item.sku_name,
+        image: item.image_url,
+      });
+    }
+  }
+
   return {
     total: num(totalRows[0]?.total),
     rows: rows.map((row) => ({
@@ -113,6 +141,8 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
       itemCount: num(row.item_count),
       settlement: num(row.settlement),
       cancelReason: row.cancel_reason,
+      firstName: firstItems.get(row.order_id)?.name ?? null,
+      firstImage: firstItems.get(row.order_id)?.image ?? null,
     })),
   };
 }

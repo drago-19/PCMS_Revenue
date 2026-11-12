@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
+import { CopyButton } from "@/components/CopyButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -179,11 +180,33 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                     href={`${queryFor({})}&order=${encodeURIComponent(row.orderId)}`.replace(/\?&/, "?").replace(/^\/platform\/orders&/, "/platform/orders?")}
                     className="flex min-w-0 flex-col gap-1 py-2.5 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                      <span className="mono truncate text-[12.5px]">{row.orderId}</span>
-                      <Badge variant={row.status === "CANCELLED" ? "destructive" : "outline"}>
-                        {STATUS_LABEL[row.status] ?? row.status}
-                      </Badge>
+                    <div className="flex min-w-0 items-start gap-2.5">
+                      {row.firstImage ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={row.firstImage}
+                          alt={row.firstName ?? "สินค้า"}
+                          width={44}
+                          height={44}
+                          loading="lazy"
+                          className="size-11 shrink-0 rounded-lg border border-border object-cover"
+                        />
+                      ) : (
+                        <span className="size-11 shrink-0 rounded-lg bg-muted" aria-hidden="true" />
+                      )}
+
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="mono truncate text-[12.5px]">{row.orderId}</span>
+                          <CopyButton value={row.orderId} label="คัดลอกเลขคำสั่งซื้อ" />
+                          <Badge variant={row.status === "CANCELLED" ? "destructive" : "outline"}>
+                            {STATUS_LABEL[row.status] ?? row.status}
+                          </Badge>
+                        </div>
+                        {row.firstName ? (
+                          <span className="truncate text-[13px] font-bold">{row.firstName}</span>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
                       <span>{dateTime(row.createTime)}</span>
@@ -219,8 +242,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
         <Dialog open>
           <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader className="pr-11">
-              <DialogTitle className="text-[16px]">
-                ออเดอร์ {detail.orderId}
+              <DialogTitle className="flex flex-wrap items-center gap-2 text-[16px]">
+                <span className="mono">ออเดอร์ {detail.orderId}</span>
+                <CopyButton value={detail.orderId} label="คัดลอกเลขคำสั่งซื้อ" />
               </DialogTitle>
               <p className="text-[13px] text-muted-foreground">
                 {detail.items.length} รายการ · ยอดสั่งซื้อ ฿{money(detail.totalAmount)} ·{" "}
