@@ -43,17 +43,17 @@ function KpiCard({
 }) {
   return (
     <Card padding="padded" className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-[12.5px] font-bold text-muted-foreground">{label}</span>
+      <span className="text-[14px] font-bold text-muted-foreground">{label}</span>
       <span
         className={
           tone === "accent"
-            ? "mono truncate text-[22px] font-bold leading-tight text-[#0d8a47]"
-            : "mono truncate text-[22px] font-bold leading-tight"
+            ? "mono truncate text-[26px] font-bold leading-tight text-[#0d8a47]"
+            : "mono truncate text-[26px] font-bold leading-tight"
         }
       >
         {value}
       </span>
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11.5px]">
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12.5px]">
         {delta ? (
           <span
             className={
@@ -68,7 +68,7 @@ function KpiCard({
           <span className="text-muted-foreground">ยังไม่มีช่วงก่อนให้เทียบ</span>
         )}
       </span>
-      {hint ? <span className="text-[11.5px] text-muted-foreground">{hint}</span> : null}
+      {hint ? <span className="text-[12.5px] text-muted-foreground">{hint}</span> : null}
     </Card>
   );
 }
@@ -243,18 +243,28 @@ export function PlatformDashboardView({
         />
       </div>
 
+      {/* สรุปประโยคเดียว — อ่านก่อนอย่างอื่น */}
+      {analytics.insights.length > 0 ? (
+        <div className="rounded-xl border border-border bg-muted/40 px-4 py-3">
+          <p className="text-[12.5px] font-bold uppercase tracking-wide text-muted-foreground">
+            สรุปสั้น ๆ
+          </p>
+          <p className="mt-1 text-[17px] font-bold leading-relaxed">{analytics.insights[0]}</p>
+        </div>
+      ) : null}
+
       {/* 2) สิ่งที่ต้องกังวล (Alert) */}
       <div className="grid grid-cols-1 gap-2 min-[900px]:grid-cols-2">
         {analytics.alerts.map((alert) => (
           <div
             key={alert.title}
-            className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-[13px] leading-6 ${ALERT_STYLES[alert.level]}`}
+            className={`flex items-start gap-2 rounded-xl border px-3.5 py-3 text-[14px] leading-7 ${ALERT_STYLES[alert.level]}`}
             role="status"
           >
             <IconInfo size={15} aria-hidden="true" className="mt-1 shrink-0" />
             <span className="min-w-0">
               <span className="block font-bold">{alert.title}</span>
-              <span className="block text-[12px] opacity-80">{alert.detail}</span>
+              <span className="block text-[13px] leading-6 opacity-85">{alert.detail}</span>
             </span>
           </div>
         ))}
