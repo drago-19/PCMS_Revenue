@@ -102,7 +102,7 @@ export function PlatformSetupPanel({ status }: { status: PlatformStatusView }) {
 
           <div>
             <Button asChild>
-              <Link href="/settings#platforms">ไปที่หน้าตั้งค่า · เชื่อมต่อแพลตฟอร์ม</Link>
+              <Link href="/settings?tab=platforms">ไปที่หน้าตั้งค่า · เชื่อมต่อแพลตฟอร์ม</Link>
             </Button>
           </div>
         </Card>
