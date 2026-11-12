@@ -4912,12 +4912,12 @@ export async function getOverallStats(
   const shopParams: unknown[] =
     activeShop && activeShop !== "all" && !isUnlinkedShop ? [activeShop] : [];
 
-  const stats = await queryOne<{ import_count: number }>(
+  const importCountPromise = queryOne<{ import_count: number }>(
     "SELECT COUNT(*) AS import_count FROM imports",
     [],
     db,
   );
-  const shopRows = await query<Record<string, unknown>>(
+  const shopRowsPromise = query<Record<string, unknown>>(
     `SELECT 
        COALESCE(NULLIF(t.shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name,
        COUNT(*)::int AS order_count,
@@ -4934,7 +4934,7 @@ export async function getOverallStats(
     db,
   );
 
-  const channelRows = await query<Record<string, unknown>>(
+  const channelRowsPromise = query<Record<string, unknown>>(
     `SELECT
        COALESCE(NULLIF(t.channel, ''), 'TikTok') AS channel,
        COUNT(*)::int AS order_count,
@@ -4963,7 +4963,7 @@ export async function getOverallStats(
     db,
   );
 
-  const nonOrderRows = await query<Record<string, unknown>>(
+  const nonOrderRowsPromise = query<Record<string, unknown>>(
     `SELECT
        t.transaction_type,
        COUNT(*)::int AS cnt,
@@ -4976,6 +4976,14 @@ export async function getOverallStats(
     shopParams,
     db,
   );
+
+  // คำสั่งทั้งสี่ไม่ขึ้นแก่กัน — ยิงพร้อมกันเพื่อไม่ให้เวลาบวกกันเป็นทอด ๆ
+  const [stats, shopRows, channelRows, nonOrderRows] = await Promise.all([
+    importCountPromise,
+    shopRowsPromise,
+    channelRowsPromise,
+    nonOrderRowsPromise,
+  ]);
 
   const shopSummaries: ShopSummaryStat[] = shopRows.map((r) => ({
     shopName: String(r.shop_name ?? "รอผูกไฟล์ร้านค้า"),
@@ -5196,6 +5204,19 @@ function getCalendarDaysInMonth(
   return daysInMonth;
 }
 
+const globalForCompletenessCache = globalThis as unknown as {
+  __pcmsCompletenessCache?: Record<
+    string,
+    { report: DailyUploadCompletenessReport; cachedAtMs: number }
+  >;
+};
+
+const COMPLETENESS_CACHE_TTL_MS = 30_000;
+
+export function clearUploadCompletenessCache(): void {
+  globalForCompletenessCache.__pcmsCompletenessCache = {};
+}
+
 export async function getDailyUploadCompleteness(
   options?: { year?: number | string; month?: string; mode?: UploadDateMode; shop?: string },
   db?: Queryable,
@@ -5206,6 +5227,18 @@ export async function getDailyUploadCompleteness(
     mode === "paid"
       ? "COALESCE(NULLIF(t.paid_date, ''), t.created_date)"
       : "COALESCE(NULLIF(t.created_date, ''), t.paid_date)";
+
+  // ปฏิทินความครบถ้วนเปลี่ยนเฉพาะเมื่อมี import ใหม่ — cache 30 วินาทีแบบเดียวกับ listDailyBatches
+  // และเคลียร์ทันทีจาก refreshSummaryTables เมื่อนำเข้าเสร็จ
+  const cacheKey = db
+    ? ""
+    : `${await getActiveCompanyId()}|${options?.year ?? ""}|${options?.month ?? ""}|${mode}|${activeShop}`;
+  if (cacheKey) {
+    const hit = globalForCompletenessCache.__pcmsCompletenessCache?.[cacheKey];
+    if (hit && Date.now() - hit.cachedAtMs < COMPLETENESS_CACHE_TTL_MS) {
+      return hit.report;
+    }
+  }
 
   const monthRows = await query<{ ym: string }>(
     `SELECT DISTINCT SUBSTRING(${dateCol} FROM 1 FOR 7) AS ym
@@ -5254,7 +5287,7 @@ export async function getDailyUploadCompleteness(
 
   const hasItemsSql = `((t.channel = 'Lazada' AND NULLIF(t.product_detail, '') IS NOT NULL AND t.product_detail <> '/') OR COALESCE(t.product_detail, '') LIKE '%·%' OR EXISTS (SELECT 1 FROM oms_order_items oi WHERE (NULLIF(t.oms_order_uid, '') IS NOT NULL AND oi.order_uid = t.oms_order_uid) OR (NULLIF(t.oms_order_uid, '') IS NULL AND oi.order_code = t.order_code)))`;
 
-  const rawRows = await query<Record<string, unknown>>(
+  const rawRowsPromise = query<Record<string, unknown>>(
     `WITH settled_paid_dates AS (
        SELECT DISTINCT paid_date AS d
        FROM transactions
@@ -5382,7 +5415,7 @@ export async function getDailyUploadCompleteness(
     [String(selectedYear)],
     db,
   );
-  const recentImportRows = await query<Record<string, unknown>>(
+  const recentImportRowsPromise = query<Record<string, unknown>>(
     `SELECT id, filename, file_type, period_start, period_end, order_count, imported_at
      FROM imports
      ORDER BY id DESC
@@ -5390,7 +5423,7 @@ export async function getDailyUploadCompleteness(
     [],
     db,
   );
-  const importPeriodRows = await query<Record<string, unknown>>(
+  const importPeriodRowsPromise = query<Record<string, unknown>>(
     `SELECT file_type, period_start, period_end
      FROM imports
      WHERE period_start IS NOT NULL
@@ -5401,12 +5434,12 @@ export async function getDailyUploadCompleteness(
     [],
     db,
   );
-  const distinctShopRows = await query<Record<string, unknown>>(
+  const distinctShopRowsPromise = query<Record<string, unknown>>(
     `SELECT DISTINCT COALESCE(NULLIF(shop_name, ''), 'รอผูกไฟล์ร้านค้า') AS shop_name FROM transactions WHERE is_order = 1 ORDER BY shop_name ASC`,
     [],
     db,
   );
-  const rawShopDateRows = await query<Record<string, unknown>>(
+  const rawShopDateRowsPromise = query<Record<string, unknown>>(
     `SELECT
        ${dateCol} AS d,
        t.shop_name AS shop_name,
@@ -5439,6 +5472,22 @@ export async function getDailyUploadCompleteness(
     [String(selectedYear)],
     db,
   );
+
+  // ห้าคำสั่งไม่ขึ้นแก่กัน (ขึ้นกับ selectedYear จากคำสั่งแรกเท่านั้น) — ยิงพร้อมกัน
+  // เดิมเรียงกันทำให้เวลาบวกทอดกันเป็น 399+174+23+2+2 ms
+  const [
+    rawRows,
+    recentImportRows,
+    importPeriodRows,
+    distinctShopRows,
+    rawShopDateRows,
+  ] = await Promise.all([
+    rawRowsPromise,
+    recentImportRowsPromise,
+    importPeriodRowsPromise,
+    distinctShopRowsPromise,
+    rawShopDateRowsPromise,
+  ]);
 
   const shopBreakdownByDate = new Map<string, DailyShopCompletenessBreakdown[]>();
   for (const sr of rawShopDateRows) {
@@ -5808,7 +5857,7 @@ export async function getDailyUploadCompleteness(
     },
   );
 
-  return {
+  const report: DailyUploadCompletenessReport = {
     year: selectedYear,
     availableYears,
     month: selectedMonth,
@@ -5832,5 +5881,13 @@ export async function getDailyUploadCompleteness(
       importedAt: String(r.imported_at ?? ""),
     })),
   };
+
+  if (cacheKey) {
+    const cache = globalForCompletenessCache.__pcmsCompletenessCache ?? {};
+    cache[cacheKey] = { report, cachedAtMs: Date.now() };
+    globalForCompletenessCache.__pcmsCompletenessCache = cache;
+  }
+
+  return report;
 }
 
