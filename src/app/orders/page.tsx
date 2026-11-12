@@ -124,12 +124,22 @@ function formatClock(iso: string | null): string {
   if (!iso) return "—";
   const instant = new Date(iso);
   if (Number.isNaN(instant.getTime())) return "—";
-  return `${new Intl.DateTimeFormat("th-TH", {
+  return new Intl.DateTimeFormat("th-TH", {
     timeZone: "Asia/Bangkok",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).format(instant)} น.`;
+  }).format(instant);
+}
+
+/** เวลาสั่งของสินค้าหนึ่ง: บิลเดียวโชว์เวลาเดียว หลายบิลโชว์เป็นช่วง (บิลแรก–บิลล่าสุด) */
+function formatOrderWindow(earliest: string | null, latest: string | null): string {
+  const first = formatClock(earliest);
+  const last = formatClock(latest);
+  if (first === "—" && last === "—") return "—";
+  if (first === last || first === "—") return `${last} น.`;
+  if (last === "—") return `${first} น.`;
+  return `${first}–${last} น.`;
 }
 
 function ProductsTable({ products }: { products: ProductPackingRow[] }) {
@@ -182,8 +192,8 @@ function ProductsTable({ products }: { products: ProductPackingRow[] }) {
               <TableCell data-label="คำสั่งซื้อ" className="num text-[13px] font-semibold">
                 {product.orderCount} บิล
               </TableCell>
-              <TableCell data-label="เวลาสั่ง (ล่าสุด)" className="num text-[13px] text-muted-foreground">
-                {formatClock(product.latestOrderAt)}
+              <TableCell data-label="เวลาสั่ง" className="num whitespace-nowrap text-[13px] text-muted-foreground">
+                {formatOrderWindow(product.earliestOrderAt, product.latestOrderAt)}
               </TableCell>
               <TableCell data-label="ต้องส่ง (ชิ้น)" className="num text-[15px] font-bold">
                 {product.quantity}

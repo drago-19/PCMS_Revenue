@@ -48,6 +48,8 @@ export interface ProductPackingRow {
   lines: ProductOrderLine[];
   /** เวลาสั่งของบิลล่าสุดที่ต้องสินค้านี้ (ISO) — ใช้บอกว่าของเข้ามาเมื่อไร */
   latestOrderAt: string | null;
+  /** เวลาสั่งของบิลแรกสุดที่ต้องสินค้านี้ (ISO) — ใช้แสดงช่วงเวลาเมื่อมีหลายบิล */
+  earliestOrderAt: string | null;
 }
 
 export interface DayPackingSummary {
@@ -231,6 +233,10 @@ function finalizeProduct(name: string, bucket: ProductBucket): ProductPackingRow
     if (!line.paidAt) return latest;
     return !latest || Date.parse(line.paidAt) > Date.parse(latest) ? line.paidAt : latest;
   }, null);
+  const earliestOrderAt = bucket.lines.reduce<string | null>((earliest, line) => {
+    if (!line.paidAt) return earliest;
+    return !earliest || Date.parse(line.paidAt) < Date.parse(earliest) ? line.paidAt : earliest;
+  }, null);
 
   return {
     name,
@@ -241,6 +247,7 @@ function finalizeProduct(name: string, bucket: ProductBucket): ProductPackingRow
     channels: summarizeLinesByChannel(bucket.lines),
     lines: bucket.lines,
     latestOrderAt,
+    earliestOrderAt,
   };
 }
 
