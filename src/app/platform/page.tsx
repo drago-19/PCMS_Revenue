@@ -223,15 +223,17 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
             <PeriodPicker from={fromParam} to={toParam} shop={selectedShop} />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" asChild>
-              <Link href="/platform/orders">ดูรายละเอียดรายออเดอร์</Link>
-            </Button>
-            <span className="text-[12px] text-muted-foreground">
-              ค้นหาเลขคำสั่งซื้อ · กรองตามสถานะ · เปิดดูสินค้าและยอดเงินทีละออเดอร์
-            </span>
-            <PlatformAutoRefresh seconds={60} />
-            <SyncNowButton />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="min-w-0 flex-1 basis-[260px] text-[12px] leading-6 text-muted-foreground">
+              ค้นหาเลขคำสั่งซื้อ · กรองตามสถานะ · เปิดดูสินค้าและยอดเงินทีละออเดอร์ ·{" "}
+              <PlatformAutoRefresh seconds={60} />
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/platform/orders">ดูรายละเอียดรายออเดอร์</Link>
+              </Button>
+              <SyncNowButton />
+            </div>
           </div>
 
           <PlatformDashboardView analytics={analytics} />
