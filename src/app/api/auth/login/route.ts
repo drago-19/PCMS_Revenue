@@ -4,14 +4,11 @@ import {
   checkLoginBruteForce,
   clearLoginFailures,
   ensureAdminUser,
-  getInitialPasswordHash,
-  getSeehengInitialPasswordHash,
   isRetiredDefaultCredential,
   recordAuditLog,
   recordLoginFailure,
   verifyPassword,
 } from "@/lib/auth";
-import { getPool } from "@/lib/db";
 import {
   createSessionToken,
   DEFAULT_SESSION_TTL_SECONDS,
@@ -147,29 +144,10 @@ export async function POST(request: Request) {
     const usernameMatches =
       username.toLowerCase() === admin.username.toLowerCase();
     const targetHash = usernameMatches ? admin.passwordHash : DUMMY_BCRYPT_HASH;
-    let passwordValid = await verifyPassword(password, targetHash);
+    const passwordValid = await verifyPassword(password, targetHash);
 
-    // If .env AUTH_INITIAL_PASSWORD / AUTH_PASSWORD_HASH was updated, sync it to DB seamlessly
-    if (usernameMatches && !passwordValid) {
-      let envHash: string | null = null;
-      try {
-        envHash =
-          admin.companyId === "seeheng"
-            ? await getSeehengInitialPasswordHash()
-            : await getInitialPasswordHash();
-      } catch (error) {
-        if (!(error instanceof AuthConfigurationError)) throw error;
-        console.error("seeheng env password is not configured", { requestId });
-      }
-      if (envHash && envHash !== admin.passwordHash && (await verifyPassword(password, envHash))) {
-        passwordValid = true;
-        await getPool().query(
-          "UPDATE public.app_users SET password_hash = $2, updated_at = now() WHERE username = $1",
-          [admin.username, envHash],
-        );
-      }
-    }
-
+    // รหัสผ่านที่ใช้ได้คือ hash ใน DB เท่านั้น — ค่าใน env ใช้แค่ตอนสร้างบัญชีใหม่
+    // (เดิมส่วนนี้เขียน hash ใน DB กลับเป็นค่าใน env ทุกครั้ง ทำให้เปลี่ยนรหัสผ่านไม่เคยมีผล)
     if (!usernameMatches || !passwordValid) {
       const failure = await recordLoginFailure(ip);
       await recordAuditLog({

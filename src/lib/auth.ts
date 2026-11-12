@@ -53,9 +53,12 @@ export function getConfiguredAdminUsername(): string {
   return (process.env.AUTH_USERNAME ?? "admin").trim() || "admin";
 }
 
-// Pre-computed bcrypt cost-12 hash of default initial credential if env is not set
-const FALLBACK_ADMIN_HASH =
-  "$2b$12$e4G3z5o1Y8k7V9m2N6p0QuW3r5T7y9U1i3O5p7A9s1D3f5G7h9J1K";
+export class AuthConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthConfigurationError";
+  }
+}
 
 let cachedDefaultHash: string | null = null;
 let cachedDefaultPlain: string | null = null;
@@ -83,14 +86,10 @@ export async function getInitialPasswordHash(): Promise<string> {
     }
     return cachedDefaultHash;
   }
-  return FALLBACK_ADMIN_HASH;
-}
-
-export class AuthConfigurationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AuthConfigurationError";
-  }
+  // ไม่มีรหัส fallback ที่ฝังในโค้ดอีก: ต้องตั้ง env ให้ครบก่อนสร้างบัญชี admin ใหม่
+  throw new AuthConfigurationError(
+    "AUTH_PASSWORD_HASH หรือ AUTH_INITIAL_PASSWORD ยังไม่ได้ตั้ง — สร้างบัญชี admin ใหม่ไม่ได้จนกว่าจะตั้งค่าใน env",
+  );
 }
 
 let cachedSeehengDefaultHash: string | null = null;

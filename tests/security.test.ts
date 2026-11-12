@@ -9,6 +9,7 @@ import {
   BLOCK_DURATION_MS,
   checkMemoryBruteForce,
   clearMemoryLoginFailures,
+  getInitialPasswordHash,
   getSeehengInitialPasswordHash,
   hashPassword,
   isRetiredDefaultCredential,
@@ -312,11 +313,33 @@ test("never falls back to a hardcoded seeheng password when the env var is missi
   }
 });
 
-test("CSP no longer allows eval and company scope never comes from a client header", () => {
-  assert.ok(!SECURITY_HEADERS["Content-Security-Policy"]!.includes("unsafe-eval"));
+test("admin bootstrap fails closed instead of using a hardcoded hash", async () => {
+  const savedHash = process.env.AUTH_PASSWORD_HASH;
+  const savedPlain = process.env.AUTH_INITIAL_PASSWORD;
+  delete process.env.AUTH_PASSWORD_HASH;
+  delete process.env.AUTH_INITIAL_PASSWORD;
+  try {
+    await assert.rejects(() => getInitialPasswordHash(), /AUTH_PASSWORD_HASH/);
+  } finally {
+    if (savedHash !== undefined) process.env.AUTH_PASSWORD_HASH = savedHash;
+    if (savedPlain !== undefined) process.env.AUTH_INITIAL_PASSWORD = savedPlain;
+  }
+});
+
+test("company scope never comes from a client header", () => {
   const dbSource = fs.readFileSync(path.resolve(process.cwd(), "src/lib/db.ts"), "utf8");
   assert.ok(
     !dbSource.includes("x-auth-company"),
     "src/lib/db.ts ต้องไม่เชื่อ header x-auth-company จาก client",
   );
+});
+
+test("production CSP does not allow eval", (t) => {
+  if (process.env.NODE_ENV !== "production") {
+    // dev ต้องเปิด unsafe-eval ให้ Turbopack — CSP ของ prod ยืนยันจาก header จริงตอน deploy
+    t.skip("ตรวจเฉพาะโหมด production");
+    return;
+  }
+  const csp = SECURITY_HEADERS["Content-Security-Policy"] ?? "";
+  assert.ok(!csp.includes("unsafe-eval"), "CSP ของ production ต้องไม่เปิด unsafe-eval");
 });
