@@ -43,7 +43,8 @@ type TabKey = (typeof TABS)[number]["key"];
 function readTab(value: string | string[] | undefined): TabKey {
   const raw = Array.isArray(value) ? value[0] : value;
   const found = TABS.find((tab) => tab.key === raw);
-  return found?.key ?? "platforms";
+  // ค่าเริ่มต้นคือหน้าข้อมูลบริษัท/เอกสาร เพราะเป็นจุดประสงค์หลักของหน้านี้
+  return found?.key ?? "company";
 }
 
 export default async function SettingsPage({
@@ -79,7 +80,7 @@ export default async function SettingsPage({
         <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
           {TABS.map((tab) => {
             const active = tab.key === activeTab;
-            const href = tab.key === "platforms" ? "/settings" : `/settings?tab=${tab.key}`;
+            const href = tab.key === "company" ? "/settings" : `/settings?tab=${tab.key}`;
             return (
               <Link
                 key={tab.key}
