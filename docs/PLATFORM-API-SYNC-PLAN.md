@@ -249,3 +249,11 @@
   - เอกสาร TikTok ระบุให้เทียบ scope ของ endpoint กับ **`granted_scopes` ของ token**; สมมติฐานที่ยังไม่ปิด: token อาจยังไม่รับ scope ใหม่ (รอ/authorize ใหม่) หรือ endpoint ต้องใช้ scope อื่น
   - ขั้นต่อไป: (1) รอ ~30 นาทีแล้ว authorize ซ้ำ หรือ (2) log `granted_scopes` ของ token เพื่อพิสูจน์ หรือ (3) เปิด ticket กับ TikTok
 - **Shopee:** ยังไม่เริ่ม — ติดเงื่อนไข TH (Mall/Managed seller) และยังไม่ได้สมัคร developer account
+
+### ✅ เชื่อม TikTok สำเร็จ (12 พ.ย. 2026 16:15)
+
+- ร้าน **Kissi Studio** (TH) เชื่อมแล้ว · `platform_accounts.status = connected` · token เก็บเข้ารหัสแล้ว
+- ทดสอบดึง Statement ผ่าน API จริง: **200 OK · 5 statement ใน 30 วัน · ยอดรวม 81,355.40 THB**
+  - ตัวอย่างรอบล่าสุด: revenue 40,554.00 − fee 10,607.66 = settlement **29,946.34 THB** (SETTLED)
+- **บทเรียน:** หลังเปิด scope และ publish แอป ต้องรอให้สิทธิ์ฝั่ง TikTok เริ่มมีผล (รอบที่ล้มเหลวเกิดก่อนหน้านั้น ~40 นาที) แล้ว authorize ใหม่ — token ใหม่จึงมี `granted_scopes` ครบ
+- สิ่งที่แก้ระหว่างทางจนผ่าน: เพิ่ม scope `Shop Authorized Information` (สำหรับ `/authorization/202309/shops`), แก้ redirect ที่ชี้ `0.0.0.0:3000`, แยกข้อความ error เป็น `token:` / `shops:`
