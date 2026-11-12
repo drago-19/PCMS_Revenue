@@ -365,6 +365,189 @@ export async function getAuthorizedShops(
     }));
 }
 
+export interface TikTokOrder {
+  id: string;
+  status: string;
+  createTime: number;
+  paidTime: number | null;
+  shippedTime: number | null;
+  deliveredTime: number | null;
+  cancelledTime: number | null;
+  cancelReason: string | null;
+  cancelUser: string | null;
+  currency: string | null;
+  totalAmount: string | null;
+  trackingNumber: string | null;
+  shippingProvider: string | null;
+  items: Array<{
+    lineItemId: string;
+    skuId: string | null;
+    productName: string | null;
+    skuName: string | null;
+    quantity: number;
+    salePrice: string | null;
+    currency: string | null;
+  }>;
+  raw: unknown;
+}
+
+interface RawOrdersData {
+  orders?: Array<Record<string, unknown>>;
+  next_page_token?: string;
+}
+
+/** ค้นหาออเดอร์ตามช่วงเวลาที่สร้าง (ต้องมีสิทธิ์ Order Information) */
+export async function searchOrders({
+  config,
+  accessToken,
+  shopCipher,
+  createTimeGe,
+  createTimeLt,
+  pageToken,
+  pageSize = 100,
+}: {
+  config: TikTokAppConfig;
+  accessToken: string;
+  shopCipher: string;
+  createTimeGe: number;
+  createTimeLt: number;
+  pageToken?: string;
+  pageSize?: number;
+}): Promise<{ orders: TikTokOrder[]; nextPageToken: string | null }> {
+  const query: Record<string, string> = {
+    shop_cipher: shopCipher,
+    page_size: String(pageSize),
+    sort_field: "create_time",
+    sort_order: "ASC",
+  };
+  if (pageToken) query.page_token = pageToken;
+
+  const data = await callTikTokApi<RawOrdersData>({
+    config,
+    path: "/order/202309/orders/search",
+    method: "POST",
+    query,
+    body: { create_time_ge: createTimeGe, create_time_lt: createTimeLt },
+    accessToken,
+  });
+
+  const num = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const str = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? value : null;
+
+  const orders: TikTokOrder[] = (data.orders ?? []).map((row) => {
+    const payment = (row.payment ?? {}) as Record<string, unknown>;
+    const cancellation = (row.cancellation ?? row.cancel_info ?? {}) as Record<string, unknown>;
+    const tracking = (row.tracking_number ?? {}) as Record<string, unknown>;
+    const lineItems = Array.isArray(row.line_items) ? (row.line_items as Array<Record<string, unknown>>) : [];
+
+    return {
+      id: String(row.id ?? ""),
+      status: String(row.status ?? "UNKNOWN"),
+      createTime: num(row.create_time) ?? 0,
+      paidTime: num(row.paid_time),
+      shippedTime: num(row.rts_time) ?? num(row.shipped_time),
+      deliveredTime: num(row.delivered_time),
+      cancelledTime: num(row.cancelled_time),
+      cancelReason: str(cancellation.reason) ?? str(row.cancel_reason),
+      cancelUser: str(cancellation.initiator) ?? str(cancellation.cancel_user),
+      currency: str(payment.currency),
+      totalAmount: str(payment.total_amount),
+      trackingNumber: str(tracking.number) ?? str(row.tracking_number_text),
+      shippingProvider: str(row.shipping_provider) ?? str(row.shipping_provider_name),
+      items: lineItems.map((item) => ({
+        lineItemId: String(item.id ?? ""),
+        skuId: str(item.sku_id),
+        productName: str(item.product_name),
+        skuName: str(item.sku_name),
+        quantity: typeof item.quantity === "number" ? item.quantity : 0,
+        salePrice: str(item.sale_price),
+        currency: str(item.currency),
+      })),
+      raw: row,
+    };
+  });
+
+  return { orders, nextPageToken: data.next_page_token ?? null };
+}
+
+export interface TikTokStatementTransaction {
+  statementId: string;
+  type: string;
+  orderId: string | null;
+  orderCreateTime: number | null;
+  settlementAmount: string;
+  revenueAmount: string;
+  feeAndTaxAmount: string;
+  shippingCostAmount: string;
+  currency: string;
+  raw: unknown;
+}
+
+interface RawStatementTransactionsData {
+  id?: string;
+  currency?: string;
+  transactions?: Array<Record<string, unknown>>;
+  next_page_token?: string;
+}
+
+/** รายการเงินต่อออเดอร์ของ statement หนึ่งใบ — ตัวเลขที่ใช้กระทบยอด/ภาษี */
+export async function listStatementTransactions({
+  config,
+  accessToken,
+  shopCipher,
+  statementId,
+  pageToken,
+  pageSize = 100,
+}: {
+  config: TikTokAppConfig;
+  accessToken: string;
+  shopCipher: string;
+  statementId: string;
+  pageToken?: string;
+  pageSize?: number;
+}): Promise<{ transactions: TikTokStatementTransaction[]; nextPageToken: string | null; currency: string }> {
+  const query: Record<string, string> = {
+    shop_cipher: shopCipher,
+    page_size: String(pageSize),
+    sort_field: "order_create_time",
+    sort_order: "ASC",
+  };
+  if (pageToken) query.page_token = pageToken;
+
+  const data = await callTikTokApi<RawStatementTransactionsData>({
+    config,
+    path: `/finance/202501/statements/${encodeURIComponent(statementId)}/statement_transactions`,
+    query,
+    accessToken,
+  });
+
+  const num = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const str = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? value : null;
+
+  const transactions: TikTokStatementTransaction[] = (data.transactions ?? []).map((row) => ({
+    statementId,
+    type: str(row.type) ?? "UNKNOWN",
+    orderId: str(row.order_id) ?? str(row.associated_order_id),
+    orderCreateTime: num(row.order_create_time) ?? num(row.create_time),
+    settlementAmount: str(row.settlement_amount) ?? "0",
+    revenueAmount: str(row.revenue_amount) ?? "0",
+    feeAndTaxAmount: str(row.fee_and_tax_amount) ?? "0",
+    shippingCostAmount: str(row.shipping_cost_amount) ?? "0",
+    currency: str(row.currency) ?? str(data.currency) ?? "THB",
+    raw: row,
+  }));
+
+  return {
+    transactions,
+    nextPageToken: data.next_page_token ?? null,
+    currency: str(data.currency) ?? "THB",
+  };
+}
+
 export interface TikTokPackage {
   id: string;
   status: string;
@@ -406,7 +589,7 @@ export async function searchPackages({
   createTimeLt: number;
   pageSize?: number;
   packageStatus?: string;
-}): Promise<{ packages: TikTokPackage[]; totalCount: number }> {
+}): Promise<{ packages: TikTokPackage[]; totalCount: number; nextPageToken: string | null }> {
   const data = await callTikTokApi<RawPackagesData>({
     config,
     path: "/fulfillment/202309/packages/search",
@@ -436,6 +619,7 @@ export async function searchPackages({
       orderIds: (row.orders ?? []).map((order) => order.id ?? "").filter(Boolean),
     })),
     totalCount: data.total_count ?? 0,
+    nextPageToken: data.next_page_token ?? null,
   };
 }
 

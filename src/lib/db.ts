@@ -6,7 +6,7 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-12-v55";
+const SCHEMA_VERSION = "2026-11-12-v56";
 
 export type { CompanyId };
 
@@ -913,6 +913,103 @@ CREATE TABLE IF NOT EXISTS platform_accounts (
   connected_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (platform, account_key)
+);
+
+-- ข้อมูลที่ดึงจากแพลตฟอร์มมาเก็บไว้ทำรายงาน (แยกจากตารางบิลเดิมโดยสิ้นเชิง)
+CREATE TABLE IF NOT EXISTS platform_statements (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  statement_id TEXT NOT NULL,
+  statement_time TIMESTAMPTZ,
+  settlement_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  revenue_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  fee_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  adjustment_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'THB',
+  payment_status TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, statement_id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_orders (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  order_status TEXT,
+  create_time TIMESTAMPTZ,
+  paid_time TIMESTAMPTZ,
+  shipped_time TIMESTAMPTZ,
+  delivered_time TIMESTAMPTZ,
+  cancelled_time TIMESTAMPTZ,
+  cancel_reason TEXT,
+  cancel_user TEXT,
+  currency TEXT,
+  total_amount NUMERIC(14,2),
+  tracking_number TEXT,
+  shipping_provider TEXT,
+  raw_json JSONB,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, order_id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_order_items (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  line_item_id TEXT NOT NULL,
+  sku_id TEXT,
+  product_name TEXT,
+  sku_name TEXT,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  sale_price NUMERIC(14,2),
+  currency TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, order_id, line_item_id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_packages (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  package_id TEXT NOT NULL,
+  status TEXT,
+  create_time TIMESTAMPTZ,
+  update_time TIMESTAMPTZ,
+  tracking_number TEXT,
+  shipping_provider TEXT,
+  order_ids TEXT[] NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, package_id)
+);
+
+-- รายการเงินต่อออเดอร็จาก statement (ตัวเลขที่ใช้อ้างอิงภาษี)
+CREATE TABLE IF NOT EXISTS platform_order_finance (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  statement_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  transaction_type TEXT,
+  order_create_time TIMESTAMPTZ,
+  settlement_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  revenue_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  fee_and_tax_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  shipping_cost_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  currency TEXT,
+  raw_json JSONB,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, statement_id, order_id, transaction_type)
+);
+
+CREATE TABLE IF NOT EXISTS platform_sync_runs (
+  id BIGSERIAL PRIMARY KEY,
+  platform TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  range_from TIMESTAMPTZ,
+  range_to TIMESTAMPTZ,
+  rows_written INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'running',
+  error TEXT,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS auth_rate_limits (
