@@ -9,6 +9,7 @@ const ITEMS = [
   { key: "overview", href: "/platform", label: "ภาพรวม" },
   { key: "ops", href: "/platform/ops", label: "งานที่ต้องทำ" },
   { key: "products", href: "/platform/products", label: "สินค้าและเหตุผล" },
+  { key: "stocks", href: "/platform/stocks", label: "สต็อก" },
   { key: "customers", href: "/platform/customers", label: "ลูกค้า" },
   { key: "orders", href: "/platform/orders", label: "ออเดอร์" },
   { key: "statements", href: "/platform/statements", label: "statement" },

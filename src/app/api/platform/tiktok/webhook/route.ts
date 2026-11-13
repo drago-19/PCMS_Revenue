@@ -9,6 +9,7 @@ import {
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
 import { syncOrders, syncStatements, type SyncContext } from "@/lib/platform/sync";
+import { refreshStockForRecentOrders } from "@/lib/platform/stock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,7 +76,11 @@ export async function POST(request: Request) {
     try {
       const orders = await syncOrders(ctx, from, to);
       const money = await syncStatements(ctx, from, to);
-      console.log(`[webhook] ${eventType} · ${account.shopName ?? account.accountKey}: ออเดอร์ ${orders} · statement ${money.statements}`);
+      // อัปเดตสต็อกเฉพาะสินค้าที่อยู่ในออเดอร์ที่เพิ่งเปลี่ยน (ไม่ดึงทั้งแคตตาล็อก)
+      const stockChanged = await refreshStockForRecentOrders(ctx.shopId, 120);
+      console.log(
+        `[webhook] ${eventType} · ${account.shopName ?? account.accountKey}: ออเดอร์ ${orders} · statement ${money.statements} · สต็อกเปลี่ยน ${stockChanged}`,
+      );
     } catch (err) {
       console.error("[webhook] อัปเดตไม่สำเร็จ", err instanceof Error ? err.message : err);
     }
