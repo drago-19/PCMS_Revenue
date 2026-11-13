@@ -44,6 +44,7 @@ export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
   const [serviceId, setServiceId] = useState(config.serviceId ?? "");
   const [saving, setSaving] = useState(false);
   const [testingKey, setTestingKey] = useState<string | null>(null);
+  const [registering, setRegistering] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
 
   async function handleSave() {
@@ -64,6 +65,30 @@ export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
       toast.error(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRegisterWebhook() {
+    setRegistering(true);
+    try {
+      const response = await fetch("/api/platform/tiktok/register-webhook", { method: "POST" });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        address?: string;
+        results?: Array<{ shop: string | null; ok: boolean; error?: string }>;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "สมัครรับแจ้งเตือนไม่สำเร็จ");
+
+      const failed = (payload.results ?? []).filter((item) => !item.ok);
+      if (failed.length > 0) {
+        throw new Error(failed.map((item) => `${item.shop ?? "ร้าน"}: ${item.error ?? "ไม่สำเร็จ"}`).join(" · "));
+      }
+      toast.success(`เปิดรับแจ้งเตือนจาก TikTok แล้ว — จะแจ้งเมื่อออเดอร์/คืนเงินเปลี่ยน`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "สมัครรับแจ้งเตือนไม่สำเร็จ");
+    } finally {
+      setRegistering(false);
     }
   }
 
@@ -245,6 +270,11 @@ export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
               <a href="/api/platform/tiktok/authorize">
                 {accounts.length > 0 ? "เชื่อมร้านเพิ่ม" : "เชื่อมร้าน TikTok"}
               </a>
+            </Button>
+          ) : null}
+          {accounts.length > 0 && config.configured ? (
+            <Button variant="outline" onClick={handleRegisterWebhook} disabled={registering} aria-busy={registering}>
+              {registering ? "กำลังสมัคร…" : "เปิดรับแจ้งเตือนจาก TikTok"}
             </Button>
           ) : null}
           <Button variant="ghost" onClick={() => setEditing(true)}>
