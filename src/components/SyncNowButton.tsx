@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
-export function SyncNowButton() {
+export function SyncNowButton({ variant = "default" }: { variant?: "default" | "outline" | "ghost" } = {}) {
   const router = useRouter();
   const [running, setRunning] = useState(false);
 
@@ -29,7 +29,7 @@ export function SyncNowButton() {
   }
 
   return (
-    <Button onClick={run} disabled={running} aria-busy={running} size="sm">
+    <Button onClick={run} disabled={running} aria-busy={running} size="sm" variant={variant}>
       {running ? "กำลังสั่งดึง…" : "ดึงข้อมูลสดตอนนี้"}
     </Button>
   );

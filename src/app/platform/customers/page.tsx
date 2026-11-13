@@ -4,17 +4,23 @@
 
 import Link from "next/link";
 import { EmptyState, PageHeader } from "@/components/PageHeader";
-import { PeriodPicker } from "@/components/PeriodPicker";
+import { PlatformStat } from "@/components/platform/PlatformCards";
+import { PlatformDetail } from "@/components/platform/PlatformDetailSlot";
+import { detailParam, hrefWithDetail } from "@/lib/platform/details";
+import { PlatformNav } from "@/components/platform/PlatformNav";
+import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
+import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getCustomerInsights, type AreaRow, type TopCustomer } from "@/lib/platform/customers";
-import { cn } from "@/lib/utils";
+import { readPlatform } from "@/lib/platform/platforms";
+import { thaiRange } from "@/lib/platform/period";
+import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "ข้อมูลลูกค้า · TikTok Shop" };
+export const metadata = { title: "แพลตฟอร์ม · ลูกค้า" };
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -23,38 +29,14 @@ function read(params: Record<string, string | string[] | undefined>, key: string
   return (Array.isArray(value) ? value[0] : value) ?? "";
 }
 
-function isoDay(date: Date): string {
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
-}
-
-function daysAgo(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return isoDay(date);
-}
-
-function monthStart(): string {
-  const date = new Date();
-  date.setDate(1);
-  return isoDay(date);
-}
-
-function prevMonthStart(): string {
-  const date = new Date();
-  date.setDate(1);
-  date.setMonth(date.getMonth() - 1);
-  return isoDay(date);
-}
-
-function prevMonthEnd(): string {
-  const date = new Date();
-  date.setDate(0);
-  return isoDay(date);
-}
-
 function money(value: number): string {
   return value.toLocaleString("th-TH", { maximumFractionDigits: 0 });
+}
+
+/** periodLabel ของฝั่งข้อมูลเป็น ISO — แปลงเป็นวันที่ไทยเพื่อให้อ่านในหน้าเดียวกันได้ */
+function thaiPeriodLabel(label: string): string {
+  const [from, to] = label.split(" → ");
+  return from && to ? thaiRange(from, to) : label;
 }
 
 function shortDate(value: string | null): string {
@@ -68,16 +50,26 @@ function share(value: number, max: number): number {
   return Math.max(3, Math.round((value / max) * 100));
 }
 
-function CustomerRow({ customer, rank, max }: { customer: TopCustomer; rank: number; max: number }) {
+function CustomerRow({
+  customer,
+  rank,
+  max,
+  href,
+}: {
+  customer: TopCustomer;
+  rank: number;
+  max: number;
+  href: string;
+}) {
   const place = [customer.district, customer.province].filter(Boolean).join(" · ") || "ไม่ทราบพื้นที่";
   return (
     <li className="flex flex-col gap-1.5 border-b border-slate-200/70 py-3 last:border-b-0">
       <div className="flex min-w-0 items-baseline justify-between gap-2">
         <div className="flex min-w-0 items-baseline gap-2">
-          <span className="w-5 shrink-0 text-[12px] font-bold text-muted-foreground tabular-nums">{rank}</span>
+          <span className="w-5 shrink-0 text-[12px] font-bold tabular-nums text-muted-foreground">{rank}</span>
           <span className="min-w-0 truncate text-[13.5px] font-bold text-foreground">{customer.name}</span>
         </div>
-        <span className="shrink-0 text-[13.5px] font-bold tabular-nums text-[#0f766e]">฿{money(customer.spend)}</span>
+        <span className="shrink-0 text-[13.5px] font-bold tabular-nums text-[#0d8a47]">฿{money(customer.spend)}</span>
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-7 text-[12px] text-muted-foreground">
         <span className="truncate">{place}</span>
@@ -87,13 +79,19 @@ function CustomerRow({ customer, rank, max }: { customer: TopCustomer; rank: num
         <span className="tabular-nums">ล่าสุด {shortDate(customer.lastOrderAt)}</span>
       </div>
       <span className="ml-7 h-1.5 overflow-hidden rounded-full bg-muted">
-        <span className="block h-full rounded-full bg-[#0f766e]" style={{ width: `${share(customer.spend, max)}%` }} />
+        <span className="block h-full rounded-full bg-[#0d8a47]" style={{ width: `${share(customer.spend, max)}%` }} />
       </span>
       {customer.products.length > 0 ? (
-        <p className="ml-7 min-w-0 truncate text-[12px] text-[#475569]">
+        <p className="ml-7 min-w-0 truncate text-[12px] text-muted-foreground">
           ซื้อ: {customer.products.map((product) => product.name).join(" · ")}
         </p>
       ) : null}
+      <Link
+        href={href}
+        className="ml-7 inline-flex min-h-[32px] w-fit items-center rounded-lg text-[12px] font-bold text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        ดูออเดอร์ของลูกค้าคนนี้ →
+      </Link>
     </li>
   );
 }
@@ -102,18 +100,20 @@ function AreaList({
   rows,
   max,
   labelOf,
+  hrefOf,
 }: {
   rows: AreaRow[];
   max: number;
   labelOf: (row: AreaRow) => string;
+  hrefOf: (row: AreaRow) => string;
 }) {
   return (
-    <ul className="flex flex-col">
+    <ul className="flex list-none flex-col p-0">
       {rows.map((row) => (
         <li key={labelOf(row)} className="flex flex-col gap-1.5 border-b border-slate-200/70 py-2.5 last:border-b-0">
           <div className="flex min-w-0 items-baseline justify-between gap-2">
             <span className="min-w-0 truncate text-[13px] font-bold text-foreground">{labelOf(row)}</span>
-            <span className="shrink-0 text-[13px] font-bold tabular-nums text-[#0f766e]">฿{money(row.spend)}</span>
+            <span className="shrink-0 text-[13px] font-bold tabular-nums text-[#0d8a47]">฿{money(row.spend)}</span>
           </div>
           <div className="flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground">
             <span className="shrink-0 tabular-nums">{row.orders} ออเดอร์</span>
@@ -121,21 +121,17 @@ function AreaList({
             <span className="min-w-0 flex-1 tabular-nums">{row.customers} ลูกค้า</span>
           </div>
           <span className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <span className="block h-full rounded-full bg-[#0f766e]" style={{ width: `${share(row.spend, max)}%` }} />
+            <span className="block h-full rounded-full bg-[#0d8a47]" style={{ width: `${share(row.spend, max)}%` }} />
           </span>
+          <Link
+            href={hrefOf(row)}
+            className="inline-flex min-h-[30px] w-fit items-center rounded-lg text-[11.5px] font-bold text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ดูออเดอร์ในพื้นที่นี้ →
+          </Link>
         </li>
       ))}
     </ul>
-  );
-}
-
-function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5 rounded-xl border border-slate-200 bg-white p-3">
-      <span className="text-[12px] font-semibold text-muted-foreground">{label}</span>
-      <span className="text-[19px] font-extrabold tabular-nums leading-tight text-foreground">{value}</span>
-      {hint ? <span className="text-[11.5px] leading-4 text-muted-foreground">{hint}</span> : null}
-    </div>
   );
 }
 
@@ -144,21 +140,17 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
   const fromParam = read(params, "from");
   const toParam = read(params, "to");
   const selectedShop = read(params, "shop") || undefined;
+  const platform = readPlatform(read(params, "platform"));
 
-  const insights = await getCustomerInsights({
-    from: fromParam || undefined,
-    to: toParam || undefined,
-    rangeDays: 30,
-    shopId: selectedShop,
-  });
-
-  const periodPresets = [
-    { key: "7d", label: "7 วัน", from: daysAgo(7) },
-    { key: "30d", label: "30 วัน", from: daysAgo(30) },
-    { key: "month", label: "เดือนนี้", from: monthStart() },
-    { key: "prevmonth", label: "เดือนก่อน", from: prevMonthStart(), to: prevMonthEnd() },
-    { key: "year", label: "ทั้งปี 69", from: "2026-01-01" },
-  ];
+  const [insights, accounts] = await Promise.all([
+    getCustomerInsights({
+      from: fromParam || undefined,
+      to: toParam || undefined,
+      rangeDays: 30,
+      shopId: selectedShop,
+    }),
+    listPlatformAccounts(TIKTOK_PLATFORM),
+  ]);
 
   const maxCustomer = insights.topCustomers[0]?.spend ?? 0;
   const maxProvince = insights.topProvinces[0]?.spend ?? 0;
@@ -169,83 +161,76 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
       : 0;
 
   return (
-    <div className="workspace-page">
+    <div className="workspace-page flex min-w-0 flex-col gap-4">
       <PageHeader
-        eyebrow="TikTok Shop · ข้อมูลลูกค้า"
-        title="ข้อมูลลูกค้า"
+        eyebrow="TikTok Shop"
+        title="ลูกค้า"
         description="ใครซื้อเยอะที่สุด ซื้ออะไร และอยู่จังหวัด/อำเภอไหน — นับจากออเดอร์ที่ซื้อจริงในช่วงที่เลือก"
-        actions={
-          <Button size="sm" variant="outline" asChild>
-            <Link href="/platform">กลับไปแดชบอร์ด</Link>
-          </Button>
-        }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="เลือกช่วงเวลา">
-          {periodPresets.map((preset) => {
-            const active = (fromParam || "") === preset.from && (toParam || "") === (preset.to ?? "");
-            const qs = new URLSearchParams();
-            qs.set("from", preset.from);
-            if (preset.to) qs.set("to", preset.to);
-            if (selectedShop) qs.set("shop", selectedShop);
-            return (
-              <Link
-                key={preset.key}
-                href={`/platform/customers?${qs.toString()}`}
-                scroll={false}
-                role="tab"
-                aria-selected={active}
-                className={cn(
-                  "inline-flex min-h-[36px] items-center rounded-full border px-3 text-[12px] font-bold",
-                  active
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-border text-muted-foreground hover:bg-muted",
-                )}
-              >
-                {preset.label}
-              </Link>
-            );
-          })}
-          <PeriodPicker from={fromParam || undefined} to={toParam || undefined} shop={selectedShop} />
-        </div>
-      </div>
+      <PlatformSwitcher
+        platform={platform}
+        basePath="/platform/customers"
+        from={fromParam}
+        to={toParam}
+        shop={selectedShop}
+      />
 
-      {!insights.hasData ? (
+      <PlatformBody platform={platform}>
+        <PlatformNav active="customers" from={fromParam} to={toParam} shop={selectedShop} />
+
+        <PlatformPeriodBar
+          basePath="/platform/customers"
+          from={fromParam || undefined}
+          to={toParam || undefined}
+          shop={selectedShop}
+          accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
+        />
+
+        {!insights.hasData ? (
         <EmptyState
           icon={<IconReceipt size={22} aria-hidden="true" />}
           title="ยังไม่มีออเดอร์ในช่วงนี้"
-          description="เลือกช่วงเวลาอื่น หรือกดดึงข้อมูลสดจากหน้าแดชบอร์ดก่อน"
+          description="เลือกช่วงเวลาอื่น หรือดึงข้อมูลสดจากหน้าภาพรวมก่อน"
         />
       ) : (
         <div className="flex min-w-0 flex-col gap-4">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <Kpi
+          <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
+            <PlatformStat
               label="ลูกค้าทั้งหมด"
               value={money(insights.totals.customers)}
-              hint={`จาก ${money(insights.totals.orders)} ออเดอร์ · ${insights.periodLabel}`}
+              hint={`จาก ${money(insights.totals.orders)} ออเดอร์ · ${thaiPeriodLabel(insights.periodLabel)}`}
             />
-            <Kpi
+            <PlatformStat
               label="ลูกค้าซื้อซ้ำ"
               value={money(insights.totals.repeatCustomers)}
               hint={`${repeatRate}% ของลูกค้าทั้งหมด`}
             />
-            <Kpi label="ยอดซื้อเฉลี่ยต่อคน" value={`฿${money(insights.totals.avgPerCustomer)}`} hint="เฉลี่ยต่อลูกค้า 1 คน" />
-            <Kpi label="ยอดซื้อรวม" value={`฿${money(insights.totals.spend)}`} hint="เฉพาะออเดอร์ที่ซื้อจริง" />
+            <PlatformStat
+              label="ยอดซื้อเฉลี่ยต่อคน"
+              value={`฿${money(insights.totals.avgPerCustomer)}`}
+              hint="เฉลี่ยต่อลูกค้า 1 คน"
+            />
+            <PlatformStat label="ยอดซื้อรวม" value={`฿${money(insights.totals.spend)}`} hint="เฉพาะออเดอร์ที่ซื้อจริง" tone="positive" />
           </div>
 
           <Card padding="padded" className="flex min-w-0 flex-col gap-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-[14.5px] font-bold">ลูกค้าที่ซื้อเยอะที่สุด</h2>
-              <Badge variant="secondary">เรียงตามยอดซื้อ</Badge>
+              <Badge variant="neutral">เรียงตามยอดซื้อ</Badge>
             </div>
-            <ul className="flex flex-col">
+            <ul className="flex list-none flex-col p-0">
               {insights.topCustomers.map((customer, index) => (
                 <CustomerRow
                   key={customer.userId}
                   customer={customer}
                   rank={index + 1}
                   max={maxCustomer}
+                  href={hrefWithDetail(
+                    "/platform/customers",
+                    params,
+                    detailParam("customer", customer.userId, customer.name),
+                  )}
                 />
               ))}
             </ul>
@@ -255,7 +240,14 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
             <Card padding="padded" className="flex min-w-0 flex-col gap-2">
               <h2 className="text-[14.5px] font-bold">จังหวัดที่ซื้อเยอะที่สุด</h2>
               {insights.topProvinces.length > 0 ? (
-                <AreaList rows={insights.topProvinces} max={maxProvince} labelOf={(row) => row.province} />
+                <AreaList
+                  rows={insights.topProvinces}
+                  max={maxProvince}
+                  labelOf={(row) => row.province}
+                  hrefOf={(row) =>
+                    hrefWithDetail("/platform/customers", params, detailParam("province", row.province ?? "ไม่ระบุ"))
+                  }
+                />
               ) : (
                 <p className="text-[12.5px] text-muted-foreground">ยังไม่มีข้อมูลจังหวัดในช่วงนี้</p>
               )}
@@ -268,6 +260,9 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
                   rows={insights.topDistricts}
                   max={maxDistrict}
                   labelOf={(row) => `${row.district} · ${row.province}`}
+                  hrefOf={(row) =>
+                    hrefWithDetail("/platform/customers", params, detailParam("district", row.district ?? "ไม่ระบุ"))
+                  }
                 />
               ) : (
                 <p className="text-[12.5px] text-muted-foreground">ยังไม่มีข้อมูลอำเภอในช่วงนี้</p>
@@ -291,8 +286,18 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
               ) : null}
             </ul>
           </Card>
-        </div>
-      )}
+          </div>
+        )}
+      </PlatformBody>
+
+      <PlatformDetail
+        raw={read(params, "detail")}
+        basePath="/platform/customers"
+        params={params}
+        from={fromParam}
+        to={toParam}
+        shopId={selectedShop}
+      />
     </div>
   );
 }

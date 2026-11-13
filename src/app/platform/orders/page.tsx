@@ -1,20 +1,22 @@
 import Link from "next/link";
-import { PageHeader } from "@/components/PageHeader";
-import { EmptyState } from "@/components/PageHeader";
+import { EmptyState, PageHeader } from "@/components/PageHeader";
+import { PlatformStat } from "@/components/platform/PlatformCards";
+import { PlatformNav } from "@/components/platform/PlatformNav";
+import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
+import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { readPlatform } from "@/lib/platform/platforms";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
 import { CopyButton } from "@/components/CopyButton";
-import { PeriodPicker } from "@/components/PeriodPicker";
-import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "รายละเอียดออเดอร์ · TikTok Shop" };
+export const metadata = { title: "แพลตฟอร์ม · ออเดอร์" };
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -74,6 +76,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const fromParam = read(params, "from") || undefined;
   const toParam = read(params, "to") || undefined;
   const page = Math.max(Number(read(params, "page") || "1") || 1, 1);
+  const platform = readPlatform(read(params, "platform"));
 
   const detailId = read(params, "order");
   const filter = { shopId: shop, status: status || undefined, search: search || undefined, from: fromParam, to: toParam };
@@ -105,15 +108,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop · จากฐานข้อมูลเรา"
-        title="รายละเอียดออเดอร์"
-        description="กดที่ออเดอร์เพื่อดูสินค้า ยอดเงิน และสถานะทีละขั้น — ข้อมูลชุดเดียวกับแดชบอร์ด"
-        actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/platform">กลับไปแดชบอร์ด</Link>
-          </Button>
-        }
+        eyebrow="TikTok Shop"
+        title="ออเดอร์"
+        description="กดที่ออเดอร์เพื่อดูสินค้า ยอดเงิน และสถานะทีละขั้น — ข้อมูลชุดเดียวกับหน้าภาพรวม"
       />
+
+      <PlatformSwitcher platform={platform} basePath="/platform/orders" from={fromParam} to={toParam} shop={shop} />
+
+      <PlatformBody platform={platform}>
+      <PlatformNav active="orders" from={fromParam} to={toParam} shop={shop} />
 
       {!config.tiktok ? (
         <EmptyState
@@ -137,31 +140,23 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               placeholder="ค้นหาเลขคำสั่งซื้อ / ชื่อสินค้า / SKU"
               className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-[13px]"
             />
-            <Button type="submit" size="sm">
+            <Button type="submit" size="sm" variant="secondary">
               ค้นหา
             </Button>
           </form>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12.5px] text-muted-foreground">ช่วงวันที่:</span>
-            <PeriodPicker
-              from={fromParam}
-              to={toParam}
-              shop={shop}
-              basePath="/platform/orders"
-              extraParams={{ status, q: search }}
-            />
-            {fromParam || toParam ? (
-              <Link href={queryFor({ keepDates: false })} className="text-[12.5px] underline underline-offset-2">
-                ล้างช่วงวันที่
-              </Link>
-            ) : null}
-            <span className="ml-auto">
-              <PlatformAutoRefresh seconds={30} />
-            </span>
-          </div>
+          <PlatformPeriodBar
+            basePath="/platform/orders"
+            from={fromParam}
+            to={toParam}
+            shop={shop}
+            accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
+            extraQuery={{ status, q: search }}
+            autoRefreshSeconds={30}
+          />
 
-          <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="กรองตามสถานะ">
+          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="กรองตามสถานะ">
+            <span className="text-[12.5px] font-bold text-muted-foreground">สถานะ</span>
             {STATUS_TABS.map((tab) => {
               const active = tab.key === status;
               return (
@@ -185,23 +180,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
           </div>
 
           {/* สรุปตามเงื่อนไขที่กรองอยู่ */}
-          <div className="grid grid-cols-2 gap-2 min-[820px]:grid-cols-4">
-            <Card padding="padded" className="flex flex-col gap-0.5">
-              <span className="text-[13px] font-bold text-muted-foreground">ออเดอร์</span>
-              <span className="mono text-[22px] font-bold">{summary.orders.toLocaleString("th-TH")}</span>
-            </Card>
-            <Card padding="padded" className="flex flex-col gap-0.5">
-              <span className="text-[13px] font-bold text-muted-foreground">ยอดโอนรวม</span>
-              <span className="mono text-[22px] font-bold text-[#0d8a47]">฿{money(summary.settlement)}</span>
-            </Card>
-            <Card padding="padded" className="flex flex-col gap-0.5">
-              <span className="text-[13px] font-bold text-muted-foreground">ยกเลิก</span>
-              <span className="mono text-[22px] font-bold text-[#b42318]">{summary.cancelled.toLocaleString("th-TH")}</span>
-            </Card>
-            <Card padding="padded" className="flex flex-col gap-0.5">
-              <span className="text-[13px] font-bold text-muted-foreground">รายการสินค้า</span>
-              <span className="mono text-[22px] font-bold">{summary.items.toLocaleString("th-TH")}</span>
-            </Card>
+          <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
+            <PlatformStat label="ออเดอร์" value={summary.orders.toLocaleString("th-TH")} />
+            <PlatformStat label="ยอดโอนรวม" value={`฿${money(summary.settlement)}`} tone="positive" />
+            <PlatformStat
+              label="ยกเลิก"
+              value={summary.cancelled.toLocaleString("th-TH")}
+              tone={summary.cancelled > 0 ? "negative" : "default"}
+            />
+            <PlatformStat label="รายการสินค้า" value={summary.items.toLocaleString("th-TH")} />
           </div>
 
           <Card padding="padded" className="flex min-w-0 flex-col gap-2">
@@ -286,6 +273,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
           </Card>
         </div>
       )}
+      </PlatformBody>
 
       {detail ? (
         <Dialog open>

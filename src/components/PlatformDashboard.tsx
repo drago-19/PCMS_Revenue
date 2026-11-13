@@ -1,10 +1,16 @@
+// หน้าภาพรวมของแพลตฟอร์ม — ตอบคำถามเดียว: "ช่วงนี้ได้เท่าไร และดีขึ้นหรือแย่ลง"
+// ไม่มีการเคลื่อนไหวโดยตั้งใจ: ตัวเลขต้องนิ่งเพื่อให้กวาดตาเทียบกันได้
+// ตัวเลขแต่ละตัวถูกพูดครั้งเดียวที่นี่ (ค่าอยู่ใน KPI, การเปลี่ยนแปลงอยู่ในป้ายข้างค่า)
+// ตารางเทียบช่วงก่อนหน้าเดิมถูกรวมเข้ามาเป็นป้าย +/- ในใบ KPI เพื่อไม่ให้พูดซ้ำ
+
 import Link from "next/link";
 import { EmptyState } from "@/components/PageHeader";
-import { IconCheckCircle, IconInfo, IconReceipt, IconWallet } from "@/components/icons";
-import { Badge } from "@/components/ui/badge";
+import { IconInfo, IconWallet } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CANCEL_RATE_LIMIT, PlatformStat } from "@/components/platform/PlatformCards";
 import type { TikTokAnalytics } from "@/lib/platform/analytics";
+import { cn } from "@/lib/utils";
 
 function money(value: number): string {
   return value.toLocaleString("th-TH", { maximumFractionDigits: 0 });
@@ -28,52 +34,24 @@ function change(currentValue: number, previousValue: number): { text: string; up
   };
 }
 
-function KpiCard({
-  label,
-  value,
-  delta,
-  hint,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  delta: { text: string; up: boolean } | null;
-  hint?: string;
-  tone?: "default" | "accent";
-}) {
-  return (
-    <Card padding="padded" className="flex min-w-0 flex-col gap-1.5">
-      <span className="text-[14px] font-bold text-muted-foreground">{label}</span>
-      <span
-        className={
-          tone === "accent"
-            ? "mono truncate text-[26px] font-bold leading-tight text-[#0d8a47]"
-            : "mono truncate text-[26px] font-bold leading-tight"
-        }
-      >
-        {value}
-      </span>
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[12.5px]">
-        {delta ? (
-          <span
-            className={
-              delta.up
-                ? "inline-flex items-center rounded-full bg-[#e7f6ee] px-2 py-0.5 font-bold text-[#0d8a47]"
-                : "inline-flex items-center rounded-full bg-[#fdeceb] px-2 py-0.5 font-bold text-[#b42318]"
-            }
-          >
-            {delta.up ? "▲" : "▼"} {delta.text} เทียบช่วงก่อน
-          </span>
-        ) : (
-          <span className="text-muted-foreground">ยังไม่มีช่วงก่อนให้เทียบ</span>
-        )}
-      </span>
-      {hint ? <span className="text-[12.5px] text-muted-foreground">{hint}</span> : null}
-    </Card>
-  );
+/** ปัดค่าสูงสุดขึ้นเป็นเลขกลม เพื่อให้แกนตั้งอ่านง่าย */
+function niceCeil(value: number): number {
+  if (value <= 0) return 1;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  const scaled = value / magnitude;
+  const step = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+  return step * magnitude;
 }
 
-/** กราฟเส้นยอดโอนรายวัน — ใช้ SVG เอง ไม่ต้องโหลดไลบรารีเพิ่ม */
+function compact(value: number): string {
+  if (value >= 1000) {
+    const thousands = value / 1000;
+    return `${thousands % 1 === 0 ? thousands.toFixed(0) : thousands.toFixed(1)}k`;
+  }
+  return Math.round(value).toLocaleString("th-TH");
+}
+
+/** กราฟเส้นยอดโอนรายวัน — SVG เอง ไม่โหลดไลบรารีเพิ่ม แต่มีสเกลแกนตั้งให้อ่านค่าได้ */
 function TrendChart({ daily }: { daily: TikTokAnalytics["daily"] }) {
   if (daily.length < 2) {
     return (
@@ -84,99 +62,99 @@ function TrendChart({ daily }: { daily: TikTokAnalytics["daily"] }) {
   }
 
   const width = 720;
-  const height = 190;
-  const padX = 8;
-  const padY = 16;
+  const height = 210;
+  const padTop = 12;
+  const padBottom = 28;
+  const padLeft = 44;
+  const padRight = 10;
+  const plotHeight = height - padTop - padBottom;
+  const plotWidth = width - padLeft - padRight;
+
   const values = daily.map((point) => point.settlement);
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, 0);
-  const span = Math.max(max - min, 1);
+  const top = niceCeil(Math.max(...values, 1));
+  const ticks = [0, top / 2, top];
 
-  const points = daily.map((point, index) => {
-    const x = padX + (index / (daily.length - 1)) * (width - padX * 2);
-    const y = height - padY - ((point.settlement - min) / span) * (height - padY * 2);
-    return { x, y, ...point };
-  });
+  const xAt = (index: number) => padLeft + (index / (daily.length - 1)) * plotWidth;
+  const yAt = (value: number) => padTop + plotHeight - (value / top) * plotHeight;
 
+  const points = daily.map((point, index) => ({ x: xAt(index), y: yAt(point.settlement), ...point }));
   const line = points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
-  const area = `${padX},${height - padY} ${line} ${width - padX},${height - padY}`;
+  const area = `${padLeft},${padTop + plotHeight} ${line} ${padLeft + plotWidth},${padTop + plotHeight}`;
+  const labelIndexes = [0, Math.floor((daily.length - 1) / 2), daily.length - 1];
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[190px] w-full"
+        className="h-[210px] w-full"
         role="img"
-        aria-label={`แนวโน้มยอดโอนรายวัน ${daily.length} วัน สูงสุด ${money(max)} บาท`}
+        aria-label={`แนวโน้มยอดโอนรายวัน ${daily.length} วัน สูงสุด ${money(top)} บาท`}
       >
-        <polygon points={area} fill="#0f766e14" />
-        <polyline points={line} fill="none" stroke="#0f766e" strokeWidth="2.5" strokeLinejoin="round" />
+        {ticks.map((tick) => (
+          <g key={tick}>
+            <line
+              x1={padLeft}
+              x2={padLeft + plotWidth}
+              y1={yAt(tick)}
+              y2={yAt(tick)}
+              stroke="#e2e8f0"
+              strokeWidth="1"
+              strokeDasharray={tick === 0 ? undefined : "3 4"}
+            />
+            <text x={padLeft - 8} y={yAt(tick) + 4} textAnchor="end" fontSize="10.5" fill="#64748b">
+              {compact(tick)}
+            </text>
+          </g>
+        ))}
+        <polygon points={area} fill="#0d8a4714" />
+        <polyline points={line} fill="none" stroke="#0d8a47" strokeWidth="2.5" strokeLinejoin="round" />
         {points.map((point) => (
-          <circle key={point.date} cx={point.x} cy={point.y} r="2.5" fill="#0f766e">
+          <circle key={point.date} cx={point.x} cy={point.y} r="2.5" fill="#0d8a47">
             <title>{`${shortDate(point.date)}: ${money(point.settlement)} บาท`}</title>
           </circle>
         ))}
+        {labelIndexes.map((index) => (
+          <text
+            key={`x-${index}`}
+            x={xAt(index)}
+            y={height - 8}
+            textAnchor={index === 0 ? "start" : index === daily.length - 1 ? "end" : "middle"}
+            fontSize="10.5"
+            fill="#64748b"
+          >
+            {shortDate(daily[index].date)}
+          </text>
+        ))}
       </svg>
-      <div className="flex items-center justify-between text-[11.5px] text-muted-foreground">
-        <span>{shortDate(daily[0].date)}</span>
-        <span>สูงสุด ฿{money(max)} · ต่ำสุด ฿{money(Math.min(...values))}</span>
-        <span>{shortDate(daily.at(-1)!.date)}</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11.5px] text-muted-foreground">
+        <span>แกนตั้ง: บาท/วัน</span>
+        <span>
+          สูงสุด ฿{money(Math.max(...values))} · ต่ำสุด ฿{money(Math.min(...values))}
+        </span>
       </div>
     </div>
   );
 }
 
-function CompareRow({
-  label,
-  current,
-  previous,
-  format,
-}: {
-  label: string;
-  current: number;
-  previous: number;
-  format: (value: number) => string;
-}) {
-  const diff = change(current, previous);
-  return (
-    <tr className="border-b border-border last:border-0">
-      <th scope="row" className="py-2 pr-2 text-left text-[12.5px] font-bold">
-        {label}
-      </th>
-      <td className="mono py-2 pr-2 text-right text-[12.5px]">{format(current)}</td>
-      <td className="mono py-2 pr-2 text-right text-[12.5px] text-muted-foreground">
-        {format(previous)}
-      </td>
-      <td
-        className={
-          diff
-            ? diff.up
-              ? "mono py-2 text-right text-[12.5px] font-bold text-[#0d8a47]"
-              : "mono py-2 text-right text-[12.5px] font-bold text-[#b42318]"
-            : "mono py-2 text-right text-[12.5px] text-muted-foreground"
-        }
-      >
-        {diff ? diff.text : "—"}
-      </td>
-    </tr>
-  );
-}
-
 const ALERT_STYLES: Record<string, string> = {
-  red: "border-[#f5c2bd] bg-[#fdf3f2] text-[#8a1c14]",
-  amber: "border-[#f5dfae] bg-[#fffbeb] text-[#7a4b0a]",
-  green: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
+  red: "border-[#f0cfcb] bg-[#fdf5f4] text-[#8a1c14]",
+  amber: "border-[#f2e3c4] bg-[#fffdf6] text-[#7a4b0a]",
+  green: "border-[#cfe8da] bg-[#f6fbf8] text-[#0d6b3c]",
 };
 
-export function PlatformDashboardView({
+export function PlatformOverviewView({
   analytics,
+  detailHref,
 }: {
   analytics: TikTokAnalytics & {
     perShop?: Array<{ shopId: string; settlement: number; orders: number; cancelled: number }>;
     periodLabel: string;
     compareLabel: string;
   };
+  /** ลิงก์ไปป๊อปอัปออเดอร์เบื้องหลังตัวเลขในการ์ด */
+  detailHref?: (kind: "kpi", value: string) => string;
 }) {
+  const kpiHref = (value: string) => (detailHref ? detailHref("kpi", value) : undefined);
   if (!analytics.hasData) {
     return (
       <EmptyState
@@ -192,253 +170,138 @@ export function PlatformDashboardView({
     );
   }
 
-  const { current, previous, rangeDays } = analytics;
+  const { current, previous } = analytics;
   const cancelRate = current.orders ? (current.cancelled / current.orders) * 100 : 0;
   const prevCancelRate = previous.orders ? (previous.cancelled / previous.orders) * 100 : 0;
-  const aov = current.orders ? current.settlement / current.orders : 0;
-  const prevAov = previous.orders ? previous.settlement / previous.orders : 0;
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-        <Badge variant="success">ช่วง {analytics.periodLabel}</Badge>
-        <span>เทียบกับ {analytics.compareLabel}</span>
-        {analytics.lastSyncedAt ? (
-          <span>
-            · ข้อมูลถึง{" "}
-            {new Date(analytics.lastSyncedAt).toLocaleString("th-TH", {
-              dateStyle: "short",
-              timeStyle: "short",
-            })}
-          </span>
-        ) : null}
+        <span>
+          เทียบกับช่วงยาวเท่ากันก่อนหน้า · ค่าติดลบได้จริงตามไฟล์ของแพลตฟอร์ม
+        </span>
       </div>
 
-      {/* 1) KPI ที่ต้องเห็นใน 5 วินาที */}
-      <div className="grid grid-cols-2 gap-2.5 min-[980px]:grid-cols-4">
-        <KpiCard
+      {analytics.alerts.length > 0 ? (
+        <p
+          className={cn(
+            "flex items-start gap-2 rounded-xl border px-3 py-2 text-[13px] leading-6",
+            ALERT_STYLES[analytics.alerts[0].level],
+          )}
+          role="status"
+        >
+          <IconInfo size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            <span className="block font-bold">{analytics.alerts[0].title}</span>
+            <span className="block text-[12px] opacity-85">{analytics.alerts[0].detail}</span>
+          </span>
+        </p>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
+        <PlatformStat
           label="ยอดโอนสุทธิ"
           value={`฿${money(current.settlement)}`}
           delta={change(current.settlement, previous.settlement)}
-          tone="accent"
+          goodWhen="up"
+          tone="positive"
           hint={`${current.orders.toLocaleString("th-TH")} ออเดอร์`}
+          href={kpiHref("settlement")}
         />
-        <KpiCard
+        <PlatformStat
           label="ยอดขายก่อนหัก"
           value={`฿${money(current.revenue)}`}
           delta={change(current.revenue, previous.revenue)}
+          goodWhen="up"
           hint={`ค่าธรรมเนียม ฿${money(Math.abs(current.fee))}`}
+          href={kpiHref("revenue")}
         />
-        <KpiCard
+        <PlatformStat
           label="จำนวนออเดอร์"
           value={current.orders.toLocaleString("th-TH")}
           delta={change(current.orders, previous.orders)}
+          goodWhen="up"
           hint={`ส่งถึงแล้ว ${current.delivered.toLocaleString("th-TH")}`}
+          href={kpiHref("orders")}
         />
-        <KpiCard
+        <PlatformStat
           label="อัตรายกเลิก"
           value={`${cancelRate.toFixed(1)}%`}
           delta={change(cancelRate, prevCancelRate)}
-          hint={`ยกเลิก ${current.cancelled.toLocaleString("th-TH")} รายการ`}
+          goodWhen="down"
+          tone={cancelRate >= CANCEL_RATE_LIMIT ? "negative" : "default"}
+          hint={`ยกเลิก ${current.cancelled.toLocaleString("th-TH")} รายการ · เกณฑ์ ${CANCEL_RATE_LIMIT}%`}
+          href={kpiHref("cancelled")}
         />
       </div>
 
-
-      {/* 3) แนวโน้ม */}
       <Card padding="padded" className="flex min-w-0 flex-col gap-3">
-        <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <h2 className="text-[14.5px] font-bold">แนวโน้มยอดโอนรายวัน</h2>
           <span className="text-[12px] text-muted-foreground">{analytics.daily.length} วัน · บาท</span>
         </div>
         <TrendChart daily={analytics.daily} />
       </Card>
 
-      <div className="grid grid-cols-1 gap-3 min-[980px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        {/* 4) เปรียบเทียบ */}
-        <Card padding="padded" className="flex min-w-0 flex-col gap-2">
-          <h2 className="text-[14.5px] font-bold">เทียบช่วงก่อนหน้า</h2>
-          {analytics.insights.length > 0 ? (
-            <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[14px] font-bold leading-7">
-              {analytics.insights[0]}
-            </p>
-          ) : null}
-          <table className="w-full table-fixed text-[12.5px]">
-            <thead>
-              <tr className="border-b border-border text-[11.5px] text-muted-foreground">
-                <th scope="col" className="py-1.5 pr-2 text-left font-bold">
-                  ตัวชี้วัด
-                </th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">
-                  ช่วงนี้
-                </th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">
-                  ก่อนหน้า
-                </th>
-                <th scope="col" className="py-1.5 text-right font-bold">
-                  เปลี่ยน
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <CompareRow
-                label="ยอดโอน"
-                current={current.settlement}
-                previous={previous.settlement}
-                format={(value) => `฿${money(value)}`}
-              />
-              <CompareRow
-                label="ยอดขาย"
-                current={current.revenue}
-                previous={previous.revenue}
-                format={(value) => `฿${money(value)}`}
-              />
-              <CompareRow
-                label="ออเดอร์"
-                current={current.orders}
-                previous={previous.orders}
-                format={(value) => value.toLocaleString("th-TH")}
-              />
-              <CompareRow
-                label="เฉลี่ย/ออเดอร์"
-                current={aov}
-                previous={prevAov}
-                format={(value) => `฿${money(value)}`}
-              />
-              <CompareRow
-                label="อัตรายกเลิก"
-                current={cancelRate}
-                previous={prevCancelRate}
-                format={(value) => `${value.toFixed(1)}%`}
-              />
-            </tbody>
-          </table>
-        </Card>
-
-        {/* 5) สาเหตุ — เหตุผลยกเลิก */}
-        <Card padding="padded" className="flex min-w-0 flex-col gap-2">
-          <h2 className="text-[14.5px] font-bold">ยกเลิกเพราะอะไร</h2>
-          {analytics.alerts.length > 0 ? (
-            <p
-              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[13px] leading-6 ${ALERT_STYLES[analytics.alerts[0].level]}`}
-              role="status"
-            >
-              <IconInfo size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
-              <span className="min-w-0">
-                <span className="block font-bold">{analytics.alerts[0].title}</span>
-                <span className="block text-[12px] opacity-85">{analytics.alerts[0].detail}</span>
-              </span>
-            </p>
-          ) : null}
-          {analytics.cancelReasons.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">ไม่มีออเดอร์ยกเลิกในช่วงนี้</p>
-          ) : (
-            <ul className="flex list-none flex-col gap-2 p-0">
-              {analytics.cancelReasons.map((reason) => {
-                const share = current.cancelled ? Math.round((reason.count / current.cancelled) * 100) : 0;
-                return (
-                  <li key={reason.reason} className="flex min-w-0 flex-col gap-1">
-                    <div className="flex items-center justify-between gap-2 text-[12.5px]">
-                      <span className="truncate">{reason.reason}</span>
-                      <span className="mono shrink-0 text-muted-foreground">
-                        {reason.count} · {share}%
-                      </span>
-                    </div>
-                    <span className="h-1.5 overflow-hidden rounded-full bg-muted">
-                      <span
-                        className="block h-full rounded-full bg-[#b42318]"
-                        style={{ width: `${Math.max(3, share)}%` }}
-                      />
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
-      </div>
-
-      {/* แยกตามร้าน (แสดงเมื่อดู "ทุกร้าน" และมีมากกว่า 1 ร้าน) */}
-      {(analytics.perShop?.length ?? 0) > 1 ? (
-        <Card padding="padded" className="flex min-w-0 flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-[14.5px] font-bold">แยกตามร้าน</h2>
-            <span className="text-[12px] text-muted-foreground">ช่วง {analytics.rangeDays} วัน</span>
-          </div>
-          <table className="w-full table-fixed text-[12.5px]">
-            <thead>
-              <tr className="border-b border-border text-[11.5px] text-muted-foreground">
-                <th scope="col" className="py-1.5 pr-2 text-left font-bold">ร้าน (shop id)</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">ยอดโอน</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">ออเดอร์</th>
-                <th scope="col" className="py-1.5 text-right font-bold">ยกเลิก</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytics.perShop!.map((shop) => (
-                <tr key={shop.shopId} className="border-b border-border last:border-0">
-                  <td className="mono py-1.5 pr-2 truncate">{shop.shopId}</td>
-                  <td className="mono py-1.5 pr-2 text-right">฿{money(shop.settlement)}</td>
-                  <td className="mono py-1.5 pr-2 text-right">{shop.orders.toLocaleString("th-TH")}</td>
-                  <td className="mono py-1.5 text-right">{shop.cancelled.toLocaleString("th-TH")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {analytics.insights.length > 0 ? (
+        <Card variant="info" padding="padded" className="flex flex-col gap-1.5">
+          <h2 className="text-[14.5px] font-bold">อ่านอะไรจากตัวเลขนี้</h2>
+          <ul className="ml-4 list-disc text-[13px] leading-6 text-muted-foreground">
+            {analytics.insights.map((insight) => (
+              <li key={insight}>{insight}</li>
+            ))}
+          </ul>
         </Card>
       ) : null}
 
-      {/* 5b) สาเหตุ — สินค้าทำยอด */}
-      <Card padding="padded" className="flex min-w-0 flex-col gap-3">
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-[14.5px] font-bold">
-            <IconReceipt size={15} aria-hidden="true" />
-            สินค้าที่ทำยอดสูงสุด
-          </h2>
-          <span className="text-[12px] text-muted-foreground">เรียงตามยอดขายก่อนหัก</span>
-        </div>
-        <ul className="flex list-none flex-col gap-2 p-0">
-          {analytics.topProducts.map((product) => {
-            const max = analytics.topProducts[0]?.revenue || 1;
-            return (
-              <li key={product.name} className="flex min-w-0 flex-col gap-1">
-                <div className="flex items-center justify-between gap-2 text-[12.5px]">
-                  <span className="truncate font-bold">{product.name}</span>
-                  <span className="mono shrink-0">
-                    ฿{money(product.revenue)} · {product.quantity} ชิ้น
-                  </span>
-                </div>
-                <span className="h-1.5 overflow-hidden rounded-full bg-muted">
-                  <span
-                    className="block h-full rounded-full bg-[#0f766e]"
-                    style={{ width: `${Math.max(3, Math.round((product.revenue / max) * 100))}%` }}
-                  />
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      </Card>
+      {(analytics.perShop?.length ?? 0) > 1 ? (
+        <Card padding="padded" className="flex min-w-0 flex-col gap-2">
+          <h2 className="text-[14.5px] font-bold">แยกตามร้าน</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-[12.5px]">
+              <thead>
+                <tr className="border-b border-border text-[11.5px] text-muted-foreground">
+                  <th scope="col" className="py-1.5 pr-2 text-left font-bold">
+                    ร้าน (shop id)
+                  </th>
+                  <th scope="col" className="py-1.5 pr-2 text-right font-bold">
+                    ยอดโอน
+                  </th>
+                  <th scope="col" className="py-1.5 pr-2 text-right font-bold">
+                    ออเดอร์
+                  </th>
+                  <th scope="col" className="py-1.5 text-right font-bold">
+                    ยกเลิก
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.perShop!.map((shop) => (
+                  <tr key={shop.shopId} className="border-b border-border last:border-0">
+                    <td className="mono truncate py-1.5 pr-2">{shop.shopId}</td>
+                    <td className="mono py-1.5 pr-2 text-right">฿{money(shop.settlement)}</td>
+                    <td className="mono py-1.5 pr-2 text-right">{shop.orders.toLocaleString("th-TH")}</td>
+                    <td className="mono py-1.5 text-right">{shop.cancelled.toLocaleString("th-TH")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
 
-      {/* 6) ข้อสรุปที่ลงมือได้ */}
-      <Card variant="info" padding="padded" className="flex flex-col gap-2">
-        <h2 className="flex items-center gap-2 text-[14.5px] font-bold">
-          <IconCheckCircle size={15} aria-hidden="true" className="text-[#0d8a47]" />
-          สรุปให้ตัดสินใจ
-        </h2>
-        <ul className="ml-4 list-disc text-[13px] leading-6">
-          {analytics.insights.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      </Card>
+      <p className="text-[12px] leading-5 text-muted-foreground">
+        กำไรสุทธิยังคิดไม่ได้ เพราะฐานข้อมูลยังไม่มีต้นทุนสินค้า (cost_price = 0 ทุก SKU) — ตอนนี้คิดได้ถึงขั้น
+        “ยอดขาย − ค่าธรรมเนียม − ค่าส่ง” จาก statement
+      </p>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/settings?tab=platforms">จัดการการเชื่อมต่อ / ทดสอบดึงข้อมูล</Link>
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/platform/ops">ไปดูงานที่ต้องทำวันนี้</Link>
         </Button>
-        <span className="text-[12px] text-muted-foreground">
-          ตัวเลขคำนวณจากฐานข้อมูลของเรา (ข้อมูลที่ดึงจาก TikTok) — ไม่ได้ยิงถาม TikTok ทุกครั้งที่เปิดหน้า
-        </span>
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/platform/products">ไปดูสินค้าและเหตุผลการยกเลิก</Link>
+        </Button>
       </div>
     </div>
   );

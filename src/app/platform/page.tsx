@@ -1,72 +1,25 @@
-import Link from "next/link";
-import { EmptyState } from "@/components/PageHeader";
 import { PageHeader } from "@/components/PageHeader";
-import { PlatformDashboardView } from "@/components/PlatformDashboard";
-import { PlatformOpsView } from "@/components/PlatformOps";
-import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
-import { PeriodPicker } from "@/components/PeriodPicker";
-import { SyncNowButton } from "@/components/SyncNowButton";
-import { IconInfo, IconReceipt } from "@/components/icons";
+import { PlatformOverviewView } from "@/components/PlatformDashboard";
+import { PlatformNav } from "@/components/platform/PlatformNav";
+import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
+import { PlatformDetail } from "@/components/platform/PlatformDetailSlot";
+import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getTikTokAnalytics } from "@/lib/platform/analytics";
-import { getTikTokOps } from "@/lib/platform/ops";
-import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
-import { cn } from "@/lib/utils";
+import { detailParam, hrefWithDetail } from "@/lib/platform/details";
+import { readPlatform } from "@/lib/platform/platforms";
+import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "ดึงข้อมูลจากแพลตฟอร์ม" };
+export const metadata = { title: "แพลตฟอร์ม · ภาพรวม" };
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-const PLATFORM_TABS = [
-  { key: "tiktok", label: "TikTok Shop", hint: "ยอดเงิน + สถานะพัสดุ จาก API จริง" },
-  { key: "shopee", label: "Shopee", hint: "ยังไม่เริ่ม — รอเงื่อนไขร้าน Mall/Managed" },
-] as const;
-
-type PlatformKey = (typeof PLATFORM_TABS)[number]["key"];
-
-/** วันที่แบบ YYYY-MM-DD (อิงเวลาท้องถิ่น) สำหรับปุ่มเลือกช่วงเวลา */
-function isoDay(date: Date): string {
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
-}
-
-function daysAgo(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return isoDay(date);
-}
-
-function monthStart(): string {
-  const date = new Date();
-  date.setDate(1);
-  return isoDay(date);
-}
-
-function prevMonthStart(): string {
-  const date = new Date();
-  date.setDate(1);
-  date.setMonth(date.getMonth() - 1);
-  return isoDay(date);
-}
-
-function prevMonthEnd(): string {
-  const date = new Date();
-  date.setDate(0);
-  return isoDay(date);
-}
 
 function readParam(params: Record<string, string | string[] | undefined>, key: string) {
   const value = params[key];
   return Array.isArray(value) ? value[0] : value;
-}
-
-function readPlatform(value: string | string[] | undefined): PlatformKey {
-  const raw = Array.isArray(value) ? value[0] : value;
-  return PLATFORM_TABS.some((tab) => tab.key === raw) ? (raw as PlatformKey) : "tiktok";
 }
 
 function buildFlash(params: Record<string, string | string[] | undefined>) {
@@ -97,33 +50,25 @@ function buildFlash(params: Record<string, string | string[] | undefined>) {
   return { tone: "danger" as const, message: readParam(params, "message") ?? "เชื่อมต่อไม่สำเร็จ" };
 }
 
-export default async function PlatformSyncPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function PlatformOverviewPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const activePlatform = readPlatform(params.platform);
-  const selectedShop = readParam(params, "shop") ?? undefined;
-  const fromParam = readParam(params, "from") ?? undefined;
-  const toParam = readParam(params, "to") ?? undefined;
+  const selectedShop = readParam(params, "shop");
+  const fromParam = readParam(params, "from");
+  const toParam = readParam(params, "to");
   const flash = buildFlash(params);
-  // ส่งช่วงเวลา/ร้านที่กำลังดูอยู่ต่อไปหน้า "ข้อมูลลูกค้า" เพื่อให้เห็นเลขชุดเดียวกัน
-  const customerQs = new URLSearchParams();
-  if (fromParam) customerQs.set("from", fromParam);
-  if (toParam) customerQs.set("to", toParam);
-  if (selectedShop) customerQs.set("shop", selectedShop);
-  const customersHref = customerQs.toString() ? `/platform/customers?${customerQs.toString()}` : "/platform/customers";
+  const platform = readPlatform(readParam(params, "platform"));
 
-  const [config, accounts, analytics, ops] = await Promise.all([
-    getPlatformConfig(),
+  const [accounts, analytics] = await Promise.all([
     listPlatformAccounts(TIKTOK_PLATFORM),
     getTikTokAnalytics({ from: fromParam, to: toParam, rangeDays: 30, shopId: selectedShop }),
-    getTikTokOps({ from: fromParam, to: toParam, shopId: selectedShop }),
   ]);
 
   return (
-    <div className="workspace-page">
+    <div className="workspace-page flex min-w-0 flex-col gap-4">
       <PageHeader
         eyebrow="TikTok Shop · Shopee (ผ่าน Open API)"
-        title="ดึงข้อมูลจากแพลตฟอร์ม"
-        description="ยอดขาย ค่าธรรมเนียม ยอดโอน และสถานะพัสดุ ที่ดึงตรงจาก API — แยกแท็บตามแพลตฟอร์ม"
+        title="แพลตฟอร์ม"
+        description="ยอดขาย ค่าธรรมเนียม และยอดโอน ที่ดึงตรงจาก API — ตัวเลขคำนวณจากฐานข้อมูลของเรา ไม่ได้ยิงถาม TikTok ทุกครั้งที่เปิดหน้า"
         actions={<Badge variant="warning">กำลังพัฒนา</Badge>}
       />
 
@@ -131,153 +76,49 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
         <Card
           variant={flash.tone === "success" ? "success" : flash.tone === "danger" ? "danger" : "warning"}
           padding="padded"
-          className="mb-4 text-[13.5px] leading-6"
+          className="text-[13.5px] leading-6"
           role="status"
         >
           {flash.message}
         </Card>
       ) : null}
 
-      <div
-        className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3"
-        role="tablist"
-        aria-label="แพลตฟอร์ม"
-      >
-        <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
-          {PLATFORM_TABS.map((tab) => {
-            const active = tab.key === activePlatform;
-            const href = tab.key === "tiktok" ? "/platform" : `/platform?platform=${tab.key}`;
-            return (
-              <Link
-                key={tab.key}
-                href={href}
-                scroll={false}
-                role="tab"
-                aria-selected={active}
-                className={cn(
-                  "inline-flex min-h-[40px] items-center rounded-lg px-3.5 py-1.5 text-[13px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  active ? "bg-slate-900 text-white shadow-xs" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-                )}
-              >
-                {tab.label}
-              </Link>
-            );
-          })}
-        </div>
-        <p className="min-w-0 text-xs text-[#64748b]">
-          {PLATFORM_TABS.find((tab) => tab.key === activePlatform)?.hint}
-        </p>
-      </div>
+      <PlatformSwitcher
+        platform={platform}
+        basePath="/platform"
+        from={fromParam}
+        to={toParam}
+        shop={selectedShop}
+      />
 
-      {activePlatform === "tiktok" ? (
-        <section aria-label="แดชบอร์ด TikTok Shop" className="flex min-w-0 flex-col gap-4">
-          {accounts.length > 1 ? (
-            <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
-              <span className="text-muted-foreground">ดู:</span>
-              <Link
-                href="/platform"
-                className={
-                  selectedShop
-                    ? "rounded-full border border-border px-3 py-1"
-                    : "rounded-full bg-slate-900 px-3 py-1 font-bold text-white"
-                }
-              >
-                ทุกร้านรวมกัน
-              </Link>
-              {accounts.map((account) => (
-                <Link
-                  key={account.accountKey}
-                  href={`/platform?shop=${encodeURIComponent(account.accountKey)}`}
-                  className={
-                    selectedShop === account.accountKey
-                      ? "rounded-full bg-slate-900 px-3 py-1 font-bold text-white"
-                      : "rounded-full border border-border px-3 py-1"
-                  }
-                >
-                  {account.shopName ?? account.accountKey}
-                </Link>
-              ))}
-            </div>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="เลือกช่วงเวลา">
-            {[
-              { key: "7d", label: "7 วัน", from: daysAgo(7) },
-              { key: "30d", label: "30 วัน", from: daysAgo(30) },
-              { key: "month", label: "เดือนนี้", from: monthStart() },
-              { key: "prevmonth", label: "เดือนก่อน", from: prevMonthStart(), to: prevMonthEnd() },
-              { key: "year", label: "ทั้งปี 69", from: "2026-01-01" },
-            ].map((preset) => {
-              const active = (fromParam ?? "") === preset.from && (toParam ?? "") === (preset.to ?? "");
-              const qs = new URLSearchParams();
-              if (preset.from) qs.set("from", preset.from);
-              if (preset.to) qs.set("to", preset.to);
-              if (selectedShop) qs.set("shop", selectedShop);
-              return (
-                <Link
-                  key={preset.key}
-                  href={qs.toString() ? `/platform?${qs.toString()}` : "/platform"}
-                  scroll={false}
-                  role="tab"
-                  aria-selected={active}
-                  className={cn(
-                    "inline-flex min-h-[36px] items-center rounded-full border px-3 text-[12px] font-bold",
-                    active ? "border-slate-900 bg-slate-900 text-white" : "border-border text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {preset.label}
-                </Link>
-              );
-            })}
+      <PlatformBody platform={platform}>
+        <PlatformNav active="overview" from={fromParam} to={toParam} shop={selectedShop} />
 
-            <PeriodPicker from={fromParam} to={toParam} shop={selectedShop} />
-          </div>
+        <PlatformPeriodBar
+          basePath="/platform"
+          from={fromParam}
+          to={toParam}
+          shop={selectedShop}
+          accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
+          showSync
+          autoRefreshSeconds={60}
+          lastSyncedAt={analytics.lastSyncedAt}
+        />
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="min-w-0 flex-1 basis-[260px] text-[12px] leading-6 text-muted-foreground">
-              ค้นหาเลขคำสั่งซื้อ · กรองตามสถานะ · เปิดดูสินค้าและยอดเงินทีละออเดอร์ ·{" "}
-              <PlatformAutoRefresh seconds={60} />
-            </p>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button size="sm" variant="outline" asChild>
-                <Link href={customersHref}>ข้อมูลลูกค้า</Link>
-              </Button>
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/platform/orders">ดูรายละเอียดรายออเดอร์</Link>
-              </Button>
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/platform/statements">statement ของ TikTok</Link>
-              </Button>
-              <SyncNowButton />
-            </div>
-          </div>
+        <PlatformOverviewView
+          analytics={analytics}
+          detailHref={(_kind, value) => hrefWithDetail("/platform", params, detailParam("kpi", value))}
+        />
+      </PlatformBody>
 
-          <PlatformDashboardView analytics={analytics} />
-          <PlatformOpsView ops={ops} />
-        </section>
-      ) : null}
-
-      {activePlatform === "shopee" ? (
-        <section aria-label="แดชบอร์ด Shopee" className="flex min-w-0 flex-col gap-4">
-          <EmptyState
-            icon={<IconReceipt size={22} aria-hidden="true" />}
-            title="Shopee ยังไม่เชื่อมต่อ"
-            description="การเชื่อม Shopee ต้องใช้แอปประเภท Seller In-house System และร้านต้องเข้าเงื่อนไข Mall หรือ Managed seller ก่อน — ยังไม่เริ่มตามที่ตกลง"
-          />
-
-          <Card variant="info" padding="padded" className="flex flex-col gap-2">
-            <h2 className="flex items-center gap-2 text-[14.5px] font-bold">
-              <IconInfo size={15} aria-hidden="true" className="text-[#1d4ed8]" />
-              สิ่งที่จะได้เมื่อเชื่อม Shopee
-            </h2>
-            <ul className="ml-4 list-disc text-[13px] leading-6 text-muted-foreground">
-              <li>ยอดโอนต่อออเดอร์ + ค่าธรรมเนียมแยกรายการ (escrow detail)</li>
-              <li>ยอดโอนที่ปล่อยจริงจาก Income API (≤14 วันต่อครั้ง)</li>
-              <li>รายการปรับปรุง (adjustment) จาก wallet transaction</li>
-              <li>สถานะพัสดุ + tracking และคำขอคืนเงิน</li>
-            </ul>
-          </Card>
-        </section>
-      ) : null}
+      <PlatformDetail
+        raw={readParam(params, "detail")}
+        basePath="/platform"
+        params={params}
+        from={fromParam}
+        to={toParam}
+        shopId={selectedShop}
+      />
     </div>
   );
 }

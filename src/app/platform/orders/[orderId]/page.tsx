@@ -1,8 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import { PlatformNav } from "@/components/platform/PlatformNav";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getPlatformOrder } from "@/lib/platform/orders";
 
@@ -58,12 +57,9 @@ export default async function OrderDetailPage({
         eyebrow="รายละเอียดออเดอร์"
         title={`ออเดอร์ ${order.orderId}`}
         description={`${order.currency ?? "THB"} · ${order.items.length} รายการ · ยอดสั่งซื้อ ฿${money(order.totalAmount)}`}
-        actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/platform/orders">กลับไปรายการ</Link>
-          </Button>
-        }
       />
+
+      <PlatformNav active="orders" shop={shop} />
 
       <div className="grid grid-cols-1 gap-3 min-[980px]:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-3">

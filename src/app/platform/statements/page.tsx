@@ -1,10 +1,20 @@
-import Link from "next/link";
-import { PeriodPicker } from "@/components/PeriodPicker";
+import { PageHeader } from "@/components/PageHeader";
+import { PlatformStat, signedMoney } from "@/components/platform/PlatformCards";
+import { PlatformNav } from "@/components/platform/PlatformNav";
+import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
+import { PlatformDetail } from "@/components/platform/PlatformDetailSlot";
+import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
+import { detailParam, hrefWithDetail } from "@/lib/platform/details";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getTikTokStatements } from "@/lib/platform/statements";
+import { readPlatform } from "@/lib/platform/platforms";
+import { thaiDate, thaiRange } from "@/lib/platform/period";
+import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
+
+export const metadata = { title: "แพลตฟอร์ม · statement" };
 
 function money(value: number): string {
   return `฿${value.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -14,114 +24,106 @@ function num(value: number): string {
   return value.toLocaleString("th-TH");
 }
 
-function dayLabel(value: string | null): string {
-  if (!value) return "ไม่ระบุวัน";
-  const date = new Date(value);
-  return date.toLocaleDateString("th-TH", {
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-  });
-}
-
-
 export default async function PlatformStatementsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; platform?: string; detail?: string }>;
 }) {
   const params = await searchParams;
-  const statements = await getTikTokStatements({ from: params.from, to: params.to });
+  const platform = readPlatform(params.platform);
+  const [statements, accounts] = await Promise.all([
+    getTikTokStatements({ from: params.from, to: params.to }),
+    listPlatformAccounts(TIKTOK_PLATFORM),
+  ]);
   const { totals, rows } = statements;
 
   const feeRatio = totals.revenue > 0 ? Math.round((totals.fee / totals.revenue) * 1000) / 10 : 0;
 
   return (
-    <main className="workspace-page flex min-w-0 flex-col gap-4">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="text-[20px] font-bold leading-tight">statement ของ TikTok</h1>
-          <p className="text-[12.5px] text-muted-foreground">
-            ใบสรุปยอดโอนรายวันที่ TikTok ส่งมา · {statements.range.from} → {statements.range.to}
-          </p>
-        </div>
-        <Link
-          href="/platform"
-          className="inline-flex h-10 items-center rounded-lg border border-border px-3 text-[13px] font-bold hover:bg-muted"
-        >
-          ← กลับหน้าแพลตฟอร์ม
-        </Link>
-      </div>
+    <div className="workspace-page flex min-w-0 flex-col gap-4">
+      <PageHeader
+        eyebrow="TikTok Shop"
+        title="statement ของ TikTok"
+        description={`ใบสรุปยอดโอนรายวันที่ TikTok ส่งมา · ${thaiRange(statements.range.from, statements.range.to)}`}
+      />
 
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="text-[12.5px] text-muted-foreground">ช่วงวันที่:</span>
-        <PeriodPicker from={params.from} to={params.to} basePath="/platform/statements" />
-        <Link
-          href="/platform/statements?from=2026-01-01"
-          className="text-[12.5px] underline underline-offset-2"
-        >
-          ทั้งปี 69
-        </Link>
-        {params.from || params.to ? (
-          <Link href="/platform/statements" className="text-[12.5px] underline underline-offset-2">
-            ล้างช่วงวันที่
-          </Link>
-        ) : null}
-      </div>
+      <PlatformSwitcher
+        platform={platform}
+        basePath="/platform/statements"
+        from={params.from}
+        to={params.to}
+      />
 
-      <div className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">
-        <Card padding="padded" className="flex min-w-0 flex-col gap-1">
-          <span className="text-[13px] font-bold text-muted-foreground">โอนจริงรวม</span>
-          <span className="mono truncate text-[22px] font-bold leading-tight text-[#0d8a47]">
-            {money(totals.settlement)}
-          </span>
-          <span className="text-[11.5px] text-muted-foreground">{num(totals.statements)} ใบ · {num(totals.orders)} ออเดอร์</span>
-        </Card>
-        <Card padding="padded" className="flex min-w-0 flex-col gap-1">
-          <span className="text-[13px] font-bold text-muted-foreground">ยอดขายก่อนหัก</span>
-          <span className="mono truncate text-[22px] font-bold leading-tight">{money(totals.revenue)}</span>
-          <span className="text-[11.5px] text-muted-foreground">ตามที่ TikTok คำนวณในใบ</span>
-        </Card>
-        <Card padding="padded" className="flex min-w-0 flex-col gap-1">
-          <span className="text-[13px] font-bold text-muted-foreground">ค่าธรรมเนียม + ภาษี</span>
-          <span className="mono truncate text-[22px] font-bold leading-tight text-[#b42318]">{money(totals.fee)}</span>
-          <span className="text-[11.5px] text-muted-foreground">คิดเป็น {feeRatio}% ของยอดขาย</span>
-        </Card>
-        <Card padding="padded" className="flex min-w-0 flex-col gap-1">
-          <span className="text-[13px] font-bold text-muted-foreground">ปรับปรุง (adjustment)</span>
-          <span className="mono truncate text-[22px] font-bold leading-tight">{money(totals.adjustment)}</span>
-          <span className="text-[11.5px] text-muted-foreground">เงินคืน/หักนอกคำสั่งซื้อ</span>
-        </Card>
+      <PlatformBody platform={platform}>
+      <PlatformNav active="statements" from={params.from} to={params.to} />
+
+      <PlatformPeriodBar
+        basePath="/platform/statements"
+        from={params.from}
+        to={params.to}
+        accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
+      />
+
+      <div className="grid min-w-0 grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
+        <PlatformStat
+          label="โอนจริงรวม"
+          value={money(totals.settlement)}
+          hint={`${num(totals.statements)} ใบ · ${num(totals.orders)} ออเดอร์`}
+          tone="positive"
+        />
+        <PlatformStat label="ยอดขายก่อนหัก" value={money(totals.revenue)} hint="ตามที่ TikTok คํานวณในใบ" />
+        <PlatformStat
+          label="ค่าธรรมเนียม + ภาษี"
+          value={signedMoney(totals.fee, 2)}
+          hint={`คิดเป็น ${feeRatio}% ของยอดขาย`}
+          tone="negative"
+        />
+        <PlatformStat
+          label="ปรับปรุง (adjustment)"
+          value={signedMoney(totals.adjustment, 2)}
+          hint="เงินคืน/หักนอกคำสั่งซื้อ"
+        />
       </div>
 
       {rows.length === 0 ? (
         <Card padding="padded" className="text-[13px] text-muted-foreground">
-          ยังไม่มี statement ในช่วงนี้ — ลองกดซิงก์ที่หน้าแพลตฟอร์มก่อน
+          ยังไม่มี statement ในช่วงนี้ — ลองดึงข้อมูลสดจากหน้าภาพรวมก่อน
         </Card>
       ) : (
         <Card padding="padded" className="flex min-w-0 flex-col">
           <h2 className="mb-1 text-[14px] font-bold">รายวัน</h2>
-          <ul className="flex min-w-0 flex-col">
+          <ul className="flex min-w-0 list-none flex-col p-0">
             {rows.map((row) => (
-              <li
-                key={row.statementId}
-                className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/70 py-2.5 last:border-0"
-              >
-                <span className="w-[72px] shrink-0 text-[13px] font-bold">{dayLabel(row.time)}</span>
+              <li key={row.statementId} className="border-b border-border/70 last:border-0">
+                <a
+                  href={hrefWithDetail("/platform/statements", params, detailParam("statement", row.statementId))}
+                  className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg py-2.5 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                <span className="w-[84px] shrink-0 text-[13px] font-bold">{thaiDate(row.time)}</span>
                 <Badge variant={row.paymentStatus === "SETTLED" ? "success" : "neutral"}>
                   {row.paymentStatus === "SETTLED" ? "โอนแล้ว" : (row.paymentStatus ?? "ไม่ระบุ")}
                 </Badge>
                 <span className="text-[11.5px] text-muted-foreground">{num(row.orderCount)} ออเดอร์</span>
                 <span className="ml-auto flex shrink-0 items-baseline gap-3 text-[12px] text-muted-foreground">
                   <span className="mono">ขาย {money(row.revenue)}</span>
-                  <span className="mono text-[#b42318]">หัก {money(row.fee)}</span>
+                  <span className="mono text-[#b42318]">ค่าธรรมเนียม {signedMoney(row.fee, 2)}</span>
                   <span className="mono text-[13.5px] font-bold text-foreground">{money(row.settlement)}</span>
                 </span>
+                </a>
               </li>
             ))}
           </ul>
         </Card>
       )}
-    </main>
+      </PlatformBody>
+
+      <PlatformDetail
+        raw={params.detail}
+        basePath="/platform/statements"
+        params={params}
+        from={params.from}
+        to={params.to}
+      />
+    </div>
   );
 }
