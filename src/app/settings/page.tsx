@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { DocumentSettingsClient } from "@/components/DocumentSettingsClient";
 import { PageHeader } from "@/components/PageHeader";
 import { ShipnityConnectForm } from "@/components/ShipnityConnectForm";
@@ -59,6 +60,12 @@ export default async function SettingsPage({
   const settings = await getDocumentSettings(undefined, true);
   const defaultSettings = getCompanyDefaultSeller(companyId);
   const shipnity = await getShipnityConnectionStatus(companyId);
+  const requestHost = (await headers()).get("host") ?? "";
+  const hostIsLocal =
+    requestHost.startsWith("localhost") ||
+    requestHost.startsWith("127.0.0.1") ||
+    requestHost.startsWith("0.0.0.0");
+
   const [platformConfig, tiktokAccounts] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
@@ -111,6 +118,7 @@ export default async function SettingsPage({
           className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2"
         >
           <TikTokConnectCard
+            hostIsLocal={hostIsLocal}
             config={{
               configured: Boolean(platformConfig.tiktok),
               appKey: platformConfig.tiktok?.appKey ?? null,

@@ -34,7 +34,14 @@ function formatDateTime(value: string | null): string {
   return date.toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
 }
 
-export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
+export function TikTokConnectCard({
+  config,
+  hostIsLocal = false,
+}: {
+  config: TikTokConfigView;
+  /** เปิดจากเครื่อง dev — ลงทะเบียน webhook ไม่ได้ (จะไปทับของ production) */
+  hostIsLocal?: boolean;
+}) {
   const router = useRouter();
   const accounts = config.accounts;
 
@@ -45,6 +52,7 @@ export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
   const [saving, setSaving] = useState(false);
   const [testingKey, setTestingKey] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
+  const [registered, setRegistered] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
 
   async function handleSave() {
@@ -84,6 +92,7 @@ export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
       if (failed.length > 0) {
         throw new Error(failed.map((item) => `${item.shop ?? "ร้าน"}: ${item.error ?? "ไม่สำเร็จ"}`).join(" · "));
       }
+      setRegistered(true);
       toast.success(`เปิดรับแจ้งเตือนจาก TikTok แล้ว — จะแจ้งเมื่อออเดอร์/คืนเงินเปลี่ยน`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "สมัครรับแจ้งเตือนไม่สำเร็จ");
@@ -273,8 +282,26 @@ export function TikTokConnectCard({ config }: { config: TikTokConfigView }) {
             </Button>
           ) : null}
           {accounts.length > 0 && config.configured ? (
-            <Button variant="outline" onClick={handleRegisterWebhook} disabled={registering} aria-busy={registering}>
-              {registering ? "กำลังสมัคร…" : "เปิดรับแจ้งเตือนจาก TikTok"}
+            <Button
+              variant="outline"
+              onClick={handleRegisterWebhook}
+              disabled={registering || registered || hostIsLocal}
+              aria-busy={registering}
+              title={
+                hostIsLocal
+                  ? "ต้องกดจากเว็บจริงเท่านั้น — การกดจากเครื่อง dev จะไปทับที่อยู่ของ production"
+                  : registered
+                    ? "เปิดรับแจ้งเตือนแล้ว"
+                    : undefined
+              }
+            >
+              {registering
+                ? "กำลังสมัคร…"
+                : registered
+                  ? "เปิดรับแจ้งเตือนแล้ว"
+                  : hostIsLocal
+                    ? "เปิดรับแจ้งเตือน (เว็บจริงเท่านั้น)"
+                    : "เปิดรับแจ้งเตือนจาก TikTok"}
             </Button>
           ) : null}
           <Button variant="ghost" onClick={() => setEditing(true)}>
