@@ -352,12 +352,54 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 ) : null}
               </div>
 
-              {detail.rtsTime || detail.collectionTime ? (
-                <ul className="flex list-none flex-col gap-1 p-0 text-[12px] text-muted-foreground">
-                  {detail.rtsTime ? <li>ส่งข้อมูลให้ขนส่ง · {dateTime(detail.rtsTime)}</li> : null}
-                  {detail.collectionTime ? <li>ขนส่งรับพัสดุแล้ว · {dateTime(detail.collectionTime)}</li> : null}
-                </ul>
-              ) : null}
+              {(() => {
+                // ไทม์ไลน์แบบแอปขนส่ง: ใหม่สุดอยู่บน จุดล่าสุดเด่น ที่เหลือเป็นเส้นทางย้อนหลัง
+                const steps = (
+                  [
+                    { label: "ส่งถึงลูกค้าแล้ว", at: detail.deliveredTime },
+                    { label: "ขนส่งรับพัสดุแล้ว", at: detail.collectionTime },
+                    { label: "ส่งข้อมูลให้ขนส่ง", at: detail.rtsTime },
+                  ] as Array<{ label: string; at: string | null }>
+                ).filter((step): step is { label: string; at: string } => Boolean(step.at));
+
+                if (steps.length === 0) return null;
+
+                return (
+                  <ol className="flex list-none flex-col p-0">
+                    {steps.map((step, index) => {
+                      const latest = index === 0;
+                      return (
+                        <li key={step.label} className="flex gap-2.5">
+                          <span className="relative flex w-3 shrink-0 justify-center" aria-hidden="true">
+                            {index < steps.length - 1 ? (
+                              <span className="absolute top-3 bottom-0 w-px bg-border" />
+                            ) : null}
+                            <span
+                              className={cn(
+                                "mt-1.5 size-2.5 shrink-0 rounded-full",
+                                latest ? "bg-[#0d8a47] ring-4 ring-[#0d8a47]/15" : "bg-border",
+                              )}
+                            />
+                          </span>
+                          <span className={index < steps.length - 1 ? "pb-3" : ""}>
+                            <span
+                              className={cn(
+                                "block text-[12.5px] leading-5",
+                                latest ? "font-bold text-foreground" : "text-muted-foreground",
+                              )}
+                            >
+                              {step.label}
+                            </span>
+                            <span className="mono block text-[11px] leading-4 text-muted-foreground">
+                              {dateTime(step.at)}
+                            </span>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                );
+              })()}
 
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm">
