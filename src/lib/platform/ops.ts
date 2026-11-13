@@ -27,6 +27,7 @@ export interface OpsProductRow {
   sku: string;
   quantity: number;
   revenue: number;
+  image: string | null;
 }
 
 export interface OpsCancelProductRow {
@@ -34,6 +35,7 @@ export interface OpsCancelProductRow {
   sold: number;
   cancelled: number;
   rate: number;
+  image: string | null;
 }
 
 export interface OpsStuckRow {
@@ -233,11 +235,12 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
         GROUP BY 1 ORDER BY 2 DESC LIMIT 6`,
       base,
     ),
-    query<{ name: string; sku: string; quantity: string; revenue: string }>(
+    query<{ name: string; sku: string; quantity: string; revenue: string; image: string | null }>(
       `SELECT COALESCE(NULLIF(i.product_name, ''), NULLIF(i.sku_name, ''), 'ไม่ระบุ') AS name,
               COALESCE(NULLIF(btrim(o.raw_json->'line_items'->0->>'seller_sku'), ''), '') AS sku,
               COALESCE(sum(i.quantity), 0)::text AS quantity,
-              COALESCE(sum(i.sale_price * i.quantity), 0)::text AS revenue
+              COALESCE(sum(i.sale_price * i.quantity), 0)::text AS revenue,
+              max(NULLIF(btrim(i.image_url), '')) AS image
          FROM platform_order_items i
          JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
         WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz
@@ -246,7 +249,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
       base,
     ),
     // ขายได้ช่วงก่อน แต่ช่วงนี้ไม่ขายเลย
-    query<{ name: string; sku: string; quantity: string }>(
+    query<{ name: string; quantity: string; image: string | null }>(
       `WITH cur AS (
          SELECT COALESCE(NULLIF(i.sku_name, ''), i.product_name, 'ไม่ระบุ') AS name,
                 COALESCE(sum(i.quantity), 0) AS q
@@ -257,14 +260,15 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
           GROUP BY 1
        ), prev AS (
          SELECT COALESCE(NULLIF(i.sku_name, ''), i.product_name, 'ไม่ระบุ') AS name,
-                COALESCE(sum(i.quantity), 0) AS q
+                COALESCE(sum(i.quantity), 0) AS q,
+                max(NULLIF(btrim(i.image_url), '')) AS image
            FROM platform_order_items i
            JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
           WHERE o.create_time >= $3::timestamptz AND o.create_time < $1::timestamptz
             AND o.order_status <> 'CANCELLED'${params.shopId ? " AND o.shop_id = $4::text" : ""}
           GROUP BY 1
        )
-       SELECT prev.name, '' AS sku, prev.q::text AS quantity
+       SELECT prev.name, prev.q::text AS quantity, prev.image
          FROM prev LEFT JOIN cur USING (name)
         WHERE COALESCE(cur.q, 0) = 0 AND prev.q > 0
         ORDER BY prev.q DESC LIMIT 8`,
@@ -273,10 +277,11 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
         : [start.toISOString(), end.toISOString(), prevStart.toISOString()],
     ),
     // สินค้าที่ถูกยกเลิกบ่อย (ในกลุ่มที่ขายเกิน 10 ชิ้น)
-    query<{ name: string; sold: string; cancelled: string }>(
+    query<{ name: string; sold: string; cancelled: string; image: string | null }>(
       `SELECT COALESCE(NULLIF(i.product_name, ''), NULLIF(i.sku_name, ''), 'ไม่ระบุ') AS name,
               count(*)::text AS sold,
-              count(*) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled
+              count(*) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled,
+              max(NULLIF(btrim(i.image_url), '')) AS image
          FROM platform_order_items i
          JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
         WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz${shopClause.replace("shop_id", "o.shop_id")}
@@ -365,18 +370,21 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
         sku: r.sku,
         quantity: toNumber(r.quantity),
         revenue: toNumber(r.revenue),
+        image: r.image ?? null,
       })),
       dropped: droppedProducts.map((r) => ({
         name: r.name,
-        sku: r.sku,
+        sku: "",
         quantity: toNumber(r.quantity),
         revenue: 0,
+        image: r.image ?? null,
       })),
       byCancel: cancelProducts.map((r) => ({
         name: r.name,
         sold: toNumber(r.sold),
         cancelled: toNumber(r.cancelled),
         rate: rate(toNumber(r.cancelled), toNumber(r.sold)),
+        image: r.image ?? null,
       })),
     },
     price: {

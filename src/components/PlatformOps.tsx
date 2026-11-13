@@ -5,6 +5,14 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { OpsCountRow, OpsOrderRow, TikTokOps } from "@/lib/platform/ops";
 
+function Thumb({ src }: { src: string | null }) {
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
+      {src ? <img src={src} alt="" loading="lazy" className="size-full object-cover" /> : null}
+    </span>
+  );
+}
+
 function num(value: number): string {
   return value.toLocaleString("th-TH");
 }
@@ -169,9 +177,10 @@ export function PlatformOpsView({ ops }: { ops: TikTokOps }) {
             {products.top.map((row) => (
               <li
                 key={`${row.name}-${row.sku}`}
-                className="flex min-w-0 items-baseline justify-between gap-2 border-b border-border/70 py-2 last:border-0"
+                className="flex min-w-0 items-center justify-between gap-2 border-b border-border/70 py-2 last:border-0"
               >
-                <span className="min-w-0">
+                <Thumb src={row.image} />
+                <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px] font-bold">{row.name}</span>
                   {row.sku ? (
                     <span className="mono block truncate text-[11.5px] text-muted-foreground">{row.sku}</span>
@@ -207,10 +216,11 @@ export function PlatformOpsView({ ops }: { ops: TikTokOps }) {
               <ul className="flex min-w-0 flex-col">
                 {products.byCancel.map((row) => (
                   <li
-                    key={row.name}
-                    className="flex min-w-0 items-baseline justify-between gap-2 border-b border-border/70 py-1.5 last:border-0"
+                    key={`cancel-${row.name}`}
+                    className="flex min-w-0 items-center justify-between gap-2 border-b border-border/70 py-1.5 last:border-0"
                   >
-                    <span className="min-w-0 truncate text-[13px]">{row.name}</span>
+                    <Thumb src={row.image} />
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{row.name}</span>
                     <span className="mono shrink-0 text-[12.5px] font-bold text-[#b42318]">
                       {row.rate}% ({num(row.cancelled)}/{num(row.sold)})
                     </span>
@@ -228,10 +238,11 @@ export function PlatformOpsView({ ops }: { ops: TikTokOps }) {
               <ul className="flex min-w-0 flex-col">
                 {products.dropped.map((row) => (
                   <li
-                    key={row.name}
-                    className="flex min-w-0 items-baseline justify-between gap-2 border-b border-border/70 py-1.5 last:border-0"
+                    key={`dropped-${row.name}`}
+                    className="flex min-w-0 items-center justify-between gap-2 border-b border-border/70 py-1.5 last:border-0"
                   >
-                    <span className="min-w-0 truncate text-[13px]">{row.name}</span>
+                    <Thumb src={row.image} />
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{row.name}</span>
                     <span className="mono shrink-0 text-[12px] text-muted-foreground">
                       เคยขาย {num(row.quantity)} ชิ้น
                     </span>
