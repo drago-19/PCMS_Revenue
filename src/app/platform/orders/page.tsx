@@ -9,6 +9,7 @@ import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
 import { CopyButton } from "@/components/CopyButton";
 import { PeriodPicker } from "@/components/PeriodPicker";
+import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -155,6 +156,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 ล้างช่วงวันที่
               </Link>
             ) : null}
+            <span className="ml-auto">
+              <PlatformAutoRefresh seconds={30} />
+            </span>
           </div>
 
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="กรองตามสถานะ">
