@@ -59,6 +59,11 @@ export function proxy(request: NextRequest) {
     return applySecurityHeaders(NextResponse.next(), requestId);
   }
 
+  // Webhook ของ TikTok: ผู้เรียกคือ TikTok ไม่มี session — route ตรวจลายเซ็น HMAC เองแล้ว
+  if (pathname === "/api/platform/tiktok/webhook") {
+    return applySecurityHeaders(NextResponse.next(), requestId);
+  }
+
   // Public auth endpoints (login / logout)
   if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") {
     const csrf = verifyCsrfOrigin(request);
