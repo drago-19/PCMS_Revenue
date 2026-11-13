@@ -233,8 +233,33 @@ export async function getStockRows(shopId: string): Promise<StockRow[]> {
   }));
 }
 
-export async function getStockMovements(shopId: string, limit = 25): Promise<StockMovement[]> {
+/** แถวประวัติ + id ของแถว (ใช้เป็นตัวต่อหน้าแบบ keyset) */
+export type StockMovementRow = StockMovement & { id: string };
+
+export type StockMovementCursor = { changedAt: string; id: string; back?: boolean };
+
+/**
+ * ประวัติการเปลี่ยนสต็อกของร้าน ทีละหน้าแบบ keyset (เวลา + id)
+ * ไม่ใช้ OFFSET เพราะตารางนี้โตตลอดและหน้าลึกจะช้าลงเรื่อย ๆ
+ */
+export async function getStockMovements(
+  shopId: string,
+  options: { limit?: number; cursor?: StockMovementCursor } = {},
+): Promise<StockMovementRow[]> {
+  const limit = Math.max(1, Math.min(options.limit ?? 10, 100));
+  const params: unknown[] = [shopId];
+  let cursorClause = "";
+  const cursor = options.cursor;
+  if (cursor?.changedAt && cursor.id) {
+    params.push(cursor.changedAt, cursor.id);
+    cursorClause = cursor.back
+      ? ` AND (changed_at, id) > ($2::timestamptz, $3::bigint)`
+      : ` AND (changed_at, id) < ($2::timestamptz, $3::bigint)`;
+  }
+  const direction = cursor?.back ? "ASC" : "DESC";
+
   const rows = await query<{
+    id: string;
     seller_sku: string | null;
     product_name: string | null;
     from_qty: number | null;
@@ -242,15 +267,16 @@ export async function getStockMovements(shopId: string, limit = 25): Promise<Sto
     delta: number;
     changed_at: string;
   }>(
-    `SELECT seller_sku, product_name, from_qty, to_qty, delta, changed_at::text AS changed_at
+    `SELECT id::text AS id, seller_sku, product_name, from_qty, to_qty, delta, changed_at::text AS changed_at
        FROM platform_stock_movements
-      WHERE shop_id = $1
-      ORDER BY changed_at DESC
-      LIMIT ${Math.max(1, Math.min(limit, 100))}`,
-    [shopId],
+      WHERE shop_id = $1${cursorClause}
+      ORDER BY changed_at ${direction}, id ${direction}
+      LIMIT ${limit}`,
+    params as never[],
   );
 
-  return rows.map((row) => ({
+  const movements = rows.map((row) => ({
+    id: row.id,
     sellerSku: row.seller_sku,
     productName: row.product_name,
     fromQty: row.from_qty,
@@ -258,6 +284,9 @@ export async function getStockMovements(shopId: string, limit = 25): Promise<Sto
     delta: row.delta,
     changedAt: row.changed_at,
   }));
+
+  // ถอยหลังมา ให้กลับลำดับให้เป็นใหม่→เก่าเหมือนเดิม
+  return cursor?.back ? movements.reverse() : movements;
 }
 
 export async function getLastStockSync(shopId: string): Promise<string | null> {

@@ -23,9 +23,12 @@ type SearchParams = Promise<{
   synced?: string;
   changed?: string;
   sku?: string;
+  after?: string;
+  before?: string;
 }>;
 
 const PAGE_SIZE = 20;
+const HISTORY_PAGE_SIZE = 10;
 
 function num(value: number): string {
   return value.toLocaleString("th-TH");
@@ -56,9 +59,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
   const sync = params.synced ? { skus: Number(params.synced), changed: Number(params.changed ?? 0) } : null;
   const pageNumber = Math.max(Number(params.page ?? "1") || 1, 1);
+
+  // ประวัติการเปลี่ยนแปลง: ต่อหน้าด้วย keyset (เวลา|id) ทีละ 10 แถว ไม่ใช้ OFFSET
+  const historyBack = Boolean(params.before);
+  const [historyTime, historyId] = (params.before || params.after || "").split("|");
+  const historyCursor =
+    historyTime && historyId ? { changedAt: historyTime, id: historyId, back: historyBack } : undefined;
   const [rows, movements, lastSync, skuDetail] = await Promise.all([
     getStockRows(shopId),
-    getStockMovements(shopId),
+    getStockMovements(shopId, { limit: HISTORY_PAGE_SIZE, cursor: historyCursor }),
     getLastStockSync(shopId),
     params.sku ? getSkuDetail(shopId, params.sku) : Promise.resolve(null),
   ]);
@@ -72,6 +81,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const visible = rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
   const pageHref = (page: number) =>
     `/platform/stocks?shop=${encodeURIComponent(shopId)}&page=${page}`;
+  const historyHref = (next: { after?: string; before?: string }) => {
+    const qs = new URLSearchParams({ shop: shopId });
+    if (current > 1) qs.set("page", String(current));
+    if (next.after) qs.set("after", next.after);
+    if (next.before) qs.set("before", next.before);
+    return `/platform/stocks?${qs.toString()}`;
+  };
+  const historyCursorOf = (movement: { changedAt: string; id: string }) =>
+    `${movement.changedAt}|${movement.id}`;
 
   return (
     <div className="workspace-page flex min-w-0 flex-col gap-4">
@@ -201,7 +219,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       <Card padding="padded" className="flex min-w-0 flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <h2 className="text-[14.5px] font-bold">ประวัติการเปลี่ยนแปลง</h2>
-          <span className="text-[11.5px] text-muted-foreground">บันทึกเมื่อยอดจาก TikTok เปลี่ยนระหว่างการดึง</span>
+          <span className="text-[11.5px] text-muted-foreground">
+            {historyCursor ? "ย้อนดูรายการก่อนหน้า" : `${HISTORY_PAGE_SIZE} รายการล่าสุด`} · บันทึกเมื่อยอดจาก TikTok เปลี่ยนระหว่างการดึง
+          </span>
         </div>
         {movements.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
@@ -209,9 +229,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           </p>
         ) : (
           <ul className="flex list-none flex-col p-0">
-            {movements.map((movement, index) => (
+            {movements.map((movement) => (
               <li
-                key={`${movement.sellerSku}-${movement.changedAt}-${index}`}
+                key={movement.id}
                 className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-border/70 py-2 last:border-0"
               >
                 <span className="mono text-[12.5px] font-bold">{movement.sellerSku ?? "—"}</span>
@@ -230,6 +250,31 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
             ))}
           </ul>
         )}
+
+        {movements.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+            <span>แสดง {num(movements.length)} รายการ</span>
+            <span className="flex items-center gap-2">
+              {historyCursor ? (
+                <Button asChild size="sm" variant="outline">
+                  <Link href={historyHref({ before: historyCursorOf(movements[0]) })} scroll={false}>
+                    ก่อนหน้า
+                  </Link>
+                </Button>
+              ) : null}
+              {movements.length === HISTORY_PAGE_SIZE ? (
+                <Button asChild size="sm" variant="outline">
+                  <Link
+                    href={historyHref({ after: historyCursorOf(movements[movements.length - 1]) })}
+                    scroll={false}
+                  >
+                    ถัดไป
+                  </Link>
+                </Button>
+              ) : null}
+            </span>
+          </div>
+        ) : null}
       </Card>
 
       <p className="text-[12px] leading-5 text-muted-foreground">

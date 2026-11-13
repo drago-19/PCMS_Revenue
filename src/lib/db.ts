@@ -7,7 +7,7 @@ import {
 } from "./session-token";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-13-v64";
+const SCHEMA_VERSION = "2026-11-13-v65";
 
 export type { CompanyId };
 
@@ -1126,6 +1126,9 @@ CREATE INDEX IF NOT EXISTS platform_order_finance_shop_order_idx
   ON platform_order_finance (shop_id, order_id);
 CREATE INDEX IF NOT EXISTS platform_stock_movements_sku_idx
   ON platform_stock_movements (shop_id, sku_id, changed_at DESC);
+-- ประวัติทั้งร้านเรียงเวลาใหม่→เก่า (keyset) — index ตัวบนมี sku_id คั่นอยู่ ใช้เรียงไม่ได้
+CREATE INDEX IF NOT EXISTS platform_stock_movements_shop_time_idx
+  ON platform_stock_movements (shop_id, changed_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS platform_sync_runs_time_idx
   ON platform_sync_runs (status, finished_at DESC);
 
