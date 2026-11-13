@@ -6,7 +6,8 @@ import {
   type CompanyId,
 } from "./session-token";
 
-const SCHEMA_VERSION = "2026-11-12-v58";
+// เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
+const SCHEMA_VERSION = "2026-11-13-v59";
 
 export type { CompanyId };
 
