@@ -84,7 +84,7 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
   await runChunks(orders, async (chunk) => {
     const values: unknown[] = [];
     const tuples = chunk.map((order, rowIndex) => {
-      const base = rowIndex * 16;
+      const base = rowIndex * 22;
       values.push(
         PLATFORM,
         shopId,
@@ -102,15 +102,23 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
         order.trackingNumber,
         order.shippingProvider,
         JSON.stringify(order.raw ?? {}),
+        order.buyerUserId,
+        order.recipientName,
+        order.recipientPhone,
+        order.province,
+        order.district,
+        order.postalCode,
       );
-      return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16})`;
+      const placeholders = Array.from({ length: 22 }, (_, index) => `$${base + index + 1}`);
+      return `(${placeholders.join(",")})`;
     });
 
     await query(
       `INSERT INTO platform_orders (
          platform, shop_id, order_id, order_status, create_time, paid_time, shipped_time,
          delivered_time, cancelled_time, cancel_reason, cancel_user, currency, total_amount,
-         tracking_number, shipping_provider, raw_json
+         tracking_number, shipping_provider, raw_json, buyer_user_id, recipient_name,
+         recipient_phone, province, district, postal_code
        ) VALUES ${tuples.join(",")}
        ON CONFLICT (platform, shop_id, order_id) DO UPDATE SET
          order_status = EXCLUDED.order_status,
@@ -124,6 +132,13 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
          tracking_number = EXCLUDED.tracking_number,
          shipping_provider = EXCLUDED.shipping_provider,
          raw_json = EXCLUDED.raw_json,
+         -- ออเดอร์ที่ยังไม่จ่ายเงินไม่มีที่อยู่ส่งมา — ห้ามเขียนทับค่าที่เคยได้ด้วยค่าว่าง
+         buyer_user_id = COALESCE(EXCLUDED.buyer_user_id, platform_orders.buyer_user_id),
+         recipient_name = COALESCE(EXCLUDED.recipient_name, platform_orders.recipient_name),
+         recipient_phone = COALESCE(EXCLUDED.recipient_phone, platform_orders.recipient_phone),
+         province = COALESCE(EXCLUDED.province, platform_orders.province),
+         district = COALESCE(EXCLUDED.district, platform_orders.district),
+         postal_code = COALESCE(EXCLUDED.postal_code, platform_orders.postal_code),
          updated_at = now()`,
       values,
     );
@@ -335,8 +350,16 @@ export async function syncStatements(ctx: SyncContext, fromUnix: number, toUnix:
   return { statements, orderFinance };
 }
 
-/** ดึงออเดอร์ตามช่วงเวลาที่สร้าง (ไล่ทุกหน้า) */
-export async function syncOrders(ctx: SyncContext, fromUnix: number, toUnix: number): Promise<number> {
+/**
+ * ดึงออเดอร์ตามช่วงเวลา (ไล่ทุกหน้า)
+ * timeField = "update" จะได้ออเดอร์ที่เพิ่งถูกแก้ไขรวมถึงที่สร้างใหม่ — ใช้กับรอบดึงสด
+ */
+export async function syncOrders(
+  ctx: SyncContext,
+  fromUnix: number,
+  toUnix: number,
+  timeField: "create" | "update" = "create",
+): Promise<number> {
   let pageToken: string | undefined;
   let written = 0;
   let pages = 0;
@@ -347,8 +370,9 @@ export async function syncOrders(ctx: SyncContext, fromUnix: number, toUnix: num
       config: ctx.config,
       accessToken: ctx.accessToken,
       shopCipher: ctx.shopCipher,
-      createTimeGe: fromUnix,
-      createTimeLt: toUnix,
+      timeGe: fromUnix,
+      timeLt: toUnix,
+      timeField,
       pageToken,
       pageSize: 100,
     });

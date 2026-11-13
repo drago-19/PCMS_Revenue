@@ -399,6 +399,14 @@ export interface TikTokOrder {
   totalAmount: string | null;
   trackingNumber: string | null;
   shippingProvider: string | null;
+  /** user_id ของผู้ซื้อ — ใช้จับว่าลูกค้าคนเดิมซื้อซ้ำ ไม่ขึ้นกับชื่อที่ถูกปิด */
+  buyerUserId: string | null;
+  /** ชื่อ/เบอร์/ที่อยู่ที่ TikTok ส่งมา — ออเดอร์ที่ส่งผ่านขนส่งของ TikTok จะถูกปิดบางส่วน */
+  recipientName: string | null;
+  recipientPhone: string | null;
+  province: string | null;
+  district: string | null;
+  postalCode: string | null;
   items: Array<{
     lineItemId: string;
     skuId: string | null;
@@ -417,28 +425,35 @@ interface RawOrdersData {
   next_page_token?: string;
 }
 
-/** ค้นหาออเดอร์ตามช่วงเวลาที่สร้าง (ต้องมีสิทธิ์ Order Information) */
+/**
+ * ค้นหาออเดอร์ตามช่วงเวลา (ต้องมีสิทธิ์ Order Information)
+ * timeField = "create" → ออเดอร์ที่สร้างในช่วงนั้น (ใช้ตอนดึงย้อน)
+ * timeField = "update" → ออเดอร์ที่ถูกแก้ไขในช่วงนั้น (ใช้ตอนดึงสด — จับสถานะที่เปลี่ยนด้วย)
+ */
 export async function searchOrders({
   config,
   accessToken,
   shopCipher,
-  createTimeGe,
-  createTimeLt,
+  timeGe,
+  timeLt,
+  timeField = "create",
   pageToken,
   pageSize = 100,
 }: {
   config: TikTokAppConfig;
   accessToken: string;
   shopCipher: string;
-  createTimeGe: number;
-  createTimeLt: number;
+  timeGe: number;
+  timeLt: number;
+  timeField?: "create" | "update";
   pageToken?: string;
   pageSize?: number;
 }): Promise<{ orders: TikTokOrder[]; nextPageToken: string | null }> {
+  const byUpdate = timeField === "update";
   const query: Record<string, string> = {
     shop_cipher: shopCipher,
     page_size: String(pageSize),
-    sort_field: "create_time",
+    sort_field: byUpdate ? "update_time" : "create_time",
     sort_order: "ASC",
   };
   if (pageToken) query.page_token = pageToken;
@@ -448,7 +463,9 @@ export async function searchOrders({
     path: "/order/202309/orders/search",
     method: "POST",
     query,
-    body: { create_time_ge: createTimeGe, create_time_lt: createTimeLt },
+    body: byUpdate
+      ? { update_time_ge: timeGe, update_time_lt: timeLt }
+      : { create_time_ge: timeGe, create_time_lt: timeLt },
     accessToken,
   });
 
@@ -462,6 +479,15 @@ export async function searchOrders({
     const cancellation = (row.cancellation ?? row.cancel_info ?? {}) as Record<string, unknown>;
     const tracking = (row.tracking_number ?? {}) as Record<string, unknown>;
     const lineItems = Array.isArray(row.line_items) ? (row.line_items as Array<Record<string, unknown>>) : [];
+    const address = (row.recipient_address ?? {}) as Record<string, unknown>;
+    const districtInfo = Array.isArray(address.district_info)
+      ? (address.district_info as Array<Record<string, unknown>>)
+      : [];
+    // L0 = ประเทศ · L1 = จังหวัด · L2 = อำเภอ/เขต — ระดับที่ลึกกว่านี้ถูกปิดเมื่อเป็นออเดอร์ 4PL
+    const districtAt = (level: string): string | null => {
+      const found = districtInfo.find((entry) => entry.address_level === level);
+      return found ? str(found.address_name) : null;
+    };
 
     return {
       id: String(row.id ?? ""),
@@ -477,6 +503,12 @@ export async function searchOrders({
       totalAmount: str(payment.total_amount),
       trackingNumber: str(tracking.number) ?? str(row.tracking_number_text),
       shippingProvider: str(row.shipping_provider) ?? str(row.shipping_provider_name),
+      buyerUserId: str(row.user_id),
+      recipientName: str(address.name),
+      recipientPhone: str(address.phone_number),
+      province: districtAt("L1"),
+      district: districtAt("L2"),
+      postalCode: str(address.postal_code),
       items: lineItems.map((item) => ({
         lineItemId: String(item.id ?? ""),
         skuId: str(item.sku_id),

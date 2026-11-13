@@ -22,7 +22,12 @@ export interface SyncWindow {
   from: number;
   to: number;
   kind: string;
+  /** "update" (ค่าเริ่มต้น) = ดึงออเดอร์ที่สร้างหรือถูกแก้ในช่วงนั้น · "create" = ใช้ตอนดึงย้อน */
+  mode?: "create" | "update";
 }
+
+// statement ของ TikTok ออกช้ากว่าวันจริงได้หลายวัน จึงดึงย้อนกว้างกว่ารอบปกติ
+const LIVE_STATEMENT_LOOKBACK_DAYS = 7;
 
 /** ยังไม่ได้ตั้งค่าแอปหรือยังไม่มีร้านที่เชื่อม — เรียกซิงก์ไม่ได้ */
 export class SyncUnavailableError extends Error {
@@ -73,8 +78,17 @@ export async function runTikTokSync(
   );
 
   try {
-    const orders = await syncOrders(ctx, window.from, window.to);
-    const money = await syncStatements(ctx, window.from, window.to);
+    const byUpdate = window.mode !== "create";
+    const orders = await syncOrders(
+      ctx,
+      window.from,
+      window.to,
+      byUpdate ? "update" : "create",
+    );
+    const statementFrom = byUpdate
+      ? window.from - LIVE_STATEMENT_LOOKBACK_DAYS * 86400
+      : window.from;
+    const money = await syncStatements(ctx, statementFrom, window.to);
     await finishSyncRun(runId, orders + money.statements + money.orderFinance, null);
     return {
       stats: { orders, statements: money.statements, orderFinance: money.orderFinance },

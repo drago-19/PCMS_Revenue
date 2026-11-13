@@ -51,10 +51,10 @@ export async function POST(request: Request) {
         { status: 400, headers: { "x-request-id": auth.requestId } },
       );
     }
-    window = { from: fromDay, to: toDay ?? now, kind: "backfill" };
+    window = { from: fromDay, to: toDay ?? now, kind: "backfill", mode: "create" };
   } else {
     const hours = clampHours(url.searchParams.get("hours"));
-    window = { from: now - hours * 3600, to: now, kind: "sync-now" };
+    window = { from: now - hours * 3600, to: now, kind: "sync-now", mode: "update" };
   }
 
   const wait = url.searchParams.get("wait") === "1";
