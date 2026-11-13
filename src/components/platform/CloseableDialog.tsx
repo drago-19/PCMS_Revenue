@@ -18,7 +18,13 @@ export function CloseableDialog({ closeHref, children }: { closeHref: string; ch
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) router.push(closeHref);
+        if (open) return;
+        // ต้องคงตำแหน่งเลื่อนเดิม — ไม่งั้นปิดป๊อปอัปแล้วหน้าจะเด้งขึ้นบนสุด
+        // Next อาจคืนตำแหน่งให้เองหลังเรนเดอร์ จึงจำไว้แล้วคืนซ้ำอีกรอบหลังหน้าอัปเดต
+        const y = window.scrollY;
+        router.push(closeHref, { scroll: false });
+        requestAnimationFrame(() => window.scrollTo(0, y));
+        window.setTimeout(() => window.scrollTo(0, y), 120);
       }}
     >
       {children}

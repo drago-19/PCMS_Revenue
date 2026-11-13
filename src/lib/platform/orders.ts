@@ -27,6 +27,8 @@ export interface OrderDetail {
   cancelReason: string | null;
   cancelUser: string | null;
   trackingNumber: string | null;
+  /** ร้านที่ออเดอร์นี้อยู่ — ใช้ดึงเหตุการณ์พัสดุของร้านนั้น */
+  shopId: string | null;
   /** เวลาที่ส่งข้อมูลให้ขนส่ง และเวลาที่ขนส่งรับพัสดุ — จาก raw_json ของ TikTok */
   rtsTime: string | null;
   collectionTime: string | null;
@@ -309,6 +311,7 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     cancelReason: order.cancel_reason,
     cancelUser: order.cancel_user,
     trackingNumber: order.tracking_number,
+    shopId: order.shop_id ?? null,
     rtsTime: order.rts_unix ? new Date(Number(order.rts_unix) * 1000).toISOString() : null,
     collectionTime: order.collection_unix ? new Date(Number(order.collection_unix) * 1000).toISOString() : null,
     shippingProvider: order.shipping_provider,

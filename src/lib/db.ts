@@ -1012,6 +1012,18 @@ CREATE TABLE IF NOT EXISTS platform_packages (
   PRIMARY KEY (platform, shop_id, package_id)
 );
 
+-- เหตุการณ์พัสดุแบบละเอียดจาก Get Tracking (ถึงศูนย์คัดแยก/สาขา/นำส่ง)
+CREATE TABLE IF NOT EXISTS platform_order_tracking (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  action_code INTEGER,
+  description TEXT NOT NULL,
+  event_time TIMESTAMPTZ NOT NULL,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, order_id, event_time, description)
+);
+
 -- รายการเงินต่อออเดอร็จาก statement (ตัวเลขที่ใช้อ้างอิงภาษี)
 CREATE TABLE IF NOT EXISTS platform_order_finance (
   platform TEXT NOT NULL,

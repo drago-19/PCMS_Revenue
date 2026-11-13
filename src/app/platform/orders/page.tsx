@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { readPlatform } from "@/lib/platform/platforms";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
+import { loadOrderTracking } from "@/lib/platform/tracking";
 import { CopyButton } from "@/components/CopyButton";
 import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -100,6 +101,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
     getOrderSummary(filter),
     detailId ? getPlatformOrder(detailId, shop) : Promise.resolve(null),
   ]);
+
+  // เหตุการณ์พัสดุแบบละเอียด (ถึงศูนย์คัดแยก/นำส่ง) — ดึงเฉพาะออเดอร์ที่เปิดดูอยู่
+  const tracking = detail ? await loadOrderTracking(detail.orderId, detail.shopId ?? shop ?? null) : [];
 
   const pages = Math.max(Math.ceil(result.total / 25), 1);
 
@@ -216,6 +220,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 <li key={row.orderId}>
                   <Link
                     href={`${queryFor({})}&order=${encodeURIComponent(row.orderId)}`.replace(/\?&/, "?").replace(/^\/platform\/orders&/, "/platform/orders?")}
+                    scroll={false}
                     className="flex min-w-0 flex-col gap-1 py-2.5 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <div className="flex min-w-0 items-start gap-2.5">
@@ -361,12 +366,16 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               {(() => {
                 // ไทม์ไลน์แบบแอปขนส่ง: ใหม่สุดอยู่บน จุดล่าสุดเด่น ที่เหลือเป็นเส้นทางย้อนหลัง
                 const steps = (
-                  [
-                    { label: "ส่งถึงลูกค้าแล้ว", at: detail.deliveredTime },
-                    { label: "ขนส่งรับพัสดุแล้ว", at: detail.collectionTime },
-                    { label: "ส่งข้อมูลให้ขนส่ง", at: detail.rtsTime },
-                  ] as Array<{ label: string; at: string | null }>
-                ).filter((step): step is { label: string; at: string } => Boolean(step.at));
+                  tracking.length > 0
+                    ? tracking.map((event) => ({ label: event.description, at: event.eventAt }))
+                    : (
+                        [
+                          { label: "ส่งถึงลูกค้าแล้ว", at: detail.deliveredTime },
+                          { label: "ขนส่งรับพัสดุแล้ว", at: detail.collectionTime },
+                          { label: "ส่งข้อมูลให้ขนส่ง", at: detail.rtsTime },
+                        ] as Array<{ label: string; at: string | null }>
+                      ).filter((step): step is { label: string; at: string } => Boolean(step.at))
+                );
 
                 if (steps.length === 0) return null;
 
@@ -409,7 +418,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
 
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm">
-                  <Link href={queryFor({})}>ปิด</Link>
+                  <Link href={queryFor({})} scroll={false}>
+                    ปิด
+                  </Link>
                 </Button>
               </div>
             </div>
