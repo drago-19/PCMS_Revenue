@@ -254,7 +254,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                       <span>{row.itemCount} รายการ</span>
                       <span className="mono">ยอดสั่ง ฿{money(row.totalAmount)}</span>
                       <span className="mono font-bold text-foreground">
-                        {row.settlement === null ? "รอโอน" : `โอนจริง ฿${money(row.settlement)}`}
+                        {row.settlement === null
+                          ? "รอ TikTok โอน"
+                          : `TikTok โอนแล้ว ฿${money(row.settlement)}`}
                       </span>
                     </div>
                     {row.cancelReason && row.status === "CANCELLED" ? (
@@ -338,9 +340,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                   <span className="mono text-[#b42318]">฿{money(detail.money.fee)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2 border-t border-border pt-1.5">
-                  <span className="font-bold">โอนจริง</span>
+                  <span className="font-bold">TikTok โอนให้ร้าน</span>
                   <span className="mono font-bold text-[#0d8a47]">
-                    {detail.money.statementId ? `฿${money(detail.money.settlement)}` : "รอโอน"}
+                    {detail.money.statementId ? `฿${money(detail.money.settlement)}` : "รอ TikTok โอน"}
                   </span>
                 </div>
               </div>
@@ -373,7 +375,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                     {steps.map((step, index) => {
                       const latest = index === 0;
                       return (
-                        <li key={step.label} className="flex gap-2.5">
+                        <li key={`${step.label}-${step.at}`} className="flex gap-2.5">
                           <span className="relative flex w-3 shrink-0 justify-center" aria-hidden="true">
                             {index < steps.length - 1 ? (
                               <span className="absolute top-3 bottom-0 w-px bg-border" />
