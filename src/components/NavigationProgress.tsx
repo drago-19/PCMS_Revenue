@@ -193,6 +193,9 @@ export function NavigationProgress() {
       <div
         className="no-print pointer-events-none fixed inset-x-0 top-0 z-[70] h-[3px] overflow-hidden"
         aria-hidden="true"
+        // Radix เพิ่ม data-aria-hidden ให้ element นอก dialog ตอนเปิดป๊อปอัป (ฝั่ง client เท่านั้น)
+        // แถบนี้เป็นของตกแต่งและซ่อนจาก screen reader อยู่แล้ว จึงปล่อยให้ต่างกันได้โดยไม่กระทบผู้ใช้
+        suppressHydrationWarning
       >
         <div
           data-navigation-progress={visible ? "pending" : "idle"}
