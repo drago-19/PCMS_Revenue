@@ -3,6 +3,7 @@ import { EmptyState, PageHeader } from "@/components/PageHeader";
 import { PlatformStat } from "@/components/platform/PlatformCards";
 import { PlatformNav } from "@/components/platform/PlatformNav";
 import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
+import { CloseableDialog } from "@/components/platform/CloseableDialog";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { parseStamp } from "@/lib/platform/period";
 import { IconReceipt } from "@/components/icons";
@@ -13,7 +14,7 @@ import { readPlatform } from "@/lib/platform/platforms";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
 import { CopyButton } from "@/components/CopyButton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -287,7 +288,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
       </PlatformBody>
 
       {detail ? (
-        <Dialog open>
+        <CloseableDialog closeHref={queryFor({})}>
           <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
             <DialogHeader className="pr-11">
               <DialogTitle className="flex flex-wrap items-center gap-2 text-[16px]">
@@ -351,6 +352,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 ) : null}
               </div>
 
+              {detail.rtsTime || detail.collectionTime ? (
+                <ul className="flex list-none flex-col gap-1 p-0 text-[12px] text-muted-foreground">
+                  {detail.rtsTime ? <li>ส่งข้อมูลให้ขนส่ง · {dateTime(detail.rtsTime)}</li> : null}
+                  {detail.collectionTime ? <li>ขนส่งรับพัสดุแล้ว · {dateTime(detail.collectionTime)}</li> : null}
+                </ul>
+              ) : null}
+
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm">
                   <Link href={queryFor({})}>ปิด</Link>
@@ -361,7 +369,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               </div>
             </div>
           </DialogContent>
-        </Dialog>
+        </CloseableDialog>
       ) : null}
     </div>
   );

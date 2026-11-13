@@ -27,6 +27,9 @@ export interface OrderDetail {
   cancelReason: string | null;
   cancelUser: string | null;
   trackingNumber: string | null;
+  /** เวลาที่ส่งข้อมูลให้ขนส่ง และเวลาที่ขนส่งรับพัสดุ — จาก raw_json ของ TikTok */
+  rtsTime: string | null;
+  collectionTime: string | null;
   shippingProvider: string | null;
   totalAmount: number;
   currency: string | null;
@@ -244,15 +247,28 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     cancel_user: string | null;
     tracking_number: string | null;
     shipping_provider: string | null;
+    rts_unix: string | null;
+    collection_unix: string | null;
     total_amount: string | null;
     currency: string | null;
     shop_id: string;
   }>(
-    `SELECT order_id, order_status, create_time::text AS create_time, paid_time::text AS paid_time,
-            shipped_time::text AS shipped_time, delivered_time::text AS delivered_time,
-            cancelled_time::text AS cancelled_time, cancel_reason, cancel_user,
-            tracking_number, shipping_provider, total_amount::text AS total_amount, currency, shop_id
-     FROM platform_orders WHERE order_id = $1${shopClause} LIMIT 1`,
+    `SELECT o.order_id, o.order_status, o.create_time::text AS create_time, o.paid_time::text AS paid_time,
+            o.shipped_time::text AS shipped_time, o.delivered_time::text AS delivered_time,
+            o.cancelled_time::text AS cancelled_time, o.cancel_reason, o.cancel_user,
+            COALESCE(NULLIF(btrim(o.tracking_number), ''), NULLIF(btrim(o.raw_json->>'tracking_number'), ''), p.tracking_number) AS tracking_number,
+            COALESCE(NULLIF(btrim(o.shipping_provider), ''), NULLIF(btrim(o.raw_json->>'shipping_provider'), ''), p.shipping_provider) AS shipping_provider,
+            o.total_amount::text AS total_amount, o.currency, o.shop_id,
+            o.raw_json->>'rts_time' AS rts_unix, o.raw_json->>'collection_time' AS collection_unix
+       FROM platform_orders o
+       LEFT JOIN LATERAL (
+         SELECT tracking_number, shipping_provider
+           FROM platform_packages
+          WHERE shop_id = o.shop_id AND o.order_id = ANY(order_ids)
+          ORDER BY update_time DESC
+          LIMIT 1
+       ) p ON true
+      WHERE o.order_id = $1${shopClause.replace("shop_id", "o.shop_id")} LIMIT 1`,
     params,
   );
 
@@ -293,6 +309,8 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     cancelReason: order.cancel_reason,
     cancelUser: order.cancel_user,
     trackingNumber: order.tracking_number,
+    rtsTime: order.rts_unix ? new Date(Number(order.rts_unix) * 1000).toISOString() : null,
+    collectionTime: order.collection_unix ? new Date(Number(order.collection_unix) * 1000).toISOString() : null,
     shippingProvider: order.shipping_provider,
     totalAmount: num(order.total_amount),
     currency: order.currency,
