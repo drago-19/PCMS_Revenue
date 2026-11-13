@@ -348,7 +348,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               <div className="flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-muted-foreground">
                 <span>{detail.shippingProvider ?? "—"} · {detail.trackingNumber ?? "ไม่มีเลขพัสดุ"}</span>
                 {detail.cancelReason ? (
-                  <span className="text-[#b42318]">ยกเลิก: {detail.cancelReason}</span>
+                  detail.status === "CANCELLED" ? (
+                    <span className="text-[#b42318]">ยกเลิก: {detail.cancelReason}</span>
+                  ) : (
+                    <span className="text-muted-foreground">มีรายการสินค้าถูกยกเลิก: {detail.cancelReason}</span>
+                  )
                 ) : null}
               </div>
 

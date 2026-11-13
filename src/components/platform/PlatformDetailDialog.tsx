@@ -119,7 +119,7 @@ export function PlatformDetailDialog({ view, closeHref }: { view: DetailView; cl
                       {row.items.length > 3 ? ` · +อีก ${row.items.length - 3} รายการ` : ""}
                     </p>
                   ) : null}
-                  {row.cancelReason ? (
+                  {row.cancelReason && row.status === "CANCELLED" ? (
                     <p className="mt-0.5 text-[11.5px] text-[#b42318]">ยกเลิก: {row.cancelReason}</p>
                   ) : null}
                 </li>
