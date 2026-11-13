@@ -250,7 +250,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                       <span>{dateTime(row.createTime)}</span>
                       <span>{row.itemCount} รายการ</span>
                       <span className="mono">ยอดสั่ง ฿{money(row.totalAmount)}</span>
-                      <span className="mono font-bold text-foreground">โอนจริง ฿{money(row.settlement)}</span>
+                      <span className="mono font-bold text-foreground">
+                        {row.settlement === null ? "รอโอน" : `โอนจริง ฿${money(row.settlement)}`}
+                      </span>
                     </div>
                     {row.cancelReason && row.status === "CANCELLED" ? (
                       <span className="text-[11.5px] text-[#b42318]">ยกเลิก: {row.cancelReason}</span>
@@ -333,7 +335,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 </div>
                 <div className="flex items-center justify-between gap-2 border-t border-border pt-1.5">
                   <span className="font-bold">โอนจริง</span>
-                  <span className="mono font-bold text-[#0d8a47]">฿{money(detail.money.settlement)}</span>
+                  <span className="mono font-bold text-[#0d8a47]">
+                    {detail.money.statementId ? `฿${money(detail.money.settlement)}` : "รอโอน"}
+                  </span>
                 </div>
               </div>
 

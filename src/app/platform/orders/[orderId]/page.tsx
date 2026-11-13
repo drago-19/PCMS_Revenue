@@ -150,7 +150,9 @@ export default async function OrderDetailPage({
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-border pt-2">
                 <dt className="font-bold">โอนจริง (settlement)</dt>
-                <dd className="mono font-bold text-[#0d8a47]">฿{money(order.money.settlement)}</dd>
+                <dd className="mono font-bold text-[#0d8a47]">
+                  {order.money.statementId ? `฿${money(order.money.settlement)}` : "รอโอน"}
+                </dd>
               </div>
               {order.money.statementId ? (
                 <div className="flex items-center justify-between gap-2 text-[11.5px] text-muted-foreground">

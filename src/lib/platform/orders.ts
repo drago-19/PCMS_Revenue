@@ -9,7 +9,8 @@ export interface OrderRow {
   totalAmount: number;
   currency: string | null;
   itemCount: number;
-  settlement: number;
+  /** null = ยังไม่มีข้อมูลการโอน (statement ยังไม่ออก) — ไม่ใช่ยอด 0 */
+  settlement: number | null;
   cancelReason: string | null;
   firstName: string | null;
   firstImage: string | null;
@@ -106,8 +107,12 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
             f.settlement_amount::text AS settlement,
             o.cancel_reason
      FROM platform_orders o
-     LEFT JOIN platform_order_finance f
-       ON f.shop_id = o.shop_id AND f.order_id = o.order_id
+     -- รวมเป็นแถวเดียวต่อออเดอร์: ออเดอร์ที่มีทั้งรายการขายและ adjustment จะได้ไม่โผล่ซ้ำ
+     LEFT JOIN (
+       SELECT shop_id, order_id, sum(settlement_amount) AS settlement_amount
+         FROM platform_order_finance
+        GROUP BY 1, 2
+     ) f ON f.shop_id = o.shop_id AND f.order_id = o.order_id
      WHERE ${where.join(" AND ")}
      ORDER BY o.create_time DESC NULLS LAST
      LIMIT ${pageSize} OFFSET ${offset}`,
@@ -149,7 +154,7 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
       totalAmount: num(row.total_amount),
       currency: row.currency,
       itemCount: num(row.item_count),
-      settlement: num(row.settlement),
+      settlement: row.settlement === null ? null : num(row.settlement),
       cancelReason: row.cancel_reason,
       firstName: firstItems.get(row.order_id)?.name ?? null,
       firstImage: firstItems.get(row.order_id)?.image ?? null,
