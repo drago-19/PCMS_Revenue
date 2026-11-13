@@ -625,3 +625,47 @@ test("อ่าน credential จาก env ได้ และคืน null �
   delete process.env.SHIPNITY_API_TOKEN;
   delete process.env.SHIPNITY_API_EMAIL;
 });
+
+test("แพ็คแล้วของวันนั้น = ใบที่พิมพ์ใบปะหน้าแล้ว · ที่เหลือคือยังไม่พิมพ์", () => {
+  const orders: ShipnityOrder[] = [
+    rawOrder({ id: 1, invoice_number: "P1", printed: true }),
+    rawOrder({
+      id: 2,
+      invoice_number: "P2",
+      printed: true,
+      purchases: [{ code: "K2", name: "กางเกงขาสั้น", quantity: 3 }],
+    }),
+    rawOrder({ id: 3, invoice_number: "P3", printed: false }),
+    rawOrder({ id: 4, invoice_number: "U1", paid: false, transferred_at: null }),
+  ];
+
+  const summary = buildDayPackingSummary(orders, "2026-11-10");
+  assert.equal(summary.totalOrders, 3);
+  assert.equal(summary.totalItems, 7);
+  assert.equal(summary.doneOrders, 2);
+  assert.equal(summary.doneItems, 5);
+  assert.equal(summary.totalOrders - summary.doneOrders, 1);
+  // รายการที่ยังเหลือ ต้องบอกได้ว่าสินค้าอะไร กี่ชิ้น อยู่ในบิลไหน
+  assert.deepEqual(
+    summary.remainingProducts.map((product) => [product.name, product.quantity, product.orderCodes]),
+    [["เลคกิ้งขาระบาย", 2, ["P3"]]],
+  );
+
+  const allPacked = buildDayPackingSummary(
+    [rawOrder({ id: 9, invoice_number: "Z1", printed: true })],
+    "2026-11-10",
+  );
+  assert.equal(allPacked.doneOrders, 1);
+  assert.deepEqual(allPacked.remainingProducts, []);
+
+  // มุมมองย้อนหลัง: ใบที่ปิดรายการแล้วก็นับว่าแพ็คเสร็จ
+  const history = buildDayPackingSummary(
+    [...orders, rawOrder({ id: 5, invoice_number: "C1", closed: true, printed: false })],
+    "2026-11-10",
+    { includeClosed: true },
+  );
+  assert.equal(history.totalOrders, 4);
+  assert.equal(history.totalItems, 9);
+  assert.equal(history.doneOrders, 3);
+  assert.equal(history.doneItems, 7);
+});

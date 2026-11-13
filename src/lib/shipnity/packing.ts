@@ -60,6 +60,11 @@ export interface DayPackingSummary {
   products: ProductPackingRow[];
   totalOrders: number;
   totalItems: number;
+  /** ใบที่แพ็คเสร็จแล้วของวันนั้น — ร้านนี้ยังไม่เปิดขั้น “แพ็ค” ใน Shipnity จึงใช้ “พิมพ์ใบปะหน้าแล้ว” เป็นสัญญาณว่าจัดของเสร็จ */
+  doneOrders: number;
+  doneItems: number;
+  /** ของที่ยังต้องแพ็คของวันนั้น (ยังไม่พิมพ์ใบปะหน้า) แยกตามสินค้า */
+  remainingProducts: ProductPackingRow[];
   waitingPaymentCount: number;
   closedCount: number;
   cancelledCount: number;
@@ -332,6 +337,8 @@ export function buildDayPackingSummary(
   const carryOverOpen = options.carryOverOpen ?? false;
   const anchor = dayAnchor(isoDay);
   const packable: PackingOrderInput[] = [];
+  /** บิลที่จัดของเสร็จแล้ว (พิมพ์ใบปะหน้า / แพ็ค / ส่งของ) ไว้ตัดยอดว่าเหลืออีกกี่ใบ */
+  const doneCodes = new Set<string>();
 
   let waitingPaymentCount = 0;
   let closedCount = 0;
@@ -373,10 +380,13 @@ export function buildDayPackingSummary(
       paidAt: order.transferred_at ?? null,
       createdAt: order.created_at ?? cutAt.toISOString(),
     });
+    if (order.printed || order.packed || order.closed) doneCodes.add(order.invoice_number);
   }
 
   const rounds = buildPackingRounds(packable, anchor);
   const allOrders = [...rounds.current, ...rounds.next].flatMap((group) => group.orders);
+  const done = allOrders.filter((order) => doneCodes.has(order.orderCode));
+  const remaining = allOrders.filter((order) => !doneCodes.has(order.orderCode));
 
   return {
     isoDay,
@@ -385,6 +395,9 @@ export function buildDayPackingSummary(
     products: summarizeProducts(allOrders),
     totalOrders: allOrders.length,
     totalItems: allOrders.reduce((sum, order) => sum + order.itemCount, 0),
+    doneOrders: done.length,
+    doneItems: done.reduce((sum, order) => sum + order.itemCount, 0),
+    remainingProducts: summarizeProducts(remaining),
     waitingPaymentCount,
     closedCount,
     cancelledCount,

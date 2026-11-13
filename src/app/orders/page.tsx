@@ -826,15 +826,11 @@ function ShopPanel({
 
   const currentOrders = summary.rounds.current.flatMap((group) => group.orders);
   const nextOrders = summary.rounds.next.flatMap((group) => group.orders);
-  // ของวันนี้ที่ยังไม่ได้พิมพ์ใบปะหน้า — ตรงกับชิป "พิมพ์ที่อยู่" ของ Shipnity
-  const dayUnprinted = item.orders.filter(
-    (order) =>
-      !order.cancelled &&
-      !order.closed &&
-      !order.printed &&
-      (order.paid || order.order_bank === "pay_later") &&
-      isOrderFromDay(order, summary.isoDay),
-  ).length;
+  // แพ็คเสร็จแล้วเท่าไร: ร้านนี้ยังไม่เปิดขั้น "แพ็ค" ใน Shipnity → นับใบที่พิมพ์ใบปะหน้าแล้ว
+  const doneOrders = summary.doneOrders;
+  const doneItems = summary.doneItems;
+  const remainingOrders = Math.max(summary.totalOrders - doneOrders, 0);
+  const remainingItems = Math.max(summary.totalItems - doneItems, 0);
   const currentProducts = summarizeProducts(currentOrders).filter(match);
   const nextProducts = summarizeProducts(nextOrders).filter(match);
   const waitingRows = item.waiting.map((row) => ({ ...row, shop: item.account.label }));
@@ -879,36 +875,58 @@ function ShopPanel({
 
       <div className="grid grid-cols-2 gap-3 no-print @min-[760px]:grid-cols-3">
         <StatCard
-          label="ต้องแพ็คของวันนี้"
-          value={`${summary.totalOrders} ออเดอร์`}
-          hint={`${summary.totalItems} ชิ้น จาก ${currentProducts.length + nextProducts.length} รายการสินค้า${
-            dayUnprinted > 0 ? ` · ยังไม่ได้พิมพ์ใบปะหน้า ${dayUnprinted} ใบ` : ""
-          }`}
+          label="แพ็คแล้ว / ต้องแพ็คของวันนี้"
+          value={`${doneOrders} / ${summary.totalOrders} ออเดอร์`}
+          hint={`แพ็คแล้ว ${doneItems}/${summary.totalItems} ชิ้น · เหลืออีก ${remainingOrders} ออเดอร์ (${remainingItems} ชิ้น)`}
           breakdown={{
             title: "ตัวเลขนี้มาจากไหน",
             subtitle: `${item.account.label} · ${formatDate(summary.isoDay)}`,
-            heroLabel: "ต้องแพ็คของวันนี้",
-            heroValue: `${summary.totalOrders} ออเดอร์`,
+            heroLabel: "แพ็คแล้ว / ต้องแพ็คของวันนี้",
+            heroValue: `${doneOrders} / ${summary.totalOrders} ออเดอร์`,
             heroTone: "brand",
             formulaNote:
-              "นับเฉพาะบิลที่สั่งวันนี้ ลูกค้าจ่ายเงินแล้วหรือเป็นเก็บเงินปลายทาง (COD) และยังไม่ถูกปิดรายการใน Shipnity",
+              "นับเฉพาะบิลที่สั่งวันนี้ ลูกค้าจ่ายเงินแล้วหรือเป็นเก็บเงินปลายทาง (COD) และยังไม่ถูกปิดรายการใน Shipnity · ร้านนี้ยังไม่เปิดขั้น “แพ็ค” ใน Shipnity จึงนับใบที่พิมพ์ใบปะหน้าแล้วเป็นแพ็คเสร็จ",
             sections: [
               {
-                title: "แยกตามการพิมพ์ใบปะหน้า",
-                description: "ตัวเลขเดียวกันนี้คือชิป “พิมพ์ที่อยู่” รวมกับส่วนหนึ่งของ “รอส่ง” ใน Shipnity",
+                title: "แพ็คเสร็จแล้วเท่าไร เหลือเท่าไร",
+                description: "แพ็คแล้ว = ใบที่พิมพ์ใบปะหน้าแล้ว (ชิป “รอส่ง”) · เหลือ = ยังไม่ได้พิมพ์ใบปะหน้า (ชิป “พิมพ์ที่อยู่”)",
                 rows: [
                   {
-                    label: "ยังไม่ได้พิมพ์ใบปะหน้า",
-                    subLabel: "เทียบได้กับชิป “พิมพ์ที่อยู่”",
-                    valueText: `${dayUnprinted} ใบ`,
+                    label: "แพ็คแล้ว",
+                    subLabel: "พิมพ์ใบปะหน้าแล้ว อยู่ในชิป “รอส่ง”",
+                    valueText: `${doneOrders} ออเดอร์ · ${doneItems} ชิ้น`,
                   },
                   {
-                    label: "พิมพ์แล้ว ยังไม่ปิดรายการ",
-                    subLabel: "อยู่ในชิป “รอส่ง”",
-                    valueText: `${summary.totalOrders - dayUnprinted} ใบ`,
+                    label: "เหลือต้องแพ็ค",
+                    subLabel: "ยังไม่ได้พิมพ์ใบปะหน้า อยู่ในชิป “พิมพ์ที่อยู่”",
+                    valueText: `${remainingOrders} ออเดอร์ · ${remainingItems} ชิ้น`,
                   },
-                  { label: "รวม", valueText: `${summary.totalOrders} ใบ`, isTotal: true },
+                  {
+                    label: "รวม",
+                    valueText: `${summary.totalOrders} ออเดอร์ · ${summary.totalItems} ชิ้น`,
+                    isTotal: true,
+                  },
                 ],
+              },
+              {
+                title: "เหลือต้องแพ็คอะไรบ้าง",
+                description:
+                  "ของที่ยังไม่ได้พิมพ์ใบปะหน้า — กดชิป “ยังไม่พิมพ์” ในตารางด้านล่างเพื่อดูเฉพาะบิลที่เหลือ",
+                rows:
+                  summary.remainingProducts.length > 0
+                    ? summary.remainingProducts.map((product) => ({
+                        label: product.name,
+                        subLabel: `${product.orderCount} บิล · ${product.orderCodes.join(" · ")}`,
+                        valueText: `${product.quantity} ชิ้น`,
+                      }))
+                    : [
+                        {
+                          label: "ไม่มีรายการเหลือ",
+                          subLabel: "แพ็คครบทุกบิลของวันนี้แล้ว",
+                          valueText: "0 ชิ้น",
+                          tone: "positive" as const,
+                        },
+                      ],
               },
               {
                 title: "ของในบิลเหล่านี้",
