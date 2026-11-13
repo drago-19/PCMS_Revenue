@@ -28,6 +28,27 @@ export async function POST(request: Request) {
   }
 
   const address = appUrl(request, "/api/platform/tiktok/webhook").toString();
+
+  // TikTok เก็บที่อยู่เดียวต่อร้าน — การกดจากเครื่อง dev จะไปทับของ production
+  // จึงปฏิเสธที่อยู่ที่ไม่ใช่โดเมนสาธารณะ (ยกเว้นตั้งค่า ALLOW_LOCAL_WEBHOOK=1 เพื่อทดสอบโดยเฉพาะ)
+  const hostname = new URL(address).hostname;
+  const isLocal =
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "0.0.0.0" ||
+    hostname.endsWith(".local");
+
+  if (isLocal && process.env.ALLOW_LOCAL_WEBHOOK !== "1") {
+    return Response.json(
+      {
+        error:
+          "ที่อยู่นี้เป็นเครื่อง dev — ถ้าสมัครจากที่นี่จะไปทับ webhook ของ production กรุณากดจากเว็บจริง หรือตั้ง ALLOW_LOCAL_WEBHOOK=1 ถ้าตั้งใจทดสอบ",
+        address,
+        requestId: auth.requestId,
+      },
+      { status: 400, headers: { "x-request-id": auth.requestId } },
+    );
+  }
   const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM)).filter(
     (row) => row.status === "connected" && row.shopCipher,
   );
