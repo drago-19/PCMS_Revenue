@@ -175,12 +175,31 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
            sku_id = EXCLUDED.sku_id,
            product_name = EXCLUDED.product_name,
            sku_name = EXCLUDED.sku_name,
-           image_url = COALESCE(EXCLUDED.image_url, platform_order_items.image_url),
+           image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), platform_order_items.image_url),
            quantity = EXCLUDED.quantity,
            sale_price = EXCLUDED.sale_price,
            currency = EXCLUDED.currency,
            updated_at = now()`,
         itemValues,
+      );
+
+      // รูปสินค้าบางออเดอร์มาไม่ครบในรอบนั้น — เติมจาก raw_json ที่เก็บไว้แล้ว
+      await query(
+        `UPDATE platform_order_items i
+            SET image_url = src.url
+           FROM (
+             SELECT o.shop_id, o.order_id, elem->>'id' AS line_item_id,
+                    NULLIF(btrim(elem->>'sku_image'), '') AS url
+               FROM platform_orders o,
+                    jsonb_array_elements(COALESCE(o.raw_json->'line_items', '[]'::jsonb)) elem
+              WHERE o.shop_id = $1 AND o.order_id = ANY($2::text[])
+           ) src
+          WHERE i.shop_id = src.shop_id
+            AND i.order_id = src.order_id
+            AND i.line_item_id = src.line_item_id
+            AND src.url IS NOT NULL
+            AND (i.image_url IS NULL OR btrim(i.image_url) = '')`,
+        [shopId, chunk.map((order) => order.id)],
       );
     }
   });
