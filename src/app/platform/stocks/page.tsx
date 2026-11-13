@@ -231,8 +231,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               <tr className="border-b border-border text-[11.5px] text-muted-foreground">
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัส SKU</th>
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">สินค้า</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือ</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">คลัง</th>
+                <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือรวม</th>
+                <th scope="col" className="py-1.5 pr-2 text-right font-bold">จำนวนคลัง</th>
                 <th scope="col" className="py-1.5 text-right font-bold">อัปเดต</th>
               </tr>
             </thead>
