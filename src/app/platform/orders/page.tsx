@@ -88,7 +88,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const shop = read(params, "shop") || undefined;
   const fromParam = read(params, "from") || undefined;
   const toParam = read(params, "to") || undefined;
-  const page = Math.max(Number(read(params, "page") || "1") || 1, 1);
+  // keyset: ?after=<เวลา|เลขออเดอร์> เดินหน้า · ?before=... ถอยหลัง (ไม่มี OFFSET แล้ว)
+  const afterRaw = read(params, "after");
+  const beforeRaw = read(params, "before");
+  const back = Boolean(beforeRaw);
+  const [cursorTime, cursorId] = (beforeRaw || afterRaw).split("|");
+  const cursor = cursorTime && cursorId ? { time: cursorTime, id: cursorId, back } : undefined;
   const platform = readPlatform(read(params, "platform"));
 
   const detailId = read(params, "order");
@@ -97,7 +102,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const [config, accounts, result, summary, detail] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
-    listPlatformOrders({ ...filter, page, pageSize: 25 }),
+    listPlatformOrders({ ...filter, cursor, pageSize: 25 }),
     getOrderSummary(filter),
     detailId ? getPlatformOrder(detailId, shop) : Promise.resolve(null),
   ]);
@@ -105,21 +110,25 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   // เหตุการณ์พัสดุแบบละเอียด (ถึงศูนย์คัดแยก/นำส่ง) — ดึงเฉพาะออเดอร์ที่เปิดดูอยู่
   const tracking = detail ? await loadOrderTracking(detail.orderId, detail.shopId ?? shop ?? null) : [];
 
-  const pages = Math.max(Math.ceil(result.total / 25), 1);
-
-  const queryFor = (next: { status?: string; page?: number; keepDates?: boolean }) => {
+  const queryFor = (next: { status?: string; after?: string; before?: string; keepDates?: boolean }) => {
     const qs = new URLSearchParams();
     const nextStatus = next.status ?? status;
-    const nextPage = next.page ?? page;
     const keepDates = next.keepDates ?? true;
     if (shop) qs.set("shop", shop);
     if (nextStatus) qs.set("status", nextStatus);
     if (search) qs.set("q", search);
     if (keepDates && fromParam) qs.set("from", fromParam);
     if (keepDates && toParam) qs.set("to", toParam);
-    if (nextPage > 1) qs.set("page", String(nextPage));
+    if (next.after) qs.set("after", next.after);
+    if (next.before) qs.set("before", next.before);
     return qs.toString() ? `/platform/orders?${qs.toString()}` : "/platform/orders";
   };
+
+  // จุดต่อของ keyset: เอาจากแถวแรก/แถวสุดท้ายที่เห็น ไม่ใช้ OFFSET
+  const cursorOf = (row: { createTime: string | null; orderId: string } | undefined) =>
+    row?.createTime ? `${row.createTime}|${row.orderId}` : "";
+  const nextCursor = cursorOf(result.rows[result.rows.length - 1]);
+  const prevCursor = cursorOf(result.rows[0]);
 
   return (
     <div className="workspace-page">
@@ -178,7 +187,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               return (
                 <Link
                   key={tab.key || "all"}
-                  href={queryFor({ status: tab.key, page: 1 })}
+                  href={queryFor({ status: tab.key })}
                   scroll={false}
                   role="tab"
                   aria-selected={active}
@@ -211,7 +220,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
             <div className="flex items-center justify-between gap-2 text-[12.5px] text-muted-foreground">
               <span>{result.total.toLocaleString("th-TH")} ออเดอร์</span>
               <span>
-                หน้า {page} / {pages}
+                {cursor ? (back ? "ถอยกลับ" : "ต่อจากหน้าถัดไป") : "หน้าแรก"}
               </span>
             </div>
 
@@ -282,11 +291,23 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
             ) : null}
 
             <div className="flex items-center justify-between gap-2">
-              <Button variant="outline" size="sm" asChild={page > 1}>
-                {page > 1 ? <Link href={queryFor({ page: page - 1 })}>ก่อนหน้า</Link> : <span>ก่อนหน้า</span>}
+              <Button variant="outline" size="sm" asChild={Boolean(prevCursor)}>
+                {prevCursor ? (
+                  <Link href={queryFor({ before: prevCursor })} scroll={false}>
+                    ก่อนหน้า
+                  </Link>
+                ) : (
+                  <span>ก่อนหน้า</span>
+                )}
               </Button>
-              <Button variant="outline" size="sm" asChild={page < pages}>
-                {page < pages ? <Link href={queryFor({ page: page + 1 })}>ถัดไป</Link> : <span>ถัดไป</span>}
+              <Button variant="outline" size="sm" asChild={result.rows.length === 25}>
+                {result.rows.length === 25 ? (
+                  <Link href={queryFor({ after: nextCursor })} scroll={false}>
+                    ถัดไป
+                  </Link>
+                ) : (
+                  <span>ถัดไป</span>
+                )}
               </Button>
             </div>
           </Card>

@@ -50,7 +50,10 @@ export interface OrderFilter {
   search?: string;
   from?: string; // YYYY-MM-DD
   to?: string; // YYYY-MM-DD
+  /** เลิกใช้แล้ว — ใช้ cursor แทน (คงไว้เพื่อไม่ให้จุดเรียกเก่าพัง) */
   page?: number;
+  /** keyset: ต่อจากแถวนี้ (เวลา + เลขที่ออเดอร์) · back = ถอยไปหน้าใหม่กว่า */
+  cursor?: { time: string; id: string; back?: boolean };
   pageSize?: number;
 }
 
@@ -84,8 +87,18 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
   }
 
   const pageSize = Math.min(Math.max(filter.pageSize ?? 25, 1), 100);
-  const page = Math.max(filter.page ?? 1, 1);
-  const offset = (page - 1) * pageSize;
+
+  // keyset pagination: ต่อจากแถวสุดท้ายที่เห็น ไม่ใช้ OFFSET ที่ยิ่งลึกยิ่งช้า
+  let cursorClause = "";
+  const cursorParams: unknown[] = [];
+  if (filter.cursor?.time && filter.cursor?.id) {
+    const time = `$${params.length + 1}::timestamptz`;
+    const id = `$${params.length + 2}`;
+    cursorParams.push(filter.cursor.time, filter.cursor.id);
+    cursorClause = filter.cursor.back
+      ? ` AND (o.create_time, o.order_id) > (${time}, ${id})`
+      : ` AND (o.create_time, o.order_id) < (${time}, ${id})`;
+  }
 
   const totalRows = await query<{ total: string }>(
     `SELECT count(*)::text AS total FROM platform_orders o WHERE ${where.join(" AND ")}`,
@@ -118,11 +131,14 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
          FROM platform_order_finance
         GROUP BY 1, 2
      ) f ON f.shop_id = o.shop_id AND f.order_id = o.order_id
-     WHERE ${where.join(" AND ")}
-     ORDER BY o.create_time DESC NULLS LAST, o.order_id DESC
-     LIMIT ${pageSize} OFFSET ${offset}`,
-    params,
+     WHERE ${where.join(" AND ")}${cursorClause}
+     ORDER BY o.create_time ${filter.cursor?.back ? "ASC" : "DESC"} NULLS LAST, o.order_id ${filter.cursor?.back ? "ASC" : "DESC"}
+     LIMIT ${pageSize}`,
+    [...params, ...cursorParams],
   );
+
+  // ถอยหลังมา ให้กลับลำดับให้เป็นใหม่→เก่าเหมือนเดิม
+  if (filter.cursor?.back) rows.reverse();
 
   // ดึงชื่อ/รูปของรายการแรกเฉพาะออเดอร์ในหน้านี้ (ไม่ทำแบบต่อออเดอร์ทั้งตาราง)
   const orderIds = rows.map((row) => row.order_id);

@@ -7,7 +7,7 @@ import {
 } from "./session-token";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-13-v60";
+const SCHEMA_VERSION = "2026-11-13-v64";
 
 export type { CompanyId };
 
@@ -1013,6 +1013,39 @@ CREATE TABLE IF NOT EXISTS platform_packages (
   PRIMARY KEY (platform, shop_id, package_id)
 );
 
+-- สรุปรายวันต่อร้านต่อแพลตฟอร์ม — ให้หน้าภาพรวม/กราฟอ่านจากตารางนี้แทนการรวมสด
+CREATE TABLE IF NOT EXISTS platform_daily_summary (
+  shop_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  day DATE NOT NULL,
+  orders INTEGER NOT NULL DEFAULT 0,
+  cancelled INTEGER NOT NULL DEFAULT 0,
+  revenue NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  settlement NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  fee NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (shop_id, platform, day)
+);
+CREATE INDEX IF NOT EXISTS platform_daily_summary_day_idx ON platform_daily_summary (platform, day DESC);
+
+-- index สำหรับคิวรีที่หน้าเว็บเรียกบ่อย — ไม่มี index ทำให้คิวรีช้าถึงหลายสิบวินาที
+CREATE INDEX IF NOT EXISTS platform_order_items_sku_idx
+  ON platform_order_items (shop_id, sku_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS products_sku_code_idx ON products (sku_code);
+CREATE INDEX IF NOT EXISTS platform_stock_shop_idx ON platform_stock (shop_id, quantity DESC);
+
+-- index สำหรับการเติบโตระดับล้าน–พันล้านแถว: กรองตามร้าน/แพลตฟอร์ม/ช่วงเวลา และเรียงตามเวลาสร้าง
+CREATE INDEX IF NOT EXISTS platform_orders_shop_time_idx
+  ON platform_orders (shop_id, platform, create_time DESC);
+CREATE INDEX IF NOT EXISTS platform_orders_status_time_idx
+  ON platform_orders (platform, order_status, create_time DESC);
+CREATE INDEX IF NOT EXISTS platform_order_finance_order_idx
+  ON platform_order_finance (shop_id, order_id);
+CREATE INDEX IF NOT EXISTS platform_stock_movements_sku_idx
+  ON platform_stock_movements (shop_id, sku_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS platform_sync_runs_time_idx
+  ON platform_sync_runs (status, finished_at DESC);
+
 -- สต็อกสินค้าจาก TikTok (ดึงตรง ไม่ผ่าน Shipnity) + ประวัติการเปลี่ยนแปลง
 CREATE TABLE IF NOT EXISTS platform_stock (
   shop_id TEXT NOT NULL,
@@ -1020,11 +1053,14 @@ CREATE TABLE IF NOT EXISTS platform_stock (
   product_id TEXT,
   seller_sku TEXT,
   product_name TEXT,
+  image_url TEXT,
   quantity INTEGER NOT NULL DEFAULT 0,
   warehouses JSONB NOT NULL DEFAULT '[]'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (shop_id, sku_id)
 );
+
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS image_url TEXT;
 
 CREATE TABLE IF NOT EXISTS platform_stock_movements (
   id BIGSERIAL PRIMARY KEY,
