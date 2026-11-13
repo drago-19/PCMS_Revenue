@@ -1032,19 +1032,12 @@ CREATE INDEX IF NOT EXISTS platform_daily_summary_day_idx ON platform_daily_summ
 CREATE INDEX IF NOT EXISTS platform_order_items_sku_idx
   ON platform_order_items (shop_id, sku_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS products_sku_code_idx ON products (sku_code);
-CREATE INDEX IF NOT EXISTS platform_stock_shop_idx ON platform_stock (shop_id, quantity DESC);
 
 -- index สำหรับการเติบโตระดับล้าน–พันล้านแถว: กรองตามร้าน/แพลตฟอร์ม/ช่วงเวลา และเรียงตามเวลาสร้าง
 CREATE INDEX IF NOT EXISTS platform_orders_shop_time_idx
   ON platform_orders (shop_id, platform, create_time DESC);
 CREATE INDEX IF NOT EXISTS platform_orders_status_time_idx
   ON platform_orders (platform, order_status, create_time DESC);
-CREATE INDEX IF NOT EXISTS platform_order_finance_order_idx
-  ON platform_order_finance (shop_id, order_id);
-CREATE INDEX IF NOT EXISTS platform_stock_movements_sku_idx
-  ON platform_stock_movements (shop_id, sku_id, changed_at DESC);
-CREATE INDEX IF NOT EXISTS platform_sync_runs_time_idx
-  ON platform_sync_runs (status, finished_at DESC);
 
 -- สต็อกสินค้าจาก TikTok (ดึงตรง ไม่ผ่าน Shipnity) + ประวัติการเปลี่ยนแปลง
 CREATE TABLE IF NOT EXISTS platform_stock (
@@ -1061,6 +1054,8 @@ CREATE TABLE IF NOT EXISTS platform_stock (
 );
 
 ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS image_url TEXT;
+-- ต้องสร้างหลังตาราง platform_stock เท่านั้น (ก่อนหน้านี้อยู่ก่อน CREATE TABLE ทำให้สร้างฐานข้อมูลใหม่ไม่ผ่าน)
+CREATE INDEX IF NOT EXISTS platform_stock_shop_idx ON platform_stock (shop_id, quantity DESC);
 
 CREATE TABLE IF NOT EXISTS platform_stock_movements (
   id BIGSERIAL PRIMARY KEY,
@@ -1126,6 +1121,13 @@ CREATE TABLE IF NOT EXISTS platform_sync_runs (
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   finished_at TIMESTAMPTZ
 );
+
+CREATE INDEX IF NOT EXISTS platform_order_finance_shop_order_idx
+  ON platform_order_finance (shop_id, order_id);
+CREATE INDEX IF NOT EXISTS platform_stock_movements_sku_idx
+  ON platform_stock_movements (shop_id, sku_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS platform_sync_runs_time_idx
+  ON platform_sync_runs (status, finished_at DESC);
 
 CREATE TABLE IF NOT EXISTS auth_rate_limits (
   ip_key TEXT PRIMARY KEY,

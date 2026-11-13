@@ -1,0 +1,48 @@
+# ระบบตัวอย่างสำหรับให้ Shopee เข้าไปรีวิว (แยกจากระบบจริงโดยสิ้นเชิง)
+#
+# ต่างจาก docker-compose.yml ตรงที่:
+#   - ใช้ฐานข้อมูลคนละตัว (DEMO_DATABASE_URL → pcms_revenue_demo) ข้อมูลจริงจึงไม่ถูกแตะ
+#   - ไม่ mount .env ของระบบจริง และไม่แชร์ PLATFORM_SECRET_KEY
+#   - เปิดคนละพอร์ต (3003) และคนละ tunnel
+#
+# ก่อนเปิดครั้งแรก ต้องมีฐานข้อมูล pcms_revenue_demo อยู่แล้ว และรันสคริปต์
+# scripts/seed-demo.ts หลังแอปบูตหนึ่งรอบ (เพื่อสร้างตารางก่อน)
+#
+# ใช้งาน: docker compose -f docker-compose.demo.yml --profile tunnel up -d
+
+services:
+  app-demo:
+    build: .
+    image: pcms-revenue-demo:latest
+    container_name: pcms-revenue-demo-app
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # ต้องชี้ไปฐานข้อมูลที่มีคำว่า demo เท่านั้น — seed-demo.ts จะปฏิเสธฐานข้อมูลอื่น
+      DATABASE_URL: ${DEMO_DATABASE_URL:-postgres://postgres:${SUPABASE_POSTGRES_PASSWORD}@host.docker.internal:5432/pcms_revenue_demo}
+      SELLER_NAME: บริษัท ตัวอย่าง จำกัด (ระบบตัวอย่าง)
+      SELLER_ADDRESS: 1 ถนนตัวอย่าง แขวงตัวอย่าง เขตตัวอย่าง กรุงเทพมหานคร 10000
+      SELLER_TAX_ID: "0000000000000"
+      SELLER_VAT_RATE: "7"
+      AUTH_USERNAME: ${DEMO_AUTH_USERNAME:-demo}
+      AUTH_INITIAL_PASSWORD: ${DEMO_AUTH_PASSWORD:-}
+      AUTH_PASSWORD_HASH: ""
+      AUTH_SESSION_SECRET: ${DEMO_AUTH_SESSION_SECRET:-}
+      # ไม่ตั้ง PLATFORM_SECRET_KEY ของจริง — ระบบตัวอย่างไม่ควรต่อแพลตฟอร์มจริงได้
+      PLATFORM_SECRET_KEY: ""
+    ports:
+      - "3003:3000"
+
+  tunnel-demo:
+    image: cloudflare/cloudflared:latest
+    container_name: pcms-revenue-demo-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      # token ของ tunnel แยกอีกตัว (Cloudflare Zero Trust → Tunnels)
+      # public hostname ที่ผูกใน Dashboard: demo.goldpulse-ai.com → http://app-demo:3000
+      TUNNEL_TOKEN: ${DEMO_CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - app-demo
