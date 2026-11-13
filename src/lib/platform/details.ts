@@ -178,10 +178,12 @@ export async function buildDetail(
       break;
     case "product": {
       const holder = push(parsed.value);
+      // platform_order_items ไม่มีคอลัมน์ sku — จับคู่ด้วยชื่อ SKU หรือชื่อสินค้า
       where.push(
         `EXISTS (SELECT 1 FROM platform_order_items i
                   WHERE i.shop_id = o.shop_id AND i.order_id = o.order_id
-                    AND (i.sku = ${holder} OR COALESCE(NULLIF(i.sku_name, ''), i.product_name) = ${holder}))`,
+                    AND (COALESCE(NULLIF(i.sku_name, ''), i.product_name) = ${holder}
+                         OR i.product_name = ${holder}))`,
       );
       break;
     }
