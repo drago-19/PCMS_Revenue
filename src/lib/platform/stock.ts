@@ -197,30 +197,41 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
   return { skus: collected.length, changed: moves.length };
 }
 
-/** ยอดคงเหลือล่าสุด + จับคู่รหัสกับทะเบียนสินค้าของเรา */
-export async function getStockRows(shopId: string): Promise<StockRow[]> {
-  // รูปเก็บอยู่ใน platform_stock แล้ว (ดึงตอนซิงก์) — ไม่ต้องกวาดตารางออเดอร์ทุกครั้ง
-  const rows = await query<{
-    sku_id: string;
-    seller_sku: string | null;
-    product_name: string | null;
-    quantity: number;
-    warehouses: Array<{ warehouseId: string; quantity: number }>;
-    updated_at: string;
-    product_code: string | null;
-    cost_price: number | null;
-    stock_image: string | null;
-  }>(
-    `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
-            p.sku_code AS product_code, p.cost_price, s.image_url AS stock_image
-       FROM platform_stock s
-       LEFT JOIN products p ON p.sku_code = s.seller_sku
-      WHERE s.shop_id = $1
-      ORDER BY s.quantity DESC, s.seller_sku ASC`,
-    [shopId],
-  );
+/** ตัวกรองของหน้าสต็อก — ใช้เป็นคีย์สั้น ๆ ใน URL */
+export type StockListFilter = "all" | "out" | "low" | "unmatched";
 
-  return rows.map((row) => ({
+/** เกณฑ์ "ใกล้หมด" — เหลือไม่เกิน 5 ชิ้น */
+export const LOW_STOCK_THRESHOLD = 5;
+
+// รูปเก็บอยู่ใน platform_stock แล้ว (ดึงตอนซิงก์) — ไม่ต้องกวาดตารางออเดอร์ทุกครั้ง
+const STOCK_FROM = `FROM platform_stock s
+       LEFT JOIN products p ON p.sku_code = s.seller_sku`;
+
+const STOCK_FILTER_SQL: Record<Exclude<StockListFilter, "all">, string> = {
+  out: "s.quantity <= 0",
+  low: `s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD}`,
+  unmatched: "p.sku_code IS NULL",
+};
+
+/** กัน % _ และ backslash ไม่ให้คำค้นของผู้ใช้กลายเป็นไวลด์การ์ด */
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+type StockRowDb = {
+  sku_id: string;
+  seller_sku: string | null;
+  product_name: string | null;
+  quantity: number;
+  warehouses: Array<{ warehouseId: string; quantity: number }>;
+  updated_at: string;
+  product_code: string | null;
+  cost_price: number | null;
+  stock_image: string | null;
+};
+
+function toStockRow(row: StockRowDb): StockRow {
+  return {
     skuId: row.sku_id,
     sellerSku: row.seller_sku,
     productName: row.product_name,
@@ -230,7 +241,85 @@ export async function getStockRows(shopId: string): Promise<StockRow[]> {
     productCode: row.product_code,
     costPrice: row.cost_price === null ? null : Number(row.cost_price),
     imageUrl: row.stock_image,
-  }));
+  };
+}
+
+export type StockCounts = {
+  all: number;
+  out: number;
+  low: number;
+  unmatched: number;
+  quantity: number;
+};
+
+/** นับของทั้งร้านในคำสั่งเดียว — หน้าเว็บไม่ต้องดึงทุกแถวมาบวกรวมเอง */
+export async function getStockCounts(shopId: string): Promise<StockCounts> {
+  const rows = await query<{
+    all: number;
+    out: number;
+    low: number;
+    unmatched: number;
+    quantity: number;
+  }>(
+    `SELECT count(*)::int AS all,
+            count(*) FILTER (WHERE s.quantity <= 0)::int AS out,
+            count(*) FILTER (WHERE s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD})::int AS low,
+            count(*) FILTER (WHERE p.sku_code IS NULL)::int AS unmatched,
+            COALESCE(sum(s.quantity), 0)::int AS quantity
+       ${STOCK_FROM}
+      WHERE s.shop_id = $1`,
+    [shopId],
+  );
+  const row = rows[0];
+  return {
+    all: Number(row?.all ?? 0),
+    out: Number(row?.out ?? 0),
+    low: Number(row?.low ?? 0),
+    unmatched: Number(row?.unmatched ?? 0),
+    quantity: Number(row?.quantity ?? 0),
+  };
+}
+
+/**
+ * หน้ารายการสต็อก: ค้นหา + กรอง + แบ่งหน้า ทำในฐานข้อมูลทั้งหมด
+ * ใช้ LIMIT/OFFSET ได้เพราะ SKU ของร้านหนึ่งจำกัดตามแคตตาล็อก (หลักพัน–แสน)
+ * ต่างจากตารางออเดอร์ที่เป็นอนุกรมเวลาและโตไม่หยุด ซึ่งใช้ keyset
+ */
+export async function getStockPage(
+  shopId: string,
+  options: { search?: string; filter?: StockListFilter; page?: number; pageSize?: number } = {},
+): Promise<{ rows: StockRow[]; total: number }> {
+  const pageSize = Math.min(Math.max(options.pageSize ?? 20, 1), 100);
+  const page = Math.max(options.page ?? 1, 1);
+  const params: unknown[] = [shopId];
+  const where = ["s.shop_id = $1"];
+
+  const search = options.search?.trim();
+  if (search) {
+    params.push(`%${escapeLike(search)}%`);
+    where.push(
+      `(s.seller_sku ILIKE $${params.length} ESCAPE '\\' OR s.product_name ILIKE $${params.length} ESCAPE '\\'
+        OR s.sku_id ILIKE $${params.length} ESCAPE '\\' OR p.sku_code ILIKE $${params.length} ESCAPE '\\')`,
+    );
+  }
+  if (options.filter && options.filter !== "all") where.push(STOCK_FILTER_SQL[options.filter]);
+
+  const clause = where.join(" AND ");
+  const totals = await query<{ total: number }>(
+    `SELECT count(*)::int AS total ${STOCK_FROM} WHERE ${clause}`,
+    params as never[],
+  );
+  const rows = await query<StockRowDb>(
+    `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
+            p.sku_code AS product_code, p.cost_price, s.image_url AS stock_image
+       ${STOCK_FROM}
+      WHERE ${clause}
+      ORDER BY s.quantity DESC, s.seller_sku ASC, s.sku_id ASC
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+    params as never[],
+  );
+
+  return { rows: rows.map(toStockRow), total: Number(totals[0]?.total ?? 0) };
 }
 
 /** แถวประวัติ + id ของแถว (ใช้เป็นตัวต่อหน้าแบบ keyset) */

@@ -5,9 +5,20 @@ import { PlatformNav } from "@/components/platform/PlatformNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { CloseableDialog } from "@/components/platform/CloseableDialog";
 import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { getLastStockSync, getSkuDetail, getStockMovements, getStockRows, syncStock } from "@/lib/platform/stock";
+import {
+  getLastStockSync,
+  getSkuDetail,
+  getStockCounts,
+  getStockMovements,
+  getStockPage,
+  LOW_STOCK_THRESHOLD,
+  syncStock,
+  type StockListFilter,
+} from "@/lib/platform/stock";
+import { cn } from "@/lib/utils";
 import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
@@ -25,6 +36,8 @@ type SearchParams = Promise<{
   sku?: string;
   after?: string;
   before?: string;
+  q?: string;
+  filter?: string;
 }>;
 
 const PAGE_SIZE = 20;
@@ -65,22 +78,46 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const [historyTime, historyId] = (params.before || params.after || "").split("|");
   const historyCursor =
     historyTime && historyId ? { changedAt: historyTime, id: historyId, back: historyBack } : undefined;
-  const [rows, movements, lastSync, skuDetail] = await Promise.all([
-    getStockRows(shopId),
+  // ค้นหา/กรองในฐานข้อมูลตั้งแต่ต้น — ไม่ดึงทุกแถวขึ้นมากรองในหน้าเว็บ
+  const search = (params.q ?? "").trim();
+  const filter: StockListFilter =
+    params.filter === "out" || params.filter === "low" || params.filter === "unmatched" ? params.filter : "all";
+  const [list, counts, movements, lastSync, skuDetail] = await Promise.all([
+    getStockPage(shopId, { search, filter, page: pageNumber, pageSize: PAGE_SIZE }),
+    getStockCounts(shopId),
     getStockMovements(shopId, { limit: HISTORY_PAGE_SIZE, cursor: historyCursor }),
     getLastStockSync(shopId),
     params.sku ? getSkuDetail(shopId, params.sku) : Promise.resolve(null),
   ]);
-
-  const totalQty = rows.reduce((sum, row) => sum + row.quantity, 0);
-  const outOfStock = rows.filter((row) => row.quantity <= 0).length;
-  const unmatched = rows.filter((row) => !row.productCode).length;
-  const shopName = accounts.find((account) => account.accountKey === shopId)?.shopName ?? shopId;
-  const pageCount = Math.max(Math.ceil(rows.length / PAGE_SIZE), 1);
+  const pageCount = Math.max(Math.ceil(list.total / PAGE_SIZE), 1);
   const current = Math.min(pageNumber, pageCount);
-  const visible = rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
-  const pageHref = (page: number) =>
-    `/platform/stocks?shop=${encodeURIComponent(shopId)}&page=${page}`;
+  const rows =
+    current === pageNumber
+      ? list.rows
+      : (await getStockPage(shopId, { search, filter, page: current, pageSize: PAGE_SIZE })).rows;
+
+  const totalQty = counts.quantity;
+  const outOfStock = counts.out;
+  const unmatched = counts.unmatched;
+  const shopName = accounts.find((account) => account.accountKey === shopId)?.shopName ?? shopId;
+
+  // ลิงก์ที่คงคำค้นและตัวกรองไว้ขณะเปลี่ยนหน้า/ปิดป๊อปอัป
+  const listHref = (next: { page?: number; filter?: StockListFilter; q?: string }) => {
+    const qs = new URLSearchParams({ shop: shopId });
+    const nextSearch = next.q ?? search;
+    const nextFilter = next.filter ?? filter;
+    const nextPage = next.page ?? 1;
+    if (nextSearch) qs.set("q", nextSearch);
+    if (nextFilter !== "all") qs.set("filter", nextFilter);
+    if (nextPage > 1) qs.set("page", String(nextPage));
+    return `/platform/stocks?${qs.toString()}`;
+  };
+  const filterTabs: Array<{ key: StockListFilter; label: string; count: number }> = [
+    { key: "all", label: "ทั้งหมด", count: counts.all },
+    { key: "out", label: "ของหมด", count: counts.out },
+    { key: "low", label: `เหลือน้อย ≤${LOW_STOCK_THRESHOLD}`, count: counts.low },
+    { key: "unmatched", label: "ยังไม่จับคู่", count: counts.unmatched },
+  ];
   const historyHref = (next: { after?: string; before?: string }) => {
     const qs = new URLSearchParams({ shop: shopId });
     if (current > 1) qs.set("page", String(current));
@@ -126,7 +163,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       ) : null}
 
       <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
-        <StatCard label="SKU ทั้งหมด" value={num(rows.length)} hint="นับเฉพาะที่มีใน TikTok" />
+        <StatCard label="SKU ทั้งหมด" value={num(counts.all)} hint="นับเฉพาะที่มีใน TikTok" />
         <StatCard label="ชิ้นคงเหลือรวม" value={num(totalQty)} tone="positive" hint="รวมทุก SKU ทุกคลัง" />
         <StatCard
           label="สินค้าหมด"
@@ -142,6 +179,55 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           <h2 className="text-[14.5px] font-bold">คงเหลือต่อ SKU</h2>
           <Badge variant="neutral">เรียงจากของมากไปน้อย</Badge>
         </div>
+
+        <form action="/platform/stocks" className="flex min-w-0 flex-wrap items-center gap-2">
+          <input type="hidden" name="shop" value={shopId} />
+          {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
+          <label className="sr-only" htmlFor="stock-search">
+            ค้นหา SKU หรือชื่อสินค้า
+          </label>
+          <Input
+            id="stock-search"
+            name="q"
+            defaultValue={search}
+            placeholder="ค้นหา SKU / ชื่อสินค้า / รหัสในระบบเรา"
+            className="h-10 min-w-0 flex-1 text-[13px]"
+          />
+          <Button type="submit" size="sm" variant="secondary">
+            ค้นหา
+          </Button>
+          {search ? (
+            <Button asChild size="sm" variant="ghost">
+              <Link href={listHref({ q: "", filter })} scroll={false}>
+                ล้างคำค้น
+              </Link>
+            </Button>
+          ) : null}
+        </form>
+
+        <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="กรองตามสถานะสต็อก">
+          {filterTabs.map((tab) => {
+            const active = tab.key === filter;
+            return (
+              <Link
+                key={tab.key}
+                href={listHref({ filter: tab.key })}
+                scroll={false}
+                role="tab"
+                aria-selected={active}
+                className={cn(
+                  "inline-flex min-h-[40px] items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-bold transition-colors",
+                  active
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-border text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {tab.label}
+                <span className="tabular-nums opacity-80">{num(tab.count)}</span>
+              </Link>
+            );
+          })}
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-[12.5px]">
             <thead>
@@ -155,15 +241,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               </tr>
             </thead>
             <tbody>
-              {visible.map((row) => (
+              {rows.map((row) => (
                 <tr key={row.skuId} className="border-b border-border last:border-0">
                   <td className="py-1.5 pr-2">
                     <Link
-                      href={`/platform/stocks?shop=${encodeURIComponent(shopId)}&page=${current}&sku=${encodeURIComponent(row.skuId)}`}
+                      href={`${listHref({ page: current })}&sku=${encodeURIComponent(row.skuId)}`}
                       scroll={false}
                       className="mono underline underline-offset-2 hover:text-foreground"
                     >
-                      {row.sellerSku ?? row.skuId}
+                      {row.sellerSku || row.skuId}
                     </Link>
                   </td>
                   <td className="py-1.5 pr-2">
@@ -189,7 +275,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-6 text-center text-muted-foreground">
-                    ยังไม่มีข้อมูล — กด “ดึงสต็อกล่าสุด” เพื่อดึงจาก TikTok
+                    {search || filter !== "all"
+                      ? "ไม่พบ SKU ที่ตรงกับเงื่อนไข — ลองเปลี่ยนคำค้นหรือตัวกรอง"
+                      : "ยังไม่มีข้อมูล — กด “ดึงสต็อกล่าสุด” เพื่อดึงจาก TikTok"}
                   </td>
                 </tr>
               ) : null}
@@ -199,17 +287,17 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
         <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
           <span>
-            แสดง {num(visible.length)} จาก {num(rows.length)} SKU · หน้า {num(current)} / {num(pageCount)}
+            แสดง {num(rows.length)} จาก {num(list.total)} SKU · หน้า {num(current)} / {num(pageCount)}
           </span>
           <span className="flex items-center gap-2">
             {current > 1 ? (
               <Button asChild size="sm" variant="outline">
-                <Link href={pageHref(current - 1)} scroll={false}>ก่อนหน้า</Link>
+                <Link href={listHref({ page: current - 1 })} scroll={false}>ก่อนหน้า</Link>
               </Button>
             ) : null}
             {current < pageCount ? (
               <Button asChild size="sm" variant="outline">
-                <Link href={pageHref(current + 1)} scroll={false}>ถัดไป</Link>
+                <Link href={listHref({ page: current + 1 })} scroll={false}>ถัดไป</Link>
               </Button>
             ) : null}
           </span>
@@ -284,7 +372,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
       {skuDetail ? (
         <CloseableDialog
-          closeHref={`/platform/stocks?shop=${encodeURIComponent(shopId)}&page=${current}`}
+          closeHref={listHref({ page: current })}
         >
           <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
             <DialogHeader className="pr-11">
