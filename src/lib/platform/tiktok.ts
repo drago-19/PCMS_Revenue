@@ -7,7 +7,7 @@
 // การเซ็นชื่อ: sign = HMAC_SHA256(app_secret, app_secret + path + {key}{value} เรียงตาม key + body + app_secret)
 // โดยตัด `sign` และ `access_token` ออก และส่ง access token ทาง header `x-tts-access-token`
 
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const TIKTOK_API_BASE = "https://open-api.tiktokglobalshop.com";
 export const TIKTOK_AUTH_BASE = "https://auth.tiktok-shops.com";
@@ -607,6 +607,61 @@ export async function listStatementTransactions({
     nextPageToken: data.next_page_token ?? null,
     currency: str(data.currency) ?? "THB",
   };
+}
+
+/** เหตุการณ์ที่เราต้องการรับแจ้งจาก TikTok (มีเมื่อข้อมูลเปลี่ยนจริง ไม่ต้องดึงเป็นรอบ) */
+export const TIKTOK_WEBHOOK_EVENTS = [
+  "ORDER_STATUS_CHANGE",
+  "CANCELLATION_STATUS_CHANGE",
+  "RETURN_STATUS_CHANGE",
+  "RECIPIENT_ADDRESS_UPDATE",
+] as const;
+
+/**
+ * ตรวจลายเซ็นของ webhook: TikTok ส่งค่า HMAC-SHA256 ของ body (คีย์ = app secret) มาใน header
+ * Authorization — ต้องเทียบกับที่คำนวณเองก่อนเชื่อข้อมูล
+ */
+export function verifyWebhookSignature({
+  rawBody,
+  signature,
+  appSecret,
+}: {
+  rawBody: string;
+  signature: string | null;
+  appSecret: string;
+}): boolean {
+  if (!signature) return false;
+  const expected = createHmac("sha256", appSecret).update(rawBody).digest("hex");
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(signature.trim().toLowerCase(), "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/** สมัครรับแจ้งเตือนสำหรับร้านหนึ่ง (ต้องมีสิทธิ์ของร้านนั้น) */
+export async function registerWebhooks({
+  config,
+  accessToken,
+  shopCipher,
+  address,
+  eventTypes = TIKTOK_WEBHOOK_EVENTS,
+}: {
+  config: TikTokAppConfig;
+  accessToken: string;
+  shopCipher: string;
+  address: string;
+  eventTypes?: readonly string[];
+}): Promise<void> {
+  for (const eventType of eventTypes) {
+    await callTikTokApi({
+      config,
+      path: "/event/202309/webhooks",
+      method: "PUT",
+      query: { shop_cipher: shopCipher },
+      body: { address, event_type: eventType },
+      accessToken,
+    });
+  }
 }
 
 export interface TikTokPackage {
