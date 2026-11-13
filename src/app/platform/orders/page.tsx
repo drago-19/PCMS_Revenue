@@ -405,9 +405,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 <Button asChild variant="outline" size="sm">
                   <Link href={queryFor({})}>ปิด</Link>
                 </Button>
-                <Button asChild variant="ghost" size="sm">
-                  <Link href={`/platform/orders/${encodeURIComponent(detail.orderId)}`}>เปิดหน้าเต็ม</Link>
-                </Button>
               </div>
             </div>
           </DialogContent>
