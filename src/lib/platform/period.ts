@@ -107,20 +107,45 @@ export function activePresetKey(from?: string, to?: string): string | null {
   return found?.key ?? null;
 }
 
+/**
+ * แปลงเวลาให้เป็น Date ที่ถูกต้อง
+ * Postgres คืน timestamptz เป็น "2026-11-13 05:59:05.947848+00" (ช่องว่าง ไม่มี T, ออฟเซต 2 หลัก, ทศนิยม 6 ตำแหน่ง)
+ * ซึ่ง new Date() ตรง ๆ ตีความผิด — เวลาบนหน้าจอจึงเพี้ยนไป 7 ชั่วโมง
+ */
+export function parseStamp(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const cleaned = value
+    .trim()
+    .replace(" ", "T")
+    .replace(/(\.\d{3})\d+/, "$1")
+    .replace(/([+-]\d{2})$/, "$1:00");
+  const date = new Date(cleaned);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /** วันที่ย่อแบบไทย: 14 ต.ค. 69 */
 export function thaiDate(value: string | null | undefined): string {
   if (!value) return "—";
-  const date = new Date(value.length <= 10 ? `${value}T00:00:00` : value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" });
+  const date = value.length <= 10 ? parseStamp(`${value}T00:00:00`) : parseStamp(value);
+  if (!date) return "—";
+  // ระบุ timeZone ตรง ๆ: คอนเทนเนอร์บนเซิร์ฟเวอร์รันด้วย UTC ถ้าอิงเวลาเครื่องจะได้ 05:59 แทน 12:59
+  return date.toLocaleDateString("th-TH", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+    timeZone: "Asia/Bangkok",
+  });
 }
 
 /** วันที่ + เวลาแบบไทย: 13/11/69 10:51 */
 export function thaiDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+  const date = parseStamp(value);
+  if (!date) return "—";
+  return date.toLocaleString("th-TH", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Asia/Bangkok",
+  });
 }
 
 /** ช่วงวันที่แบบอ่านง่าย: 14 ต.ค. – 13 พ.ย. 69 */

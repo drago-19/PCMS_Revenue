@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { parseStamp } from "@/lib/platform/period";
 import type { DetailView } from "@/lib/platform/details";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -47,13 +48,15 @@ function detailMoney(value: number): string {
 }
 
 function shortDateTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const year = String((date.getFullYear() + 543) % 100).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
+  const date = parseStamp(iso);
+  if (!date) return "—";
+  // บวก 7 ชั่วโมงแล้วอ่านด้วย getUTC* → ได้เวลาไทยเสมอ ไม่ขึ้นกับ timezone ของเครื่องที่เรนเดอร์
+  const bkk = new Date(date.getTime() + 7 * 3_600_000);
+  const day = String(bkk.getUTCDate()).padStart(2, "0");
+  const month = String(bkk.getUTCMonth() + 1).padStart(2, "0");
+  const year = String((bkk.getUTCFullYear() + 543) % 100).padStart(2, "0");
+  const hour = String(bkk.getUTCHours()).padStart(2, "0");
+  const minute = String(bkk.getUTCMinutes()).padStart(2, "0");
   return `${day}/${month}/${year} ${hour}:${minute}`;
 }
 
