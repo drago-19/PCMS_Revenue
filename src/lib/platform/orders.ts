@@ -251,6 +251,7 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     shipping_provider: string | null;
     rts_unix: string | null;
     collection_unix: string | null;
+    item_cancel_user: string | null;
     total_amount: string | null;
     currency: string | null;
     shop_id: string;
@@ -261,7 +262,11 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
             COALESCE(NULLIF(btrim(o.tracking_number), ''), NULLIF(btrim(o.raw_json->>'tracking_number'), ''), p.tracking_number) AS tracking_number,
             COALESCE(NULLIF(btrim(o.shipping_provider), ''), NULLIF(btrim(o.raw_json->>'shipping_provider'), ''), p.shipping_provider) AS shipping_provider,
             o.total_amount::text AS total_amount, o.currency, o.shop_id,
-            o.raw_json->>'rts_time' AS rts_unix, o.raw_json->>'collection_time' AS collection_unix
+            o.raw_json->>'rts_time' AS rts_unix, o.raw_json->>'collection_time' AS collection_unix,
+            (SELECT item->>'cancel_user'
+               FROM jsonb_array_elements(coalesce(o.raw_json->'line_items', '[]'::jsonb)) AS item
+              WHERE coalesce(item->>'cancel_user', '') <> ''
+              LIMIT 1) AS item_cancel_user
        FROM platform_orders o
        LEFT JOIN LATERAL (
          SELECT tracking_number, shipping_provider
@@ -309,7 +314,7 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     deliveredTime: order.delivered_time,
     cancelledTime: order.cancelled_time,
     cancelReason: order.cancel_reason,
-    cancelUser: order.cancel_user,
+    cancelUser: order.item_cancel_user ?? order.cancel_user ?? null,
     trackingNumber: order.tracking_number,
     shopId: order.shop_id ?? null,
     rtsTime: order.rts_unix ? new Date(Number(order.rts_unix) * 1000).toISOString() : null,

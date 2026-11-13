@@ -357,8 +357,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 {detail.cancelReason ? (
                   detail.status === "CANCELLED" ? (
                     <span className="text-[#b42318]">ยกเลิก: {detail.cancelReason}</span>
+                  ) : detail.cancelUser === "BUYER" ? (
+                    <span className="rounded-full bg-[#fffdf6] px-2 py-0.5 text-[#7a4b0a] ring-1 ring-[#f2e3c4]">
+                      ผู้ซื้อขอคืนสินค้า: {detail.cancelReason}
+                    </span>
                   ) : (
-                    <span className="text-muted-foreground">มีรายการสินค้าถูกยกเลิก: {detail.cancelReason}</span>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                      ร้าน/ระบบยกเลิกบางรายการ: {detail.cancelReason}
+                    </span>
                   )
                 ) : null}
               </div>
