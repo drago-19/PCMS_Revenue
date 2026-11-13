@@ -4,6 +4,7 @@
 //   ช่วงนี้เป็นอย่างไร → เทียบช่วงก่อน → แนวโน้ม → ต้นเหตุ → อะไรผิดปกติ → ควรทำอะไร
 
 import { query } from "@/lib/db";
+import { isoDay, resolveRange } from "@/lib/platform/period";
 
 export interface PeriodTotals {
   settlement: number;
@@ -123,17 +124,16 @@ export async function getTikTokAnalytics(
   options: AnalyticsOptions = {},
 ): Promise<TikTokAnalytics & { perShop: ShopTotal[]; periodLabel: string; compareLabel: string }> {
   const shopId = options.shopId;
-  const toDate = options.to ? new Date(`${options.to}T23:59:59Z`) : new Date();
-  const fromDate = options.from
-    ? new Date(`${options.from}T00:00:00Z`)
-    : new Date(toDate.getTime() - (options.rangeDays ?? 30) * 86400_000);
+  const range = resolveRange(options.from, options.to, options.rangeDays ?? 30);
+  const toDate = new Date(range.endIso);
+  const fromDate = new Date(range.startIso);
   const spanMs = Math.max(toDate.getTime() - fromDate.getTime(), 86400_000);
   const rangeDays = Math.max(1, Math.round(spanMs / 86400_000));
-  const toIso = toDate.toISOString();
+  const toIso = range.endIso;
   const from = fromDate;
   const prevFrom = new Date(from.getTime() - spanMs);
-  const periodLabel = `${fromDate.toISOString().slice(0, 10)} → ${toDate.toISOString().slice(0, 10)}`;
-  const compareLabel = `${prevFrom.toISOString().slice(0, 10)} → ${fromDate.toISOString().slice(0, 10)}`;
+  const periodLabel = `${range.fromDay} → ${range.toDay}`;
+  const compareLabel = `${isoDay(prevFrom)} → ${range.fromDay}`;
 
   const [current, previous] = await Promise.all([
     periodTotals(from.toISOString(), toIso, shopId),

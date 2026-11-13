@@ -1,5 +1,6 @@
 // รายการ statement (ใบสรุปยอดโอนรายวัน) ของ TikTok ที่เก็บไว้แล้ว
 import { query } from "@/lib/db";
+import { resolveRange } from "@/lib/platform/period";
 
 export interface StatementRow {
   statementId: string;
@@ -31,31 +32,17 @@ export interface StatementParams {
   shopId?: string | null;
 }
 
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isoDay(date: Date): string {
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
-}
-
-function dayOffset(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return isoDay(date);
-}
-
 function toNumber(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export async function getTikTokStatements(params: StatementParams): Promise<TikTokStatements> {
-  const to = params.to && DAY_RE.test(params.to) ? params.to : isoDay(new Date());
-  const from = params.from && DAY_RE.test(params.from) ? params.from : dayOffset(-30);
-
-  const start = new Date(`${from}T00:00:00+07:00`);
-  const end = new Date(`${to}T00:00:00+07:00`);
-  end.setDate(end.getDate() + 1);
+  const range = resolveRange(params.from ?? undefined, params.to ?? undefined);
+  const from = range.fromDay;
+  const to = range.toDay;
+  const start = new Date(range.startIso);
+  const end = new Date(range.endIso);
 
   const base = params.shopId
     ? [start.toISOString(), end.toISOString(), params.shopId]

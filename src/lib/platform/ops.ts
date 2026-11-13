@@ -5,6 +5,7 @@
 // จึงคิดได้ถึง "กำไรขั้นต้นหลังค่าธรรมเนียม/ค่าส่ง" เท่านั้น
 
 import { query } from "@/lib/db";
+import { resolveRange } from "@/lib/platform/period";
 
 export interface OpsOrderRow {
   orderId: string;
@@ -45,11 +46,24 @@ export interface OpsStuckRow {
   idleDays: number;
 }
 
+export interface OpsPendingRow {
+  orderId: string;
+  status: string;
+  createdAt: string;
+  amount: number;
+  province: string | null;
+  tracking: string | null;
+}
+
 export interface TikTokOps {
   range: { from: string; to: string };
   overdue: { count: number; rows: OpsOrderRow[] };
   noTracking: { count: number; rows: OpsOrderRow[] };
   stuck: { count: number; rows: OpsStuckRow[] };
+  /** นับออเดอร์ตามสถานะในช่วงที่เลือก — ที่มาของการ์ดรอจัดส่ง/รอขนรับ/กำลังขนส่ง */
+  byStatus: Record<string, number>;
+  /** ออเดอร์ที่ยังไม่จัดส่ง (รอจัดส่ง + รอขนรับ) เรียงจากเก่าสุด */
+  pending: { rows: OpsPendingRow[] };
   cancels: {
     total: number;
     cancelled: number;
@@ -72,19 +86,6 @@ export interface OpsParams {
   shopId?: string | null;
 }
 
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isoDay(date: Date): string {
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
-}
-
-function dayOffset(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return isoDay(date);
-}
-
 function toNumber(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -100,15 +101,9 @@ const DUE_UNIX = `COALESCE(
 const UNSHIPPED = "('AWAITING_SHIPMENT','ON_HOLD','PARTIALLY_SHIPPING','AWAITING_COLLECTION')";
 
 export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
-  const to = params.to && DAY_RE.test(params.to) ? params.to : isoDay(new Date());
-  const from =
-    params.from && DAY_RE.test(params.from)
-      ? params.from
-      : dayOffset(-30);
-
-  const start = new Date(`${from}T00:00:00+07:00`);
-  const end = new Date(`${to}T00:00:00+07:00`);
-  end.setDate(end.getDate() + 1);
+  const range = resolveRange(params.from ?? undefined, params.to ?? undefined);
+  const start = new Date(range.startIso);
+  const end = new Date(range.endIso);
   const spanMs = Math.max(end.getTime() - start.getTime(), 86_400_000);
   const prevStart = new Date(start.getTime() - spanMs);
 
@@ -129,6 +124,8 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
     droppedProducts,
     cancelProducts,
     priceRows,
+    statusRows,
+    pendingRows,
   ] = await Promise.all([
     // ค้างส่งเกินกำหนด: สถานะยังไม่จัดส่ง และเวลาที่ต้องส่งผ่านไปแล้ว
     query<{
@@ -306,6 +303,32 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
          FROM li`,
       base,
     ),
+    // นับออเดอร์ตามสถานะ — ตัวเลขที่หน้างานใช้ได้จริงทุกวัน
+    query<{ order_status: string; n: string }>(
+      `SELECT order_status, count(*)::text AS n
+         FROM platform_orders
+        WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz${shopClause}
+        GROUP BY 1`,
+      base,
+    ),
+    // ออเดอร์ที่ยังไม่จัดส่ง — คิวงานจริงของคนแพ็ค
+    query<{
+      order_id: string;
+      order_status: string;
+      created_at: string;
+      total_amount: string;
+      province: string | null;
+      tracking_number: string | null;
+    }>(
+      `SELECT order_id, order_status, create_time::text AS created_at, total_amount::text, province,
+              COALESCE(NULLIF(btrim(tracking_number), ''), NULLIF(btrim(raw_json->>'tracking_number'), '')) AS tracking_number
+         FROM platform_orders
+        WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz
+          AND order_status IN ('AWAITING_SHIPMENT','AWAITING_COLLECTION')${shopClause}
+        ORDER BY create_time ASC
+        LIMIT 200`,
+      base,
+    ),
   ]);
 
   const totalOrders = toNumber(cancelTotals[0]?.total);
@@ -332,7 +355,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
   });
 
   return {
-    range: { from, to },
+    range: { from: range.fromDay, to: range.toDay },
     overdue: { count: overdueRows.length, rows: overdueRows.slice(0, 8).map(toRow) },
     noTracking: { count: noTrackingRows.length, rows: noTrackingRows.slice(0, 6).map(toRow) },
     stuck: {
@@ -342,6 +365,17 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
         carrier: r.shipping_provider,
         status: r.status,
         idleDays: Math.round(toNumber(r.idle_days)),
+      })),
+    },
+    byStatus: Object.fromEntries(statusRows.map((r) => [r.order_status, toNumber(r.n)])),
+    pending: {
+      rows: pendingRows.slice(0, 8).map((r) => ({
+        orderId: r.order_id,
+        status: r.order_status,
+        createdAt: r.created_at,
+        amount: toNumber(r.total_amount),
+        province: r.province,
+        tracking: r.tracking_number,
       })),
     },
     cancels: {

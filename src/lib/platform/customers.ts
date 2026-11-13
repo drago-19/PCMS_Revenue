@@ -6,6 +6,7 @@
 
 import { query } from "@/lib/db";
 import { normalizeDistrictSql, normalizeProvinceSql } from "@/lib/platform/geo";
+import { resolveRange } from "@/lib/platform/period";
 
 export interface CustomerProduct {
   name: string;
@@ -81,13 +82,10 @@ function scope(fromIso: string, toIso: string, shopId?: string) {
 }
 
 export async function getCustomerInsights(options: CustomerOptions = {}): Promise<CustomerInsights> {
-  const toDate = options.to ? new Date(`${options.to}T23:59:59Z`) : new Date();
-  const fromDate = options.from
-    ? new Date(`${options.from}T00:00:00Z`)
-    : new Date(toDate.getTime() - (options.rangeDays ?? 30) * 86400_000);
+  const range = resolveRange(options.from, options.to, options.rangeDays ?? 30);
   const limit = options.limit ?? 10;
-  const fromIso = fromDate.toISOString();
-  const toIso = toDate.toISOString();
+  const fromIso = range.startIso;
+  const toIso = range.endIso;
   const { clause, params } = scope(fromIso, toIso, options.shopId);
 
   const totalsRows = await query<{
@@ -221,7 +219,7 @@ export async function getCustomerInsights(options: CustomerOptions = {}): Promis
   return {
     from: fromIso,
     to: toIso,
-    periodLabel: `${fromDate.toISOString().slice(0, 10)} → ${toDate.toISOString().slice(0, 10)}`,
+    periodLabel: `${range.fromDay} → ${range.toDay}`,
     totals: {
       customers,
       repeatCustomers: num(repeatRows[0]?.repeat),
