@@ -302,6 +302,9 @@ export function PlatformOverviewView({
         <Button size="sm" variant="outline" asChild>
           <Link href="/platform/products">ไปดูสินค้าและเหตุผลการยกเลิก</Link>
         </Button>
+        <Button size="sm" variant="outline" asChild>
+          <Link href="/platform/stocks">สต็อกของร้านนี้</Link>
+        </Button>
       </div>
     </div>
   );

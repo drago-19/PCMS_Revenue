@@ -7,7 +7,7 @@ import {
 } from "./session-token";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-13-v59";
+const SCHEMA_VERSION = "2026-11-13-v60";
 
 export type { CompanyId };
 
@@ -1011,6 +1011,31 @@ CREATE TABLE IF NOT EXISTS platform_packages (
   order_ids TEXT[] NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (platform, shop_id, package_id)
+);
+
+-- สต็อกสินค้าจาก TikTok (ดึงตรง ไม่ผ่าน Shipnity) + ประวัติการเปลี่ยนแปลง
+CREATE TABLE IF NOT EXISTS platform_stock (
+  shop_id TEXT NOT NULL,
+  sku_id TEXT NOT NULL,
+  product_id TEXT,
+  seller_sku TEXT,
+  product_name TEXT,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  warehouses JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (shop_id, sku_id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_stock_movements (
+  id BIGSERIAL PRIMARY KEY,
+  shop_id TEXT NOT NULL,
+  sku_id TEXT NOT NULL,
+  seller_sku TEXT,
+  product_name TEXT,
+  from_qty INTEGER,
+  to_qty INTEGER NOT NULL,
+  delta INTEGER NOT NULL,
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- เหตุการณ์พัสดุแบบละเอียดจาก Get Tracking (ถึงศูนย์คัดแยก/สาขา/นำส่ง)
