@@ -26,10 +26,7 @@ export type StockRow = {
   quantity: number;
   warehouses: Array<{ warehouseId: string; quantity: number }>;
   updatedAt: string;
-  /** รหัสในทะเบียนสินค้าของเรา (products.sku_code) ถ้าจับคู่ได้ */
-  productCode: string | null;
-  costPrice: number | null;
-  /** รูปสินค้าที่เราเก็บไว้ในรายการออเดอร์ (ไม่ต้องเรียก API เพิ่ม) */
+  /** รูปสินค้าที่เราเก็บไว้กับสต็อก (ดึงจาก TikTok ตอนซิงก์) */
   imageUrl: string | null;
 };
 
@@ -198,19 +195,17 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
 }
 
 /** ตัวกรองของหน้าสต็อก — ใช้เป็นคีย์สั้น ๆ ใน URL */
-export type StockListFilter = "all" | "out" | "low" | "unmatched";
+export type StockListFilter = "all" | "out" | "low";
 
 /** เกณฑ์ "ใกล้หมด" — เหลือไม่เกิน 5 ชิ้น */
 export const LOW_STOCK_THRESHOLD = 5;
 
-// รูปเก็บอยู่ใน platform_stock แล้ว (ดึงตอนซิงก์) — ไม่ต้องกวาดตารางออเดอร์ทุกครั้ง
-const STOCK_FROM = `FROM platform_stock s
-       LEFT JOIN products p ON p.sku_code = s.seller_sku`;
+// หน้าสต็อกอ่านเฉพาะตารางของแพลตฟอร์ม — ไม่ผูกกับทะเบียนสินค้าหรือต้นทุนของระบบเรา
+const STOCK_FROM = `FROM platform_stock s`;
 
 const STOCK_FILTER_SQL: Record<Exclude<StockListFilter, "all">, string> = {
   out: "s.quantity <= 0",
   low: `s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD}`,
-  unmatched: "p.sku_code IS NULL",
 };
 
 /** กัน % _ และ backslash ไม่ให้คำค้นของผู้ใช้กลายเป็นไวลด์การ์ด */
@@ -225,8 +220,6 @@ type StockRowDb = {
   quantity: number;
   warehouses: Array<{ warehouseId: string; quantity: number }>;
   updated_at: string;
-  product_code: string | null;
-  cost_price: number | null;
   stock_image: string | null;
 };
 
@@ -238,8 +231,6 @@ function toStockRow(row: StockRowDb): StockRow {
     quantity: Number(row.quantity ?? 0),
     warehouses: row.warehouses ?? [],
     updatedAt: row.updated_at,
-    productCode: row.product_code,
-    costPrice: row.cost_price === null ? null : Number(row.cost_price),
     imageUrl: row.stock_image,
   };
 }
@@ -248,7 +239,6 @@ export type StockCounts = {
   all: number;
   out: number;
   low: number;
-  unmatched: number;
   quantity: number;
 };
 
@@ -258,13 +248,11 @@ export async function getStockCounts(shopId: string): Promise<StockCounts> {
     all: number;
     out: number;
     low: number;
-    unmatched: number;
     quantity: number;
   }>(
     `SELECT count(*)::int AS all,
             count(*) FILTER (WHERE s.quantity <= 0)::int AS out,
             count(*) FILTER (WHERE s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD})::int AS low,
-            count(*) FILTER (WHERE p.sku_code IS NULL)::int AS unmatched,
             COALESCE(sum(s.quantity), 0)::int AS quantity
        ${STOCK_FROM}
       WHERE s.shop_id = $1`,
@@ -275,7 +263,6 @@ export async function getStockCounts(shopId: string): Promise<StockCounts> {
     all: Number(row?.all ?? 0),
     out: Number(row?.out ?? 0),
     low: Number(row?.low ?? 0),
-    unmatched: Number(row?.unmatched ?? 0),
     quantity: Number(row?.quantity ?? 0),
   };
 }
@@ -299,7 +286,7 @@ export async function getStockPage(
     params.push(`%${escapeLike(search)}%`);
     where.push(
       `(s.seller_sku ILIKE $${params.length} ESCAPE '\\' OR s.product_name ILIKE $${params.length} ESCAPE '\\'
-        OR s.sku_id ILIKE $${params.length} ESCAPE '\\' OR p.sku_code ILIKE $${params.length} ESCAPE '\\')`,
+        OR s.sku_id ILIKE $${params.length} ESCAPE '\\')`,
     );
   }
   if (options.filter && options.filter !== "all") where.push(STOCK_FILTER_SQL[options.filter]);
@@ -311,7 +298,7 @@ export async function getStockPage(
   );
   const rows = await query<StockRowDb>(
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
-            p.sku_code AS product_code, p.cost_price, s.image_url AS stock_image
+            s.image_url AS stock_image
        ${STOCK_FROM}
       WHERE ${clause}
       ORDER BY s.quantity DESC, s.seller_sku ASC, s.sku_id ASC
@@ -400,7 +387,6 @@ export type SkuDetail = {
   quantity: number;
   warehouses: Array<{ warehouseId: string; quantity: number }>;
   updatedAt: string;
-  productCode: string | null;
   imageUrl: string | null;
   orders: SkuOrderRow[];
   movements: StockMovement[];
@@ -415,14 +401,12 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
     quantity: number;
     warehouses: Array<{ warehouseId: string; quantity: number }>;
     updated_at: string;
-    product_code: string | null;
     image_url: string | null;
     product_id: string | null;
   }>(
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
-            s.image_url, s.product_id, p.sku_code AS product_code
+            s.image_url, s.product_id
        FROM platform_stock s
-       LEFT JOIN products p ON p.sku_code = s.seller_sku
       WHERE s.shop_id = $1 AND s.sku_id = $2
       LIMIT 1`,
     [shopId, skuId],
@@ -547,7 +531,6 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
     quantity: Number(row.quantity ?? 0),
     warehouses: row.warehouses ?? [],
     updatedAt: row.updated_at,
-    productCode: row.product_code,
     imageUrl,
     orders: orders.map((order) => ({
       orderId: order.order_id,

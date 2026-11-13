@@ -81,7 +81,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   // ค้นหา/กรองในฐานข้อมูลตั้งแต่ต้น — ไม่ดึงทุกแถวขึ้นมากรองในหน้าเว็บ
   const search = (params.q ?? "").trim();
   const filter: StockListFilter =
-    params.filter === "out" || params.filter === "low" || params.filter === "unmatched" ? params.filter : "all";
+    params.filter === "out" || params.filter === "low" ? params.filter : "all";
   const [list, counts, movements, lastSync, skuDetail] = await Promise.all([
     getStockPage(shopId, { search, filter, page: pageNumber, pageSize: PAGE_SIZE }),
     getStockCounts(shopId),
@@ -98,7 +98,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
   const totalQty = counts.quantity;
   const outOfStock = counts.out;
-  const unmatched = counts.unmatched;
   const shopName = accounts.find((account) => account.accountKey === shopId)?.shopName ?? shopId;
 
   // ลิงก์ที่คงคำค้นและตัวกรองไว้ขณะเปลี่ยนหน้า/ปิดป๊อปอัป
@@ -116,7 +115,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     { key: "all", label: "ทั้งหมด", count: counts.all },
     { key: "out", label: "ของหมด", count: counts.out },
     { key: "low", label: `เหลือน้อย ≤${LOW_STOCK_THRESHOLD}`, count: counts.low },
-    { key: "unmatched", label: "ยังไม่จับคู่", count: counts.unmatched },
   ];
   const historyHref = (next: { after?: string; before?: string }) => {
     const qs = new URLSearchParams({ shop: shopId });
@@ -162,7 +160,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
+      <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-3">
         <StatCard label="SKU ทั้งหมด" value={num(counts.all)} hint="นับเฉพาะที่มีใน TikTok" />
         <StatCard label="ชิ้นคงเหลือรวม" value={num(totalQty)} tone="positive" hint="รวมทุก SKU ทุกคลัง" />
         <StatCard
@@ -171,7 +169,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           tone={outOfStock > 0 ? "negative" : "default"}
           hint="คงเหลือ 0 ชิ้น"
         />
-        <StatCard label="ยังไม่จับคู่รหัส" value={num(unmatched)} hint="ไม่มีรหัสในทะเบียนสินค้า" />
       </div>
 
       <Card padding="padded" className="flex min-w-0 flex-col gap-2">
@@ -190,7 +187,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
             id="stock-search"
             name="q"
             defaultValue={search}
-            placeholder="ค้นหา SKU / ชื่อสินค้า / รหัสในระบบเรา"
+            placeholder="ค้นหา SKU หรือชื่อสินค้า"
             className="h-10 min-w-0 flex-1 text-[13px]"
           />
           <Button type="submit" size="sm" variant="secondary">
@@ -236,7 +233,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">สินค้า</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือ</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">คลัง</th>
-                <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัสในระบบเรา</th>
                 <th scope="col" className="py-1.5 text-right font-bold">อัปเดต</th>
               </tr>
             </thead>
@@ -266,15 +262,12 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                     {num(row.quantity)}
                   </td>
                   <td className="mono py-1.5 pr-2 text-right text-muted-foreground">{num(row.warehouses.length)}</td>
-                  <td className="py-1.5 pr-2">
-                    {row.productCode ? <span className="mono">{row.productCode}</span> : <span className="text-muted-foreground">—</span>}
-                  </td>
                   <td className="py-1.5 text-right text-muted-foreground">{thaiDateTime(row.updatedAt)}</td>
                 </tr>
               ))}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
                     {search || filter !== "all"
                       ? "ไม่พบ SKU ที่ตรงกับเงื่อนไข — ลองเปลี่ยนคำค้นหรือตัวกรอง"
                       : "ยังไม่มีข้อมูล — กด “ดึงสต็อกล่าสุด” เพื่อดึงจาก TikTok"}
@@ -380,7 +373,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 {skuDetail.productName ?? skuDetail.sellerSku ?? "สินค้า"}
               </DialogTitle>
               <p className="text-[12px] leading-5 text-muted-foreground">
-                SKU TikTok {skuDetail.sellerSku ?? "—"} · รหัสในระบบเรา {skuDetail.productCode ?? "—"} · อัปเดต{" "}
+                SKU TikTok {skuDetail.sellerSku ?? "—"} · อัปเดต{" "}
                 {thaiDateTime(skuDetail.updatedAt)}
               </p>
             </DialogHeader>
