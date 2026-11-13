@@ -97,30 +97,44 @@ async function safeFetch(url: URL, secret: string, init?: RequestInit): Promise<
 
 /**
  * กันยิงถี่เกินลิมิตของ TikTok (Dynamic QPS — แนะนำ 3–10 req/s สำหรับ read/sync)
- * ทุกคำขอจะต่อคิวกันในโปรเซสนี้ ไม่ยิงขนาน และเว้นระยะขั้นต่ำระหว่างคำขอ
+ * ยิงพร้อมกันได้ไม่เกิน N คำขอ (ค่าเริ่มต้น 3) และเว้นระยะขั้นต่ำระหว่างการเริ่มแต่ละคำขอ
+ * ถ้าถูกจำกัดอัตราจะถอยแล้วลองใหม่ตามเดิม
  */
 const MAX_RETRIES = 5;
 
 let lastCallAt = 0;
-let queue: Promise<void> = Promise.resolve();
+let inFlight = 0;
+const waiting: Array<() => void> = [];
 
 // อ่านค่าจาก env ตอนเรียก เพื่อให้เทสต์ปรับได้โดยไม่ต้อง import ใหม่
 function minIntervalMs(): number {
-  // 500 ms ≈ 2 คำขอ/วินาที — ต่ำกว่าช่วงที่ TikTok แนะนำสำหรับ read/sync (3–10 rps)
-  // เพื่อเหลือระยะปลอดภัยและไม่ให้ถูกมองว่าเป็น burst
-  const value = Number(process.env.TIKTOK_MIN_INTERVAL_MS ?? 500);
-  return Number.isFinite(value) && value >= 0 ? value : 500;
+  // 250 ms ≈ 4 คำขอ/วินาที — อยู่ในช่วงที่ TikTok แนะนำ (3–10 rps) แต่ไม่ถึงเพดาน
+  const value = Number(process.env.TIKTOK_MIN_INTERVAL_MS ?? 250);
+  return Number.isFinite(value) && value >= 0 ? value : 250;
 }
 
-async function throttle(): Promise<void> {
-  const interval = minIntervalMs();
-  const turn = queue.then(async () => {
-    const wait = lastCallAt + interval - Date.now();
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    lastCallAt = Date.now();
-  });
-  queue = turn.catch(() => undefined);
-  await turn;
+function maxConcurrency(): number {
+  const value = Number(process.env.TIKTOK_MAX_CONCURRENCY ?? 3);
+  if (!Number.isFinite(value) || value < 1) return 3;
+  return Math.min(8, Math.floor(value));
+}
+
+/** จองช่อง: รอให้มีช่องว่าง แล้วเว้นระยะขั้นต่ำก่อนเริ่มคำขอ */
+async function acquireSlot(): Promise<void> {
+  if (inFlight >= maxConcurrency()) {
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  }
+  inFlight += 1;
+
+  const wait = lastCallAt + minIntervalMs() - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastCallAt = Date.now();
+}
+
+function releaseSlot(): void {
+  inFlight = Math.max(0, inFlight - 1);
+  const next = waiting.shift();
+  if (next) next();
 }
 
 function backoffDelay(attempt: number, retryAfterHeader: string | null): number {
@@ -216,7 +230,7 @@ export async function callTikTokApi<T>({
   url.searchParams.set("sign", sign);
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
-    await throttle();
+    await acquireSlot();
 
     const response = await safeFetch(url, config.appSecret, {
       method,
@@ -226,7 +240,7 @@ export async function callTikTokApi<T>({
         ...(accessToken ? { "x-tts-access-token": accessToken } : {}),
       },
       ...(method === "GET" ? {} : { body: rawBody }),
-    });
+    }).finally(() => releaseSlot());
 
     // 429 = ถูกจำกัดอัตรา (ฝั่ง transport) — ถอยแล้วลองใหม่ ไม่นับเป็น error
     if (response.status === 429) {
@@ -303,8 +317,10 @@ export async function exchangeAuthCode(
   // ค่าที่ TikTok กำหนดไว้จริงคือ authorized_code (ไม่ใช่ authorization_code)
   url.searchParams.set("grant_type", "authorized_code");
 
-  await throttle();
-  const response = await safeFetch(url, config.appSecret, { cache: "no-store" });
+  await acquireSlot();
+  const response = await safeFetch(url, config.appSecret, { cache: "no-store" }).finally(() =>
+    releaseSlot(),
+  );
   const data = await readEnvelope<RawTokenData>(response);
   return toTokenResult(data);
 }
@@ -319,8 +335,10 @@ export async function refreshAccessToken(
   url.searchParams.set("refresh_token", refreshToken);
   url.searchParams.set("grant_type", "refresh_token");
 
-  await throttle();
-  const response = await safeFetch(url, config.appSecret, { cache: "no-store" });
+  await acquireSlot();
+  const response = await safeFetch(url, config.appSecret, { cache: "no-store" }).finally(() =>
+    releaseSlot(),
+  );
   const data = await readEnvelope<RawTokenData>(response);
   return toTokenResult(data);
 }
