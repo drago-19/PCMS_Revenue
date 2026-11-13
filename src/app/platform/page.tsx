@@ -2,6 +2,7 @@ import Link from "next/link";
 import { EmptyState } from "@/components/PageHeader";
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformDashboardView } from "@/components/PlatformDashboard";
+import { PlatformOpsView } from "@/components/PlatformOps";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { PeriodPicker } from "@/components/PeriodPicker";
 import { SyncNowButton } from "@/components/SyncNowButton";
@@ -10,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getTikTokAnalytics } from "@/lib/platform/analytics";
+import { getTikTokOps } from "@/lib/platform/ops";
 import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { cn } from "@/lib/utils";
 
@@ -109,10 +111,11 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
   if (selectedShop) customerQs.set("shop", selectedShop);
   const customersHref = customerQs.toString() ? `/platform/customers?${customerQs.toString()}` : "/platform/customers";
 
-  const [config, accounts, analytics] = await Promise.all([
+  const [config, accounts, analytics, ops] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
     getTikTokAnalytics({ from: fromParam, to: toParam, rangeDays: 30, shopId: selectedShop }),
+    getTikTokOps({ from: fromParam, to: toParam, shopId: selectedShop }),
   ]);
 
   return (
@@ -246,6 +249,7 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
           </div>
 
           <PlatformDashboardView analytics={analytics} />
+          <PlatformOpsView ops={ops} />
         </section>
       ) : null}
 
