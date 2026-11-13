@@ -952,6 +952,36 @@ CREATE TABLE IF NOT EXISTS platform_orders (
   PRIMARY KEY (platform, shop_id, order_id)
 );
 
+-- ข้อมูลผู้รับจาก API — TikTok ปิดชื่อ/เบอร์/บ้านเลขที่ให้ออเดอร์ที่ส่งผ่านขนส่งของ TikTok
+-- แต่จังหวัดกับอำเภอยังอ่านได้เต็ม ใช้ตอบคำถาม "ลูกค้าอยู่จังหวัดไหนซื้อเยอะสุด"
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS buyer_user_id TEXT;
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS recipient_name TEXT;
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS recipient_phone TEXT;
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS province TEXT;
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS district TEXT;
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS postal_code TEXT;
+
+-- เติมย้อนหลังให้แถวที่ดึงมาก่อนมีคอลัมน์ — แถวที่เติมแล้วจะถูกข้าม จึงรันซ้ำได้ทุกครั้งที่เปิดระบบ
+UPDATE platform_orders SET
+  buyer_user_id = raw_json->>'user_id',
+  recipient_name = raw_json->'recipient_address'->>'name',
+  recipient_phone = raw_json->'recipient_address'->>'phone_number',
+  postal_code = raw_json->'recipient_address'->>'postal_code',
+  province = (
+    SELECT elem->>'address_name'
+    FROM jsonb_array_elements(COALESCE(raw_json->'recipient_address'->'district_info', '[]'::jsonb)) AS elem
+    WHERE elem->>'address_level' = 'L1'
+    LIMIT 1
+  ),
+  district = (
+    SELECT elem->>'address_name'
+    FROM jsonb_array_elements(COALESCE(raw_json->'recipient_address'->'district_info', '[]'::jsonb)) AS elem
+    WHERE elem->>'address_level' = 'L2'
+    LIMIT 1
+  )
+WHERE province IS NULL
+  AND COALESCE(raw_json->'recipient_address'->>'name', '') <> '';
+
 CREATE TABLE IF NOT EXISTS platform_order_items (
   platform TEXT NOT NULL,
   shop_id TEXT NOT NULL,
@@ -1003,6 +1033,8 @@ CREATE TABLE IF NOT EXISTS platform_order_finance (
 CREATE INDEX IF NOT EXISTS platform_orders_shop_time_idx ON platform_orders (shop_id, create_time DESC);
 CREATE INDEX IF NOT EXISTS platform_orders_status_idx ON platform_orders (order_status);
 CREATE INDEX IF NOT EXISTS platform_orders_order_id_idx ON platform_orders (order_id);
+CREATE INDEX IF NOT EXISTS platform_orders_buyer_idx ON platform_orders (buyer_user_id);
+CREATE INDEX IF NOT EXISTS platform_orders_province_idx ON platform_orders (province);
 CREATE INDEX IF NOT EXISTS platform_order_items_order_idx ON platform_order_items (order_id);
 CREATE INDEX IF NOT EXISTS platform_order_finance_time_idx ON platform_order_finance (shop_id, order_create_time DESC);
 CREATE INDEX IF NOT EXISTS platform_order_finance_order_idx ON platform_order_finance (order_id);

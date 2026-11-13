@@ -102,6 +102,12 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
   const fromParam = readParam(params, "from") ?? undefined;
   const toParam = readParam(params, "to") ?? undefined;
   const flash = buildFlash(params);
+  // ส่งช่วงเวลา/ร้านที่กำลังดูอยู่ต่อไปหน้า "ข้อมูลลูกค้า" เพื่อให้เห็นเลขชุดเดียวกัน
+  const customerQs = new URLSearchParams();
+  if (fromParam) customerQs.set("from", fromParam);
+  if (toParam) customerQs.set("to", toParam);
+  if (selectedShop) customerQs.set("shop", selectedShop);
+  const customersHref = customerQs.toString() ? `/platform/customers?${customerQs.toString()}` : "/platform/customers";
 
   const [config, accounts, analytics] = await Promise.all([
     getPlatformConfig(),
@@ -228,7 +234,10 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
               ค้นหาเลขคำสั่งซื้อ · กรองตามสถานะ · เปิดดูสินค้าและยอดเงินทีละออเดอร์ ·{" "}
               <PlatformAutoRefresh seconds={60} />
             </p>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <Link href={customersHref}>ข้อมูลลูกค้า</Link>
+              </Button>
               <Button size="sm" variant="outline" asChild>
                 <Link href="/platform/orders">ดูรายละเอียดรายออเดอร์</Link>
               </Button>
