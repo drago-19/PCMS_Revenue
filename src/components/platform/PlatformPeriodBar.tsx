@@ -8,6 +8,7 @@ import { PeriodPicker } from "@/components/PeriodPicker";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { SyncNowButton } from "@/components/SyncNowButton";
 import { activePresetKey, periodPresets, thaiDateTime } from "@/lib/platform/period";
+import { getLastSyncAt } from "@/lib/platform/sync-state";
 import { cn } from "@/lib/utils";
 
 export type PlatformAccount = { accountKey: string; shopName: string | null };
@@ -27,7 +28,7 @@ function hrefFor(
   return qs.toString() ? `${basePath}?${qs.toString()}` : basePath;
 }
 
-export function PlatformPeriodBar({
+export async function PlatformPeriodBar({
   basePath,
   from,
   to,
@@ -48,6 +49,9 @@ export function PlatformPeriodBar({
   autoRefreshSeconds?: number;
   lastSyncedAt?: string | null;
 }) {
+  // ทุกแท็บต้องบอกได้ว่าข้อมูลล่าสุดเมื่อไร — ถ้าหน้าไหนไม่ได้ส่งมา ให้อ่านจากรอบซิงก์ล่าสุด
+  const syncedAt = lastSyncedAt ?? (await getLastSyncAt());
+
   const activeKey = activePresetKey(from, to);
   const isCustom = Boolean((from || to) && !activeKey);
 
@@ -145,14 +149,14 @@ export function PlatformPeriodBar({
         ) : null}
       </div>
 
-      {shopLabel || lastSyncedAt || autoRefreshSeconds ? (
+      {shopLabel || syncedAt || autoRefreshSeconds ? (
         <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted-foreground">
           {shopLabel ? (
             <span className="font-bold text-foreground">ร้าน {shopLabel}</span>
           ) : null}
-          {shopLabel && (lastSyncedAt || autoRefreshSeconds) ? <span aria-hidden="true">·</span> : null}
-          {lastSyncedAt ? <span>ข้อมูลถึง {thaiDateTime(lastSyncedAt)}</span> : null}
-          {lastSyncedAt && autoRefreshSeconds ? <span aria-hidden="true">·</span> : null}
+          {shopLabel && (syncedAt || autoRefreshSeconds) ? <span aria-hidden="true">·</span> : null}
+          {syncedAt ? <span>ข้อมูลถึง {thaiDateTime(syncedAt)}</span> : null}
+          {syncedAt && autoRefreshSeconds ? <span aria-hidden="true">·</span> : null}
           {autoRefreshSeconds ? <PlatformAutoRefresh seconds={autoRefreshSeconds} /> : null}
         </p>
       ) : null}
