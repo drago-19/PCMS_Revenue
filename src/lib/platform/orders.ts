@@ -114,7 +114,7 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
         GROUP BY 1, 2
      ) f ON f.shop_id = o.shop_id AND f.order_id = o.order_id
      WHERE ${where.join(" AND ")}
-     ORDER BY o.create_time DESC NULLS LAST
+     ORDER BY o.create_time DESC NULLS LAST, o.order_id DESC
      LIMIT ${pageSize} OFFSET ${offset}`,
     params,
   );

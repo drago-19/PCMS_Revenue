@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformNav } from "@/components/platform/PlatformNav";
+import { thaiDateTime } from "@/lib/platform/period";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getPlatformOrder } from "@/lib/platform/orders";
@@ -25,7 +26,7 @@ function money(value: number): string {
 
 function dateTime(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+  return thaiDateTime(value);
 }
 
 export default async function OrderDetailPage({

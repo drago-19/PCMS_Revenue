@@ -4,6 +4,7 @@ import { PlatformStat } from "@/components/platform/PlatformCards";
 import { PlatformNav } from "@/components/platform/PlatformNav";
 import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
+import { parseStamp } from "@/lib/platform/period";
 import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,9 +64,19 @@ function money(value: number): string {
   return value.toLocaleString("th-TH", { maximumFractionDigits: 0 });
 }
 
+/** เวลาแบบมีวินาที — ต้องเห็นวินาทีจึงจะรู้ว่าลิสต์เรียงจากใหม่ไปเก่าจริง */
 function dateTime(value: string | null): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
+  const date = parseStamp(value);
+  if (!date) return "—";
+  return date.toLocaleString("th-TH", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: "Asia/Bangkok",
+  });
 }
 
 export default async function OrdersPage({ searchParams }: { searchParams: SearchParams }) {
