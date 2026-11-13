@@ -244,6 +244,9 @@ export default async function PlatformSyncPage({ searchParams }: { searchParams:
               <Button size="sm" variant="outline" asChild>
                 <Link href="/platform/orders">ดูรายละเอียดรายออเดอร์</Link>
               </Button>
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/platform/statements">statement ของ TikTok</Link>
+              </Button>
               <SyncNowButton />
             </div>
           </div>
