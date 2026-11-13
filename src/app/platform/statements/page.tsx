@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PeriodPicker } from "@/components/PeriodPicker";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getTikTokStatements } from "@/lib/platform/statements";
@@ -23,12 +24,6 @@ function dayLabel(value: string | null): string {
   });
 }
 
-function isoDayOffset(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
-}
 
 export default async function PlatformStatementsPage({
   searchParams,
@@ -58,27 +53,20 @@ export default async function PlatformStatementsPage({
         </Link>
       </div>
 
-      <div className="flex min-w-0 flex-wrap gap-2">
-        {[
-          { label: "7 วัน", days: -7 },
-          { label: "30 วัน", days: -30 },
-          { label: "90 วัน", days: -90 },
-          { label: "ทั้งปี 69", days: 0 },
-        ].map((option) => {
-          const href =
-            option.days === 0
-              ? "/platform/statements?from=2026-01-01"
-              : `/platform/statements?from=${isoDayOffset(option.days)}`;
-          return (
-            <Link
-              key={option.label}
-              href={href}
-              className="inline-flex h-10 items-center rounded-lg border border-border px-3 text-[13px] hover:bg-muted"
-            >
-              {option.label}
-            </Link>
-          );
-        })}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="text-[12.5px] text-muted-foreground">ช่วงวันที่:</span>
+        <PeriodPicker from={params.from} to={params.to} basePath="/platform/statements" />
+        <Link
+          href="/platform/statements?from=2026-01-01"
+          className="text-[12.5px] underline underline-offset-2"
+        >
+          ทั้งปี 69
+        </Link>
+        {params.from || params.to ? (
+          <Link href="/platform/statements" className="text-[12.5px] underline underline-offset-2">
+            ล้างช่วงวันที่
+          </Link>
+        ) : null}
       </div>
 
       <div className="grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-4">
