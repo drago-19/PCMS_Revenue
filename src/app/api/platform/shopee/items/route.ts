@@ -8,7 +8,7 @@ import {
   ShopeeApiError,
   uploadShopeeImage,
 } from "@/lib/platform/shopee";
-import { ensureValidShopeeToken } from "@/lib/platform/shopee-sync";
+import { ensureValidShopeeToken, syncShopeeStock } from "@/lib/platform/shopee-sync";
 import {
   getPlatformConfig,
   listPlatformAccounts,
@@ -173,12 +173,23 @@ export async function POST(request: Request) {
       requestId: auth.requestId,
     });
 
+    // ดึงสต็อกทันทีหลังสร้าง เพื่อให้สินค้าใหม่โผล่ในหน้าเว็บโดยไม่ต้องรอรอบอัตโนมัติ
+    // Shopee ใช้เวลาสักครู่กว่าสินค้าที่เพิ่งสร้างจะโผล่ใน get_item_list — จึงรอแล้วค่อยดึง
+    let stockSynced = true;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+      await syncShopeeStock(target.accountKey);
+    } catch {
+      stockSynced = false;
+    }
+
     return Response.json(
       {
         ok: true,
         itemId: created.itemId,
         category: category.name,
         imageUrl: uploaded.imageUrl,
+        stockSynced,
         requestId: auth.requestId,
       },
       { status: 200, headers: { "x-request-id": auth.requestId } },
