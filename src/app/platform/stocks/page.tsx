@@ -31,6 +31,8 @@ import {
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { StockAdjustForm } from "@/components/platform/StockAdjustForm";
+import { StockHoldActions } from "@/components/platform/StockHoldActions";
+import { listOpenHolds } from "@/lib/platform/stock-hold";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
 import { ShopeeAddProductButton } from "@/components/ShopeeAddProductButton";
 
@@ -176,6 +178,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const inTransit = counts.inTransit;
   const outOfStock = counts.out;
   const shopName = accounts.find((account) => account.accountKey === shopId)?.shopName ?? shopId;
+  // ที่กันสต็อกค้างไว้ (ขั้นที่ 2) — เฉพาะร้าน TikTok ที่เชื่อมอยู่
+  const heldBySku = platform === "tiktok" && shopId ? await listOpenHolds(shopId) : new Map<string, number>();
 
   // ลิงก์ที่คงคำค้นและตัวกรองไว้ขณะเปลี่ยนหน้า/ปิดป๊อปอัป
   const listHref = (next: { page?: number; filter?: StockListFilter; q?: string }) => {
@@ -484,6 +488,19 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 {thaiDateTime(skuDetail.updatedAt)}
               </p>
             </DialogHeader>
+
+            {skuDetail.productId ? (
+              <StockHoldActions
+                shopId={shopId ?? ""}
+                productId={skuDetail.productId}
+                skuId={skuDetail.skuId}
+                quantity={skuDetail.quantity}
+                inTransit={skuDetail.inTransit}
+                held={heldBySku.get(skuDetail.skuId) ?? 0}
+                canWrite={isSandboxShopName(shopName)}
+                blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
+              />
+            ) : null}
 
             {skuDetail.productId ? (
               <StockAdjustForm

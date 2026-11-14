@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-14-v68";
+const SCHEMA_VERSION = "2026-11-14-v69";
 
 export type { CompanyId };
 
@@ -1127,6 +1127,26 @@ CREATE TABLE IF NOT EXISTS platform_return_items (
 );
 CREATE INDEX IF NOT EXISTS platform_return_items_sku_idx
   ON platform_return_items (platform, shop_id, sku_id);
+
+-- การ "กันสต็อก" ของที่กำลังตีกลับ: ลดจำนวนบน TikTok ไว้ก่อน แล้วคืนเมื่อของถึงร้าน
+-- หนึ่ง SKU มีที่กันค้างไว้ได้ทีละรายการเท่านั้น (unique เฉพาะสถานะ held)
+CREATE TABLE IF NOT EXISTS platform_stock_holds (
+  id BIGSERIAL PRIMARY KEY,
+  platform TEXT NOT NULL DEFAULT 'TikTok',
+  shop_id TEXT NOT NULL,
+  sku_id TEXT NOT NULL,
+  product_id TEXT,
+  quantity INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'held',
+  source TEXT NOT NULL DEFAULT 'return_in_transit',
+  actor TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  released_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS platform_stock_holds_open_idx
+  ON platform_stock_holds (platform, shop_id, sku_id) WHERE status = 'held';
+CREATE INDEX IF NOT EXISTS platform_stock_holds_shop_time_idx
+  ON platform_stock_holds (platform, shop_id, created_at DESC);
 
 -- เหตุการณ์พัสดุแบบละเอียดจาก Get Tracking (ถึงศูนย์คัดแยก/สาขา/นำส่ง)
 CREATE TABLE IF NOT EXISTS platform_order_tracking (

@@ -371,6 +371,28 @@ export type StockMovementCursor = { changedAt: string; id: string; back?: boolea
  * ประวัติการเปลี่ยนสต็อกของร้าน ทีละหน้าแบบ keyset (เวลา + id)
  * ไม่ใช้ OFFSET เพราะตารางนี้โตตลอดและหน้าลึกจะช้าลงเรื่อย ๆ
  */
+/** จำนวนชิ้นของ SKU หนึ่งที่ลูกค้าส่งคืนแล้วแต่ยังไม่ถึงร้าน */
+export async function getInTransitQty(
+  shopId: string,
+  skuId: string,
+  platform = TIKTOK_PLATFORM,
+): Promise<number> {
+  const rows = await query<{ qty: number }>(
+    `SELECT COALESCE(sum(COALESCE(NULLIF(i.quantity, 0), oi.quantity, 0)), 0)::int AS qty
+       FROM platform_return_items i
+       JOIN platform_returns r
+         ON r.platform = i.platform AND r.shop_id = i.shop_id AND r.return_id = i.return_id
+       LEFT JOIN platform_order_items oi
+         ON oi.platform = i.platform AND oi.shop_id = i.shop_id
+        AND oi.order_id = r.order_id AND oi.line_item_id = i.order_line_item_id
+      WHERE i.platform = $1 AND i.shop_id = $2 AND i.sku_id = $3
+        AND r.return_type = 'RETURN_AND_REFUND'
+        AND r.return_status = ANY($4::text[])`,
+    [platform, shopId, skuId, [...IN_TRANSIT_RETURN_STATUSES]],
+  );
+  return Number(rows[0]?.qty ?? 0);
+}
+
 export async function getStockMovements(
   shopId: string,
   options: { limit?: number; cursor?: StockMovementCursor; platform?: string } = {},
@@ -440,6 +462,8 @@ export type SkuDetail = {
   sellerSku: string | null;
   productName: string | null;
   quantity: number;
+  /** ชิ้นที่ลูกค้าส่งคืนแล้วแต่ยังไม่ถึงร้าน */
+  inTransit: number;
   warehouses: Array<{ warehouseId: string; quantity: number }>;
   updatedAt: string;
   imageUrl: string | null;
@@ -583,8 +607,11 @@ export async function getSkuDetail(
     imageUrl = image[0]?.image_url ?? null;
   }
 
+  const inTransit = await getInTransitQty(shopId, skuId, platform);
+
   return {
     skuId: row.sku_id,
+    inTransit,
     sellerSku: row.seller_sku,
     productName: row.product_name,
     quantity: Number(row.quantity ?? 0),
