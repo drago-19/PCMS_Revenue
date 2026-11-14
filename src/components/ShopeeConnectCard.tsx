@@ -452,15 +452,17 @@ export function ShopeeConnectCard({
               {accounts.length > 0 ? "เพิ่ม / เชื่อมร้าน Shopee ใหม่" : "เชื่อมร้าน Shopee (OAuth)"}
             </a>
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="min-h-[40px]"
-            onClick={() => setShowManual((v) => !v)}
-          >
-            {showManual ? "ซ่อนช่องวาง Callback" : "วาง Callback URL / Code (Dev)"}
-          </Button>
+          {hostIsLocal ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-[40px]"
+              onClick={() => setShowManual((v) => !v)}
+            >
+              {showManual ? "ซ่อนช่องวาง Callback" : "วาง Callback URL / Code (Dev)"}
+            </Button>
+          ) : null}
           {connectedCount > 0 ? (
             <Button asChild variant="outline" size="sm" className="min-h-[40px]">
               <Link href="/platform?platform=shopee">เปิดดูแดชบอร์ด Shopee</Link>
