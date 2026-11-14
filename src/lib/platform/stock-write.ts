@@ -23,21 +23,24 @@ export function liveWriteAllowed(): boolean {
 
 type Warehouse = { warehouseId: string; quantity: number };
 
+/**
+ * callTikTokApi คืนตัว product มาตรง ๆ (ไม่ได้ห่อใน data.product)
+ * ผลตอบจริงมี skus/status อยู่บนสุด
+ */
 type ProductDetail = {
-  product?: {
-    status?: string;
-    skus?: Array<{
-      id?: string;
-      seller_sku?: string;
-      inventory?: Array<{ warehouse_id?: string; quantity?: number }>;
-    }>;
-  };
+  status?: string;
+  product_status?: string;
+  skus?: Array<{
+    id?: string;
+    seller_sku?: string;
+    inventory?: Array<{ warehouse_id?: string; quantity?: number }>;
+  }>;
 };
 
 /** สถานะที่ TikTok ยอมให้แก้สต็อก — FREEZE/DELETED ส่งไปจะถูกตีกลับ */
 const WRITABLE_STATUS = new Set(["DRAFT", "PENDING", "FAILED", "ACTIVATE", "SELLER_DEACTIVATED"]);
 
-function toWarehouses(sku: NonNullable<NonNullable<ProductDetail["product"]>["skus"]>[number]): Warehouse[] {
+function toWarehouses(sku: NonNullable<ProductDetail["skus"]>[number]): Warehouse[] {
   return (sku.inventory ?? [])
     .filter((item) => item.warehouse_id)
     .map((item) => ({ warehouseId: String(item.warehouse_id), quantity: Number(item.quantity ?? 0) }));
@@ -128,10 +131,13 @@ async function adjustStockInner(input: {
       ...ctx,
       path: `/product/202309/products/${encodeURIComponent(productId)}`,
     });
-    const product = detail.product;
-    if (!product) throw new StockWriteError("not_found", "ไม่พบสินค้านี้ใน TikTok");
-    if (product.status && !WRITABLE_STATUS.has(product.status)) {
-      throw new StockWriteError("rejected", `สินค้าอยู่สถานะ ${product.status} แก้สต็อกไม่ได้`);
+    const product = detail;
+    const status = product.status ?? product.product_status;
+    if (!product.skus?.length) {
+      throw new StockWriteError("not_found", "ไม่พบสินค้านี้ใน TikTok");
+    }
+    if (status && !WRITABLE_STATUS.has(status)) {
+      throw new StockWriteError("rejected", `สินค้าอยู่สถานะ ${status} แก้สต็อกไม่ได้`);
     }
     const sku = (product.skus ?? []).find((row) => String(row.id) === skuId);
     if (!sku) throw new StockWriteError("not_found", "ไม่พบ SKU นี้ในสินค้า");
