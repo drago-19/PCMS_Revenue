@@ -4,6 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
 type Action = "set_stock" | "unlist" | "delete";
@@ -24,6 +32,7 @@ export function ShopeeStockEditor({
   const router = useRouter();
   const [value, setValue] = useState(String(quantity));
   const [busy, setBusy] = useState<Action | null>(null);
+  const [askDelete, setAskDelete] = useState(false);
 
   const [itemIdRaw, modelIdRaw] = skuId.split(":");
   const itemId = Number.parseInt(itemIdRaw ?? "", 10);
@@ -100,14 +109,45 @@ export function ShopeeStockEditor({
           variant="outline"
           className="h-10 text-destructive"
           disabled={busy !== null}
-          onClick={() => {
-            if (!window.confirm("ลบสินค้านี้ออกจาก Shopee ถาวร? กู้คืนไม่ได้")) return;
-            void run("delete", {}, "ลบสินค้าออกจาก Shopee แล้ว");
-          }}
+          onClick={() => setAskDelete(true)}
         >
           {busy === "delete" ? "กำลังลบ…" : "ลบสินค้า"}
         </Button>
       </div>
+
+      <Dialog open={askDelete} onOpenChange={setAskDelete}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="pr-11">
+            <DialogTitle className="text-[16px] leading-6">ลบสินค้าออกจาก Shopee?</DialogTitle>
+            <DialogDescription className="text-[12.5px] leading-5">
+              สินค้า {skuId} จะถูกลบถาวรจากร้าน — กู้คืนไม่ได้ และรูป/ประวัติการขายที่ผูกไว้จะหายไปด้วย
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10"
+              onClick={() => setAskDelete(false)}
+              disabled={busy === "delete"}
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="button"
+              className="h-10"
+              variant="destructive"
+              disabled={busy === "delete"}
+              onClick={() => {
+                setAskDelete(false);
+                void run("delete", {}, "ลบสินค้าออกจาก Shopee แล้ว");
+              }}
+            >
+              {busy === "delete" ? "กำลังลบ…" : "ลบถาวร"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
