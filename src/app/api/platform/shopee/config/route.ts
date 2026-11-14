@@ -6,6 +6,7 @@ import {
   saveShopeeConfig,
   SHOPEE_PLATFORM,
 } from "@/lib/platform/store";
+import { setShopeePushConfig } from "@/lib/platform/shopee";
 import { getClientIp } from "@/lib/session-token";
 
 export const runtime = "nodejs";
@@ -76,12 +77,19 @@ export async function POST(request: Request) {
       },
       requestId: auth.requestId,
     });
+
+    // ลงทะเบียน callback push ให้ตรงกับคีย์ที่เพิ่งบันทึก (Sandbox/Live)
+    const base = (config.redirectBaseUrl ?? new URL(request.url).origin).replace(/\/+$/, "");
+    const pushToken = createHmac("sha256", config.partnerKey).update("shopee-push").digest("hex").slice(0, 32);
+    const push = await setShopeePushConfig(config, `${base}/api/platform/shopee/webhook?token=${pushToken}`);
     return Response.json(
       {
         ok: true,
         partnerId: config.partnerId,
         env: config.env,
         redirectBaseUrl: config.redirectBaseUrl ?? null,
+        pushRegistered: push.ok,
+        pushMessage: push.ok ? null : push.message,
         requestId: auth.requestId,
       },
       { status: 200, headers: { "x-request-id": auth.requestId } },

@@ -1203,6 +1203,30 @@ export async function addShopeeItem(
   return { itemId };
 }
 
+/**
+ * ลงทะเบียน callback URL รับ push กับ Shopee (API สาธารณะ ไม่ต้องใช้ token ร้าน)
+ * เรียกทุกครั้งที่บันทึก Credential เพื่อให้ค่า Sandbox/Live ตรงกับคีย์ที่ใช้อยู่
+ */
+export async function setShopeePushConfig(
+  config: ShopeeAppConfig,
+  callbackUrl: string,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const payload = await callShopeeApi<{ result?: string }>({
+      config,
+      path: "/api/v2/push/set_app_push_config",
+      method: "POST",
+      body: {
+        callback_url: callbackUrl,
+        push_config: { order_status: 1, order_tracking_no: 1 },
+      },
+    });
+    return { ok: payload.response?.result === "success", message: payload.message ?? "" };
+  } catch (err) {
+    return { ok: false, message: redactShopeeSecret(err instanceof Error ? err.message : String(err), config.partnerKey) };
+  }
+}
+
 /** ลบสินค้าถาวร — Shopee ลบไม่ได้ถ้าสินค้ายังอยู่ในโปรโมชั่นหรือมีออเดอร์ค้าง */
 export async function deleteShopeeItem(
   config: ShopeeAppConfig,

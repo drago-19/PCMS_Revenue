@@ -116,9 +116,19 @@ export function ShopeeConnectCard({
           redirectBaseUrl,
         }),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        error?: string;
+        pushRegistered?: boolean;
+        pushMessage?: string | null;
+      };
       if (!response.ok) throw new Error(payload.error || "บันทึกค่า Shopee ไม่สำเร็จ");
-      toast.success("บันทึกค่าเชื่อมต่อ Shopee แล้ว");
+      if (payload.pushRegistered === false) {
+        toast.warning(
+          `บันทึกค่าแล้ว แต่ลงทะเบียน Push ไม่สำเร็จ: ${payload.pushMessage ?? "Shopee ปฏิเสธ"}`,
+        );
+      } else {
+        toast.success("บันทึกค่าเชื่อมต่อ Shopee แล้ว · ลงทะเบียน Push ให้เรียบร้อย");
+      }
       setPartnerKey("");
       setEditing(false);
       router.refresh();
