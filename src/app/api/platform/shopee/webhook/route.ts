@@ -34,7 +34,11 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "too_large" }, { status: 413 });
   }
 
+  // โทเคนลับใน URL กันคนอื่นยิงเข้ามาเล่น — คำนวณจาก partner key ที่ทั้งสองฝั่งมี
   const partnerKey = config.shopee.partnerKey;
+  const expectedToken = createHmac("sha256", partnerKey).update("shopee-push").digest("hex").slice(0, 32);
+  const token = new URL(request.url).searchParams.get("token") ?? "";
+  const tokenOk = token.length > 0 && safeEqual(expectedToken, token);
   const authorization = (request.headers.get("authorization") ?? "").trim();
 
   // หลัง reverse proxy ค่า request.url อาจเป็น http:// หรือใช้ host ภายใน
@@ -49,11 +53,13 @@ export async function POST(request: Request) {
     `https://${forwardedHost}${pathname}${search}`,
   ]);
 
-  const matched = authorization
-    ? [...candidates].some((base) =>
-        safeEqual(createHmac("sha256", partnerKey).update(`${base}|${raw}`).digest("hex"), authorization),
-      )
-    : false;
+  const matched =
+    tokenOk ||
+    (authorization
+      ? [...candidates].some((base) =>
+          safeEqual(createHmac("sha256", partnerKey).update(`${base}|${raw}`).digest("hex"), authorization),
+        )
+      : false);
 
   if (!matched) {
     // บันทึกไว้เพื่อวินิจฉัย: Shopee ใช้ URL ใดในการเซ็น และส่ง header อะไรมา
