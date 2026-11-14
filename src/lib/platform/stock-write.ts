@@ -63,6 +63,7 @@ export async function adjustStock(input: {
     throw new StockWriteError("rejected", "ต้องระบุจำนวนที่ต้องการเพิ่มหรือลด");
   }
 
+
   const config = await getPlatformConfig();
   if (!config.tiktok) throw new StockWriteError("not_allowed", "ยังไม่ได้ตั้งค่าแอป TikTok");
 
@@ -88,19 +89,40 @@ export async function adjustStock(input: {
     query: { shop_cipher: account.shopCipher },
   };
 
-  const detail = await callTikTokApi<ProductDetail>({
-    ...ctx,
-    path: `/product/202309/products/${encodeURIComponent(productId)}`,
-  });
-  const product = detail.product;
-  if (!product) throw new StockWriteError("not_found", "ไม่พบสินค้านี้ใน TikTok");
-  if (product.status && !WRITABLE_STATUS.has(product.status)) {
-    throw new StockWriteError("rejected", `สินค้าอยู่สถานะ ${product.status} แก้สต็อกไม่ได้`);
+  // อ่านสดจาก TikTok ก่อน — สินค้าที่เป็น Draft จะอ่านรายละเอียดไม่ได้
+  // กรณีนั้นใช้ค่าที่ซิงก์ไว้ใน DB แทน (Draft ยังไม่ขาย จึงไม่มีคนแย่งตัดสต็อก)
+  let warehouses: Warehouse[];
+  let sellerSku: string | null = null;
+  let fromDb = false;
+  try {
+    const detail = await callTikTokApi<ProductDetail>({
+      ...ctx,
+      path: `/product/202309/products/${encodeURIComponent(productId)}`,
+    });
+    const product = detail.product;
+    if (!product) throw new StockWriteError("not_found", "ไม่พบสินค้านี้ใน TikTok");
+    if (product.status && !WRITABLE_STATUS.has(product.status)) {
+      throw new StockWriteError("rejected", `สินค้าอยู่สถานะ ${product.status} แก้สต็อกไม่ได้`);
+    }
+    const sku = (product.skus ?? []).find((row) => String(row.id) === skuId);
+    if (!sku) throw new StockWriteError("not_found", "ไม่พบ SKU นี้ในสินค้า");
+    warehouses = toWarehouses(sku);
+    sellerSku = sku.seller_sku ?? null;
+  } catch (error) {
+    if (!(error instanceof StockWriteError) || error.code !== "not_found") throw error;
+    const rows = await query<{ quantity: number; warehouses: Warehouse[]; seller_sku: string | null }>(
+      `SELECT quantity, warehouses, seller_sku FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
+      [shopId, skuId],
+    );
+    const row = rows[0];
+    if (!row) throw new StockWriteError("not_found", "ไม่พบสินค้านี้ทั้งใน TikTok และในฐานข้อมูลเรา");
+    warehouses = Array.isArray(row.warehouses) ? row.warehouses : [];
+    sellerSku = row.seller_sku;
+    fromDb = true;
   }
-
-  const sku = (product.skus ?? []).find((row) => String(row.id) === skuId);
-  if (!sku) throw new StockWriteError("not_found", "ไม่พบ SKU นี้ในสินค้า");
-  const warehouses = toWarehouses(sku);
+  if (fromDb) {
+    console.log("[stock-write] สินค้าอ่านสดไม่ได้ (Draft) — ใช้ค่าที่ซิงก์ไว้", { shopId, skuId });
+  }
   if (warehouses.length === 0) {
     throw new StockWriteError("rejected", "SKU นี้ไม่มีคลังให้แก้ — ต้องตั้งคลังใน Seller Center ก่อน");
   }
@@ -153,7 +175,7 @@ export async function adjustStock(input: {
     `INSERT INTO platform_stock_movements
        (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [TIKTOK_PLATFORM, shopId, skuId, sku.seller_sku ?? null, null, current, next, delta],
+    [TIKTOK_PLATFORM, shopId, skuId, sellerSku, null, current, next, delta],
   );
 
   return { quantity: next, warehouses: nextWarehouses };
