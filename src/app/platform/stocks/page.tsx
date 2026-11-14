@@ -21,6 +21,7 @@ import {
   syncStock,
   type StockListFilter,
 } from "@/lib/platform/stock";
+import { isSandboxShopName } from "@/lib/platform/platforms";
 import { cn } from "@/lib/utils";
 import {
   getActiveShopId,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/platform/store";
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
+import { StockAdjustForm } from "@/components/platform/StockAdjustForm";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
 import { ShopeeAddProductButton } from "@/components/ShopeeAddProductButton";
 
@@ -466,6 +468,17 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 {thaiDateTime(skuDetail.updatedAt)}
               </p>
             </DialogHeader>
+
+            {skuDetail.productId ? (
+              <StockAdjustForm
+                shopId={shopId}
+                productId={skuDetail.productId}
+                skuId={skuDetail.skuId}
+                quantity={skuDetail.quantity}
+                canWrite={isSandboxShopName(shopName)}
+                blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
+              />
+            ) : null}
 
             <div className="flex flex-col gap-4">
               <div className="flex items-center gap-3">

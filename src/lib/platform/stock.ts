@@ -393,6 +393,7 @@ export type SkuOrderRow = {
 
 export type SkuDetail = {
   skuId: string;
+  productId: string | null;
   sellerSku: string | null;
   productName: string | null;
   quantity: number;
@@ -546,6 +547,7 @@ export async function getSkuDetail(
     quantity: Number(row.quantity ?? 0),
     warehouses: row.warehouses ?? [],
     updatedAt: row.updated_at,
+    productId: row.product_id ?? null,
     imageUrl,
     orders: orders.map((order) => ({
       orderId: order.order_id,
