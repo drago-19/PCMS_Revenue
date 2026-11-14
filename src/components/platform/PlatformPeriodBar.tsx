@@ -91,7 +91,7 @@ export async function PlatformPeriodBar({
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      {(accounts?.length ?? 0) > 1 ? (
+      {accountList.length > 1 ? (
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
           <span className="font-bold text-muted-foreground">ร้าน</span>
           <Link
@@ -103,7 +103,7 @@ export async function PlatformPeriodBar({
           >
             ทุกร้านรวมกัน
           </Link>
-          {(accounts ?? []).map((account) => (
+          {accountList.map((account) => (
             <Link
               key={account.accountKey}
               href={hrefFor(basePath, { from, to }, { shop: account.accountKey, query: mergedExtraQuery })}
