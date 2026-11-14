@@ -28,6 +28,8 @@ export type StockRow = {
   updatedAt: string;
   /** รูปสินค้าที่เราเก็บไว้กับสต็อก (ดึงจาก TikTok ตอนซิงก์) */
   imageUrl: string | null;
+  /** ชิ้นที่ลูกค้าส่งคืนแล้วแต่ยังไม่ถึงร้าน — ไม่ควรนับเป็นของพร้อมขาย */
+  inTransit: number;
 };
 
 export type StockMovement = {
@@ -212,6 +214,33 @@ export const LOW_STOCK_THRESHOLD = 5;
 // หน้าสต็อกอ่านเฉพาะตารางของแพลตฟอร์ม — ไม่ผูกกับทะเบียนสินค้าหรือต้นทุนของระบบเรา
 const STOCK_FROM = `FROM platform_stock s`;
 
+// สถานะคำขอคืนที่ถือว่า "ของออกจากมือลูกค้าแล้วแต่ยังไม่ถึงร้าน"
+// ไม่นับ REFUND (ลูกค้าเก็บของไว้) และไม่นับ REPLACEMENT/EXCHANGE (มีออเดอร์ใหม่แทน)
+export const IN_TRANSIT_RETURN_STATUSES = [
+  "BUYER_SHIPPED_ITEM",
+  "RETURN_OR_REFUND_REQUEST_SUCCESS",
+  "RETURN_OR_REFUND_REQUEST_COMPLETE",
+];
+
+/** ยอดกำลังตีกลับต่อ SKU — จำนวนต่อแถวอาจไม่ถูกส่งมาในบางเวอร์ชัน จึงถอยไปใช้จำนวนในรายการออเดอร์ */
+function inTransitJoin(statusParam: string): string {
+  return `LEFT JOIN (
+    SELECT i.platform, i.shop_id, i.sku_id,
+           sum(COALESCE(NULLIF(i.quantity, 0), oi.quantity, 0))::int AS in_transit
+      FROM platform_return_items i
+      JOIN platform_returns r
+        ON r.platform = i.platform AND r.shop_id = i.shop_id AND r.return_id = i.return_id
+      LEFT JOIN platform_order_items oi
+        ON oi.platform = i.platform AND oi.shop_id = i.shop_id
+       AND oi.order_id = r.order_id AND oi.line_item_id = i.order_line_item_id
+     WHERE i.platform = $1 AND i.shop_id = $2
+       AND r.return_type = 'RETURN_AND_REFUND'
+       AND r.return_status = ANY(${statusParam}::text[])
+     GROUP BY i.platform, i.shop_id, i.sku_id
+  ) rt
+    ON rt.platform = s.platform AND rt.shop_id = s.shop_id AND rt.sku_id = s.sku_id`;
+}
+
 const STOCK_FILTER_SQL: Record<Exclude<StockListFilter, "all">, string> = {
   out: "s.quantity <= 0",
   low: `s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD}`,
@@ -230,6 +259,7 @@ type StockRowDb = {
   warehouses: Array<{ warehouseId: string; quantity: number }>;
   updated_at: string;
   stock_image: string | null;
+  in_transit: number;
 };
 
 function toStockRow(row: StockRowDb): StockRow {
@@ -238,6 +268,7 @@ function toStockRow(row: StockRowDb): StockRow {
     sellerSku: row.seller_sku,
     productName: row.product_name,
     quantity: Number(row.quantity ?? 0),
+    inTransit: Number(row.in_transit ?? 0),
     warehouses: row.warehouses ?? [],
     updatedAt: row.updated_at,
     imageUrl: row.stock_image,
@@ -249,23 +280,32 @@ export type StockCounts = {
   out: number;
   low: number;
   quantity: number;
+  /** ชิ้นที่กำลังเดินกลับร้าน — ยังไม่ควรนับเป็นของพร้อมขาย */
+  inTransit: number;
 };
 
 /** นับของทั้งร้านในคำสั่งเดียว — หน้าเว็บไม่ต้องดึงทุกแถวมาบวกรวมเอง */
 export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM): Promise<StockCounts> {
+  const params: unknown[] = [platform, shopId];
+  const join = inTransitJoin(`$${params.length + 1}`);
+  params.push([...IN_TRANSIT_RETURN_STATUSES]);
+
   const rows = await query<{
     all: number;
     out: number;
     low: number;
     quantity: number;
+    in_transit: number;
   }>(
     `SELECT count(*)::int AS all,
             count(*) FILTER (WHERE s.quantity <= 0)::int AS out,
             count(*) FILTER (WHERE s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD})::int AS low,
-            COALESCE(sum(s.quantity), 0)::int AS quantity
+            COALESCE(sum(s.quantity), 0)::int AS quantity,
+            COALESCE(sum(rt.in_transit), 0)::int AS in_transit
        ${STOCK_FROM}
+       ${join}
       WHERE s.platform = $1 AND s.shop_id = $2`,
-    [platform, shopId],
+    params as never[],
   );
   const row = rows[0];
   return {
@@ -273,6 +313,7 @@ export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM)
     out: Number(row?.out ?? 0),
     low: Number(row?.low ?? 0),
     quantity: Number(row?.quantity ?? 0),
+    inTransit: Number(row?.in_transit ?? 0),
   };
 }
 
@@ -306,10 +347,14 @@ export async function getStockPage(
     `SELECT count(*)::int AS total ${STOCK_FROM} WHERE ${clause}`,
     params as never[],
   );
+  const join = inTransitJoin(`$${params.length + 1}`);
+  params.push([...IN_TRANSIT_RETURN_STATUSES]);
+
   const rows = await query<StockRowDb>(
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
-            s.image_url AS stock_image
+            s.image_url AS stock_image, COALESCE(rt.in_transit, 0)::int AS in_transit
        ${STOCK_FROM}
+       ${join}
       WHERE ${clause}
       ORDER BY s.quantity DESC, s.seller_sku ASC, s.sku_id ASC
       LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,

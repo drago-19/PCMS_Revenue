@@ -1,4 +1,4 @@
-import { runTikTokSync } from "./run-sync";
+import { runReturnsSync, runTikTokSync } from "./run-sync";
 import { refreshDailySummary } from "./daily-summary";
 import { runShopeeSync, syncShopeeStock } from "./shopee-sync";
 import { shopeeNowSeconds } from "./shopee";
@@ -17,6 +17,8 @@ const STATEMENT_EVERY_TICKS = Math.max(1, Math.round((10 * 60 * 1000) / INTERVAL
 // สต็อก: ดึงทั้งแคตตาล็อกใช้แค่ 2 คำขอต่อร้าน จึงตั้งรอบสั้น (60 วินาที) แยกจากออเดอร์
 // รอบเต็มใช้เป็นตัวไล่เก็บ (reconcile) — ตั้งห่างไว้ เพราะเส้นทางหลักคือ webhook + หน้าจอ
 const STOCK_INTERVAL_MS = Number(process.env.PLATFORM_STOCK_INTERVAL_MS ?? 30 * 60 * 1000);
+// คำขอคืนสินค้าเปลี่ยนไม่บ่อยแต่ต้องเห็นเร็ว (ของถูกเปิดขายทันทีที่ plataform ปิดออเดอร์)
+const RETURNS_INTERVAL_MS = Number(process.env.PLATFORM_RETURNS_INTERVAL_MS ?? 10 * 60 * 1000);
 // สรุปรายวันเป็นข้อมูลสรุป — คํานวณทุก 15 นาทีก็พอ
 const SUMMARY_EVERY_TICKS = Math.max(1, Math.round((15 * 60 * 1000) / INTERVAL_MS));
 let tickCount = 0;
@@ -24,6 +26,7 @@ let tickCount = 0;
 let started = false;
 let running = false;
 let stockRunning = false;
+let returnsRunning = false;
 
 /**
  * ตัวตั้งเวลาซิงก์ TikTok อยู่ใน process ของแอปเอง (ไม่ต้องพึ่ง Task Scheduler ของเครื่อง)
@@ -150,14 +153,43 @@ export function startScheduledSync(): void {
     }
   };
 
+  // คำขอคืนสินค้า: รอบแรกคือดึงย้อน แล้วหลังจากนั้นดูเฉพาะที่เปลี่ยน
+  const returnsTick = async () => {
+    if (returnsRunning) return;
+    returnsRunning = true;
+    try {
+      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+      for (const account of accounts.filter((a) => a.status === "connected")) {
+        try {
+          const written = await runReturnsSync(account.accountKey);
+          if (written > 0) {
+            console.log(`[returns-sync] ${account.accountKey} · ${written} คำขอ`);
+          }
+        } catch (error) {
+          console.error(
+            "[returns-sync] ล้มเหลว",
+            account.accountKey,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+    } finally {
+      returnsRunning = false;
+    }
+  };
+
   setTimeout(tick, FIRST_DELAY_MS).unref();
   setInterval(tick, INTERVAL_MS).unref();
   setTimeout(stockTick, FIRST_DELAY_MS + 5000).unref();
   setInterval(stockTick, STOCK_INTERVAL_MS).unref();
+  setTimeout(returnsTick, FIRST_DELAY_MS + 10000).unref();
+  setInterval(returnsTick, RETURNS_INTERVAL_MS).unref();
   console.log(
     `[scheduled-sync] ออเดอร์ทุก ${Math.round(INTERVAL_MS / 1000)} วิ (ดึงย้อน ${LOOKBACK_MINUTES} นาที) · statement ทุก ${
       STATEMENT_EVERY_TICKS * Math.round(INTERVAL_MS / 1000)
-    } วิ · สต็อกทุก ${Math.round(STOCK_INTERVAL_MS / 1000)} วิ · ยิงพร้อมกันไม่เกิน ${
+    } วิ · สต็อกทุก ${Math.round(STOCK_INTERVAL_MS / 1000)} วิ · คืนสินค้าทุก ${Math.round(
+      RETURNS_INTERVAL_MS / 1000,
+    )} วิ · ยิงพร้อมกันไม่เกิน ${
       process.env.TIKTOK_MAX_CONCURRENCY ?? 3
     } คำขอ`,
   );

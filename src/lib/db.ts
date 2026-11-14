@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-14-v67";
+const SCHEMA_VERSION = "2026-11-14-v68";
 
 export type { CompanyId };
 
@@ -1082,6 +1082,51 @@ CREATE TABLE IF NOT EXISTS platform_stock_movements (
 ALTER TABLE platform_stock_movements ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'TikTok';
 CREATE INDEX IF NOT EXISTS platform_stock_movements_platform_shop_time_idx
   ON platform_stock_movements (platform, shop_id, changed_at DESC, id DESC);
+
+-- คำขอคืนสินค้า/คืนเงินจากแพลตฟอร์ม
+-- TikTok เติมจำนวนที่ขายได้คืนทันทีที่มันปิดออเดอร์ ซึ่งเกิดก่อนของถึงร้าน
+-- ตารางนี้ทำให้เรารู้ว่ามีของกี่ชิ้นกำลังเดินกลับ และไม่ควรนับเป็นของพร้อมขาย
+CREATE TABLE IF NOT EXISTS platform_returns (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  return_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  return_type TEXT,
+  return_status TEXT,
+  return_reason TEXT,
+  return_reason_text TEXT,
+  return_tracking_number TEXT,
+  return_provider_name TEXT,
+  refund_total NUMERIC(14,2),
+  create_time TIMESTAMPTZ,
+  update_time TIMESTAMPTZ,
+  raw_json JSONB,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, return_id)
+);
+CREATE INDEX IF NOT EXISTS platform_returns_shop_status_idx
+  ON platform_returns (platform, shop_id, return_status, update_time DESC);
+CREATE INDEX IF NOT EXISTS platform_returns_order_idx
+  ON platform_returns (platform, shop_id, order_id);
+
+-- รายการสินค้าในคำขอคืน — จำนวนต่อแถวอาจไม่ถูกส่งมาในทุกเวอร์ชัน API
+-- (อ่านซ้ำจากรายการออเดอร์ได้ที่ order_line_item_id) จึงเก็บเป็น 0 ได้
+CREATE TABLE IF NOT EXISTS platform_return_items (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  return_id TEXT NOT NULL,
+  return_line_item_id TEXT NOT NULL,
+  order_line_item_id TEXT,
+  sku_id TEXT,
+  seller_sku TEXT,
+  product_name TEXT,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  refund_amount NUMERIC(14,2),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, return_id, return_line_item_id)
+);
+CREATE INDEX IF NOT EXISTS platform_return_items_sku_idx
+  ON platform_return_items (platform, shop_id, sku_id);
 
 -- เหตุการณ์พัสดุแบบละเอียดจาก Get Tracking (ถึงศูนย์คัดแยก/สาขา/นำส่ง)
 CREATE TABLE IF NOT EXISTS platform_order_tracking (

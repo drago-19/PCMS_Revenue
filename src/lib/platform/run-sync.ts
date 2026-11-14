@@ -5,9 +5,11 @@ import {
   TIKTOK_PLATFORM,
 } from "./store";
 import {
+  countStoredReturns,
   finishSyncRun,
   startSyncRun,
   syncOrders,
+  syncReturns,
   syncStatements,
   type SyncContext,
 } from "./sync";
@@ -133,4 +135,20 @@ export async function runTikTokSync(
     shopName: contexts.length === 1 ? contexts[0].shopName : `${contexts.length} ร้าน`,
   };
 }
+
+// คำขอคืนสินค้าอาจค้างอยู่หลายวัน (ลูกค้ามีเวลา 10 วันในการส่งของกลับ)
+// รอบแรกของร้านจึงดึงย้อนกว้างพอให้ครอบคำขอที่ค้างอยู่ แล้วรอบถัดไปดูแค่ที่เพิ่งเปลี่ยน
+const FIRST_RETURNS_LOOKBACK_DAYS = 120;
+const LIVE_RETURNS_LOOKBACK_DAYS = 7;
+
+/** ดึงคำขอคืนสินค้าของร้านเดียว — ครั้งแรกดึงย้อน 120 วัน หลังจากนั้น 7 วันล่าสุด */
+export async function runReturnsSync(shopId: string): Promise<number> {
+  const contexts = await buildContexts(shopId);
+  const { ctx } = contexts[0];
+  const first = (await countStoredReturns(shopId)) === 0;
+  const now = Math.floor(Date.now() / 1000);
+  const days = first ? FIRST_RETURNS_LOOKBACK_DAYS : LIVE_RETURNS_LOOKBACK_DAYS;
+  return syncReturns(ctx, now - days * 86400, now, first ? "create" : "update");
+}
+
 

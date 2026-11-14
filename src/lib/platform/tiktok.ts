@@ -592,6 +592,154 @@ export async function searchOrders({
   return { orders, nextPageToken: data.next_page_token ?? null };
 }
 
+export interface TikTokReturnItem {
+  lineItemId: string;
+  orderLineItemId: string | null;
+  skuId: string | null;
+  sellerSku: string | null;
+  productName: string | null;
+  quantity: number;
+  refundAmount: string | null;
+}
+
+export interface TikTokReturn {
+  id: string;
+  orderId: string;
+  returnType: string | null;
+  status: string | null;
+  reason: string | null;
+  reasonText: string | null;
+  trackingNumber: string | null;
+  providerName: string | null;
+  /** รวมยอดที่จะคืนให้ลูกค้าจากทุกรายการ (ถ้า API ส่งมา) */
+  refundTotal: string | null;
+  createTime: number | null;
+  updateTime: number | null;
+  items: TikTokReturnItem[];
+  raw: unknown;
+}
+
+interface RawReturnsData {
+  return_orders?: Array<Record<string, unknown>>;
+  returns?: Array<Record<string, unknown>>;
+  next_page_token?: string;
+}
+
+// เวอร์ชันของเส้นทางคืนสินค้าที่แอปนี้เรียกได้จริง — จำไว้หลังสำเร็จครั้งแรก
+// จะได้ไม่ต้องลองผิดเวอร์ชันซ้ำทุกรอบ (202602 เป็นตัวใหม่; แอปที่ยังไม่อัปเกรดจะใช้ 202309)
+let returnsPathVersion: string | null = null;
+
+/**
+ * ค้นหาคำขอคืนสินค้า/คืนเงินตามช่วงเวลา (ต้องมีสิทธิ์ seller.return_refund.basic)
+ * timeField = "update" สำหรับรอบดึงสด (จับสถานะที่เปลี่ยน เช่น ลูกค้าส่งของกลับแล้ว)
+ * timeField = "create" สำหรับดึงย้อนครั้งแรก
+ */
+export async function searchReturns({
+  config,
+  accessToken,
+  shopCipher,
+  timeGe,
+  timeLt,
+  timeField = "update",
+  pageToken,
+  pageSize = 50,
+}: {
+  config: TikTokAppConfig;
+  accessToken: string;
+  shopCipher: string;
+  timeGe: number;
+  timeLt: number;
+  timeField?: "create" | "update";
+  pageToken?: string;
+  pageSize?: number;
+}): Promise<{ returns: TikTokReturn[]; nextPageToken: string | null }> {
+  const byUpdate = timeField === "update";
+  const query: Record<string, string> = {
+    shop_cipher: shopCipher,
+    page_size: String(pageSize),
+    sort_field: byUpdate ? "update_time" : "create_time",
+    sort_order: "ASC",
+  };
+  if (pageToken) query.page_token = pageToken;
+
+  const body = byUpdate
+    ? { update_time_ge: timeGe, update_time_lt: timeLt }
+    : { create_time_ge: timeGe, create_time_lt: timeLt };
+
+  const candidates = returnsPathVersion ? [returnsPathVersion] : ["202602", "202309"];
+  let data: RawReturnsData | null = null;
+  let lastError: unknown = null;
+  for (const version of candidates) {
+    try {
+      data = await callTikTokApi<RawReturnsData>({
+        config,
+        path: `/return_refund/${version}/returns/search`,
+        method: "POST",
+        query,
+        body,
+        accessToken,
+      });
+      returnsPathVersion = version;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (!data) throw lastError instanceof Error ? lastError : new Error("ดึงคำขอคืนสินค้าไม่สำเร็จ");
+
+  const num = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const str = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? value : null;
+  const money = (value: unknown): string | null => {
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return value.toFixed(2);
+    return null;
+  };
+
+  const rows = data.return_orders ?? data.returns ?? [];
+  const returns: TikTokReturn[] = rows
+    .map((row) => {
+      const lines = Array.isArray(row.return_line_items)
+        ? (row.return_line_items as Array<Record<string, unknown>>)
+        : [];
+      const items: TikTokReturnItem[] = lines
+        .map((line, index) => {
+          const refund = (line.refund_amount ?? {}) as Record<string, unknown>;
+          return {
+            lineItemId: str(line.return_line_item_id) ?? `${str(row.return_id) ?? "return"}-${index}`,
+            orderLineItemId: str(line.order_line_item_id),
+            skuId: str(line.sku_id),
+            sellerSku: str(line.seller_sku),
+            productName: str(line.product_name) ?? str(line.sku_name),
+            quantity: num(line.quantity) ?? 0,
+            refundAmount: money(refund.refund_total),
+          };
+        });
+      const refundTotal = items.reduce((sum, item) => sum + Number(item.refundAmount ?? 0), 0);
+      return {
+        id: str(row.return_id) ?? "",
+        orderId: str(row.order_id) ?? "",
+        returnType: str(row.return_type),
+        status: str(row.return_status),
+        reason: str(row.return_reason),
+        reasonText: str(row.return_reason_text),
+        trackingNumber: str(row.return_tracking_number),
+        providerName: str(row.return_provider_name),
+        createTime: num(row.create_time),
+        updateTime: num(row.update_time),
+        items,
+        refundTotal: items.some((item) => item.refundAmount !== null)
+          ? refundTotal.toFixed(2)
+          : null,
+        raw: row,
+      };
+    })
+    .filter((row) => row.id.length > 0 && row.orderId.length > 0);
+
+  return { returns, nextPageToken: data.next_page_token ?? null };
+}
+
 export interface TikTokStatementTransaction {
   statementId: string;
   type: string;

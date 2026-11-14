@@ -173,6 +173,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       : (await getStockPage(shopId, { search, filter, page: current, pageSize: PAGE_SIZE, platform: dbPlatform })).rows;
 
   const totalQty = counts.quantity;
+  const inTransit = counts.inTransit;
   const outOfStock = counts.out;
   const shopName = accounts.find((account) => account.accountKey === shopId)?.shopName ?? shopId;
 
@@ -255,7 +256,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
         <StatCard label="SKU ทั้งหมด" value={num(counts.all)} hint={`นับเฉพาะที่มีใน ${platformTab(platform).label}`} />
         <StatCard label="ชิ้นคงเหลือรวม" value={num(totalQty)} tone="positive" hint="รวมทุก SKU ทุกคลัง" />
         <StatCard
@@ -263,6 +264,11 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           value={num(outOfStock)}
           tone={outOfStock > 0 ? "negative" : "default"}
           hint="คงเหลือ 0 ชิ้น"
+        />
+        <StatCard
+          label="กำลังตีกลับ"
+          value={num(inTransit)}
+          hint="ลูกค้าส่งคืนแล้ว แต่ของยังไม่ถึงร้าน"
         />
       </div>
 
@@ -322,12 +328,13 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           })}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-[12.5px]">
+          <table className="w-full min-w-[820px] text-[12.5px]">
             <thead>
               <tr className="border-b border-border text-[11.5px] text-muted-foreground">
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัส SKU</th>
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">สินค้า</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือรวม</th>
+                <th scope="col" className="py-1.5 pr-2 text-right font-bold">กำลังตีกลับ</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">จำนวนคลัง</th>
                 <th scope="col" className="py-1.5 text-right font-bold">อัปเดต</th>
               </tr>
@@ -357,13 +364,16 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                   <td className={`mono py-1.5 pr-2 text-right font-bold ${row.quantity <= 0 ? "text-[#b42318]" : ""}`}>
                     {num(row.quantity)}
                   </td>
+                  <td className={`mono py-1.5 pr-2 text-right ${row.inTransit > 0 ? "font-bold text-[#b54708]" : "text-muted-foreground"}`}>
+                    {row.inTransit > 0 ? num(row.inTransit) : "—"}
+                  </td>
                   <td className="mono py-1.5 pr-2 text-right text-muted-foreground">{num(row.warehouses.length)}</td>
                   <td className="py-1.5 text-right text-muted-foreground">{thaiDateTime(row.updatedAt)}</td>
                 </tr>
               ))}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={6} className="py-6 text-center text-muted-foreground">
                     {search || filter !== "all"
                       ? "ไม่พบ SKU ที่ตรงกับเงื่อนไข — ลองเปลี่ยนคำค้นหรือตัวกรอง"
                       : "ยังไม่มีข้อมูล — กด “ดึงสต็อกล่าสุด” เพื่อดึงจาก TikTok"}

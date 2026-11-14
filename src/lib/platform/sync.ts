@@ -9,9 +9,11 @@ import {
   listStatements,
   searchOrders,
   searchPackages,
+  searchReturns,
   type TikTokAppConfig,
   type TikTokOrder,
   type TikTokPackage,
+  type TikTokReturn,
   type TikTokStatement,
   type TikTokStatementTransaction,
 } from "@/lib/platform/tiktok";
@@ -205,6 +207,142 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
   });
 
   return orders.length;
+}
+
+/** บันทึกคำขอคืนสินค้า + รายการสินค้าในคำขอ (เขียนเป็นชุด ไม่วนคิวรีต่อแถว) */
+export async function upsertReturns(shopId: string, returns: TikTokReturn[]): Promise<number> {
+  if (returns.length === 0) return 0;
+
+  await runChunks(returns, async (chunk) => {
+    const values: unknown[] = [];
+    const tuples = chunk.map((entry, rowIndex) => {
+      const base = rowIndex * 14;
+      values.push(
+        PLATFORM,
+        shopId,
+        entry.id,
+        entry.orderId,
+        entry.returnType,
+        entry.status,
+        entry.reason,
+        entry.reasonText,
+        entry.trackingNumber,
+        entry.providerName,
+        entry.refundTotal === null ? null : num(entry.refundTotal),
+        toTimestamp(entry.createTime),
+        toTimestamp(entry.updateTime),
+        JSON.stringify(entry.raw ?? {}),
+      );
+      const placeholders = Array.from({ length: 14 }, (_, index) => `$${base + index + 1}`);
+      return `(${placeholders.join(",")})`;
+    });
+
+    await query(
+      `INSERT INTO platform_returns (
+         platform, shop_id, return_id, order_id, return_type, return_status,
+         return_reason, return_reason_text, return_tracking_number, return_provider_name,
+         refund_total, create_time, update_time, raw_json
+       ) VALUES ${tuples.join(",")}
+       ON CONFLICT (platform, shop_id, return_id) DO UPDATE SET
+         order_id = EXCLUDED.order_id,
+         return_type = EXCLUDED.return_type,
+         return_status = EXCLUDED.return_status,
+         return_reason = EXCLUDED.return_reason,
+         return_reason_text = EXCLUDED.return_reason_text,
+         return_tracking_number = COALESCE(EXCLUDED.return_tracking_number, platform_returns.return_tracking_number),
+         return_provider_name = COALESCE(EXCLUDED.return_provider_name, platform_returns.return_provider_name),
+         refund_total = EXCLUDED.refund_total,
+         create_time = EXCLUDED.create_time,
+         update_time = EXCLUDED.update_time,
+         raw_json = EXCLUDED.raw_json,
+         updated_at = now()`,
+      values,
+    );
+
+    const items = chunk.flatMap((entry) => entry.items.map((item) => ({ returnId: entry.id, item })));
+    if (items.length > 0) {
+      const itemValues: unknown[] = [];
+      const itemTuples = items.map((entry, rowIndex) => {
+        const base = rowIndex * 10;
+        itemValues.push(
+          PLATFORM,
+          shopId,
+          entry.returnId,
+          entry.item.lineItemId,
+          entry.item.orderLineItemId,
+          entry.item.skuId,
+          entry.item.sellerSku,
+          entry.item.productName,
+          entry.item.quantity,
+          entry.item.refundAmount === null ? null : num(entry.item.refundAmount),
+        );
+        const placeholders = Array.from({ length: 10 }, (_, index) => `$${base + index + 1}`);
+        return `(${placeholders.join(",")})`;
+      });
+
+      await query(
+        `INSERT INTO platform_return_items (
+           platform, shop_id, return_id, return_line_item_id, order_line_item_id,
+           sku_id, seller_sku, product_name, quantity, refund_amount
+         ) VALUES ${itemTuples.join(",")}
+         ON CONFLICT (platform, shop_id, return_id, return_line_item_id) DO UPDATE SET
+           order_line_item_id = EXCLUDED.order_line_item_id,
+           sku_id = EXCLUDED.sku_id,
+           seller_sku = EXCLUDED.seller_sku,
+           product_name = EXCLUDED.product_name,
+           quantity = EXCLUDED.quantity,
+           refund_amount = EXCLUDED.refund_amount,
+           updated_at = now()`,
+        itemValues,
+      );
+    }
+  });
+
+  return returns.length;
+}
+
+/** จำนวนคำขอคืนที่เก็บไว้แล้ว — ใช้ตัดสินว่าจะดึงย้อนครั้งแรกหรือดึงเฉพาะที่เปลี่ยน */
+export async function countStoredReturns(shopId: string): Promise<number> {
+  const rows = await query<{ total: string }>(
+    `SELECT count(*)::text AS total FROM platform_returns WHERE platform = $1 AND shop_id = $2`,
+    [PLATFORM, shopId],
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
+/** ดึงคำขอคืนสินค้าตามช่วงเวลา (ไล่ทุกหน้า) */
+export async function syncReturns(
+  ctx: SyncContext,
+  fromUnix: number,
+  toUnix: number,
+  timeField: "create" | "update" = "update",
+): Promise<number> {
+  let pageToken: string | undefined;
+  let written = 0;
+  let pages = 0;
+  const seen = new Set<string>();
+
+  while (pages < 500) {
+    const page = await searchReturns({
+      config: ctx.config,
+      accessToken: ctx.accessToken,
+      shopCipher: ctx.shopCipher,
+      timeGe: fromUnix,
+      timeLt: toUnix,
+      timeField,
+      pageToken,
+      pageSize: 50,
+    });
+    written += await upsertReturns(ctx.shopId, page.returns);
+    pages += 1;
+
+    const next = page.nextPageToken ?? undefined;
+    if (!next || seen.has(next)) break;
+    seen.add(next);
+    pageToken = next;
+  }
+
+  return written;
 }
 
 export async function upsertPackages(shopId: string, packages: TikTokPackage[]): Promise<number> {
