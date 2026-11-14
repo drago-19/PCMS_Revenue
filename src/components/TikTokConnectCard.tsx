@@ -201,30 +201,34 @@ export function TikTokConnectCard({
       ) : null}
 
       {accounts.length > 0 ? (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/40 p-3">
-          <span className="text-[12.5px] font-bold text-muted-foreground">โหมด</span>
-          <Badge variant={modeIsTest ? "warning" : "neutral"}>{modeIsTest ? "ทดสอบ" : "ใช้งานจริง"}</Badge>
-          <span className="min-w-0 flex-1 text-[12px] text-muted-foreground">
+        <div className="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-[12.5px] font-bold text-muted-foreground">โหมด</span>
+            <Badge variant={modeIsTest ? "warning" : "neutral"}>{modeIsTest ? "ทดสอบ" : "ใช้งานจริง"}</Badge>
+            <Button
+              size="sm"
+              variant={modeIsTest ? "outline" : "secondary"}
+              onClick={() => realAccounts[0] && handleSetActive(realAccounts[0].accountKey)}
+              disabled={!realAccounts.length || !modeIsTest || switchingKey !== null}
+            >
+              ใช้ร้านจริง
+            </Button>
+            <Button
+              size="sm"
+              variant={modeIsTest ? "secondary" : "outline"}
+              onClick={() => sandboxAccounts[0] && handleSetActive(sandboxAccounts[0].accountKey)}
+              disabled={!sandboxAccounts.length || modeIsTest || switchingKey !== null}
+            >
+              {sandboxAccounts.length ? "ใช้ร้านทดสอบ" : "ยังไม่มีร้านทดสอบ"}
+            </Button>
+          </div>
+          <p className="min-w-0 text-[12px] leading-5 text-muted-foreground">
             {modeIsTest
               ? "ทุกอย่างที่ทำบนหน้านี้ใช้ร้านทดสอบ ไม่กระทบร้านจริง"
-              : "ใช้ร้านจริง — การแก้สต็อกยังไม่เปิดจนกว่าจะทดสอบบนร้านทดสอบผ่าน"}
-          </span>
-          <Button
-            size="sm"
-            variant={modeIsTest ? "outline" : "secondary"}
-            onClick={() => realAccounts[0] && handleSetActive(realAccounts[0].accountKey)}
-            disabled={!realAccounts.length || !modeIsTest || switchingKey !== null}
-          >
-            ใช้ร้านจริง
-          </Button>
-          <Button
-            size="sm"
-            variant={modeIsTest ? "secondary" : "outline"}
-            onClick={() => sandboxAccounts[0] && handleSetActive(sandboxAccounts[0].accountKey)}
-            disabled={!sandboxAccounts.length || modeIsTest || switchingKey !== null}
-          >
-            {sandboxAccounts.length ? "ใช้ร้านทดสอบ" : "ยังไม่มีร้านทดสอบ"}
-          </Button>
+              : sandboxAccounts.length
+                ? "ใช้ร้านจริง — กด “ใช้ร้านทดสอบ” เพื่อทดสอบโดยไม่กระทบยอดขายจริง"
+                : "ใช้ร้านจริง — ยังไม่มีร้านทดสอบในระบบ ต้องเชื่อมร้านทดสอบจาก Partner Center → Development Shops ก่อน"}
+          </p>
         </div>
       ) : null}
 
