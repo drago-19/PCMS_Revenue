@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { getTikTokAnalytics } from "@/lib/platform/analytics";
 import { detailParam, hrefWithDetail } from "@/lib/platform/details";
 import { readPlatform, platformDbName, platformTab } from "@/lib/platform/platforms";
-import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
+import { getActiveShopId, getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +52,8 @@ function buildFlash(params: Record<string, string | string[] | undefined>) {
 
 export default async function PlatformOverviewPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const selectedShop = readParam(params, "shop");
+  // ไม่ระบุร้าน = ใช้ร้านที่เลือกไว้ในหน้าตั้งค่า (โหมดจริง/ทดสอบ) ไม่ใช่รวมทุกร้าน
+  const selectedShop = readParam(params, "shop") ?? (await getActiveShopId("TikTok")) ?? undefined;
   const fromParam = readParam(params, "from");
   const toParam = readParam(params, "to");
   const flash = buildFlash(params);
