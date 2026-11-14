@@ -82,7 +82,11 @@ export async function adjustStock(input: {
   if (!account?.accessToken || !account.shopCipher) {
     throw new StockWriteError("not_allowed", "ไม่พบ token ของร้าน");
   }
-  const ctx = { config: config.tiktok, accessToken: account.accessToken, shopCipher: account.shopCipher };
+  const ctx = {
+    config: config.tiktok,
+    accessToken: account.accessToken,
+    query: { shop_cipher: account.shopCipher },
+  };
 
   const detail = await callTikTokApi<ProductDetail>({
     ...ctx,
