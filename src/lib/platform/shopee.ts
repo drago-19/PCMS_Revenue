@@ -1195,22 +1195,7 @@ export async function addShopeeItem(
       logistic_info: logisticIds.map((id) => ({ logistic_id: id, enabled: true })),
       category_id: categoryId,
       image: { image_id_list: [imageId] },
-      // Shopee ต้องการ seller_stock ระดับสินค้าเสมอ แม้สินค้าจะมีตัวเลือก
       seller_stock: [{ stock }],
-      ...(tierVariation && tierVariation.length > 0 && models && models.length > 0
-        ? {
-            tier_variation: tierVariation.map((tier) => ({
-              name: tier.name.trim().slice(0, 14),
-              option_list: tier.options.map((option) => ({ option: option.trim().slice(0, 20) })),
-            })),
-            model_list: models.map((model) => ({
-              tier_index: model.optionIndexes,
-              original_price: model.price,
-              seller_stock: [{ stock: model.stock }],
-              ...(model.sku ? { model_sku: model.sku } : {}),
-            })),
-          }
-        : {}),
       // Shopee บังคับให้ระบุแบรนด์ — ใช้ brand_id 0 พร้อมชื่อที่ผู้ใช้กรอก
       brand: { brand_id: 0, original_brand_name: brandName?.trim() || "No Brand" },
       ...(sellerSku ? { item_sku: sellerSku } : {}),
@@ -1221,6 +1206,42 @@ export async function addShopeeItem(
   if (typeof itemId !== "number") {
     throw new ShopeeApiError("Shopee ไม่ได้คืน item_id หลังสร้างสินค้า");
   }
+
+  // สินค้าหลายตัวเลือกต้องสร้างตัวเลือกหลังสร้างสินค้า: init_tier_variation แล้ว add_model
+  if (tierVariation && tierVariation.length > 0 && models && models.length > 0) {
+    await callShopeeApi<unknown>({
+      config,
+      path: "/api/v2/product/init_tier_variation",
+      method: "POST",
+      accessToken,
+      shopId,
+      body: {
+        item_id: itemId,
+        tier_variation: tierVariation.map((tier) => ({
+          name: tier.name.trim().slice(0, 14),
+          option_list: tier.options.map((option) => ({ option: option.trim().slice(0, 20) })),
+        })),
+      },
+    });
+
+    await callShopeeApi<unknown>({
+      config,
+      path: "/api/v2/product/add_model",
+      method: "POST",
+      accessToken,
+      shopId,
+      body: {
+        item_id: itemId,
+        model_list: models.map((model) => ({
+          tier_index: model.optionIndexes,
+          original_price: model.price,
+          seller_stock: [{ stock: model.stock }],
+          ...(model.sku ? { model_sku: model.sku } : {}),
+        })),
+      },
+    });
+  }
+
   return { itemId };
 }
 
