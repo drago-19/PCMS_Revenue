@@ -56,6 +56,21 @@ export async function POST(request: Request) {
     : false;
 
   if (!matched) {
+    // บันทึกไว้เพื่อวินิจฉัย: Shopee ใช้ URL ใดในการเซ็น และส่ง header อะไรมา
+    await recordAuditLog({
+      actor: "shopee-push",
+      action: "platform.shopee.push_rejected",
+      ipAddress: getClientIp(request),
+      outcome: "failure",
+      details: {
+        authPrefix: authorization.slice(0, 8),
+        authLength: authorization.length,
+        candidates: [...candidates],
+        proto,
+        host: forwardedHost,
+      },
+      requestId: `push-reject-${Date.now()}`,
+    });
     return Response.json({ ok: false, error: "bad_signature" }, { status: 401 });
   }
 
