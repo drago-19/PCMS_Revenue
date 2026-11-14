@@ -1,5 +1,6 @@
 import { recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { runTikTokSync, SyncUnavailableError, type SyncWindow } from "@/lib/platform/run-sync";
+import { tikTokNowSeconds } from "@/lib/platform/tiktok";
 import { getClientIp } from "@/lib/session-token";
 
 export const runtime = "nodejs";
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);
-  const now = Math.floor(Date.now() / 1000);
+  const now = tikTokNowSeconds();
   const fromDay = parseDay(url.searchParams.get("from"));
   const toDay = parseDay(url.searchParams.get("to"));
 

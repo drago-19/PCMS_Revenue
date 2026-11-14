@@ -3,9 +3,14 @@
 > 📈 อัปเดตทุกครั้งที่มีความคืบหน้า — เขียนสถานะจริง (เสร็จ/ค้าง/ติดอะไร) ห้ามเขียนลอย ๆ
 > ⚠️ งานที่ยังไม่ได้รัน/เทสต์จริง = ยังไม่เสร็จ (ดู DoD + Reality Check)
 
-## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-11)
+## สถานะปัจจุบัน (อัปเดตล่าสุด: 2026-11-14)
 
 - **เจ้าของงาน (ACTIVE)**: ผู้ใช้ (เทสต์การนำเข้าไฟล์รายได้ Shopee ด้วยตนเอง — โค้ด + เทสต์ + Quality Gate เสร็จแล้ว รอผู้ใช้ยืนยันผลจริงบนเบราว์เซอร์และนำเข้าไฟล์จริงในระบบ production เอง)
+- ✅ **เสร็จสมบูรณ์แล้ว (2026-11-14 — กัน `Invalid timestamp` จาก TikTok Shop API และกันหน้า `/platform/stocks` ล่มเมื่อซิงก์พลาด)**:
+  - `src/lib/platform/tiktok.ts`: เพิ่มระบบปรับชดเชยเวลา (`clockOffsetSeconds` จาก HTTP `Date` header ของ TikTok เมื่อต่าง ≥ 5 วินาที), สร้าง URL+`sign` ใหม่ภายในลูป retry, และเมื่อเจอ error เกี่ยวกับ `timestamp` ที่ปรับ offset ได้ ให้เซ็นใหม่และลองซ้ำทันที 1 ครั้ง (export `tikTokNowSeconds`, `resetTikTokClockOffset`)
+  - `src/lib/platform/stock.ts` + `src/app/platform/stocks/page.tsx`: จับ error ใน `syncStock` แล้วคืน `{ skus: 0, changed: 0, error }` แทนการโยน exception ให้หน้าระเบิด และแสดง `<Card variant="danger" role="alert">` ผ่าน query `syncError`
+  - `src/lib/platform/scheduler.ts` + `src/app/api/platform/tiktok/sync-now/route.ts`: ใช้ `tikTokNowSeconds()` แทน `Date.now() / 1000` และให้ `scheduler.ts` log `result.error` ของ `syncStock`
+  - เทสต์ `tests/platform-tiktok.test.ts` 11/11 ผ่าน + `npx tsc --noEmit` 0 error + `pnpm build` ผ่าน
 - **เป้าหมายปัจจุบัน**:
   - [x] 1. รองรับไฟล์รายได้ Shopee (Shopee Settlement — `Income.โอนเงินสำเร็จ.th.*.xlsx`) แบบ 3 ไฟล์ แทน flow เดิม 2 ไฟล์จาก Shipnity เพียงอย่างเดียว
   - [x] 2. สร้าง parser ใหม่ `src/lib/ingest/shopee-parse.ts` (จับคอลัมน์ตามชื่อหัวตาราง, รวมหลายแถวต่อคำสั่งซื้อ, ตรวจอัตลักษณ์ `income + refund + fees = payout`, เตือน drift คอลัมน์ที่ยังไม่ถูกนับ, อ่านชีต Adjustment เป็นรายการหักนอกคำสั่งซื้อ)

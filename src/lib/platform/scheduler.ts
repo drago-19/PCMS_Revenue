@@ -2,6 +2,7 @@ import { runTikTokSync } from "./run-sync";
 import { refreshDailySummary } from "./daily-summary";
 import { syncStock } from "./stock";
 import { listPlatformAccounts, TIKTOK_PLATFORM } from "./store";
+import { tikTokNowSeconds } from "./tiktok";
 
 // รอบตั้งต้น 3 นาที — ตัวเลขขยับใกล้เวลาจริง แต่ละรอบยังเบา (ดึงย้อนไม่กี่ชั่วโมง)
 const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
@@ -33,7 +34,7 @@ export function startScheduledSync(): void {
       return;
     }
     running = true;
-    const to = Math.floor(Date.now() / 1000);
+    const to = tikTokNowSeconds();
     const from = to - LOOKBACK_HOURS * 3600;
     try {
       const { stats } = await runTikTokSync({ from, to, kind: "scheduled" });
@@ -76,7 +77,9 @@ export function startScheduledSync(): void {
       for (const account of accounts) {
         try {
           const result = await syncStock(account.accountKey);
-          if (result.changed > 0) {
+          if (result.error) {
+            console.error("[stock-sync] ล้มเหลว", account.accountKey, result.error);
+          } else if (result.changed > 0) {
             console.log(
               `[stock-sync] ${account.accountKey} · ${result.skus} SKU · เปลี่ยน ${result.changed} รายการ`,
             );

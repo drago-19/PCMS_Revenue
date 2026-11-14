@@ -33,6 +33,7 @@ type SearchParams = Promise<{
   page?: string;
   synced?: string;
   changed?: string;
+  syncError?: string;
   sku?: string;
   after?: string;
   before?: string;
@@ -65,12 +66,20 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   // เพื่อไม่ให้การรีเฟรชหรือ prefetch ไปดึงซ้ำ
   if (params.sync) {
     const result = await syncStock(shopId);
-    redirect(
-      `/platform/stocks?shop=${encodeURIComponent(shopId)}&synced=${result.skus}&changed=${result.changed}`,
-    );
+    const qs = new URLSearchParams({
+      shop: shopId,
+      synced: String(result.skus),
+      changed: String(result.changed),
+    });
+    if (result.error) qs.set("syncError", result.error);
+    redirect(`/platform/stocks?${qs.toString()}`);
   }
 
-  const sync = params.synced ? { skus: Number(params.synced), changed: Number(params.changed ?? 0) } : null;
+  const syncError = params.syncError ? params.syncError.trim() : null;
+  const sync =
+    !syncError && params.synced
+      ? { skus: Number(params.synced), changed: Number(params.changed ?? 0) }
+      : null;
   const pageNumber = Math.max(Number(params.page ?? "1") || 1, 1);
 
   // ประวัติการเปลี่ยนแปลง: ต่อหน้าด้วย keyset (เวลา|id) ทีละ 10 แถว ไม่ใช้ OFFSET
@@ -154,7 +163,11 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         <PlatformAutoRefresh seconds={60} />
       </p>
 
-      {sync ? (
+      {syncError ? (
+        <Card variant="danger" padding="padded" className="text-[13px]" role="alert">
+          ดึงสต็อกไม่สำเร็จ: {syncError}
+        </Card>
+      ) : sync ? (
         <p className="rounded-xl border border-[#cfe8da] bg-[#f6fbf8] px-3 py-2 text-[12.5px] text-[#0d6b3c]" role="status">
           ดึงแล้ว {num(sync.skus)} SKU · เปลี่ยนแปลง {num(sync.changed)} รายการ
         </p>

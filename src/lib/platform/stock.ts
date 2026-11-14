@@ -59,43 +59,49 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
     warehouses: Array<{ warehouseId: string; quantity: number }>;
   }> = [];
 
-  for (let page = 0; page < 20; page += 1) {
-    const response = await callTikTokApi<{
-      products?: ApiProduct[];
-      next_page_token?: string;
-    }>({
-      config: config.tiktok,
-      accessToken: account.accessToken,
-      path: "/product/202309/products/search",
-      method: "POST",
-      query: {
-        shop_cipher: account.shopCipher,
-        page_size: String(PAGE_SIZE),
-        ...(pageToken ? { page_token: pageToken } : {}),
-      },
-      body: { page_size: PAGE_SIZE, ...(pageToken ? { page_token: pageToken } : {}) },
-    });
+  try {
+    for (let page = 0; page < 20; page += 1) {
+      const response = await callTikTokApi<{
+        products?: ApiProduct[];
+        next_page_token?: string;
+      }>({
+        config: config.tiktok,
+        accessToken: account.accessToken,
+        path: "/product/202309/products/search",
+        method: "POST",
+        query: {
+          shop_cipher: account.shopCipher,
+          page_size: String(PAGE_SIZE),
+          ...(pageToken ? { page_token: pageToken } : {}),
+        },
+        body: { page_size: PAGE_SIZE, ...(pageToken ? { page_token: pageToken } : {}) },
+      });
 
-    for (const product of response.products ?? []) {
-      for (const sku of product.skus ?? []) {
-        if (!sku.id) continue;
-        const warehouses = (sku.inventory ?? []).map((item) => ({
-          warehouseId: String(item.warehouse_id ?? ""),
-          quantity: Number(item.quantity ?? 0),
-        }));
-        collected.push({
-          skuId: sku.id,
-          productId: product.id ?? null,
-          sellerSku: sku.seller_sku ?? null,
-          productName: product.title ?? null,
-          quantity: warehouses.reduce((sum, item) => sum + item.quantity, 0),
-          warehouses,
-        });
+      for (const product of response.products ?? []) {
+        for (const sku of product.skus ?? []) {
+          if (!sku.id) continue;
+          const warehouses = (sku.inventory ?? []).map((item) => ({
+            warehouseId: String(item.warehouse_id ?? ""),
+            quantity: Number(item.quantity ?? 0),
+          }));
+          collected.push({
+            skuId: sku.id,
+            productId: product.id ?? null,
+            sellerSku: sku.seller_sku ?? null,
+            productName: product.title ?? null,
+            quantity: warehouses.reduce((sum, item) => sum + item.quantity, 0),
+            warehouses,
+          });
+        }
       }
-    }
 
-    pageToken = response.next_page_token;
-    if (!pageToken) break;
+      pageToken = response.next_page_token;
+      if (!pageToken) break;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "ดึงสต็อกไม่สำเร็จ";
+    console.error("[stock-sync] ดึงสต็อกจาก TikTok ไม่สำเร็จ", shopId, message);
+    return { skus: 0, changed: 0, error: message.slice(0, 240) };
   }
 
   if (collected.length === 0) return { skus: 0, changed: 0 };

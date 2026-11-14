@@ -181,6 +181,73 @@ async function readJson<T>(response: Response): Promise<TikTokEnvelope<T> | null
   }
 }
 
+const CLOCK_SKEW_THRESHOLD_SEC = 5;
+
+let clockOffsetSeconds = 0;
+
+/** เวลาปัจจุบัน (วินาที Unix) ที่ชดเชยส่วนต่างกับนาฬิกาเซิร์ฟเวอร์ของ TikTok แล้ว */
+export function tikTokNowSeconds(): number {
+  return Math.floor(Date.now() / 1000) + clockOffsetSeconds;
+}
+
+/** รีเซ็ตค่าชดเชยนาฬิกา (ใช้ในเทสต์เพื่อให้แต่ละเคสเริ่มจากศูนย์) */
+export function resetTikTokClockOffset(): void {
+  clockOffsetSeconds = 0;
+}
+
+function syncClockOffsetFromResponse(response: Response): boolean {
+  const dateHeader = response.headers.get("date");
+  if (!dateHeader) return false;
+
+  const serverMs = Date.parse(dateHeader);
+  if (!Number.isFinite(serverMs)) return false;
+
+  const serverSec = Math.floor(serverMs / 1000);
+  const localSec = Math.floor(Date.now() / 1000);
+  const rawOffset = serverSec - localSec;
+  const nextOffset = Math.abs(rawOffset) >= CLOCK_SKEW_THRESHOLD_SEC ? rawOffset : 0;
+  const changed = Math.abs(nextOffset - clockOffsetSeconds) >= 2;
+  clockOffsetSeconds = nextOffset;
+  return changed;
+}
+
+function isTimestampError<T>(payload: TikTokEnvelope<T> | null): boolean {
+  const message = payload?.message ?? "";
+  return /\btimestamp\b/i.test(message);
+}
+
+function buildSignedApiUrl({
+  config,
+  path,
+  query,
+  rawBody,
+}: {
+  config: TikTokAppConfig;
+  path: string;
+  query: Record<string, string>;
+  rawBody: string;
+}): URL {
+  const params: Record<string, string> = {
+    ...query,
+    app_key: config.appKey,
+    timestamp: String(tikTokNowSeconds()),
+  };
+
+  const sign = signRequest({
+    path,
+    query: params,
+    body: rawBody,
+    appSecret: config.appSecret,
+  });
+
+  const url = new URL(TIKTOK_API_BASE + path);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  url.searchParams.set("sign", sign);
+  return url;
+}
+
 function unwrapEnvelope<T>(response: Response, payload: TikTokEnvelope<T> | null): T {
   if (!response.ok || !payload || payload.code !== 0) {
     throw new TikTokApiError(
@@ -210,27 +277,12 @@ export async function callTikTokApi<T>({
   const rawBody =
     body === undefined ? "" : typeof body === "string" ? body : JSON.stringify(body);
 
-  const params: Record<string, string> = {
-    app_key: config.appKey,
-    timestamp: String(Math.floor(Date.now() / 1000)),
-    ...query,
-  };
-
-  const sign = signRequest({
-    path,
-    query: params,
-    body: rawBody,
-    appSecret: config.appSecret,
-  });
-
-  const url = new URL(TIKTOK_API_BASE + path);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-  url.searchParams.set("sign", sign);
+  let retriedClockSkew = false;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
     await acquireSlot();
+
+    const url = buildSignedApiUrl({ config, path, query, rawBody });
 
     const response = await safeFetch(url, config.appSecret, {
       method,
@@ -241,6 +293,8 @@ export async function callTikTokApi<T>({
       },
       ...(method === "GET" ? {} : { body: rawBody }),
     }).finally(() => releaseSlot());
+
+    const clockAdjusted = syncClockOffsetFromResponse(response);
 
     // 429 = ถูกจำกัดอัตรา (ฝั่ง transport) — ถอยแล้วลองใหม่ ไม่นับเป็น error
     if (response.status === 429) {
@@ -254,6 +308,12 @@ export async function callTikTokApi<T>({
     }
 
     const payload = await readJson<T>(response);
+
+    // นาฬิกาเครื่องไม่ตรงกับ TikTok (> 30 วินาที): ชดเชยจาก header Date แล้วเซ็นใหม่ทันที 1 ครั้ง
+    if (isTimestampError(payload) && clockAdjusted && !retriedClockSkew && attempt < MAX_RETRIES - 1) {
+      retriedClockSkew = true;
+      continue;
+    }
 
     // 36009002 = TikTok แจ้งว่ายิงถี่เกิน — ถอยแล้วลองใหม่เช่นกัน
     if (payload?.code === 36009002 && attempt < MAX_RETRIES - 1) {
