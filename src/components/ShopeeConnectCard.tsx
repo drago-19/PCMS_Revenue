@@ -45,6 +45,16 @@ export function ShopeeConnectCard({
 }) {
   const router = useRouter();
   const accounts = config.accounts;
+  const webhookUrl = `${(config.redirectBaseUrl ?? (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/+$/, "")}/api/platform/shopee/webhook`;
+
+  async function handleCopyWebhook() {
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      toast.success("คัดลอก Callback URL แล้ว");
+    } catch {
+      toast.error("คัดลอกอัตโนมัติไม่สำเร็จ — เลือกข้อความแล้วคัดลอกเอง");
+    }
+  }
 
   const [editing, setEditing] = useState(!config.configured);
   const [env, setEnv] = useState<"sandbox" | "live">(config.env);
@@ -392,6 +402,7 @@ export function ShopeeConnectCard({
       ) : null}
 
       {config.configured ? (
+        <>
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           <Button asChild size="sm" className="min-h-[40px]">
             <a href="/api/platform/shopee/authorize">
@@ -413,6 +424,31 @@ export function ShopeeConnectCard({
             </Button>
           ) : null}
         </div>
+
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3">
+          <span className="text-xs font-semibold text-foreground">
+            Callback URL สำหรับ Push ออเดอร์ — วางใน Shopee Console → Push Mechanism
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="mono min-w-0 flex-1 truncate rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px]">
+              {webhookUrl}
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-[40px]"
+              onClick={handleCopyWebhook}
+            >
+              คัดลอก
+            </Button>
+          </div>
+          <span className="text-[11px] leading-relaxed text-muted-foreground">
+            ต้องเป็นโดเมนที่ Shopee เรียกถึงจากอินเทอร์เน็ต (ไม่ใช่ localhost) และ endpoint นี้ตรวจลายเซ็น
+            HMAC ของ Shopee เองก่อนทำงาน
+          </span>
+        </div>
+        </>
       ) : null}
 
       {showManual ? (

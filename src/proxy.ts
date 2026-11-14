@@ -59,8 +59,8 @@ export function proxy(request: NextRequest) {
     return applySecurityHeaders(NextResponse.next(), requestId);
   }
 
-  // Webhook ของ TikTok: ผู้เรียกคือ TikTok ไม่มี session — route ตรวจลายเซ็น HMAC เองแล้ว
-  if (pathname === "/api/platform/tiktok/webhook") {
+  // Webhook ของ TikTok / Shopee: ผู้เรียกคือแพลตฟอร์ม ไม่มี session — route ตรวจลายเซ็น HMAC เองแล้ว
+  if (pathname === "/api/platform/tiktok/webhook" || pathname === "/api/platform/shopee/webhook") {
     return applySecurityHeaders(NextResponse.next(), requestId);
   }
 
