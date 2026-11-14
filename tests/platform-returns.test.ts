@@ -132,8 +132,28 @@ test("returns: นับเฉพาะของที่ลูกค้าส�
     assert.equal(sentBack?.inTransit, 2, "ของที่ส่งคืนแล้วต้องถูกนับ 2 ชิ้น (ใช้จำนวนจากรายการออเดอร์)");
     assert.equal(keepsItem?.inTransit, 0, "คืนเงินอย่างเดียวต้องไม่ถูกนับเป็นของกำลังเดินกลับ");
 
+    // คืนเงินจบแล้วถือว่าจบ ไม่ค้างอยู่ในยอดกำลังตีกลับ
+    await upsertReturns(SHOP, [
+      makeReturn({
+        id: "return-4",
+        orderId: "order-1",
+        status: "RETURN_OR_REFUND_REQUEST_COMPLETE",
+        items: [
+          {
+            lineItemId: "ret-line-4",
+            orderLineItemId: "line-1",
+            skuId: SKU_SENT_BACK,
+            sellerSku: SKU_SENT_BACK,
+            productName: "sku sent back",
+            quantity: 5,
+            refundAmount: "250.00",
+          },
+        ],
+      }),
+    ]);
+
     const counts = await getStockCounts(SHOP);
-    assert.equal(counts.inTransit, 2);
+    assert.equal(counts.inTransit, 2, "คำขอที่จบแล้วต้องไม่ถูกนับเพิ่ม");
     assert.equal(counts.quantity, 20, "ยอดคงเหลือบน TikTok ยังเป็นค่าที่ดึงมา ไม่ถูกหักในชั้นนี้");
   } finally {
     await cleanup();

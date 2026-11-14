@@ -216,11 +216,9 @@ const STOCK_FROM = `FROM platform_stock s`;
 
 // สถานะคำขอคืนที่ถือว่า "ของออกจากมือลูกค้าแล้วแต่ยังไม่ถึงร้าน"
 // ไม่นับ REFUND (ลูกค้าเก็บของไว้) และไม่นับ REPLACEMENT/EXCHANGE (มีออเดอร์ใหม่แทน)
-export const IN_TRANSIT_RETURN_STATUSES = [
-  "BUYER_SHIPPED_ITEM",
-  "RETURN_OR_REFUND_REQUEST_SUCCESS",
-  "RETURN_OR_REFUND_REQUEST_COMPLETE",
-];
+// ไม่นับ *_REQUEST_COMPLETE เพราะเป็นสถานะจบ (คืนเงินจบแล้ว) — ถ้านับด้วย ของคืนเก่าหลายเดือน
+// จะค้างอยู่ในยอดตลอดไป ทำให้ตัวเลขบนหน้าสต็อกพองเกินจริง
+export const IN_TRANSIT_RETURN_STATUSES = ["BUYER_SHIPPED_ITEM", "RETURN_OR_REFUND_REQUEST_SUCCESS"];
 
 /** ยอดกำลังตีกลับต่อ SKU — จำนวนต่อแถวอาจไม่ถูกส่งมาในบางเวอร์ชัน จึงถอยไปใช้จำนวนในรายการออเดอร์ */
 function inTransitJoin(statusParam: string): string {
