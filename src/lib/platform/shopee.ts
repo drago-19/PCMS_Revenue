@@ -951,3 +951,78 @@ export async function updateShopeeStock(
     failureList: payload.response?.failure_list ?? [],
   };
 }
+
+/** ตั้งจำนวนสต็อกของสินค้าเดียว (ไม่มีตัวเลือก) ให้เป็นค่านั้นตรง ๆ */
+export async function setShopeeStock(
+  config: ShopeeAppConfig,
+  {
+    accessToken,
+    shopId,
+    itemId,
+    quantity,
+    modelId,
+  }: {
+    accessToken: string;
+    shopId: string;
+    itemId: number;
+    quantity: number;
+    modelId?: number;
+  },
+): Promise<{ successList: unknown[]; failureList: unknown[] }> {
+  const row: { model_id?: number; seller_stock: Array<{ stock: number }> } = {
+    seller_stock: [{ stock: quantity }],
+  };
+  if (modelId !== undefined && modelId > 0) row.model_id = modelId;
+  return updateShopeeStock(config, {
+    accessToken,
+    shopId,
+    itemId,
+    stockList: [row],
+  });
+}
+
+/** ซ่อนสินค้าจากหน้าร้าน (ยังไม่ลบ กู้คืนได้ด้วยการนำขึ้นขายใหม่) */
+export async function unlistShopeeItem(
+  config: ShopeeAppConfig,
+  {
+    accessToken,
+    shopId,
+    itemId,
+  }: { accessToken: string; shopId: string; itemId: number },
+): Promise<{ successList: unknown[]; failureList: unknown[] }> {
+  const payload = await callShopeeApi<{
+    success_list?: unknown[];
+    failure_list?: unknown[];
+  }>({
+    config,
+    path: "/api/v2/product/unlist_item",
+    method: "POST",
+    accessToken,
+    shopId,
+    body: { item_list: [{ item_id: itemId, unlist: true }] },
+  });
+
+  return {
+    successList: payload.response?.success_list ?? [],
+    failureList: payload.response?.failure_list ?? [],
+  };
+}
+
+/** ลบสินค้าถาวร — Shopee ลบไม่ได้ถ้าสินค้ายังอยู่ในโปรโมชั่นหรือมีออเดอร์ค้าง */
+export async function deleteShopeeItem(
+  config: ShopeeAppConfig,
+  {
+    accessToken,
+    shopId,
+    itemId,
+  }: { accessToken: string; shopId: string; itemId: number },
+): Promise<void> {
+  await callShopeeApi<unknown>({
+    config,
+    path: "/api/v2/product/delete_item",
+    method: "POST",
+    accessToken,
+    shopId,
+    body: { item_id: itemId },
+  });
+}

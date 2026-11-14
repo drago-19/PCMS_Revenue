@@ -19,6 +19,9 @@ import {
   shopeeNowSeconds,
   signShopeePublicRequest,
   signShopeeShopRequest,
+  deleteShopeeItem,
+  setShopeeStock,
+  unlistShopeeItem,
   updateShopeeStock,
   type ShopeeAppConfig,
 } from "../src/lib/platform/shopee";
@@ -447,6 +450,54 @@ test("clock skew: ชดเชย timestamp จาก response header Date แ�
     assert.ok(shopeeNowSeconds() > Math.floor(Date.now() / 1000) + 500);
   } finally {
     resetShopeeClockOffset();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("setShopeeStock / unlistShopeeItem / deleteShopeeItem: ยิง path และ body ตรงสเปก", async () => {
+  resetShopeeClockOffset();
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+    calls.push({ path: url.pathname, body });
+    if (url.pathname.endsWith("/update_stock")) {
+      return jsonResponse({ response: { success_list: [{ model_id: 0 }], failure_list: [] } });
+    }
+    if (url.pathname.endsWith("/unlist_item")) {
+      return jsonResponse({ response: { success_list: [{ item_id: 102 }], failure_list: [] } });
+    }
+    return jsonResponse({ response: {} });
+  };
+
+  try {
+    await setShopeeStock(SANDBOX_CONFIG, {
+      accessToken: "atk",
+      shopId: "22556677",
+      itemId: 102,
+      quantity: 15,
+    });
+    assert.equal(calls[0].path, "/api/v2/product/update_stock");
+    assert.equal(calls[0].body.item_id, 102);
+    const stockList = calls[0].body.stock_list as Array<Record<string, unknown>>;
+    assert.deepEqual(stockList[0].seller_stock, [{ stock: 15 }]);
+    assert.equal(stockList[0].model_id, undefined);
+
+    const unlisted = await unlistShopeeItem(SANDBOX_CONFIG, {
+      accessToken: "atk",
+      shopId: "22556677",
+      itemId: 102,
+    });
+    assert.equal(unlisted.successList.length, 1);
+    assert.equal(calls[1].path, "/api/v2/product/unlist_item");
+    assert.deepEqual(calls[1].body.item_list, [{ item_id: 102, unlist: true }]);
+
+    await deleteShopeeItem(SANDBOX_CONFIG, { accessToken: "atk", shopId: "22556677", itemId: 102 });
+    assert.equal(calls[2].path, "/api/v2/product/delete_item");
+    assert.equal(calls[2].body.item_id, 102);
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });

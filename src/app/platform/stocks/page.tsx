@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
+import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -437,8 +438,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       </Card>
 
       <p className="text-[12px] leading-5 text-muted-foreground">
-        หมายเหตุ: หน้านี้อ่านจำนวนจาก TikTok อย่างเดียว — การเพิ่ม/ลดจากระบบเรายังต้องรอสิทธิ์ “เขียนสินค้า” (Product write)
-        จาก TikTok ก่อน ระหว่างนี้ประวัติจะบันทึกเฉพาะการเปลี่ยนแปลงที่ตรวจพบจากฝั่ง TikTok
+        หมายเหตุ: TikTok อ่านจำนวนอย่างเดียว — การเพิ่ม/ลดจากระบบเรายังต้องรอสิทธิ์ “เขียนสินค้า” (Product write)
+        จาก TikTok ก่อน ส่วน Shopee แก้จำนวน ซ่อน และลบสินค้าได้จากช่องรายละเอียดสินค้า แล้วดึงค่ากลับมายืนยัน
+        ประวัติจะบันทึกเฉพาะการเปลี่ยนแปลงที่ตรวจพบจากฝั่งแพลตฟอร์ม
       </p>
 
       {skuDetail ? (
@@ -451,7 +453,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 {skuDetail.productName ?? skuDetail.sellerSku ?? "สินค้า"}
               </DialogTitle>
               <p className="text-[12px] leading-5 text-muted-foreground">
-                SKU TikTok {skuDetail.sellerSku ?? "—"} · อัปเดต{" "}
+                SKU {platform === "shopee" ? "Shopee" : "TikTok"} {skuDetail.sellerSku ?? "—"} · อัปเดต{" "}
                 {thaiDateTime(skuDetail.updatedAt)}
               </p>
             </DialogHeader>
@@ -468,6 +470,14 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                   <p className="mono text-[24px] font-bold leading-tight">{num(skuDetail.quantity)}</p>
                 </div>
               </div>
+
+              {platform === "shopee" ? (
+                <ShopeeStockEditor
+                  accountKey={shopId ?? ""}
+                  skuId={skuDetail.skuId}
+                  quantity={skuDetail.quantity}
+                />
+              ) : null}
 
               {skuDetail.warehouses.length > 0 ? (
                 <div>
