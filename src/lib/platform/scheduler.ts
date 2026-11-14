@@ -9,8 +9,7 @@ import { tikTokNowSeconds } from "./tiktok";
 // รอบออเดอร์ทุก 60 วินาที — วัดจริง: ดึงย้อน 30 นาทีใช้ ~1.3 วิ (ออเดอร์ 97 แถว) ราคาถูกมาก
 const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 60 * 1000);
 const FIRST_DELAY_MS = 15 * 1000;
-// ดึงย้อนกว่ารอบหนึ่งช่วง เพื่อไม่ให้พลาดออเดอร์ที่สถานะเปลี่ยนช้า
-// ดึงย้อน 30 นาที = ได้ลองซ้ำ ~30 รอบก่อนหลุดหน้าต่าง
+// ดึงย้อน 30 นาที = ได้ลองซ้ำ ~30 รอบก่อนหลุดหน้าต่าง (กันสถานะที่เปลี่ยนช้า/รอบที่ล้ม)
 const LOOKBACK_MINUTES = Number(process.env.PLATFORM_SYNC_LOOKBACK_MINUTES ?? 30);
 const LOOKBACK_HOURS = LOOKBACK_MINUTES / 60;
 // statement ออกวันละครั้ง และการดึง 7 วันใช้ ~14 วิ — จึงดึงทุก 10 นาที ไม่ใช่ทุกรอบ
