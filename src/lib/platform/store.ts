@@ -326,16 +326,47 @@ export async function getConnectedPlatforms(): Promise<Array<"tiktok" | "shopee"
   }
 }
 
+/**
+ * ถอดรหัสโทเคนที่อ่านจากฐานข้อมูล — แถวเก่าที่ยังเป็นข้อความธรรมดาจะถูกเข้ารหัส
+ * เก็บกลับให้อัตโนมัติเมื่อมีคีย์ (ครั้งเดียวต่อแถว ไม่บล็อกคำขอ)
+ */
+function readStoredToken(
+  value: string | null,
+  platform: string,
+  accountKey: string,
+  column: "access_token" | "refresh_token",
+): string | null {
+  if (!value) return value;
+  if (isEncryptedValue(value)) return decryptSecret(value);
+
+  if (isEncryptionConfigured()) {
+    void query(
+      `UPDATE platform_accounts SET ${column} = $3 WHERE platform = $1 AND account_key = $2`,
+      [platform, accountKey, encryptSecret(value)],
+    ).catch(() => {});
+  }
+  return value;
+}
+
 export async function getPlatformAccountRow(
   platform: string,
   accountKey: string,
 ): Promise<(PlatformAccountPublic & { accessToken: string | null; refreshToken: string | null }) | null> {
   try {
-    return await queryOne<PlatformAccountPublic & { accessToken: string | null; refreshToken: string | null }>(
+    const row = await queryOne<
+      PlatformAccountPublic & { accessToken: string | null; refreshToken: string | null }
+    >(
       `SELECT ${ACCOUNT_COLUMNS}, access_token AS "accessToken", refresh_token AS "refreshToken"
        FROM platform_accounts WHERE platform = $1 AND account_key = $2`,
       [platform, accountKey],
     );
+    if (!row) return null;
+
+    return {
+      ...row,
+      accessToken: readStoredToken(row.accessToken, platform, accountKey, "access_token"),
+      refreshToken: readStoredToken(row.refreshToken, platform, accountKey, "refresh_token"),
+    };
   } catch {
     return null;
   }
@@ -406,8 +437,9 @@ async function upsertPlatformAccount({
       shopName,
       sellerName,
       region,
-      accessToken,
-      refreshToken,
+      // เก็บโทเคนแบบเข้ารหัสเสมอ — คีย์ถอดรหัสอยู่ใน env ไม่ได้อยู่ในฐานข้อมูล
+      encryptSecret(accessToken),
+      encryptSecret(refreshToken),
       accessTokenExpiresAt,
       refreshTokenExpiresAt,
       grantedScopes,
@@ -484,8 +516,8 @@ export async function updateAccountTokens({
     [
       platform,
       accountKey,
-      accessToken,
-      refreshToken,
+      encryptSecret(accessToken),
+      encryptSecret(refreshToken),
       accessTokenExpiresAt,
       refreshTokenExpiresAt,
     ],
