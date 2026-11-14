@@ -89,7 +89,10 @@ export function ensureSchema(): Promise<void> {
       const pool = getPool();
       const client = await pool.connect();
       try {
-        await client.query("SELECT pg_advisory_lock(88192842)");
+        // ใช้ lock ระดับ transaction — ปลดอัตโนมัติเมื่อ COMMIT/ROLLBACK
+        // (แบบ session-scoped เดิม ถ้าคำสั่ง unlock ล้มเหลว ล็อกจะค้างกับ connection ใน pool ตลอดไป)
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(88192842)");
         try {
           // Fast-path: ตรวจสอบ version ในฐานข้อมูลเพื่อหลีกเลี่ยงการรัน DDL 1,200 บรรทัดซ้ำทุกครั้งที่สตาร์ท
           await client.query(`
@@ -300,8 +303,10 @@ export function ensureSchema(): Promise<void> {
         );
 
         await client.query("SET search_path TO public");
-        } finally {
-          await client.query("SELECT pg_advisory_unlock(88192842)").catch(() => {});
+        await client.query("COMMIT");
+        } catch (error) {
+          await client.query("ROLLBACK").catch(() => {});
+          throw error;
         }
       } finally {
         client.release();
