@@ -27,7 +27,6 @@ import {
   getActiveShopId,
   getConnectedPlatforms,
   listPlatformAccounts,
-  TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
@@ -69,7 +68,14 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     listPlatformAccounts(dbPlatform),
     getConnectedPlatforms(),
   ]);
-  const shopId = params.shop ?? (await getActiveShopId(TIKTOK_PLATFORM)) ?? accounts[0]?.accountKey ?? null;
+  // ร้านที่เลือกมาอาจเป็นของแพลตฟอร์มอื่น (เช่นค่าที่ค้างจากแท็บ TikTok)
+  // ใช้ได้เฉพาะร้านที่มีอยู่จริงในแพลตฟอร์มนี้ ไม่งั้นถอยไปร้านที่ตั้งไว้หรือร้านแรก
+  const requestedShop =
+    typeof params.shop === "string" && accounts.some((account) => account.accountKey === params.shop)
+      ? params.shop
+      : null;
+  const shopId =
+    requestedShop ?? (await getActiveShopId(dbPlatform)) ?? accounts[0]?.accountKey ?? null;
   const isConnected = connectedPlatforms.includes(platform);
 
   if (!isConnected) {
