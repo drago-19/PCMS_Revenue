@@ -89,6 +89,20 @@ export function ensureSchema(): Promise<void> {
       const pool = getPool();
       const client = await pool.connect();
       try {
+        // Fast-path ก่อนขอ lock: ถ้า version ตรงแล้ว ไม่ต้องต่อคิวรอ lock เลย
+        // (เดิมตรวจหลังได้ lock ทำให้ทุกคำขอต้องรอคิว แม้จะไม่มีอะไรต้องอัปเกรด)
+        const fastPath = await client
+          .query<{ ok: boolean }>(
+            `SELECT (
+               (SELECT version FROM app_schema_version WHERE schema_name = 'public') = $1
+               AND (SELECT version FROM app_schema_version WHERE schema_name = 'seeheng') = $1
+               AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chart_of_accounts')
+             ) AS ok`,
+            [SCHEMA_VERSION],
+          )
+          .catch(() => ({ rows: [{ ok: false }] }));
+        if (fastPath.rows[0]?.ok) return;
+
         // ใช้ lock ระดับ transaction — ปลดอัตโนมัติเมื่อ COMMIT/ROLLBACK
         // (แบบ session-scoped เดิม ถ้าคำสั่ง unlock ล้มเหลว ล็อกจะค้างกับ connection ใน pool ตลอดไป)
         await client.query("BEGIN");
