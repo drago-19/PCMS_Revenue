@@ -22,7 +22,9 @@ services:
       # ถ้าไม่ตั้ง หน้า /platform จะไม่ยอมบันทึก credential ใน production
       PLATFORM_SECRET_KEY: ${PLATFORM_SECRET_KEY:-}
     ports:
-      - "3002:3000"
+      # เปิดเฉพาะ loopback — cloudflared บนเครื่องเซิร์ฟเวอร์ต่อเข้า localhost:3002
+      # ห้ามผูก 0.0.0.0 มิฉะนั้นจะเข้าตรงได้ ข้าม WAF และข้ามการล็อก IP ของ Cloudflare
+      - "127.0.0.1:3002:3000"
 
   # Cloudflare Tunnel — เปิดใช้งานด้วย: docker compose --profile tunnel up -d
   # ต้องใส่ CLOUDFLARE_TUNNEL_TOKEN ใน .env (ได้จาก Cloudflare Zero Trust → Tunnels)
