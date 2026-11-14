@@ -40,12 +40,37 @@ function formatDateTime(value: string | null): string {
 export function ShopeeConnectCard({
   config,
   hostIsLocal = false,
+  activeShopId = null,
 }: {
   config: ShopeeConfigView;
   hostIsLocal?: boolean;
+  activeShopId?: string | null;
 }) {
   const router = useRouter();
+  const [switchingKey, setSwitchingKey] = useState<string | null>(null);
   const accounts = config.accounts;
+
+  async function handleUseShop(shopId: string) {
+    setSwitchingKey(shopId);
+    try {
+      const response = await fetch("/api/platform/shopee/active-shop", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ shopId }),
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        toast.error(data.error ?? "สลับร้านไม่สำเร็จ");
+        return;
+      }
+      toast.success("สลับร้านที่ใช้อยู่แล้ว");
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
+    } finally {
+      setSwitchingKey(null);
+    }
+  }
   const webhookUrl =
     config.pushCallbackUrl ??
     `${(config.redirectBaseUrl ?? (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/+$/, "")}/api/platform/shopee/webhook`;
@@ -358,6 +383,9 @@ export function ShopeeConnectCard({
                       {account.region ? (
                         <Badge variant="neutral">{account.region}</Badge>
                       ) : null}
+                      {activeShopId === account.accountKey ? (
+                        <Badge variant="info">ใช้อยู่</Badge>
+                      ) : null}
                     </div>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       Shop ID: {account.accountKey} · Token หมดอายุ{" "}
@@ -366,6 +394,18 @@ export function ShopeeConnectCard({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
+                    {activeShopId === account.accountKey ? null : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-[40px]"
+                        onClick={() => handleUseShop(account.accountKey)}
+                        disabled={switchingKey === account.accountKey}
+                      >
+                        {switchingKey === account.accountKey ? "กำลังสลับ…" : "ใช้ร้านนี้"}
+                      </Button>
+                    )}
                     <Button
                       type="button"
                       variant="outline"

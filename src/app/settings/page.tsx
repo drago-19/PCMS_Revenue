@@ -75,6 +75,7 @@ export default async function SettingsPage({
     getActiveShopId(TIKTOK_PLATFORM),
   ]);
 
+  const activeShopeeShopId = await getActiveShopId(SHOPEE_PLATFORM);
   const shopeeParam = Array.isArray(params.shopee) ? params.shopee[0] : params.shopee;
   const shopeeMsgParam = Array.isArray(params.message) ? params.message[0] : params.message;
   const shopeeShopParam = Array.isArray(params.shop) ? params.shop[0] : params.shop;
