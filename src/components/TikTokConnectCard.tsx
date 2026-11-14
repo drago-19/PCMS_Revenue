@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { isSandboxShopName } from "@/lib/platform/platforms";
 
 export interface TikTokAccountView {
   accountKey: string;
@@ -37,13 +38,39 @@ function formatDateTime(value: string | null): string {
 export function TikTokConnectCard({
   config,
   hostIsLocal = false,
+  activeShopId = null,
 }: {
   config: TikTokConfigView;
   /** เปิดจากเครื่อง dev — ลงทะเบียน webhook ไม่ได้ (จะไปทับของ production) */
   hostIsLocal?: boolean;
+  /** ร้านที่ระบบใช้เป็นค่าเริ่มต้นอยู่ตอนนี้ */
+  activeShopId?: string | null;
 }) {
   const router = useRouter();
   const accounts = config.accounts;
+  const [switchingKey, setSwitchingKey] = useState<string | null>(null);
+
+  /** สลับร้านเริ่มต้น (จริง ↔ ทดสอบ) — ไม่เขียนข้อมูลใด ๆ ทั้งสิ้น */
+  const handleSetActive = async (shopId: string) => {
+    if (switchingKey) return;
+    setSwitchingKey(shopId);
+    try {
+      const res = await fetch("/api/platform/tiktok/active-shop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "สลับร้านไม่สำเร็จ");
+        return;
+      }
+      toast.success("เปลี่ยนร้านเริ่มต้นแล้ว");
+      router.refresh();
+    } finally {
+      setSwitchingKey(null);
+    }
+  };
 
   const [editing, setEditing] = useState(!config.configured);
   const [appKey, setAppKey] = useState(config.appKey ?? "");
@@ -176,8 +203,10 @@ export function TikTokConnectCard({
             >
               <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="truncate text-[14px] font-bold">
-                    {account.shopName ?? account.accountKey}
+                  <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-[14px] font-bold">
+                    <span className="truncate">{account.shopName ?? account.accountKey}</span>
+                    {isSandboxShopName(account.shopName) ? <Badge variant="warning">ทดสอบ</Badge> : null}
+                    {activeShopId === account.accountKey ? <Badge variant="neutral">กำลังใช้อยู่</Badge> : null}
                   </p>
                   <p className="text-[12.5px] text-muted-foreground">
                     {account.region ?? "—"} · เชื่อม {formatDateTime(account.connectedAt)} · token ถึง{" "}
@@ -207,7 +236,7 @@ export function TikTokConnectCard({
                 </p>
               ) : null}
 
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
                   onClick={() => handleTest(account.accountKey)}
@@ -215,6 +244,18 @@ export function TikTokConnectCard({
                   aria-busy={testingKey === account.accountKey}
                 >
                   {testingKey === account.accountKey ? "กำลังดึง…" : "ทดสอบดึง Statement"}
+                </Button>
+                <Button
+                  variant={activeShopId === account.accountKey ? "secondary" : "default"}
+                  onClick={() => handleSetActive(account.accountKey)}
+                  disabled={activeShopId === account.accountKey || switchingKey !== null}
+                  aria-busy={switchingKey === account.accountKey}
+                >
+                  {activeShopId === account.accountKey
+                    ? "ร้านที่ใช้อยู่"
+                    : switchingKey === account.accountKey
+                      ? "กำลังสลับ…"
+                      : "ใช้ร้านนี้"}
                 </Button>
               </div>
             </li>

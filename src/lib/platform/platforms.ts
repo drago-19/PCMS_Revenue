@@ -8,6 +8,11 @@ export type PlatformKey = (typeof PLATFORM_KEYS)[number];
 
 export const DEFAULT_PLATFORM: PlatformKey = "tiktok";
 
+/** ร้านทดสอบที่ TikTok สร้างจาก Development Shop จะชื่อขึ้นต้นด้วย SANDBOX_ */
+export function isSandboxShopName(name: string | null | undefined): boolean {
+  return Boolean(name && /^SANDBOX_/i.test(name.trim()));
+}
+
 export type PlatformTab = {
   key: PlatformKey;
   label: string;

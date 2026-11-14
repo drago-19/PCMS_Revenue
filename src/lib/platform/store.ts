@@ -22,6 +22,36 @@ const SETTINGS_KEY = "platform_api";
 export const TIKTOK_PLATFORM = "TikTok";
 export const SHOPEE_PLATFORM = "Shopee";
 
+/** ร้านที่เลือกใช้เป็นค่าเริ่มต้น (ร้านจริงหรือร้านทดสอบ) — เก็บใน app_settings เดียวกัน */
+export async function getActiveShopId(platform: string): Promise<string | null> {
+  const { raw } = await readRawSettingsRow();
+  const active = raw.activeShop;
+  if (!active || typeof active !== "object") return null;
+  const value = (active as Record<string, unknown>)[platform];
+  return typeof value === "string" && value ? value : null;
+}
+
+export async function setActiveShopId(platform: string, shopId: string): Promise<void> {
+  // jsonb_set สร้างคีย์ซ้อนชั้นไม่ได้ — ต้องสร้าง activeShop เป็น object ก่อนแล้วค่อยใส่ค่าร้าน
+  await query(
+    `UPDATE app_settings
+        SET value_json = jsonb_set(
+              jsonb_set(
+                COALESCE(value_json, '{}'::jsonb),
+                '{activeShop}',
+                COALESCE(value_json -> 'activeShop', '{}'::jsonb),
+                true
+              ),
+              ARRAY['activeShop', $2::text],
+              to_jsonb($3::text),
+              true
+            ),
+            updated_at = now()
+      WHERE setting_key = $1`,
+    [SETTINGS_KEY, platform, shopId],
+  );
+}
+
 function clean(value: unknown, max: number): string {
   return typeof value === "string"
     ? value.replace(/[\r\n\t]/g, "").trim().slice(0, max)

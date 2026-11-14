@@ -9,6 +9,7 @@ import { IconCheckCircle, IconInfo } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { getActiveCompanyId } from "@/lib/db";
 import {
+  getActiveShopId,
   getPlatformConfig,
   listPlatformAccounts,
   SHOPEE_PLATFORM,
@@ -66,10 +67,11 @@ export default async function SettingsPage({
     requestHost.startsWith("127.0.0.1") ||
     requestHost.startsWith("0.0.0.0");
 
-  const [platformConfig, tiktokAccounts, shopeeAccounts] = await Promise.all([
+  const [platformConfig, tiktokAccounts, shopeeAccounts, tiktokActiveShopId] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
     listPlatformAccounts(SHOPEE_PLATFORM),
+    getActiveShopId(TIKTOK_PLATFORM),
   ]);
 
   const shopeeParam = Array.isArray(params.shopee) ? params.shopee[0] : params.shopee;
@@ -159,6 +161,7 @@ export default async function SettingsPage({
           <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2">
             <TikTokConnectCard
               hostIsLocal={hostIsLocal}
+              activeShopId={tiktokActiveShopId}
               config={{
                 configured: Boolean(platformConfig.tiktok),
                 appKey: platformConfig.tiktok?.appKey ?? null,

@@ -22,7 +22,12 @@ import {
   type StockListFilter,
 } from "@/lib/platform/stock";
 import { cn } from "@/lib/utils";
-import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
+import {
+  getActiveShopId,
+  getConnectedPlatforms,
+  listPlatformAccounts,
+  TIKTOK_PLATFORM,
+} from "@/lib/platform/store";
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
@@ -62,7 +67,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     listPlatformAccounts(dbPlatform),
     getConnectedPlatforms(),
   ]);
-  const shopId = params.shop ?? accounts[0]?.accountKey ?? null;
+  const shopId = params.shop ?? (await getActiveShopId(TIKTOK_PLATFORM)) ?? accounts[0]?.accountKey ?? null;
   const isConnected = connectedPlatforms.includes(platform);
 
   if (!isConnected) {
