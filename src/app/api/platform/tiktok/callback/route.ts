@@ -8,6 +8,7 @@ import {
   TIKTOK_OAUTH_STATE_COOKIE,
 } from "@/lib/platform/tiktok";
 import { getPlatformConfig, saveTikTokShop } from "@/lib/platform/store";
+import { isSandboxShopName } from "@/lib/platform/platforms";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +38,12 @@ export async function GET(request: Request) {
   cookieStore.delete(TIKTOK_OAUTH_STATE_COOKIE);
 
   if (denied) return back(request, "tiktok=denied");
-  if (!expectedState || !state || state !== expectedState) {
+
+  // Development Shop (sandbox) ของ TikTok เริ่ม authorize จาก Partner Center
+  // ไม่ได้ผ่านลิงก์ของเรา จึงไม่มีคุกกี้ state ของเรา (มันส่ง state ของตัวเองมา)
+  // ร้านที่รับได้ในกรณีนี้ต้องเป็น SANDBOX_ เท่านั้น — ร้านจริงต้องมาจากลิงก์ของเรา
+  const fromDevelopmentShop = !expectedState;
+  if (!fromDevelopmentShop && (!expectedState || !state || state !== expectedState)) {
     return back(request, "tiktok=bad_state");
   }
   if (!code || code === "null") return back(request, "tiktok=no_code");
@@ -56,9 +62,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const shops = await getAuthorizedShops(config.tiktok, token.accessToken);
+    const allShops = await getAuthorizedShops(config.tiktok, token.accessToken);
+    // flow ที่ไม่มี state ของเรา รับเฉพาะร้านทดสอบ (SANDBOX_) — ร้านจริงต้องมาทางลิงก์ authorize ของเราเท่านั้น
+    const shops = fromDevelopmentShop
+      ? allShops.filter((shop) => isSandboxShopName(shop.name))
+      : allShops;
 
     if (shops.length === 0) return back(request, "tiktok=no_shop");
+    if (fromDevelopmentShop) {
+      console.log("[tiktok/callback] development shop authorized", { shops: shops.length });
+    }
 
     for (const shop of shops) {
       await saveTikTokShop({
