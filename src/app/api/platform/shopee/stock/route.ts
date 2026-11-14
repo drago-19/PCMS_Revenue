@@ -6,7 +6,7 @@ import {
   setShopeeStock,
   unlistShopeeItem,
 } from "@/lib/platform/shopee";
-import { ensureValidShopeeToken } from "@/lib/platform/shopee-sync";
+import { ensureValidShopeeToken, syncShopeeStock } from "@/lib/platform/shopee-sync";
 import {
   getPlatformConfig,
   listPlatformAccounts,
@@ -132,6 +132,9 @@ export async function POST(request: Request) {
           { status: 409, headers: { "x-request-id": auth.requestId } },
         );
       }
+      // ซิงก์กลับเพื่อให้ตัวเลขบนหน้าเว็บตรงกับ Shopee ทันที
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+    await syncShopeeStock(target.accountKey).catch(() => undefined);
       return Response.json(
         { ok: true, action, itemId, quantity, requestId: auth.requestId },
         { status: 200, headers: { "x-request-id": auth.requestId } },
@@ -155,6 +158,9 @@ export async function POST(request: Request) {
           { status: 409, headers: { "x-request-id": auth.requestId } },
         );
       }
+      // สินค้าที่ถูกซ่อนจะหลุดจากรายการที่ดึงมา — ซิงก์เพื่อให้หน้าเว็บอัปเดตทันที
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+    await syncShopeeStock(target.accountKey).catch(() => undefined);
       return Response.json(
         { ok: true, action, itemId, requestId: auth.requestId },
         { status: 200, headers: { "x-request-id": auth.requestId } },
@@ -162,6 +168,9 @@ export async function POST(request: Request) {
     }
 
     await deleteShopeeItem(config.shopee, { ...scope, itemId });
+    // สินค้าที่ถูกลบจะหายจากรายการที่ดึงมา — ซิงก์เพื่อให้แถวในฐานข้อมูลหายตามทันที
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    await syncShopeeStock(target.accountKey).catch(() => undefined);
     await recordAuditLog({
       actor: auth.session.sub,
       action: "platform.shopee.delete_item",

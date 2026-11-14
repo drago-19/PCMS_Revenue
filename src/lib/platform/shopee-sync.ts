@@ -399,6 +399,14 @@ export async function syncShopeeStock(targetShopId?: string): Promise<{ skus: nu
     );
   });
 
+  // สินค้าที่ถูกลบ/ซ่อนบน Shopee จะไม่อยู่ในรายการที่ดึงมา — เอาออกจากตารางด้วย
+  // ทำเมื่อได้รายการครบเท่านั้น (items ว่างอาจหมายถึง API ล้ม ไม่ใช่ร้านว่าง)
+  await query(
+    `DELETE FROM platform_stock
+      WHERE platform = $1 AND shop_id = $2 AND NOT (sku_id = ANY($3::text[]))`,
+    [SHOPEE_PLATFORM, ctx.shopId, items.map((item) => item.skuId)],
+  );
+
   const moves = items.filter((item) => before.has(item.skuId) && before.get(item.skuId) !== item.quantity);
   if (moves.length > 0) {
     await runChunks(moves, async (chunk) => {
