@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getTikTokAnalytics } from "@/lib/platform/analytics";
 import { detailParam, hrefWithDetail } from "@/lib/platform/details";
-import { readPlatform } from "@/lib/platform/platforms";
-import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { readPlatform, platformDbName, platformTab } from "@/lib/platform/platforms";
+import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
@@ -57,18 +57,21 @@ export default async function PlatformOverviewPage({ searchParams }: { searchPar
   const toParam = readParam(params, "to");
   const flash = buildFlash(params);
   const platform = readPlatform(readParam(params, "platform"));
+  const dbPlatform = platformDbName(platform);
 
-  const [accounts, analytics] = await Promise.all([
-    listPlatformAccounts(TIKTOK_PLATFORM),
-    getTikTokAnalytics({ from: fromParam, to: toParam, rangeDays: 30, shopId: selectedShop }),
+  const [accounts, connectedPlatforms, analytics] = await Promise.all([
+    listPlatformAccounts(dbPlatform),
+    getConnectedPlatforms(),
+    getTikTokAnalytics({ from: fromParam, to: toParam, rangeDays: 30, shopId: selectedShop, platform: dbPlatform }),
   ]);
+  const isConnected = connectedPlatforms.includes(platform);
 
   return (
     <div className="workspace-page flex min-w-0 flex-col gap-4">
       <PageHeader
-        eyebrow="TikTok Shop · Shopee (ผ่าน Open API)"
+        eyebrow={`${platformTab(platform).label} (ผ่าน Open API)`}
         title="แพลตฟอร์ม"
-        description="ยอดขาย ค่าธรรมเนียม และยอดโอน ที่ดึงตรงจาก API — ตัวเลขคำนวณจากฐานข้อมูลของเรา ไม่ได้ยิงถาม TikTok ทุกครั้งที่เปิดหน้า"
+        description="ยอดขาย ค่าธรรมเนียม และยอดโอน ที่ดึงตรงจาก API — ตัวเลขคำนวณจากฐานข้อมูลของเรา ไม่ได้ยิงถาม API ทุกครั้งที่เปิดหน้า"
         actions={<Badge variant="warning">กำลังพัฒนา</Badge>}
       />
 
@@ -89,19 +92,21 @@ export default async function PlatformOverviewPage({ searchParams }: { searchPar
         from={fromParam}
         to={toParam}
         shop={selectedShop}
+        connectedPlatforms={connectedPlatforms}
       />
 
-      <PlatformBody platform={platform}>
-        <PlatformNav active="overview" from={fromParam} to={toParam} shop={selectedShop} />
+      <PlatformBody platform={platform} connected={isConnected}>
+        <PlatformNav active="overview" from={fromParam} to={toParam} shop={selectedShop} platform={platform} />
 
         <PlatformPeriodBar
           basePath="/platform"
           from={fromParam}
           to={toParam}
           shop={selectedShop}
+          platform={platform}
           accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
           showSync
-          autoRefreshSeconds={60}
+          autoRefreshSeconds={30}
           lastSyncedAt={analytics.lastSyncedAt}
         />
 
@@ -118,6 +123,7 @@ export default async function PlatformOverviewPage({ searchParams }: { searchPar
         from={fromParam}
         to={toParam}
         shopId={selectedShop}
+        platform={dbPlatform}
       />
     </div>
   );

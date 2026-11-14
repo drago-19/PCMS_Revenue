@@ -1,14 +1,20 @@
 import { runTikTokSync } from "./run-sync";
 import { refreshDailySummary } from "./daily-summary";
+import { runShopeeSync, syncShopeeStock } from "./shopee-sync";
+import { shopeeNowSeconds } from "./shopee";
 import { syncStock } from "./stock";
-import { listPlatformAccounts, TIKTOK_PLATFORM } from "./store";
+import { listPlatformAccounts, SHOPEE_PLATFORM, TIKTOK_PLATFORM } from "./store";
 import { tikTokNowSeconds } from "./tiktok";
 
-// รอบตั้งต้น 3 นาที — ตัวเลขขยับใกล้เวลาจริง แต่ละรอบยังเบา (ดึงย้อนไม่กี่ชั่วโมง)
-const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 3 * 60 * 1000);
-const FIRST_DELAY_MS = 20 * 1000;
+// รอบออเดอร์ทุก 60 วินาที — วัดจริง: ดึงย้อน 30 นาทีใช้ ~1.3 วิ (ออเดอร์ 97 แถว) ราคาถูกมาก
+const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 60 * 1000);
+const FIRST_DELAY_MS = 15 * 1000;
 // ดึงย้อนกว่ารอบหนึ่งช่วง เพื่อไม่ให้พลาดออเดอร์ที่สถานะเปลี่ยนช้า
-const LOOKBACK_HOURS = Number(process.env.PLATFORM_SYNC_LOOKBACK_HOURS ?? 3);
+// ดึงย้อน 30 นาที = ได้ลองซ้ำ ~30 รอบก่อนหลุดหน้าต่าง
+const LOOKBACK_MINUTES = Number(process.env.PLATFORM_SYNC_LOOKBACK_MINUTES ?? 30);
+const LOOKBACK_HOURS = LOOKBACK_MINUTES / 60;
+// statement ออกวันละครั้ง และการดึง 7 วันใช้ ~14 วิ — จึงดึงทุก 10 นาที ไม่ใช่ทุกรอบ
+const STATEMENT_EVERY_TICKS = Math.max(1, Math.round((10 * 60 * 1000) / INTERVAL_MS));
 // สต็อก: ดึงทั้งแคตตาล็อกใช้แค่ 2 คำขอต่อร้าน จึงตั้งรอบสั้น (60 วินาที) แยกจากออเดอร์
 // รอบเต็มใช้เป็นตัวไล่เก็บ (reconcile) — ตั้งห่างไว้ เพราะเส้นทางหลักคือ webhook + หน้าจอ
 const STOCK_INTERVAL_MS = Number(process.env.PLATFORM_STOCK_INTERVAL_MS ?? 30 * 60 * 1000);
@@ -34,15 +40,18 @@ export function startScheduledSync(): void {
       return;
     }
     running = true;
+    tickCount += 1;
+    const withStatements = tickCount === 1 || tickCount % STATEMENT_EVERY_TICKS === 0;
     const to = tikTokNowSeconds();
     const from = to - LOOKBACK_HOURS * 3600;
     try {
-      const { stats } = await runTikTokSync({ from, to, kind: "scheduled" });
+      const { stats } = await runTikTokSync({ from, to, kind: "scheduled", skipStatements: !withStatements });
       console.log(
-        `[scheduled-sync] ออเดอร์ ${stats.orders} · statement ${stats.statements} · เงินต่อออเดอร์ ${stats.orderFinance}`,
+        withStatements
+          ? `[scheduled-sync] ออเดอร์ ${stats.orders} · statement ${stats.statements} · เงินต่อออเดอร์ ${stats.orderFinance}`
+          : `[scheduled-sync] ออเดอร์ ${stats.orders} · เว้น statement รอบนี้`,
       );
 
-      tickCount += 1;
       const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
 
       // สรุปรายวัน: ทุก 15 นาที
@@ -63,6 +72,34 @@ export function startScheduledSync(): void {
         "[scheduled-sync] ล้มเหลว",
         error instanceof Error ? error.message : error,
       );
+    }
+
+    try {
+      const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+      const connectedShopee = shopeeAccounts.filter((a) => a.status === "connected");
+      const shopeeTo = shopeeNowSeconds();
+      const shopeeFrom = shopeeTo - LOOKBACK_HOURS * 3600;
+      for (const account of connectedShopee) {
+        try {
+          const { stats } = await runShopeeSync({
+            from: shopeeFrom,
+            to: shopeeTo,
+            kind: "scheduled",
+            shopId: account.accountKey,
+          });
+          if (stats.orders > 0 || stats.orderFinance > 0) {
+            console.log(
+              `[scheduled-sync:shopee] ${account.accountKey} · ออเดอร์ ${stats.orders} · เงิน ${stats.orderFinance}`,
+            );
+          }
+        } catch (err) {
+          console.error(
+            "[scheduled-sync:shopee] ล้มเหลว",
+            account.accountKey,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
     } finally {
       running = false;
     }
@@ -91,6 +128,24 @@ export function startScheduledSync(): void {
           );
         }
       }
+
+      const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+      for (const account of shopeeAccounts.filter((a) => a.status === "connected")) {
+        try {
+          const result = await syncShopeeStock(account.accountKey);
+          if (result.changed > 0) {
+            console.log(
+              `[stock-sync:shopee] ${account.accountKey} · ${result.skus} SKU · เปลี่ยน ${result.changed} รายการ`,
+            );
+          }
+        } catch (error) {
+          console.error(
+            "[stock-sync:shopee] ล้มเหลว",
+            account.accountKey,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
     } finally {
       stockRunning = false;
     }
@@ -101,8 +156,10 @@ export function startScheduledSync(): void {
   setTimeout(stockTick, FIRST_DELAY_MS + 5000).unref();
   setInterval(stockTick, STOCK_INTERVAL_MS).unref();
   console.log(
-    `[scheduled-sync] ออเดอร์ทุก ${Math.round(INTERVAL_MS / 1000)} วิ · สต็อกทุก ${Math.round(
-      STOCK_INTERVAL_MS / 1000,
-    )} วิ · ดึงย้อน ${LOOKBACK_HOURS} ชม. · ยิงพร้อมกันไม่เกิน ${process.env.TIKTOK_MAX_CONCURRENCY ?? 3} คำขอ`,
+    `[scheduled-sync] ออเดอร์ทุก ${Math.round(INTERVAL_MS / 1000)} วิ (ดึงย้อน ${LOOKBACK_MINUTES} นาที) · statement ทุก ${
+      STATEMENT_EVERY_TICKS * Math.round(INTERVAL_MS / 1000)
+    } วิ · สต็อกทุก ${Math.round(STOCK_INTERVAL_MS / 1000)} วิ · ยิงพร้อมกันไม่เกิน ${
+      process.env.TIKTOK_MAX_CONCURRENCY ?? 3
+    } คำขอ`,
   );
 }

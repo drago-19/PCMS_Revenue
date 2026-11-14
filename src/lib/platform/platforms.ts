@@ -38,7 +38,7 @@ export const PLATFORM_TABS: PlatformTab[] = [
       "สถานะพัสดุ + tracking และคำขอคืนเงิน",
     ],
     caveat:
-      "ต้องใช้แอปประเภท Seller In-house System และร้านต้องเข้าเงื่อนไข Mall หรือ Managed seller ก่อน",
+      "รองรับทั้ง Sandbox (ทดสอบ) และ Live (ERP System) — เชื่อมต่อได้ที่ ตั้งค่า > เชื่อมต่อแพลตฟอร์ม",
   },
   {
     key: "facebook",
@@ -61,4 +61,16 @@ export function readPlatform(value?: string | string[]): PlatformKey {
 
 export function platformTab(key: PlatformKey): PlatformTab {
   return PLATFORM_TABS.find((tab) => tab.key === key) ?? PLATFORM_TABS[0];
+}
+
+/** ชื่อแพลตฟอร์มที่ใช้เป็นคีย์คอลัมน์ platform ในตาราง platform_* */
+export function platformDbName(key: PlatformKey): string {
+  switch (key) {
+    case "shopee":
+      return "Shopee";
+    case "facebook":
+      return "Facebook";
+    default:
+      return "TikTok";
+  }
 }

@@ -2,12 +2,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader, StatCard } from "@/components/PageHeader";
 import { PlatformNav } from "@/components/platform/PlatformNav";
+import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CloseableDialog } from "@/components/platform/CloseableDialog";
 import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
+import { syncShopeeStock } from "@/lib/platform/shopee-sync";
 import {
   getLastStockSync,
   getSkuDetail,
@@ -19,7 +22,7 @@ import {
   type StockListFilter,
 } from "@/lib/platform/stock";
 import { cn } from "@/lib/utils";
-import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 
@@ -28,6 +31,7 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "แพลตฟอร์ม · สต็อก" };
 
 type SearchParams = Promise<{
+  platform?: string;
   shop?: string;
   sync?: string;
   page?: string;
@@ -50,14 +54,52 @@ function num(value: number): string {
 
 export default async function PlatformStockPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+  const platform = readPlatform(params.platform);
+  const dbPlatform = platformDbName(platform);
+  const [accounts, connectedPlatforms] = await Promise.all([
+    listPlatformAccounts(dbPlatform),
+    getConnectedPlatforms(),
+  ]);
   const shopId = params.shop ?? accounts[0]?.accountKey ?? null;
+  const isConnected = connectedPlatforms.includes(platform);
+
+  if (!isConnected) {
+    return (
+      <div className="workspace-page flex min-w-0 flex-col gap-4">
+        <PageHeader
+          eyebrow={platformTab(platform).label}
+          title="สต็อกของร้านนี้"
+          description="ยังไม่มีร้านที่เชื่อมต่อ"
+        />
+        <PlatformSwitcher
+          platform={platform}
+          basePath="/platform/stocks"
+          shop={params.shop}
+          connectedPlatforms={connectedPlatforms}
+        />
+        <PlatformBody platform={platform} connected={false}>
+          <div />
+        </PlatformBody>
+      </div>
+    );
+  }
 
   if (!shopId) {
     return (
       <div className="workspace-page flex min-w-0 flex-col gap-4">
-        <PageHeader eyebrow="TikTok Shop" title="สต็อกของร้านนี้" description="ยังไม่มีร้านที่เชื่อมต่อ" />
-        <p className="text-[13px] text-muted-foreground">เชื่อมร้าน TikTok ก่อน แล้วจำนวนสต็อกจะดึงมาแสดงที่นี่</p>
+        <PageHeader
+          eyebrow={platformTab(platform).label}
+          title="สต็อกของร้านนี้"
+          description="ยังไม่มีร้านที่เชื่อมต่อ"
+        />
+        <PlatformSwitcher
+          platform={platform}
+          basePath="/platform/stocks"
+          connectedPlatforms={connectedPlatforms}
+        />
+        <p className="text-[13px] text-muted-foreground">
+          เชื่อมร้าน {platformTab(platform).label} ก่อน แล้วจำนวนสต็อกจะดึงมาแสดงที่นี่
+        </p>
       </div>
     );
   }
@@ -65,12 +107,22 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   // ดึงจริงเฉพาะเมื่อกดปุ่ม (sync=1) แล้วเด้งกลับ URL เดียวกันที่ไม่มี sync
   // เพื่อไม่ให้การรีเฟรชหรือ prefetch ไปดึงซ้ำ
   if (params.sync) {
-    const result = await syncStock(shopId);
+    let result: { skus: number; changed: number; error?: string };
+    if (platform === "shopee") {
+      try {
+        result = await syncShopeeStock(shopId);
+      } catch (err) {
+        result = { skus: 0, changed: 0, error: err instanceof Error ? err.message : String(err) };
+      }
+    } else {
+      result = await syncStock(shopId);
+    }
     const qs = new URLSearchParams({
       shop: shopId,
       synced: String(result.skus),
       changed: String(result.changed),
     });
+    if (platform !== "tiktok") qs.set("platform", platform);
     if (result.error) qs.set("syncError", result.error);
     redirect(`/platform/stocks?${qs.toString()}`);
   }
@@ -92,18 +144,18 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const filter: StockListFilter =
     params.filter === "out" || params.filter === "low" ? params.filter : "all";
   const [list, counts, movements, lastSync, skuDetail] = await Promise.all([
-    getStockPage(shopId, { search, filter, page: pageNumber, pageSize: PAGE_SIZE }),
-    getStockCounts(shopId),
-    getStockMovements(shopId, { limit: HISTORY_PAGE_SIZE, cursor: historyCursor }),
-    getLastStockSync(shopId),
-    params.sku ? getSkuDetail(shopId, params.sku) : Promise.resolve(null),
+    getStockPage(shopId, { search, filter, page: pageNumber, pageSize: PAGE_SIZE, platform: dbPlatform }),
+    getStockCounts(shopId, dbPlatform),
+    getStockMovements(shopId, { limit: HISTORY_PAGE_SIZE, cursor: historyCursor, platform: dbPlatform }),
+    getLastStockSync(shopId, dbPlatform),
+    params.sku ? getSkuDetail(shopId, params.sku, dbPlatform) : Promise.resolve(null),
   ]);
   const pageCount = Math.max(Math.ceil(list.total / PAGE_SIZE), 1);
   const current = Math.min(pageNumber, pageCount);
   const rows =
     current === pageNumber
       ? list.rows
-      : (await getStockPage(shopId, { search, filter, page: current, pageSize: PAGE_SIZE })).rows;
+      : (await getStockPage(shopId, { search, filter, page: current, pageSize: PAGE_SIZE, platform: dbPlatform })).rows;
 
   const totalQty = counts.quantity;
   const outOfStock = counts.out;
@@ -112,6 +164,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   // ลิงก์ที่คงคำค้นและตัวกรองไว้ขณะเปลี่ยนหน้า/ปิดป๊อปอัป
   const listHref = (next: { page?: number; filter?: StockListFilter; q?: string }) => {
     const qs = new URLSearchParams({ shop: shopId });
+    if (platform !== "tiktok") qs.set("platform", platform);
     const nextSearch = next.q ?? search;
     const nextFilter = next.filter ?? filter;
     const nextPage = next.page ?? 1;
@@ -127,6 +180,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   ];
   const historyHref = (next: { after?: string; before?: string }) => {
     const qs = new URLSearchParams({ shop: shopId });
+    if (platform !== "tiktok") qs.set("platform", platform);
     if (current > 1) qs.set("page", String(current));
     if (next.after) qs.set("after", next.after);
     if (next.before) qs.set("before", next.before);
@@ -135,18 +189,21 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const historyCursorOf = (movement: { changedAt: string; id: string }) =>
     `${movement.changedAt}|${movement.id}`;
 
+  const syncParams = new URLSearchParams({ shop: shopId, sync: "1" });
+  if (platform !== "tiktok") syncParams.set("platform", platform);
+
   return (
     <div className="workspace-page flex min-w-0 flex-col gap-4">
       <PageHeader
-        eyebrow="TikTok Shop"
+        eyebrow={platformTab(platform).label}
         title="สต็อกของร้านนี้"
-        description={`จำนวนคงเหลือดึงจาก TikTok โดยตรง · ร้าน ${shopName} · อัปเดตล่าสุด ${
+        description={`จำนวนคงเหลือดึงจาก ${platformTab(platform).label} โดยตรง · ร้าน ${shopName} · อัปเดตล่าสุด ${
           lastSync ? thaiDateTime(lastSync) : "ยังไม่เคยดึง"
         }`}
         actions={
           <Button asChild size="sm" variant="outline">
             <Link
-              href={`/platform/stocks?shop=${encodeURIComponent(shopId)}&sync=1`}
+              href={`/platform/stocks?${syncParams.toString()}`}
               scroll={false}
               prefetch={false}
             >
@@ -156,10 +213,17 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         }
       />
 
-      <PlatformNav active="stocks" shop={shopId} />
+      <PlatformSwitcher
+        platform={platform}
+        basePath="/platform/stocks"
+        shop={shopId}
+        connectedPlatforms={connectedPlatforms}
+      />
+
+      <PlatformNav active="stocks" shop={shopId} platform={platform} />
 
       <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">
-        <span>จำนวนคงเหลือดึงจาก TikTok เข้า DB เราทุก 3 นาที — หน้านี้รีเฟรชตัวเองให้เห็นค่าล่าสุด</span>
+        <span>จำนวนคงเหลือดึงจาก {platformTab(platform).label} เข้า DB เราอัตโนมัติ — หน้านี้รีเฟรชตัวเองให้เห็นค่าล่าสุด</span>
         <PlatformAutoRefresh seconds={60} />
       </p>
 
@@ -174,7 +238,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       ) : null}
 
       <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-3">
-        <StatCard label="SKU ทั้งหมด" value={num(counts.all)} hint="นับเฉพาะที่มีใน TikTok" />
+        <StatCard label="SKU ทั้งหมด" value={num(counts.all)} hint={`นับเฉพาะที่มีใน ${platformTab(platform).label}`} />
         <StatCard label="ชิ้นคงเหลือรวม" value={num(totalQty)} tone="positive" hint="รวมทุก SKU ทุกคลัง" />
         <StatCard
           label="สินค้าหมด"
@@ -191,6 +255,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         </div>
 
         <form action="/platform/stocks" className="flex min-w-0 flex-wrap items-center gap-2">
+          {platform !== "tiktok" ? <input type="hidden" name="platform" value={platform} /> : null}
           <input type="hidden" name="shop" value={shopId} />
           {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
           <label className="sr-only" htmlFor="stock-search">
@@ -430,7 +495,11 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                         className="flex flex-wrap items-baseline gap-x-2 border-b border-border/70 py-1.5 text-[12.5px] last:border-0"
                       >
                         <Link
-                          href={`/platform/orders?order=${encodeURIComponent(order.orderId)}`}
+                          href={
+                            platform !== "tiktok"
+                              ? `/platform/orders?platform=${platform}&order=${encodeURIComponent(order.orderId)}`
+                              : `/platform/orders?order=${encodeURIComponent(order.orderId)}`
+                          }
                           className="mono underline underline-offset-2"
                         >
                           {order.orderId}

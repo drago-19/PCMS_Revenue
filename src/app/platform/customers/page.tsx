@@ -14,9 +14,9 @@ import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getCustomerInsights, type AreaRow, type TopCustomer } from "@/lib/platform/customers";
-import { readPlatform } from "@/lib/platform/platforms";
+import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import { thaiRange } from "@/lib/platform/period";
-import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
@@ -141,15 +141,18 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
   const toParam = read(params, "to");
   const selectedShop = read(params, "shop") || undefined;
   const platform = readPlatform(read(params, "platform"));
+  const dbPlatform = platformDbName(platform);
 
-  const [insights, accounts] = await Promise.all([
+  const [insights, accounts, connectedPlatforms] = await Promise.all([
     getCustomerInsights({
       from: fromParam || undefined,
       to: toParam || undefined,
       rangeDays: 30,
       shopId: selectedShop,
+      platform: dbPlatform,
     }),
-    listPlatformAccounts(TIKTOK_PLATFORM),
+    listPlatformAccounts(dbPlatform),
+    getConnectedPlatforms(),
   ]);
 
   const maxCustomer = insights.topCustomers[0]?.spend ?? 0;
@@ -163,7 +166,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
   return (
     <div className="workspace-page flex min-w-0 flex-col gap-4">
       <PageHeader
-        eyebrow="TikTok Shop"
+        eyebrow={platformTab(platform).label}
         title="ลูกค้า"
         description="ใครซื้อเยอะที่สุด ซื้ออะไร และอยู่จังหวัด/อำเภอไหน — นับจากออเดอร์ที่ซื้อจริงในช่วงที่เลือก"
       />
@@ -174,16 +177,18 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
         from={fromParam}
         to={toParam}
         shop={selectedShop}
+        connectedPlatforms={connectedPlatforms}
       />
 
-      <PlatformBody platform={platform}>
-        <PlatformNav active="customers" from={fromParam} to={toParam} shop={selectedShop} />
+      <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
+        <PlatformNav active="customers" from={fromParam} to={toParam} shop={selectedShop} platform={platform} />
 
         <PlatformPeriodBar
           basePath="/platform/customers"
           from={fromParam || undefined}
           to={toParam || undefined}
           shop={selectedShop}
+          platform={platform}
           accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
         />
 
@@ -297,6 +302,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
         from={fromParam}
         to={toParam}
         shopId={selectedShop}
+        platform={dbPlatform}
       />
     </div>
   );

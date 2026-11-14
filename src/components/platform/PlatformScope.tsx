@@ -7,33 +7,37 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { EmptyState } from "@/components/PageHeader";
 import { IconInfo, IconReceipt } from "@/components/icons";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { PLATFORM_TABS, platformTab, type PlatformKey } from "@/lib/platform/platforms";
 
-/** ตัวสลับแพลตฟอร์ม — เก็บช่วงเวลา/ร้านที่กำลังดูอยู่ไว้ */
+/** ตัวสลับแพลตฟอร์ม — เก็บช่วงเวลาไว้ (ไม่พก shop ID ข้ามแพลตฟอร์ม) */
 export function PlatformSwitcher({
   platform,
   basePath,
   from,
   to,
   shop,
+  connectedPlatforms,
 }: {
   platform: PlatformKey;
   basePath: string;
   from?: string;
   to?: string;
   shop?: string;
+  connectedPlatforms?: PlatformKey[];
 }) {
   return (
     <nav aria-label="เลือกแพลตฟอร์ม" className="flex min-w-0 flex-wrap items-center gap-1.5">
       {PLATFORM_TABS.map((tab) => {
         const active = tab.key === platform;
+        const isConnected = connectedPlatforms ? connectedPlatforms.includes(tab.key) : tab.connected;
         const qs = new URLSearchParams();
         if (tab.key !== "tiktok") qs.set("platform", tab.key);
         if (from) qs.set("from", from);
         if (to) qs.set("to", to);
-        if (shop) qs.set("shop", shop);
+        if (active && shop) qs.set("shop", shop);
         const href = qs.toString() ? `${basePath}?${qs.toString()}` : basePath;
 
         return (
@@ -46,13 +50,13 @@ export function PlatformSwitcher({
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               active
                 ? "border-foreground bg-foreground text-background"
-                : tab.connected
+                : isConnected
                   ? "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
                   : "border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
             {tab.label}
-            {!tab.connected ? <span className="sr-only">(ยังไม่เชื่อมต่อ)</span> : null}
+            {!isConnected ? <span className="sr-only">(ยังไม่เชื่อมต่อ)</span> : null}
           </Link>
         );
       })}
@@ -83,13 +87,29 @@ export function PlatformNotConnected({ platform }: { platform: PlatformKey }) {
           ))}
         </ul>
         <p className="text-[12px] leading-5 text-muted-foreground">เงื่อนไข: {tab.caveat}</p>
+        {platform !== "facebook" ? (
+          <div className="pt-1">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/settings?tab=platforms">ไปตั้งค่าเชื่อมต่อ {tab.label}</Link>
+            </Button>
+          </div>
+        ) : null}
       </Card>
     </div>
   );
 }
 
 /** ตัวกันเนื้อหา — แสดงเนื้อหาจริงเฉพาะแพลตฟอร์มที่เชื่อมแล้ว */
-export function PlatformBody({ platform, children }: { platform: PlatformKey; children: ReactNode }) {
-  if (platform === "tiktok") return <>{children}</>;
+export function PlatformBody({
+  platform,
+  connected,
+  children,
+}: {
+  platform: PlatformKey;
+  connected?: boolean;
+  children: ReactNode;
+}) {
+  const allowed = connected ?? platform === "tiktok";
+  if (allowed) return <>{children}</>;
   return <PlatformNotConnected platform={platform} />;
 }

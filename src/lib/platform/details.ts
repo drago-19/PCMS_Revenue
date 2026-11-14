@@ -140,11 +140,12 @@ function money(value: number): string {
  */
 export async function buildDetail(
   parsed: { kind: DetailKind; value: string; label?: string },
-  range: { from?: string; to?: string; shopId?: string },
+  range: { from?: string; to?: string; shopId?: string; platform?: string },
   limit = 40,
 ): Promise<DetailView> {
+  const platform = range.platform ?? "TikTok";
   const { startIso, endIso, fromDay, toDay } = resolveRange(range.from, range.to);
-  const params: unknown[] = [startIso, endIso];
+  const params: unknown[] = [platform, startIso, endIso];
   const where: string[] = [];
 
   const push = (value: string) => {
@@ -181,7 +182,7 @@ export async function buildDetail(
       // platform_order_items ไม่มีคอลัมน์ sku — จับคู่ด้วยชื่อ SKU หรือชื่อสินค้า
       where.push(
         `EXISTS (SELECT 1 FROM platform_order_items i
-                  WHERE i.shop_id = o.shop_id AND i.order_id = o.order_id
+                  WHERE i.platform = o.platform AND i.shop_id = o.shop_id AND i.order_id = o.order_id
                     AND (COALESCE(NULLIF(i.sku_name, ''), i.product_name) = ${holder}
                          OR i.product_name = ${holder}))`,
       );
@@ -202,8 +203,8 @@ export async function buildDetail(
             sum(f.settlement_amount)::text AS settlement
        FROM platform_orders o
        LEFT JOIN platform_order_finance f
-         ON f.shop_id = o.shop_id AND f.order_id = o.order_id
-      WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz${filterSql}`,
+         ON f.platform = o.platform AND f.shop_id = o.shop_id AND f.order_id = o.order_id
+      WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz${filterSql}`,
     params,
   );
 
@@ -221,8 +222,8 @@ export async function buildDetail(
             o.cancel_reason
        FROM platform_orders o
        LEFT JOIN platform_order_finance f
-         ON f.shop_id = o.shop_id AND f.order_id = o.order_id
-      WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz${filterSql}
+         ON f.platform = o.platform AND f.shop_id = o.shop_id AND f.order_id = o.order_id
+      WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz${filterSql}
       ORDER BY o.create_time DESC
       LIMIT ${Math.max(1, Math.min(limit, 100))}`,
     params,
@@ -243,9 +244,9 @@ export async function buildDetail(
               quantity::text AS quantity,
               sale_price::text AS price
          FROM platform_order_items
-        WHERE order_id = ANY($1::text[])
+        WHERE platform = $1 AND order_id = ANY($2::text[])
         ORDER BY order_id, quantity DESC`,
-      [ids],
+      [platform, ids],
     );
     itemsByOrder = items.reduce((map, item) => {
       const list = map.get(item.order_id) ?? [];

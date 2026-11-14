@@ -56,6 +56,7 @@ export interface CustomerInsights {
 }
 
 export interface CustomerOptions {
+  platform?: string;
   from?: string; // YYYY-MM-DD
   to?: string; // YYYY-MM-DD
   rangeDays?: number;
@@ -71,9 +72,9 @@ function num(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function scope(fromIso: string, toIso: string, shopId?: string) {
-  const params: unknown[] = [fromIso, toIso];
-  let clause = `o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz AND ${PURCHASED}`;
+function scope(fromIso: string, toIso: string, shopId?: string, platform = "TikTok") {
+  const params: unknown[] = [platform, fromIso, toIso];
+  let clause = `o.platform = $1::text AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz AND ${PURCHASED}`;
   if (shopId) {
     params.push(shopId);
     clause += ` AND o.shop_id = $${params.length}::text`;
@@ -86,7 +87,7 @@ export async function getCustomerInsights(options: CustomerOptions = {}): Promis
   const limit = options.limit ?? 10;
   const fromIso = range.startIso;
   const toIso = range.endIso;
-  const { clause, params } = scope(fromIso, toIso, options.shopId);
+  const { clause, params } = scope(fromIso, toIso, options.shopId, options.platform ?? "TikTok");
 
   const totalsRows = await query<{
     orders: string;

@@ -6,10 +6,10 @@ import { PlatformDetail } from "@/components/platform/PlatformDetailSlot";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { getTikTokAnalytics } from "@/lib/platform/analytics";
 import { detailParam, hrefWithDetail } from "@/lib/platform/details";
-import { readPlatform } from "@/lib/platform/platforms";
+import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import { getTikTokOps } from "@/lib/platform/ops";
 import { thaiRange } from "@/lib/platform/period";
-import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
@@ -28,17 +28,19 @@ export default async function PlatformProductsPage({ searchParams }: { searchPar
   const fromParam = read(params, "from");
   const toParam = read(params, "to");
   const platform = readPlatform(read(params, "platform"));
+  const dbPlatform = platformDbName(platform);
 
-  const [accounts, analytics, ops] = await Promise.all([
-    listPlatformAccounts(TIKTOK_PLATFORM),
-    getTikTokAnalytics({ from: fromParam, to: toParam, rangeDays: 30, shopId: selectedShop }),
-    getTikTokOps({ from: fromParam, to: toParam, shopId: selectedShop }),
+  const [accounts, connectedPlatforms, analytics, ops] = await Promise.all([
+    listPlatformAccounts(dbPlatform),
+    getConnectedPlatforms(),
+    getTikTokAnalytics({ from: fromParam, to: toParam, rangeDays: 30, shopId: selectedShop, platform: dbPlatform }),
+    getTikTokOps({ from: fromParam, to: toParam, shopId: selectedShop, platform: dbPlatform }),
   ]);
 
   return (
     <div className="workspace-page flex min-w-0 flex-col gap-4">
       <PageHeader
-        eyebrow="TikTok Shop"
+        eyebrow={platformTab(platform).label}
         title="สินค้าและเหตุผล"
         description={`สินค้าที่ทำยอด ราคาที่ขายได้จริง และเหตุผลที่ออเดอร์ถูกยกเลิก · ${thaiRange(ops.range.from, ops.range.to)}`}
       />
@@ -49,16 +51,18 @@ export default async function PlatformProductsPage({ searchParams }: { searchPar
         from={fromParam}
         to={toParam}
         shop={selectedShop}
+        connectedPlatforms={connectedPlatforms}
       />
 
-      <PlatformBody platform={platform}>
-        <PlatformNav active="products" from={fromParam} to={toParam} shop={selectedShop} />
+      <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
+        <PlatformNav active="products" from={fromParam} to={toParam} shop={selectedShop} platform={platform} />
 
         <PlatformPeriodBar
           basePath="/platform/products"
           from={fromParam}
           to={toParam}
           shop={selectedShop}
+          platform={platform}
           accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
         />
 
@@ -83,6 +87,7 @@ export default async function PlatformProductsPage({ searchParams }: { searchPar
         from={fromParam}
         to={toParam}
         shopId={selectedShop}
+        platform={dbPlatform}
       />
     </div>
   );

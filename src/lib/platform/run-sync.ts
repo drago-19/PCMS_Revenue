@@ -24,6 +24,8 @@ export interface SyncWindow {
   kind: string;
   /** "update" (ค่าเริ่มต้น) = ดึงออเดอร์ที่สร้างหรือถูกแก้ในช่วงนั้น · "create" = ใช้ตอนดึงย้อน */
   mode?: "create" | "update";
+  /** รอบถี่ ๆ เอาแค่ออเดอร์ — ข้ามการดึง statement (ซึ่งกินเวลาหลายวินาที) */
+  skipStatements?: boolean;
 }
 
 // statement ของ TikTok ออกช้ากว่าวันจริงได้หลายวัน จึงดึงย้อนกว้างกว่ารอบปกติ
@@ -88,7 +90,9 @@ export async function runTikTokSync(
     const statementFrom = byUpdate
       ? window.from - LIVE_STATEMENT_LOOKBACK_DAYS * 86400
       : window.from;
-    const money = await syncStatements(ctx, statementFrom, window.to);
+    const money = window.skipStatements
+      ? { statements: 0, orderFinance: 0 }
+      : await syncStatements(ctx, statementFrom, window.to);
     await finishSyncRun(runId, orders + money.statements + money.orderFinance, null);
     return {
       stats: { orders, statements: money.statements, orderFinance: money.orderFinance },

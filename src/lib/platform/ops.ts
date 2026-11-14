@@ -81,6 +81,7 @@ export interface TikTokOps {
 }
 
 export interface OpsParams {
+  platform?: string;
   from?: string | null;
   to?: string | null;
   shopId?: string | null;
@@ -101,16 +102,17 @@ const DUE_UNIX = `COALESCE(
 const UNSHIPPED = "('AWAITING_SHIPMENT','ON_HOLD','PARTIALLY_SHIPPING','AWAITING_COLLECTION')";
 
 export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
+  const platform = params.platform ?? "TikTok";
   const range = resolveRange(params.from ?? undefined, params.to ?? undefined);
   const start = new Date(range.startIso);
   const end = new Date(range.endIso);
   const spanMs = Math.max(end.getTime() - start.getTime(), 86_400_000);
   const prevStart = new Date(start.getTime() - spanMs);
 
-  const shopClause = params.shopId ? " AND shop_id = $3::text" : "";
+  const shopClause = params.shopId ? " AND shop_id = $4::text" : "";
   const base = params.shopId
-    ? [start.toISOString(), end.toISOString(), params.shopId]
-    : [start.toISOString(), end.toISOString()];
+    ? [platform, start.toISOString(), end.toISOString(), params.shopId]
+    : [platform, start.toISOString(), end.toISOString()];
 
   const [
     overdueRows,
@@ -142,7 +144,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
                 COALESCE(NULLIF(btrim(tracking_number), ''), NULLIF(btrim(raw_json->>'tracking_number'), '')) AS tracking_number,
                 ${DUE_UNIX} AS due_unix
            FROM platform_orders o
-          WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz
+          WHERE o.platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz
             AND order_status IN ${UNSHIPPED}${shopClause}
        )
        SELECT order_id, order_status, to_timestamp(due_unix)::text AS due_at,
@@ -169,7 +171,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
                 COALESCE(NULLIF(btrim(tracking_number), ''), NULLIF(btrim(raw_json->>'tracking_number'), '')) AS tracking_number,
                 ${DUE_UNIX} AS due_unix
            FROM platform_orders o
-          WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz
+          WHERE o.platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz
             AND order_status IN ('AWAITING_COLLECTION','IN_TRANSIT','PARTIALLY_SHIPPING')${shopClause}
        )
        SELECT order_id, order_status, to_timestamp(due_unix)::text AS due_at,
@@ -192,10 +194,11 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
               shipping_provider, COALESCE(status, 'ไม่ทราบสถานะ') AS status,
               (EXTRACT(EPOCH FROM now() - COALESCE(update_time, create_time)) / 86400)::text AS idle_days
          FROM platform_packages
-        WHERE COALESCE(status, '') NOT IN ('DELIVERED','COMPLETED','CANCELLED','RETURNED','LOST')
+        WHERE platform = $1
+          AND COALESCE(status, '') NOT IN ('DELIVERED','COMPLETED','CANCELLED','RETURNED','LOST')
           AND COALESCE(update_time, create_time) < now() - interval '3 days'
-          AND create_time >= $1::timestamptz AND create_time < $2::timestamptz
-          ${params.shopId ? " AND shop_id = $3::text" : ""}
+          AND create_time >= $2::timestamptz AND create_time < $3::timestamptz
+          ${params.shopId ? " AND shop_id = $4::text" : ""}
         ORDER BY EXTRACT(EPOCH FROM now() - COALESCE(update_time, create_time)) DESC
         LIMIT 200`,
       base,
@@ -204,14 +207,14 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
       `SELECT count(*)::text AS total,
               count(*) FILTER (WHERE order_status = 'CANCELLED')::text AS cancelled
          FROM platform_orders
-        WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz${shopClause}`,
+        WHERE platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz${shopClause}`,
       base,
     ),
     query<{ label: string; n: string }>(
       `SELECT COALESCE(NULLIF(o.raw_json->>'cancellation_initiator', ''), 'ไม่ระบุ') AS label,
               count(*)::text AS n
          FROM platform_orders o
-        WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz
+        WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz
           AND o.order_status = 'CANCELLED'${shopClause.replace("shop_id", "o.shop_id")}
         GROUP BY 1 ORDER BY 2 DESC`,
       base,
@@ -219,7 +222,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
     query<{ label: string; n: string }>(
       `SELECT COALESCE(NULLIF(cancel_reason, ''), 'ไม่ระบุเหตุผล') AS label, count(*)::text AS n
          FROM platform_orders
-        WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz
+        WHERE platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz
           AND order_status = 'CANCELLED'${shopClause}
         GROUP BY 1 ORDER BY 2 DESC LIMIT 8`,
       base,
@@ -227,7 +230,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
     query<{ label: string; n: string }>(
       `SELECT COALESCE(NULLIF(province, ''), 'ไม่ระบุจังหวัด') AS label, count(*)::text AS n
          FROM platform_orders
-        WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz
+        WHERE platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz
           AND order_status = 'CANCELLED'${shopClause}
         GROUP BY 1 ORDER BY 2 DESC LIMIT 6`,
       base,
@@ -239,8 +242,9 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
               COALESCE(sum(i.sale_price * i.quantity), 0)::text AS revenue,
               max(NULLIF(btrim(i.image_url), '')) AS image
          FROM platform_order_items i
-         JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
-        WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz
+         JOIN platform_orders o
+           ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
+        WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz
           AND o.order_status <> 'CANCELLED'${shopClause.replace("shop_id", "o.shop_id")}
         GROUP BY 1, 2 ORDER BY 4 DESC LIMIT 8`,
       base,
@@ -251,18 +255,20 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
          SELECT COALESCE(NULLIF(i.sku_name, ''), i.product_name, 'ไม่ระบุ') AS name,
                 COALESCE(sum(i.quantity), 0) AS q
            FROM platform_order_items i
-           JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
-          WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz
-            AND o.order_status <> 'CANCELLED'${params.shopId ? " AND o.shop_id = $4::text" : ""}
+           JOIN platform_orders o
+             ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
+          WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz
+            AND o.order_status <> 'CANCELLED'${params.shopId ? " AND o.shop_id = $5::text" : ""}
           GROUP BY 1
        ), prev AS (
          SELECT COALESCE(NULLIF(i.sku_name, ''), i.product_name, 'ไม่ระบุ') AS name,
                 COALESCE(sum(i.quantity), 0) AS q,
                 max(NULLIF(btrim(i.image_url), '')) AS image
            FROM platform_order_items i
-           JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
-          WHERE o.create_time >= $3::timestamptz AND o.create_time < $1::timestamptz
-            AND o.order_status <> 'CANCELLED'${params.shopId ? " AND o.shop_id = $4::text" : ""}
+           JOIN platform_orders o
+             ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
+          WHERE o.platform = $1 AND o.create_time >= $4::timestamptz AND o.create_time < $2::timestamptz
+            AND o.order_status <> 'CANCELLED'${params.shopId ? " AND o.shop_id = $5::text" : ""}
           GROUP BY 1
        )
        SELECT prev.name, prev.q::text AS quantity, prev.image
@@ -270,8 +276,8 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
         WHERE COALESCE(cur.q, 0) = 0 AND prev.q > 0
         ORDER BY prev.q DESC LIMIT 8`,
       params.shopId
-        ? [start.toISOString(), end.toISOString(), prevStart.toISOString(), params.shopId]
-        : [start.toISOString(), end.toISOString(), prevStart.toISOString()],
+        ? [platform, start.toISOString(), end.toISOString(), prevStart.toISOString(), params.shopId]
+        : [platform, start.toISOString(), end.toISOString(), prevStart.toISOString()],
     ),
     // สินค้าที่ถูกยกเลิกบ่อย (ในกลุ่มที่ขายเกิน 10 ชิ้น)
     query<{ name: string; sold: string; cancelled: string; image: string | null }>(
@@ -280,21 +286,22 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
               count(*) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled,
               max(NULLIF(btrim(i.image_url), '')) AS image
          FROM platform_order_items i
-         JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
-        WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz${shopClause.replace("shop_id", "o.shop_id")}
+         JOIN platform_orders o
+           ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
+        WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz${shopClause.replace("shop_id", "o.shop_id")}
         GROUP BY 1 HAVING count(*) >= 10
         ORDER BY (count(*) FILTER (WHERE o.order_status = 'CANCELLED')::numeric / count(*)) DESC
         LIMIT 6`,
       base,
     ),
-    // ราคาที่ขายได้จริง เทียบราคาตั้ง (จากข้อมูลดิบของ TikTok)
+    // ราคาที่ขายได้จริง เทียบราคาตั้ง (จากข้อมูลดิบของแพลตฟอร์ม)
     query<{ n: string; avg_sale: string; avg_list: string }>(
       `WITH li AS (
          SELECT CASE WHEN elem->>'sale_price' ~ '^[0-9.]+$' THEN (elem->>'sale_price')::numeric END AS sale_price,
                 CASE WHEN elem->>'original_price' ~ '^[0-9.]+$' THEN (elem->>'original_price')::numeric END AS list_price
            FROM platform_orders o,
                 jsonb_array_elements(COALESCE(o.raw_json->'line_items', '[]'::jsonb)) elem
-          WHERE o.create_time >= $1::timestamptz AND o.create_time < $2::timestamptz
+          WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.create_time < $3::timestamptz
             AND o.order_status <> 'CANCELLED'${shopClause.replace("shop_id", "o.shop_id")}
        )
        SELECT count(*)::text AS n,
@@ -307,7 +314,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
     query<{ order_status: string; n: string }>(
       `SELECT order_status, count(*)::text AS n
          FROM platform_orders
-        WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz${shopClause}
+        WHERE platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz${shopClause}
         GROUP BY 1`,
       base,
     ),
@@ -323,7 +330,7 @@ export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
       `SELECT order_id, order_status, create_time::text AS created_at, total_amount::text, province,
               COALESCE(NULLIF(btrim(tracking_number), ''), NULLIF(btrim(raw_json->>'tracking_number'), '')) AS tracking_number
          FROM platform_orders
-        WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz
+        WHERE platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz
           AND order_status IN ('AWAITING_SHIPMENT','AWAITING_COLLECTION')${shopClause}
         ORDER BY create_time ASC
         LIMIT 200`,

@@ -75,15 +75,20 @@ function money(value: number): string {
   return value.toLocaleString("th-TH", { maximumFractionDigits: 0 });
 }
 
-async function periodTotals(fromIso: string, toIso: string, shopId?: string): Promise<PeriodTotals> {
-  const shopClause = shopId ? " AND shop_id = $3::text" : "";
-  const params = shopId ? [fromIso, toIso, shopId] : [fromIso, toIso];
+async function periodTotals(
+  platform: string,
+  fromIso: string,
+  toIso: string,
+  shopId?: string,
+): Promise<PeriodTotals> {
+  const shopClause = shopId ? " AND shop_id = $4::text" : "";
+  const params = shopId ? [platform, fromIso, toIso, shopId] : [platform, fromIso, toIso];
   const finance = await query<{ settlement: string; revenue: string; fee: string }>(
     `SELECT COALESCE(sum(settlement_amount),0)::text AS settlement,
             COALESCE(sum(revenue_amount),0)::text AS revenue,
             COALESCE(sum(fee_and_tax_amount),0)::text AS fee
      FROM platform_order_finance
-     WHERE order_create_time >= $1::timestamptz AND order_create_time < $2::timestamptz${shopClause}`,
+     WHERE platform = $1 AND order_create_time >= $2::timestamptz AND order_create_time < $3::timestamptz${shopClause}`,
     params,
   );
 
@@ -92,7 +97,7 @@ async function periodTotals(fromIso: string, toIso: string, shopId?: string): Pr
             count(*) FILTER (WHERE order_status = 'CANCELLED')::text AS cancelled,
             count(*) FILTER (WHERE order_status = 'DELIVERED' OR order_status = 'COMPLETED')::text AS delivered
      FROM platform_orders
-     WHERE create_time >= $1::timestamptz AND create_time < $2::timestamptz${shopClause}`,
+     WHERE platform = $1 AND create_time >= $2::timestamptz AND create_time < $3::timestamptz${shopClause}`,
     params,
   );
 
@@ -114,6 +119,7 @@ export interface ShopTotal {
 }
 
 export interface AnalyticsOptions {
+  platform?: string;
   rangeDays?: number;
   from?: string; // YYYY-MM-DD
   to?: string; // YYYY-MM-DD
@@ -123,6 +129,7 @@ export interface AnalyticsOptions {
 export async function getTikTokAnalytics(
   options: AnalyticsOptions = {},
 ): Promise<TikTokAnalytics & { perShop: ShopTotal[]; periodLabel: string; compareLabel: string }> {
+  const platform = options.platform ?? "TikTok";
   const shopId = options.shopId;
   const range = resolveRange(options.from, options.to, options.rangeDays ?? 30);
   const toDate = new Date(range.endIso);
@@ -136,8 +143,8 @@ export async function getTikTokAnalytics(
   const compareLabel = `${isoDay(prevFrom)} → ${range.fromDay}`;
 
   const [current, previous] = await Promise.all([
-    periodTotals(from.toISOString(), toIso, shopId),
-    periodTotals(prevFrom.toISOString(), from.toISOString(), shopId),
+    periodTotals(platform, from.toISOString(), toIso, shopId),
+    periodTotals(platform, prevFrom.toISOString(), from.toISOString(), shopId),
   ]);
 
   // ยอดรวมแยกร้าน (ใช้เมื่อดูแบบ "ทุกร้าน")
@@ -153,10 +160,10 @@ export async function getTikTokAnalytics(
             count(DISTINCT o.order_id) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled
      FROM platform_orders o
      LEFT JOIN platform_order_finance f
-       ON f.shop_id = o.shop_id AND f.order_id = o.order_id
-     WHERE o.create_time >= $1::timestamptz
+       ON f.platform = o.platform AND f.shop_id = o.shop_id AND f.order_id = o.order_id
+     WHERE o.platform = $1 AND o.create_time >= $2::timestamptz
      GROUP BY 1 ORDER BY sum(f.settlement_amount) DESC NULLS LAST`,
-    [from.toISOString()],
+    [platform, from.toISOString()],
   );
 
   const perShop: ShopTotal[] = perShopRows.map((row) => ({
@@ -166,14 +173,15 @@ export async function getTikTokAnalytics(
     cancelled: toNumber(row.cancelled),
   }));
 
+  const shopParams = shopId ? [platform, from.toISOString(), shopId] : [platform, from.toISOString()];
   const dailyRows = await query<{ day: string; settlement: string; orders: string }>(
     `SELECT to_char(date_trunc('day', f.order_create_time), 'YYYY-MM-DD') AS day,
             COALESCE(sum(f.settlement_amount),0)::text AS settlement,
             COALESCE(count(DISTINCT f.order_id),0)::text AS orders
      FROM platform_order_finance f
-     WHERE f.order_create_time >= $1::timestamptz${shopId ? " AND f.shop_id = $2::text" : ""}
+     WHERE f.platform = $1 AND f.order_create_time >= $2::timestamptz${shopId ? " AND f.shop_id = $3::text" : ""}
      GROUP BY 1 ORDER BY 1`,
-    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
+    shopParams,
   );
 
   const productRows = await query<{ name: string; revenue: string; quantity: string }>(
@@ -181,30 +189,32 @@ export async function getTikTokAnalytics(
             COALESCE(sum(i.sale_price * i.quantity),0)::text AS revenue,
             COALESCE(sum(i.quantity),0)::text AS quantity
      FROM platform_order_items i
-     JOIN platform_orders o ON o.order_id = i.order_id
-     WHERE o.create_time >= $1::timestamptz AND o.order_status <> 'CANCELLED'${shopId ? " AND o.shop_id = $2::text" : ""}
+     JOIN platform_orders o
+       ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
+     WHERE o.platform = $1 AND o.create_time >= $2::timestamptz AND o.order_status <> 'CANCELLED'${shopId ? " AND o.shop_id = $3::text" : ""}
      GROUP BY 1 ORDER BY sum(i.sale_price * i.quantity) DESC NULLS LAST LIMIT 8`,
-    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
+    shopParams,
   );
 
   const cancelRows = await query<{ reason: string; count: string }>(
     `SELECT COALESCE(NULLIF(cancel_reason, ''), 'ไม่ระบุเหตุผล') AS reason, count(*)::text AS count
      FROM platform_orders
-     WHERE create_time >= $1::timestamptz AND order_status = 'CANCELLED'${shopId ? " AND shop_id = $2::text" : ""}
+     WHERE platform = $1 AND create_time >= $2::timestamptz AND order_status = 'CANCELLED'${shopId ? " AND shop_id = $3::text" : ""}
      GROUP BY 1 ORDER BY count(*) DESC LIMIT 6`,
-    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
+    shopParams,
   );
 
   const statusRows = await query<{ status: string; count: string }>(
     `SELECT order_status AS status, count(*)::text AS count
-     FROM platform_orders WHERE create_time >= $1::timestamptz${shopId ? " AND shop_id = $2::text" : ""}
+     FROM platform_orders WHERE platform = $1 AND create_time >= $2::timestamptz${shopId ? " AND shop_id = $3::text" : ""}
      GROUP BY 1 ORDER BY count(*) DESC LIMIT 8`,
-    shopId ? [from.toISOString(), shopId] : [from.toISOString()],
+    shopParams,
   );
 
   const lastRun = await query<{ finished_at: string | null }>(
     `SELECT finished_at::text AS finished_at FROM platform_sync_runs
-     WHERE status = 'done' ORDER BY finished_at DESC NULLS LAST LIMIT 1`,
+     WHERE platform = $1 AND status = 'done' ORDER BY finished_at DESC NULLS LAST LIMIT 1`,
+    [platform],
   );
 
   const daily: DayPoint[] = dailyRows.map((row) => ({

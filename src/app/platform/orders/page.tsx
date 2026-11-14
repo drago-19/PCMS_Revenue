@@ -10,8 +10,8 @@ import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { readPlatform } from "@/lib/platform/platforms";
-import { getPlatformConfig, listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
+import { getConnectedPlatforms, getPlatformConfig, listPlatformAccounts } from "@/lib/platform/store";
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
 import { loadOrderTracking } from "@/lib/platform/tracking";
 import { CopyButton } from "@/components/CopyButton";
@@ -95,17 +95,27 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const [cursorTime, cursorId] = (beforeRaw || afterRaw).split("|");
   const cursor = cursorTime && cursorId ? { time: cursorTime, id: cursorId, back } : undefined;
   const platform = readPlatform(read(params, "platform"));
+  const dbPlatform = platformDbName(platform);
 
   const detailId = read(params, "order");
-  const filter = { shopId: shop, status: status || undefined, search: search || undefined, from: fromParam, to: toParam };
+  const filter = {
+    platform: dbPlatform,
+    shopId: shop,
+    status: status || undefined,
+    search: search || undefined,
+    from: fromParam,
+    to: toParam,
+  };
 
-  const [config, accounts, result, summary, detail] = await Promise.all([
+  const [config, accounts, connectedPlatforms, result, summary, detail] = await Promise.all([
     getPlatformConfig(),
-    listPlatformAccounts(TIKTOK_PLATFORM),
+    listPlatformAccounts(dbPlatform),
+    getConnectedPlatforms(),
     listPlatformOrders({ ...filter, cursor, pageSize: 25 }),
     getOrderSummary(filter),
-    detailId ? getPlatformOrder(detailId, shop) : Promise.resolve(null),
+    detailId ? getPlatformOrder(detailId, shop, dbPlatform) : Promise.resolve(null),
   ]);
+  const isAppConfigured = platform === "shopee" ? Boolean(config.shopee) : Boolean(config.tiktok);
 
   // เหตุการณ์พัสดุแบบละเอียด (ถึงศูนย์คัดแยก/นำส่ง) — ดึงเฉพาะออเดอร์ที่เปิดดูอยู่
   const tracking = detail ? await loadOrderTracking(detail.orderId, detail.shopId ?? shop ?? null) : [];
@@ -114,6 +124,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
     const qs = new URLSearchParams();
     const nextStatus = next.status ?? status;
     const keepDates = next.keepDates ?? true;
+    if (platform !== "tiktok") qs.set("platform", platform);
     if (shop) qs.set("shop", shop);
     if (nextStatus) qs.set("status", nextStatus);
     if (search) qs.set("q", search);
@@ -133,26 +144,34 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   return (
     <div className="workspace-page">
       <PageHeader
-        eyebrow="TikTok Shop"
+        eyebrow={platformTab(platform).label}
         title="ออเดอร์"
         description="กดที่ออเดอร์เพื่อดูสินค้า ยอดเงิน และสถานะทีละขั้น — ข้อมูลชุดเดียวกับหน้าภาพรวม"
       />
 
-      <PlatformSwitcher platform={platform} basePath="/platform/orders" from={fromParam} to={toParam} shop={shop} />
+      <PlatformSwitcher
+        platform={platform}
+        basePath="/platform/orders"
+        from={fromParam}
+        to={toParam}
+        shop={shop}
+        connectedPlatforms={connectedPlatforms}
+      />
 
-      <PlatformBody platform={platform}>
-      <PlatformNav active="orders" from={fromParam} to={toParam} shop={shop} />
+      <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
+      <PlatformNav active="orders" from={fromParam} to={toParam} shop={shop} platform={platform} />
 
-      {!config.tiktok ? (
+      {!isAppConfigured && accounts.length === 0 ? (
         <EmptyState
           icon={<IconReceipt size={22} aria-hidden="true" />}
-          title="ยังไม่ได้เชื่อมต่อ TikTok"
+          title={`ยังไม่ได้เชื่อมต่อ ${platformTab(platform).label}`}
           description="เชื่อมร้านก่อน แล้วออเดอร์จะเข้ามาที่นี่"
           action={<Button asChild><Link href="/settings?tab=platforms">ไปที่หน้าตั้งค่า</Link></Button>}
         />
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
           <form action="/platform/orders" className="flex flex-wrap items-center gap-2">
+            {platform !== "tiktok" ? <input type="hidden" name="platform" value={platform} /> : null}
             {shop ? <input type="hidden" name="shop" value={shop} /> : null}
             {status ? <input type="hidden" name="status" value={status} /> : null}
             <label className="sr-only" htmlFor="order-search">
@@ -175,6 +194,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
             from={fromParam}
             to={toParam}
             shop={shop}
+            platform={platform}
             accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
             extraQuery={{ status, q: search }}
             autoRefreshSeconds={30}

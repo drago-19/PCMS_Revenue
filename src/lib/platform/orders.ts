@@ -45,6 +45,7 @@ function num(value: unknown): number {
 }
 
 export interface OrderFilter {
+  platform?: string;
   shopId?: string;
   status?: string;
   search?: string;
@@ -57,9 +58,10 @@ export interface OrderFilter {
   pageSize?: number;
 }
 
-export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: OrderRow[]; total: number }> {
-  const where: string[] = ["1 = 1"];
-  const params: unknown[] = [];
+function buildOrderWhere(filter: OrderFilter): { where: string[]; params: unknown[]; platform: string } {
+  const platform = filter.platform ?? "TikTok";
+  const where: string[] = ["o.platform = $1::text"];
+  const params: unknown[] = [platform];
 
   if (filter.shopId) {
     params.push(filter.shopId);
@@ -73,7 +75,7 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
     params.push(`%${filter.search}%`);
     where.push(`(o.order_id ILIKE $${params.length} OR EXISTS (
       SELECT 1 FROM platform_order_items i2
-      WHERE i2.shop_id = o.shop_id AND i2.order_id = o.order_id
+      WHERE i2.platform = o.platform AND i2.shop_id = o.shop_id AND i2.order_id = o.order_id
         AND (i2.product_name ILIKE $${params.length} OR i2.sku_id ILIKE $${params.length})
     ))`);
   }
@@ -85,6 +87,12 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
     params.push(`${filter.to}T23:59:59Z`);
     where.push(`o.create_time <= $${params.length}::timestamptz`);
   }
+
+  return { where, params, platform };
+}
+
+export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: OrderRow[]; total: number }> {
+  const { where, params, platform } = buildOrderWhere(filter);
 
   const pageSize = Math.min(Math.max(filter.pageSize ?? 25, 1), 100);
 
@@ -121,16 +129,16 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
             o.total_amount::text AS total_amount,
             o.currency,
             (SELECT count(*) FROM platform_order_items i
-              WHERE i.shop_id = o.shop_id AND i.order_id = o.order_id)::text AS item_count,
+              WHERE i.platform = o.platform AND i.shop_id = o.shop_id AND i.order_id = o.order_id)::text AS item_count,
             f.settlement_amount::text AS settlement,
             o.cancel_reason
      FROM platform_orders o
      -- รวมเป็นแถวเดียวต่อออเดอร์: ออเดอร์ที่มีทั้งรายการขายและ adjustment จะได้ไม่โผล่ซ้ำ
      LEFT JOIN (
-       SELECT shop_id, order_id, sum(settlement_amount) AS settlement_amount
+       SELECT platform, shop_id, order_id, sum(settlement_amount) AS settlement_amount
          FROM platform_order_finance
-        GROUP BY 1, 2
-     ) f ON f.shop_id = o.shop_id AND f.order_id = o.order_id
+        GROUP BY 1, 2, 3
+     ) f ON f.platform = o.platform AND f.shop_id = o.shop_id AND f.order_id = o.order_id
      WHERE ${where.join(" AND ")}${cursorClause}
      ORDER BY o.create_time ${filter.cursor?.back ? "ASC" : "DESC"} NULLS LAST, o.order_id ${filter.cursor?.back ? "ASC" : "DESC"}
      LIMIT ${pageSize}`,
@@ -153,9 +161,9 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
     }>(
       `SELECT DISTINCT ON (order_id) order_id, product_name, sku_name, image_url
        FROM platform_order_items
-       WHERE order_id = ANY($1::text[])
+       WHERE platform = $1 AND order_id = ANY($2::text[])
        ORDER BY order_id, line_item_id`,
-      [orderIds],
+      [platform, orderIds],
     );
 
     for (const item of itemRows) {
@@ -192,33 +200,7 @@ export interface OrderSummary {
 
 /** สรุปตามเงื่อนไขกรองเดียวกับรายการ — ใช้แสดงแถบสรุปเหนือตาราง */
 export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary> {
-  const where: string[] = ["1 = 1"];
-  const params: unknown[] = [];
-
-  if (filter.shopId) {
-    params.push(filter.shopId);
-    where.push(`o.shop_id = $${params.length}::text`);
-  }
-  if (filter.status) {
-    params.push(filter.status);
-    where.push(`o.order_status = $${params.length}::text`);
-  }
-  if (filter.search) {
-    params.push(`%${filter.search}%`);
-    where.push(`(o.order_id ILIKE $${params.length} OR EXISTS (
-      SELECT 1 FROM platform_order_items i2
-      WHERE i2.shop_id = o.shop_id AND i2.order_id = o.order_id
-        AND (i2.product_name ILIKE $${params.length} OR i2.sku_id ILIKE $${params.length})
-    ))`);
-  }
-  if (filter.from) {
-    params.push(`${filter.from}T00:00:00Z`);
-    where.push(`o.create_time >= $${params.length}::timestamptz`);
-  }
-  if (filter.to) {
-    params.push(`${filter.to}T23:59:59Z`);
-    where.push(`o.create_time <= $${params.length}::timestamptz`);
-  }
+  const { where, params } = buildOrderWhere(filter);
 
   // แยกเป็น 2 คำสั่งง่าย ๆ — เดิมนับรายการสินค้าแบบถามซ้ำทีละออเดอร์จนใช้เวลา ~57 วินาที
   const totals = await query<{ orders: string; settlement: string; cancelled: string }>(
@@ -227,7 +209,7 @@ export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary
             count(DISTINCT o.order_id) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled
      FROM platform_orders o
      LEFT JOIN platform_order_finance f
-       ON f.shop_id = o.shop_id AND f.order_id = o.order_id
+       ON f.platform = o.platform AND f.shop_id = o.shop_id AND f.order_id = o.order_id
      WHERE ${where.join(" AND ")}`,
     params,
   );
@@ -235,7 +217,8 @@ export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary
   const itemRow = await query<{ items: string }>(
     `SELECT count(*)::text AS items
      FROM platform_order_items i
-     JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
+     JOIN platform_orders o
+       ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
      WHERE ${where.join(" AND ")}`,
     params,
   );
@@ -248,9 +231,13 @@ export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary
   };
 }
 
-export async function getPlatformOrder(orderId: string, shopId?: string): Promise<OrderDetail | null> {
-  const params: unknown[] = [orderId];
-  const shopClause = shopId ? " AND shop_id = $2::text" : "";
+export async function getPlatformOrder(
+  orderId: string,
+  shopId?: string,
+  platform = "TikTok",
+): Promise<OrderDetail | null> {
+  const params: unknown[] = [platform, orderId];
+  const shopClause = shopId ? " AND o.shop_id = $3::text" : "";
   if (shopId) params.push(shopId);
 
   const order = await queryOne<{
@@ -287,11 +274,11 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
        LEFT JOIN LATERAL (
          SELECT tracking_number, shipping_provider
            FROM platform_packages
-          WHERE shop_id = o.shop_id AND o.order_id = ANY(order_ids)
+          WHERE platform = o.platform AND shop_id = o.shop_id AND o.order_id = ANY(order_ids)
           ORDER BY update_time DESC
           LIMIT 1
        ) p ON true
-      WHERE o.order_id = $1${shopClause.replace("shop_id", "o.shop_id")} LIMIT 1`,
+      WHERE o.platform = $1 AND o.order_id = $2${shopClause} LIMIT 1`,
     params,
   );
 
@@ -306,8 +293,8 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     sale_price: string | null;
   }>(
     `SELECT product_name, sku_id, sku_name, image_url, quantity, sale_price::text AS sale_price
-     FROM platform_order_items WHERE shop_id = $1 AND order_id = $2 ORDER BY line_item_id`,
-    [order.shop_id, orderId],
+     FROM platform_order_items WHERE platform = $1 AND shop_id = $2 AND order_id = $3 ORDER BY line_item_id`,
+    [platform, order.shop_id, orderId],
   );
 
   const finance = await queryOne<{
@@ -317,8 +304,8 @@ export async function getPlatformOrder(orderId: string, shopId?: string): Promis
     statement_id: string | null;
   }>(
     `SELECT revenue_amount::text, fee_and_tax_amount::text, settlement_amount::text, statement_id
-     FROM platform_order_finance WHERE shop_id = $1 AND order_id = $2 LIMIT 1`,
-    [order.shop_id, orderId],
+     FROM platform_order_finance WHERE platform = $1 AND shop_id = $2 AND order_id = $3 LIMIT 1`,
+    [platform, order.shop_id, orderId],
   );
 
   return {

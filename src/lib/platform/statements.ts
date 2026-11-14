@@ -30,6 +30,7 @@ export interface StatementParams {
   from?: string | null;
   to?: string | null;
   shopId?: string | null;
+  platform?: string;
 }
 
 function toNumber(value: unknown): number {
@@ -38,6 +39,7 @@ function toNumber(value: unknown): number {
 }
 
 export async function getTikTokStatements(params: StatementParams): Promise<TikTokStatements> {
+  const platform = params.platform ?? "TikTok";
   const range = resolveRange(params.from ?? undefined, params.to ?? undefined);
   const from = range.fromDay;
   const to = range.toDay;
@@ -45,9 +47,9 @@ export async function getTikTokStatements(params: StatementParams): Promise<TikT
   const end = new Date(range.endIso);
 
   const base = params.shopId
-    ? [start.toISOString(), end.toISOString(), params.shopId]
-    : [start.toISOString(), end.toISOString()];
-  const shopClause = params.shopId ? " AND s.shop_id = $3::text" : "";
+    ? [platform, start.toISOString(), end.toISOString(), params.shopId]
+    : [platform, start.toISOString(), end.toISOString()];
+  const shopClause = params.shopId ? " AND s.shop_id = $4::text" : "";
 
   const rows = await query<{
     statement_id: string;
@@ -69,11 +71,11 @@ export async function getTikTokStatements(params: StatementParams): Promise<TikT
             COALESCE(f.order_count, 0)::text AS order_count
        FROM platform_statements s
        LEFT JOIN (
-         SELECT shop_id, statement_id, count(DISTINCT order_id) AS order_count
+         SELECT platform, shop_id, statement_id, count(DISTINCT order_id) AS order_count
            FROM platform_order_finance
-          GROUP BY 1, 2
-       ) f ON f.shop_id = s.shop_id AND f.statement_id = s.statement_id
-      WHERE s.statement_time >= $1::timestamptz AND s.statement_time < $2::timestamptz${shopClause}
+          GROUP BY 1, 2, 3
+       ) f ON f.platform = s.platform AND f.shop_id = s.shop_id AND f.statement_id = s.statement_id
+      WHERE s.platform = $1 AND s.statement_time >= $2::timestamptz AND s.statement_time < $3::timestamptz${shopClause}
       ORDER BY s.statement_time DESC
       LIMIT 400`,
     base,

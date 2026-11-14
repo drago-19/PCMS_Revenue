@@ -20,7 +20,7 @@ export async function refreshDailySummary(shopId: string, days = 45): Promise<nu
             COALESCE(sum(f.fee_and_tax_amount), 0)
        FROM platform_orders o
        LEFT JOIN platform_order_finance f
-         ON f.shop_id = o.shop_id AND f.order_id = o.order_id
+         ON f.platform = o.platform AND f.shop_id = o.shop_id AND f.order_id = o.order_id
       WHERE o.shop_id = $1
         AND o.create_time >= now() - ($2 || ' days')::interval
       GROUP BY 1, 2, 3

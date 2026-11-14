@@ -3,6 +3,7 @@
 // ไม่มีการเคลื่อนไหวโดยตั้งใจ: เมนูต้องนิ่งเพื่อให้จำตำแหน่งได้
 
 import Link from "next/link";
+import type { PlatformKey } from "@/lib/platform/platforms";
 import { cn } from "@/lib/utils";
 
 const ITEMS = [
@@ -19,9 +20,10 @@ export type PlatformNavKey = (typeof ITEMS)[number]["key"];
 
 export function withPeriodQuery(
   href: string,
-  { from, to, shop }: { from?: string; to?: string; shop?: string },
+  { from, to, shop, platform }: { from?: string; to?: string; shop?: string; platform?: PlatformKey },
 ): string {
   const qs = new URLSearchParams();
+  if (platform && platform !== "tiktok") qs.set("platform", platform);
   if (from) qs.set("from", from);
   if (to) qs.set("to", to);
   if (shop) qs.set("shop", shop);
@@ -33,11 +35,13 @@ export function PlatformNav({
   from,
   to,
   shop,
+  platform,
 }: {
   active: PlatformNavKey;
   from?: string;
   to?: string;
   shop?: string;
+  platform?: PlatformKey;
 }) {
   return (
     <nav aria-label="เมนูหมวดแพลตฟอร์ม" className="-mx-1">
@@ -47,7 +51,7 @@ export function PlatformNav({
           return (
             <li key={item.key} className="-mb-px">
               <Link
-                href={withPeriodQuery(item.href, { from, to, shop })}
+                href={withPeriodQuery(item.href, { from, to, shop, platform })}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "inline-flex min-h-[44px] items-center whitespace-nowrap border-b-2 px-3 text-[13.5px] font-bold transition-colors",

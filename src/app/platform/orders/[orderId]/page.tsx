@@ -5,6 +5,7 @@ import { thaiDateTime } from "@/lib/platform/period";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getPlatformOrder } from "@/lib/platform/orders";
+import { platformDbName, readPlatform } from "@/lib/platform/platforms";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +41,9 @@ export default async function OrderDetailPage({
   const query = await searchParams;
   const shopParam = query.shop;
   const shop = (Array.isArray(shopParam) ? shopParam[0] : shopParam) ?? undefined;
+  const platform = readPlatform(query.platform);
 
-  const order = await getPlatformOrder(decodeURIComponent(orderId), shop);
+  const order = await getPlatformOrder(decodeURIComponent(orderId), shop, platformDbName(platform));
   if (!order) notFound();
 
   const steps = [
@@ -60,7 +62,7 @@ export default async function OrderDetailPage({
         description={`${order.currency ?? "THB"} · ${order.items.length} รายการ · ยอดสั่งซื้อ ฿${money(order.totalAmount)}`}
       />
 
-      <PlatformNav active="orders" shop={shop} />
+      <PlatformNav active="orders" shop={shop} platform={platform} />
 
       <div className="grid grid-cols-1 gap-3 min-[980px]:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-3">

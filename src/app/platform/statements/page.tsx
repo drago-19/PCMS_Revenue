@@ -8,9 +8,9 @@ import { detailParam, hrefWithDetail } from "@/lib/platform/details";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getTikTokStatements } from "@/lib/platform/statements";
-import { readPlatform } from "@/lib/platform/platforms";
+import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import { thaiDate, thaiRange } from "@/lib/platform/period";
-import { listPlatformAccounts, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
@@ -31,9 +31,11 @@ export default async function PlatformStatementsPage({
 }) {
   const params = await searchParams;
   const platform = readPlatform(params.platform);
-  const [statements, accounts] = await Promise.all([
-    getTikTokStatements({ from: params.from, to: params.to }),
-    listPlatformAccounts(TIKTOK_PLATFORM),
+  const dbPlatform = platformDbName(platform);
+  const [statements, accounts, connectedPlatforms] = await Promise.all([
+    getTikTokStatements({ from: params.from, to: params.to, platform: dbPlatform }),
+    listPlatformAccounts(dbPlatform),
+    getConnectedPlatforms(),
   ]);
   const { totals, rows } = statements;
 
@@ -42,9 +44,9 @@ export default async function PlatformStatementsPage({
   return (
     <div className="workspace-page flex min-w-0 flex-col gap-4">
       <PageHeader
-        eyebrow="TikTok Shop"
-        title="statement ของ TikTok"
-        description={`ใบสรุปยอดโอนรายวันที่ TikTok ส่งมา · ${thaiRange(statements.range.from, statements.range.to)}`}
+        eyebrow={platformTab(platform).label}
+        title={`statement ของ ${platformTab(platform).label}`}
+        description={`ใบสรุปยอดโอนรายวันที่ ${platformTab(platform).label} ส่งมา · ${thaiRange(statements.range.from, statements.range.to)}`}
       />
 
       <PlatformSwitcher
@@ -52,15 +54,17 @@ export default async function PlatformStatementsPage({
         basePath="/platform/statements"
         from={params.from}
         to={params.to}
+        connectedPlatforms={connectedPlatforms}
       />
 
-      <PlatformBody platform={platform}>
-      <PlatformNav active="statements" from={params.from} to={params.to} />
+      <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
+      <PlatformNav active="statements" from={params.from} to={params.to} platform={platform} />
 
       <PlatformPeriodBar
         basePath="/platform/statements"
         from={params.from}
         to={params.to}
+        platform={platform}
         accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
       />
 
@@ -123,6 +127,7 @@ export default async function PlatformStatementsPage({
         params={params}
         from={params.from}
         to={params.to}
+        platform={dbPlatform}
       />
     </div>
   );

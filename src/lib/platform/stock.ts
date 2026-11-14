@@ -108,24 +108,26 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
 
   // เขียนครั้งเดียวทั้งชุด (ไม่วนคิวรีต่อแถว) — ยอดเดิมดึงมาครั้งเดียวเพื่อเทียบ
   const previous = await query<{ sku_id: string; quantity: number }>(
-    `SELECT sku_id, quantity FROM platform_stock WHERE shop_id = $1`,
-    [shopId],
+    `SELECT sku_id, quantity FROM platform_stock WHERE platform = $1 AND shop_id = $2`,
+    [TIKTOK_PLATFORM, shopId],
   );
   const before = new Map(previous.map((row) => [row.sku_id, Number(row.quantity ?? 0)]));
 
   await query(
-    `INSERT INTO platform_stock (shop_id, sku_id, product_id, seller_sku, product_name, quantity, warehouses, updated_at)
-     SELECT $1, item.sku_id, item.product_id, item.seller_sku, item.product_name, item.quantity, item.warehouses::jsonb, now()
-       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::int[], $7::text[])
+    `INSERT INTO platform_stock (platform, shop_id, sku_id, product_id, seller_sku, product_name, quantity, warehouses, updated_at)
+     SELECT $1, $2, item.sku_id, item.product_id, item.seller_sku, item.product_name, item.quantity, item.warehouses::jsonb, now()
+       FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::int[], $8::text[])
             AS item(sku_id, product_id, seller_sku, product_name, quantity, warehouses)
      ON CONFLICT (shop_id, sku_id) DO UPDATE
-       SET product_id = EXCLUDED.product_id,
+       SET platform = EXCLUDED.platform,
+           product_id = EXCLUDED.product_id,
            seller_sku = EXCLUDED.seller_sku,
            product_name = EXCLUDED.product_name,
            quantity = EXCLUDED.quantity,
            warehouses = EXCLUDED.warehouses,
            updated_at = now()`,
     [
+      TIKTOK_PLATFORM,
       shopId,
       collected.map((item) => item.skuId),
       collected.map((item) => item.productId),
@@ -141,8 +143,8 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
   // รูปสินค้า: ผลค้นหาไม่ส่งรูปมา ต้องขอรายละเอียดทีละสินค้า (เฉพาะที่ยังไม่มีรูป)
   const productIds = [...new Set(collected.map((item) => item.productId).filter((id): id is string => Boolean(id)))];
   const haveImage = await query<{ product_id: string }>(
-    `SELECT DISTINCT product_id FROM platform_stock WHERE shop_id = $1 AND coalesce(image_url, '') <> ''`,
-    [shopId],
+    `SELECT DISTINCT product_id FROM platform_stock WHERE platform = $1 AND shop_id = $2 AND coalesce(image_url, '') <> ''`,
+    [TIKTOK_PLATFORM, shopId],
   );
   const withImage = new Set(haveImage.map((row) => row.product_id));
   const needImage = productIds.filter((id) => !withImage.has(id)).slice(0, 200);
@@ -173,20 +175,21 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
     if (found.length > 0) {
       await query(
         `UPDATE platform_stock s SET image_url = item.image_url
-           FROM unnest($2::text[], $3::text[]) AS item(product_id, image_url)
-          WHERE s.shop_id = $1 AND s.product_id = item.product_id`,
-        [shopId, found.map((item) => item.productId), found.map((item) => item.imageUrl)],
+           FROM unnest($3::text[], $4::text[]) AS item(product_id, image_url)
+          WHERE s.platform = $1 AND s.shop_id = $2 AND s.product_id = item.product_id`,
+        [TIKTOK_PLATFORM, shopId, found.map((item) => item.productId), found.map((item) => item.imageUrl)],
       );
     }
   }
 
   if (moves.length > 0) {
     await query(
-      `INSERT INTO platform_stock_movements (shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
-       SELECT $1, item.sku_id, item.seller_sku, item.product_name, item.from_qty, item.to_qty, item.to_qty - item.from_qty
-         FROM unnest($2::text[], $3::text[], $4::text[], $5::int[], $6::int[])
+      `INSERT INTO platform_stock_movements (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
+       SELECT $1, $2, item.sku_id, item.seller_sku, item.product_name, item.from_qty, item.to_qty, item.to_qty - item.from_qty
+         FROM unnest($3::text[], $4::text[], $5::text[], $6::int[], $7::int[])
               AS item(sku_id, seller_sku, product_name, from_qty, to_qty)`,
       [
+        TIKTOK_PLATFORM,
         shopId,
         moves.map((item) => item.skuId),
         moves.map((item) => item.sellerSku),
@@ -249,7 +252,7 @@ export type StockCounts = {
 };
 
 /** นับของทั้งร้านในคำสั่งเดียว — หน้าเว็บไม่ต้องดึงทุกแถวมาบวกรวมเอง */
-export async function getStockCounts(shopId: string): Promise<StockCounts> {
+export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM): Promise<StockCounts> {
   const rows = await query<{
     all: number;
     out: number;
@@ -261,8 +264,8 @@ export async function getStockCounts(shopId: string): Promise<StockCounts> {
             count(*) FILTER (WHERE s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD})::int AS low,
             COALESCE(sum(s.quantity), 0)::int AS quantity
        ${STOCK_FROM}
-      WHERE s.shop_id = $1`,
-    [shopId],
+      WHERE s.platform = $1 AND s.shop_id = $2`,
+    [platform, shopId],
   );
   const row = rows[0];
   return {
@@ -280,12 +283,13 @@ export async function getStockCounts(shopId: string): Promise<StockCounts> {
  */
 export async function getStockPage(
   shopId: string,
-  options: { search?: string; filter?: StockListFilter; page?: number; pageSize?: number } = {},
+  options: { search?: string; filter?: StockListFilter; page?: number; pageSize?: number; platform?: string } = {},
 ): Promise<{ rows: StockRow[]; total: number }> {
+  const platform = options.platform ?? TIKTOK_PLATFORM;
   const pageSize = Math.min(Math.max(options.pageSize ?? 20, 1), 100);
   const page = Math.max(options.page ?? 1, 1);
-  const params: unknown[] = [shopId];
-  const where = ["s.shop_id = $1"];
+  const params: unknown[] = [platform, shopId];
+  const where = ["s.platform = $1", "s.shop_id = $2"];
 
   const search = options.search?.trim();
   if (search) {
@@ -326,17 +330,18 @@ export type StockMovementCursor = { changedAt: string; id: string; back?: boolea
  */
 export async function getStockMovements(
   shopId: string,
-  options: { limit?: number; cursor?: StockMovementCursor } = {},
+  options: { limit?: number; cursor?: StockMovementCursor; platform?: string } = {},
 ): Promise<StockMovementRow[]> {
+  const platform = options.platform ?? TIKTOK_PLATFORM;
   const limit = Math.max(1, Math.min(options.limit ?? 10, 100));
-  const params: unknown[] = [shopId];
+  const params: unknown[] = [platform, shopId];
   let cursorClause = "";
   const cursor = options.cursor;
   if (cursor?.changedAt && cursor.id) {
     params.push(cursor.changedAt, cursor.id);
     cursorClause = cursor.back
-      ? ` AND (changed_at, id) > ($2::timestamptz, $3::bigint)`
-      : ` AND (changed_at, id) < ($2::timestamptz, $3::bigint)`;
+      ? ` AND (changed_at, id) > ($3::timestamptz, $4::bigint)`
+      : ` AND (changed_at, id) < ($3::timestamptz, $4::bigint)`;
   }
   const direction = cursor?.back ? "ASC" : "DESC";
 
@@ -351,7 +356,7 @@ export async function getStockMovements(
   }>(
     `SELECT id::text AS id, seller_sku, product_name, from_qty, to_qty, delta, changed_at::text AS changed_at
        FROM platform_stock_movements
-      WHERE shop_id = $1${cursorClause}
+      WHERE platform = $1 AND shop_id = $2${cursorClause}
       ORDER BY changed_at ${direction}, id ${direction}
       LIMIT ${limit}`,
     params as never[],
@@ -371,10 +376,10 @@ export async function getStockMovements(
   return cursor?.back ? movements.reverse() : movements;
 }
 
-export async function getLastStockSync(shopId: string): Promise<string | null> {
+export async function getLastStockSync(shopId: string, platform = TIKTOK_PLATFORM): Promise<string | null> {
   const rows = await query<{ at: string | null }>(
-    `SELECT max(updated_at)::text AS at FROM platform_stock WHERE shop_id = $1`,
-    [shopId],
+    `SELECT max(updated_at)::text AS at FROM platform_stock WHERE platform = $1 AND shop_id = $2`,
+    [platform, shopId],
   );
   return rows[0]?.at ?? null;
 }
@@ -399,7 +404,11 @@ export type SkuDetail = {
 };
 
 /** รายละเอียดของ SKU เดียว: คงเหลือต่อคลัง + ออเดอร์ที่ตัดสต็อก + ประวัติที่บันทึกไว้ */
-export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDetail | null> {
+export async function getSkuDetail(
+  shopId: string,
+  skuId: string,
+  platform = TIKTOK_PLATFORM,
+): Promise<SkuDetail | null> {
   const rows = await query<{
     sku_id: string;
     seller_sku: string | null;
@@ -413,15 +422,15 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
             s.image_url, s.product_id
        FROM platform_stock s
-      WHERE s.shop_id = $1 AND s.sku_id = $2
+      WHERE s.platform = $1 AND s.shop_id = $2 AND s.sku_id = $3
       LIMIT 1`,
-    [shopId, skuId],
+    [platform, shopId, skuId],
   );
   const row = rows[0];
   if (!row) return null;
 
-  // ค่าสด: เปิดดูสินค้าตัวไหน = ขอจาก TikTok 1 คำขอ แล้วเขียนลง DB ก่อนแสดง
-  if (row.product_id) {
+  // ค่าสด (TikTok): เปิดดูสินค้าตัวไหน = ขอจาก TikTok 1 คำขอ แล้วเขียนลง DB ก่อนแสดง
+  if (platform === TIKTOK_PLATFORM && row.product_id) {
     const config = await getPlatformConfig();
     const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
     if (config.tiktok && account?.accessToken && account.shopCipher) {
@@ -448,25 +457,25 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
           const fresh = warehouses.reduce((sum, item) => sum + item.quantity, 0);
 
           const before = await query<{ quantity: number }>(
-            `SELECT quantity FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
-            [shopId, sku.id],
+            `SELECT quantity FROM platform_stock WHERE platform = $1 AND shop_id = $2 AND sku_id = $3`,
+            [TIKTOK_PLATFORM, shopId, sku.id],
           );
 
           await query(
             `UPDATE platform_stock
-                SET quantity = $3, warehouses = $4::jsonb,
-                    image_url = COALESCE($5, image_url),
-                    product_name = COALESCE($6, product_name),
+                SET quantity = $4, warehouses = $5::jsonb,
+                    image_url = COALESCE($6, image_url),
+                    product_name = COALESCE($7, product_name),
                     updated_at = now()
-              WHERE shop_id = $1 AND sku_id = $2`,
-            [shopId, sku.id, fresh, JSON.stringify(warehouses), image ?? null, detail.title ?? null],
+              WHERE platform = $1 AND shop_id = $2 AND sku_id = $3`,
+            [TIKTOK_PLATFORM, shopId, sku.id, fresh, JSON.stringify(warehouses), image ?? null, detail.title ?? null],
           );
 
           if (before[0] && before[0].quantity !== fresh) {
             await query(
-              `INSERT INTO platform_stock_movements (shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-              [shopId, sku.id, sku.seller_sku ?? null, detail.title ?? null, before[0].quantity, fresh, fresh - before[0].quantity],
+              `INSERT INTO platform_stock_movements (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [TIKTOK_PLATFORM, shopId, sku.id, sku.seller_sku ?? null, detail.title ?? null, before[0].quantity, fresh, fresh - before[0].quantity],
             );
           }
         }
@@ -474,15 +483,15 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
         row.quantity = Number(
           (
             await query<{ quantity: number }>(
-              `SELECT quantity FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
-              [shopId, skuId],
+              `SELECT quantity FROM platform_stock WHERE platform = $1 AND shop_id = $2 AND sku_id = $3`,
+              [TIKTOK_PLATFORM, shopId, skuId],
             )
           )[0]?.quantity ?? row.quantity,
         );
         row.updated_at = (
           await query<{ at: string }>(
-            `SELECT updated_at::text AS at FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
-            [shopId, skuId],
+            `SELECT updated_at::text AS at FROM platform_stock WHERE platform = $1 AND shop_id = $2 AND sku_id = $3`,
+            [TIKTOK_PLATFORM, shopId, skuId],
           )
         )[0]?.at ?? row.updated_at;
         row.image_url = row.image_url ?? image ?? null;
@@ -495,11 +504,11 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
   const orders = await query<{ order_id: string; quantity: number; ordered_at: string; status: string }>(
     `SELECT i.order_id, i.quantity, o.create_time::text AS ordered_at, o.order_status AS status
        FROM platform_order_items i
-       JOIN platform_orders o ON o.shop_id = i.shop_id AND o.order_id = i.order_id
-      WHERE i.shop_id = $1 AND i.sku_id = $2
+       JOIN platform_orders o ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
+      WHERE i.platform = $1 AND i.shop_id = $2 AND i.sku_id = $3
       ORDER BY o.create_time DESC
       LIMIT 10`,
-    [shopId, skuId],
+    [platform, shopId, skuId],
   );
 
   const movements = await query<{
@@ -512,10 +521,10 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
   }>(
     `SELECT seller_sku, product_name, from_qty, to_qty, delta, changed_at::text AS changed_at
        FROM platform_stock_movements
-      WHERE shop_id = $1 AND sku_id = $2
+      WHERE platform = $1 AND shop_id = $2 AND sku_id = $3
       ORDER BY changed_at DESC
       LIMIT 10`,
-    [shopId, skuId],
+    [platform, shopId, skuId],
   );
 
   // รูป: ใช้รูปที่เก็บไว้กับสต็อกก่อน (มีครบทุก SKU) แล้วค่อย fallback ไปรูปในออเดอร์
@@ -523,9 +532,9 @@ export async function getSkuDetail(shopId: string, skuId: string): Promise<SkuDe
   if (!imageUrl) {
     const image = await query<{ image_url: string }>(
       `SELECT image_url FROM platform_order_items
-        WHERE shop_id = $1 AND sku_id = $2 AND coalesce(image_url, '') <> ''
+        WHERE platform = $1 AND shop_id = $2 AND sku_id = $3 AND coalesce(image_url, '') <> ''
         ORDER BY updated_at DESC LIMIT 1`,
-      [shopId, skuId],
+      [platform, shopId, skuId],
     );
     imageUrl = image[0]?.image_url ?? null;
   }
@@ -563,11 +572,12 @@ export async function refreshStockForRecentOrders(shopId: string, withinMinutes 
   const products = await query<{ product_id: string }>(
     `SELECT DISTINCT s.product_id
        FROM platform_order_items i
-       JOIN platform_stock s ON s.shop_id = i.shop_id AND s.sku_id = i.sku_id
-      WHERE i.shop_id = $1
-        AND i.updated_at >= now() - ($2 || ' minutes')::interval
+       JOIN platform_stock s ON s.platform = i.platform AND s.shop_id = i.shop_id AND s.sku_id = i.sku_id
+      WHERE i.platform = $1
+        AND i.shop_id = $2
+        AND i.updated_at >= now() - ($3 || ' minutes')::interval
         AND coalesce(s.product_id, '') <> ''`,
-    [shopId, String(withinMinutes)],
+    [TIKTOK_PLATFORM, shopId, String(withinMinutes)],
   );
   const ids = products.map((row) => row.product_id);
   if (ids.length === 0) return 0;
@@ -598,22 +608,22 @@ export async function refreshStockForRecentOrders(shopId: string, withinMinutes 
             const quantity = warehouses.reduce((sum, item) => sum + item.quantity, 0);
 
             const before = await query<{ quantity: number }>(
-              `SELECT quantity FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
-              [shopId, sku.id],
+              `SELECT quantity FROM platform_stock WHERE platform = $1 AND shop_id = $2 AND sku_id = $3`,
+              [TIKTOK_PLATFORM, shopId, sku.id],
             );
 
             await query(
               `UPDATE platform_stock
-                  SET quantity = $3, warehouses = $4::jsonb, updated_at = now()
-                WHERE shop_id = $1 AND sku_id = $2`,
-              [shopId, sku.id, quantity, JSON.stringify(warehouses)],
+                  SET quantity = $4, warehouses = $5::jsonb, updated_at = now()
+                WHERE platform = $1 AND shop_id = $2 AND sku_id = $3`,
+              [TIKTOK_PLATFORM, shopId, sku.id, quantity, JSON.stringify(warehouses)],
             );
 
             if (before[0] && before[0].quantity !== quantity) {
               await query(
-                `INSERT INTO platform_stock_movements (shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                [shopId, sku.id, sku.seller_sku ?? null, null, before[0].quantity, quantity, quantity - before[0].quantity],
+                `INSERT INTO platform_stock_movements (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [TIKTOK_PLATFORM, shopId, sku.id, sku.seller_sku ?? null, null, before[0].quantity, quantity, quantity - before[0].quantity],
               );
               updated += 1;
             }

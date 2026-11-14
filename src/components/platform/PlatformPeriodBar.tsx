@@ -8,6 +8,7 @@ import { PeriodPicker } from "@/components/PeriodPicker";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { SyncNowButton } from "@/components/SyncNowButton";
 import { activePresetKey, periodPresets, thaiDateTime } from "@/lib/platform/period";
+import { platformDbName, type PlatformKey } from "@/lib/platform/platforms";
 import { getLastSyncAt } from "@/lib/platform/sync-state";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,7 @@ export async function PlatformPeriodBar({
   from,
   to,
   shop,
+  platform = "tiktok",
   accounts,
   extraQuery,
   showSync = false,
@@ -43,14 +45,19 @@ export async function PlatformPeriodBar({
   from?: string;
   to?: string;
   shop?: string;
+  platform?: PlatformKey;
   accounts?: PlatformAccount[];
   extraQuery?: Record<string, string | undefined>;
   showSync?: boolean;
   autoRefreshSeconds?: number;
   lastSyncedAt?: string | null;
 }) {
-  // ทุกแท็บต้องบอกได้ว่าข้อมูลล่าสุดเมื่อไร — ถ้าหน้าไหนไม่ได้ส่งมา ให้อ่านจากรอบซิงก์ล่าสุด
-  const syncedAt = lastSyncedAt ?? (await getLastSyncAt());
+  const mergedExtraQuery: Record<string, string | undefined> = {
+    ...(platform !== "tiktok" ? { platform } : {}),
+    ...extraQuery,
+  };
+  // ทุกแท็บต้องบอกได้ว่าข้อมูลล่าสุดเมื่อไร — ถ้าหน้าไหนไม่ได้ส่งมา ให้อ่านจากรอบซิงก์ล่าสุดของแพลตฟอร์มนั้น
+  const syncedAt = lastSyncedAt ?? (await getLastSyncAt(platformDbName(platform)));
 
   const activeKey = activePresetKey(from, to);
   const isCustom = Boolean((from || to) && !activeKey);
@@ -68,7 +75,7 @@ export async function PlatformPeriodBar({
   })();
   // PeriodPicker รับได้เฉพาะค่าที่เป็นสตริง — ตัดคีย์ที่ไม่มีค่าออกก่อน
   const pickerParams: Record<string, string> = {};
-  for (const [key, value] of Object.entries(extraQuery ?? {})) {
+  for (const [key, value] of Object.entries(mergedExtraQuery)) {
     if (value) pickerParams[key] = value;
   }
 
@@ -78,7 +85,7 @@ export async function PlatformPeriodBar({
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
           <span className="font-bold text-muted-foreground">ร้าน</span>
           <Link
-            href={hrefFor(basePath, { from, to }, { query: extraQuery })}
+            href={hrefFor(basePath, { from, to }, { query: mergedExtraQuery })}
             className={cn(
               "inline-flex min-h-[32px] items-center rounded-full px-2.5 font-bold",
               shop ? "text-muted-foreground hover:bg-muted" : "bg-muted text-foreground",
@@ -89,7 +96,7 @@ export async function PlatformPeriodBar({
           {(accounts ?? []).map((account) => (
             <Link
               key={account.accountKey}
-              href={hrefFor(basePath, { from, to }, { shop: account.accountKey, query: extraQuery })}
+              href={hrefFor(basePath, { from, to }, { shop: account.accountKey, query: mergedExtraQuery })}
               className={cn(
                 "inline-flex min-h-[32px] items-center rounded-full px-2.5 font-bold",
                 shop === account.accountKey
@@ -110,7 +117,7 @@ export async function PlatformPeriodBar({
             return (
               <Link
                 key={preset.key}
-                href={hrefFor(basePath, { from: preset.from, to: preset.to }, { shop, query: extraQuery })}
+                href={hrefFor(basePath, { from: preset.from, to: preset.to }, { shop, query: mergedExtraQuery })}
                 scroll={false}
                 role="tab"
                 aria-selected={active}
@@ -135,7 +142,7 @@ export async function PlatformPeriodBar({
           />
           {isCustom ? (
             <Link
-              href={hrefFor(basePath, {}, { shop, query: extraQuery })}
+              href={hrefFor(basePath, {}, { shop, query: mergedExtraQuery })}
               className="inline-flex min-h-[36px] items-center px-2 text-[12.5px] underline underline-offset-2"
             >
               ล้างช่วงวันที่
@@ -144,7 +151,7 @@ export async function PlatformPeriodBar({
         </div>
         {showSync ? (
           <span className="ml-auto shrink-0">
-            <SyncNowButton variant="outline" />
+            <SyncNowButton variant="outline" platform={platform} />
           </span>
         ) : null}
       </div>

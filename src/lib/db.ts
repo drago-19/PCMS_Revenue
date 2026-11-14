@@ -7,7 +7,7 @@ import {
 } from "./session-token";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-13-v65";
+const SCHEMA_VERSION = "2026-11-14-v66";
 
 export type { CompanyId };
 
@@ -1054,11 +1054,14 @@ CREATE TABLE IF NOT EXISTS platform_stock (
 );
 
 ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'TikTok';
 -- ต้องสร้างหลังตาราง platform_stock เท่านั้น (ก่อนหน้านี้อยู่ก่อน CREATE TABLE ทำให้สร้างฐานข้อมูลใหม่ไม่ผ่าน)
 CREATE INDEX IF NOT EXISTS platform_stock_shop_idx ON platform_stock (shop_id, quantity DESC);
+CREATE INDEX IF NOT EXISTS platform_stock_platform_shop_idx ON platform_stock (platform, shop_id, quantity DESC);
 
 CREATE TABLE IF NOT EXISTS platform_stock_movements (
   id BIGSERIAL PRIMARY KEY,
+  platform TEXT NOT NULL DEFAULT 'TikTok',
   shop_id TEXT NOT NULL,
   sku_id TEXT NOT NULL,
   seller_sku TEXT,
@@ -1068,6 +1071,9 @@ CREATE TABLE IF NOT EXISTS platform_stock_movements (
   delta INTEGER NOT NULL,
   changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE platform_stock_movements ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'TikTok';
+CREATE INDEX IF NOT EXISTS platform_stock_movements_platform_shop_time_idx
+  ON platform_stock_movements (platform, shop_id, changed_at DESC, id DESC);
 
 -- เหตุการณ์พัสดุแบบละเอียดจาก Get Tracking (ถึงศูนย์คัดแยก/สาขา/นำส่ง)
 CREATE TABLE IF NOT EXISTS platform_order_tracking (

@@ -3,15 +3,15 @@ import { headers } from "next/headers";
 import { DocumentSettingsClient } from "@/components/DocumentSettingsClient";
 import { PageHeader } from "@/components/PageHeader";
 import { ShipnityConnectForm } from "@/components/ShipnityConnectForm";
+import { ShopeeConnectCard } from "@/components/ShopeeConnectCard";
 import { TikTokConnectCard } from "@/components/TikTokConnectCard";
-import { IconInfo, IconReceipt } from "@/components/icons";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { IconCheckCircle, IconInfo } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { getActiveCompanyId } from "@/lib/db";
 import {
   getPlatformConfig,
   listPlatformAccounts,
+  SHOPEE_PLATFORM,
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
 import { getCompanyDefaultSeller, getDocumentSettings } from "@/lib/settings";
@@ -66,10 +66,30 @@ export default async function SettingsPage({
     requestHost.startsWith("127.0.0.1") ||
     requestHost.startsWith("0.0.0.0");
 
-  const [platformConfig, tiktokAccounts] = await Promise.all([
+  const [platformConfig, tiktokAccounts, shopeeAccounts] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(TIKTOK_PLATFORM),
+    listPlatformAccounts(SHOPEE_PLATFORM),
   ]);
+
+  const shopeeParam = Array.isArray(params.shopee) ? params.shopee[0] : params.shopee;
+  const shopeeMsgParam = Array.isArray(params.message) ? params.message[0] : params.message;
+  const shopeeShopParam = Array.isArray(params.shop) ? params.shop[0] : params.shop;
+  let shopeeNotice: { tone: "ok" | "error"; text: string } | null = null;
+  if (shopeeParam === "connected") {
+    shopeeNotice = {
+      tone: "ok",
+      text: `เชื่อมต่อร้าน Shopee${shopeeShopParam ? ` (${shopeeShopParam})` : ""} สำเร็จแล้ว`,
+    };
+  } else if (shopeeParam) {
+    const map: Record<string, string> = {
+      missing_config: "กรุณากรอก Partner ID และ Partner Key ของ Shopee ก่อน",
+      bad_state: "คำขอ OAuth หมดอายุหรือ state ไม่ตรง — ลองกดเชื่อมใหม่อีกครั้ง",
+      no_code: "Shopee ไม่ได้ส่ง code หรือ shop_id กลับมา",
+      error: shopeeMsgParam || "เชื่อมต่อ Shopee ไม่สำเร็จ",
+    };
+    shopeeNotice = { tone: "error", text: map[shopeeParam] ?? shopeeParam };
+  }
 
   return (
     <div className="workspace-page">
@@ -115,60 +135,67 @@ export default async function SettingsPage({
       {activeTab === "platforms" ? (
         <section
           aria-label="เชื่อมต่อแพลตฟอร์ม"
-          className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2"
+          className="flex flex-col gap-3"
         >
-          <TikTokConnectCard
-            hostIsLocal={hostIsLocal}
-            config={{
-              configured: Boolean(platformConfig.tiktok),
-              appKey: platformConfig.tiktok?.appKey ?? null,
-              serviceId: platformConfig.tiktok?.serviceId ?? null,
-              accounts: tiktokAccounts.map((account) => ({
-                accountKey: account.accountKey,
-                shopName: account.shopName,
-                shopCipher: account.shopCipher,
-                region: account.region,
-                status: account.status,
-                lastError: account.lastError,
-                accessTokenExpiresAt: account.accessTokenExpiresAt,
-                connectedAt: account.connectedAt,
-              })),
-            }}
-          />
-
-          <Card padding="padded" className="flex min-w-0 flex-col gap-3">
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground"
-                >
-                  <IconReceipt size={16} />
-                </span>
-                <span className="truncate text-[15px] font-bold">Shopee</span>
-              </div>
-              <Badge variant="neutral">ยังไม่เชื่อมต่อ</Badge>
+          {shopeeNotice ? (
+            <div
+              role="status"
+              className={cn(
+                "flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-medium",
+                shopeeNotice.tone === "ok"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-rose-200 bg-rose-50 text-rose-800",
+              )}
+            >
+              {shopeeNotice.tone === "ok" ? (
+                <IconCheckCircle className="h-4 w-4 shrink-0" />
+              ) : (
+                <IconInfo className="h-4 w-4 shrink-0" />
+              )}
+              <span>{shopeeNotice.text}</span>
             </div>
+          ) : null}
 
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[13px]">
-              <div className="min-w-0">
-                <dt className="text-muted-foreground">ร้านที่เชื่อม</dt>
-                <dd className="mono font-bold">0 ร้าน</dd>
-              </div>
-              <div className="min-w-0">
-                <dt className="text-muted-foreground">ดึงล่าสุด</dt>
-                <dd className="font-bold">ยังไม่มี</dd>
-              </div>
-              <div className="col-span-2 min-w-0 border-t border-border pt-2 text-muted-foreground">
-                ใช้แอปประเภท Seller In-house System (ต้องขึ้น Live ก่อน)
-              </div>
-            </dl>
+          <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2">
+            <TikTokConnectCard
+              hostIsLocal={hostIsLocal}
+              config={{
+                configured: Boolean(platformConfig.tiktok),
+                appKey: platformConfig.tiktok?.appKey ?? null,
+                serviceId: platformConfig.tiktok?.serviceId ?? null,
+                accounts: tiktokAccounts.map((account) => ({
+                  accountKey: account.accountKey,
+                  shopName: account.shopName,
+                  shopCipher: account.shopCipher,
+                  region: account.region,
+                  status: account.status,
+                  lastError: account.lastError,
+                  accessTokenExpiresAt: account.accessTokenExpiresAt,
+                  connectedAt: account.connectedAt,
+                })),
+              }}
+            />
 
-            <p className="flex items-start gap-1.5 text-[12.5px] leading-6 text-muted-foreground">
-              <IconInfo size={14} aria-hidden="true" className="mt-1 shrink-0" />
-              <span className="min-w-0">ยังไม่เริ่มงานฝั่ง Shopee — เริ่มจาก TikTok ก่อนตามที่ตกลง</span>
-            </p>
-          </Card>
+            <ShopeeConnectCard
+              hostIsLocal={hostIsLocal}
+              config={{
+                configured: Boolean(platformConfig.shopee),
+                partnerId: platformConfig.shopee?.partnerId ?? null,
+                env: platformConfig.shopee?.env ?? "sandbox",
+                redirectBaseUrl: platformConfig.shopee?.redirectBaseUrl ?? null,
+                accounts: shopeeAccounts.map((account) => ({
+                  accountKey: account.accountKey,
+                  shopName: account.shopName,
+                  shopCipher: account.shopCipher,
+                  region: account.region,
+                  status: account.status,
+                  lastError: account.lastError,
+                  accessTokenExpiresAt: account.accessTokenExpiresAt,
+                  connectedAt: account.connectedAt,
+                })),
+              }}
+            />
+          </div>
         </section>
       ) : null}
 

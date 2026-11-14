@@ -5,15 +5,24 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import type { PlatformKey } from "@/lib/platform/platforms";
 
-export function SyncNowButton({ variant = "default" }: { variant?: "default" | "outline" | "ghost" } = {}) {
+export function SyncNowButton({
+  variant = "default",
+  platform = "tiktok",
+}: {
+  variant?: "default" | "outline" | "ghost";
+  platform?: PlatformKey;
+} = {}) {
   const router = useRouter();
   const [running, setRunning] = useState(false);
 
   async function run() {
     setRunning(true);
     try {
-      const response = await fetch("/api/platform/tiktok/sync-now", { method: "POST" });
+      const endpoint =
+        platform === "shopee" ? "/api/platform/shopee/sync-now" : "/api/platform/tiktok/sync-now";
+      const response = await fetch(endpoint, { method: "POST" });
       const payload = (await response.json()) as { error?: string; shop?: string };
       if (!response.ok) throw new Error(payload.error || "เริ่มดึงไม่สำเร็จ");
 

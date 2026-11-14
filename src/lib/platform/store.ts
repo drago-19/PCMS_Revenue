@@ -12,9 +12,15 @@ import {
   isEncryptionConfigured,
 } from "@/lib/platform/secrets";
 import type { TikTokAppConfig, TikTokShop } from "@/lib/platform/tiktok";
+import {
+  normalizeShopeeEnv,
+  type ShopeeAppConfig,
+  type ShopeeEnvironment,
+} from "@/lib/platform/shopee";
 
 const SETTINGS_KEY = "platform_api";
 export const TIKTOK_PLATFORM = "TikTok";
+export const SHOPEE_PLATFORM = "Shopee";
 
 function clean(value: unknown, max: number): string {
   return typeof value === "string"
@@ -24,57 +30,82 @@ function clean(value: unknown, max: number): string {
 
 export interface StoredPlatformConfig {
   tiktok: TikTokAppConfig | null;
+  shopee: ShopeeAppConfig | null;
   updatedAt: string | null;
+}
+
+async function readRawSettingsRow(): Promise<{
+  raw: Record<string, unknown>;
+  updatedAt: string | null;
+}> {
+  const row = await queryOne<{ value_json: unknown; updated_at: string | null }>(
+    "SELECT value_json, updated_at::text AS updated_at FROM app_settings WHERE setting_key = $1",
+    [SETTINGS_KEY],
+  );
+  const raw =
+    row?.value_json && typeof row.value_json === "object"
+      ? (row.value_json as Record<string, unknown>)
+      : {};
+  return { raw, updatedAt: row?.updated_at ?? null };
+}
+
+async function resolveEncryptedSecret(
+  storedValue: string,
+  jsonPath: string,
+): Promise<string> {
+  if (!storedValue) return "";
+  let plain = "";
+  try {
+    plain = decryptSecret(storedValue);
+  } catch {
+    // คีย์ไม่ตรงหรือยังไม่ได้ตั้งคีย์ — ให้หน้าเว็บเห็นว่ายังใช้งานไม่ได้ ดีกว่าโยน error ทั้งหน้า
+    return "";
+  }
+
+  if (plain && !isEncryptedValue(storedValue) && isEncryptionConfigured()) {
+    try {
+      await query(
+        `UPDATE app_settings
+         SET value_json = jsonb_set(value_json, $2::text[], to_jsonb($3::text)),
+             updated_at = now()
+         WHERE setting_key = $1`,
+        [SETTINGS_KEY, jsonPath, encryptSecret(plain)],
+      );
+    } catch {
+      // เข้ารหัสซ้ำไม่สำเร็จไม่ควรทำให้อ่านค่าไม่ได้
+    }
+  }
+  return plain;
 }
 
 export async function getPlatformConfig(): Promise<StoredPlatformConfig> {
   try {
-    const row = await queryOne<{ value_json: unknown; updated_at: string | null }>(
-      "SELECT value_json, updated_at::text AS updated_at FROM app_settings WHERE setting_key = $1",
-      [SETTINGS_KEY],
-    );
-    const raw = (row?.value_json ?? {}) as Record<string, unknown>;
-    const tiktok = raw.tiktok as Record<string, unknown> | undefined;
-    const appKey = clean(tiktok?.appKey, 200);
-    const storedSecret = clean(tiktok?.appSecret, 4000);
-    const serviceId = clean(tiktok?.serviceId, 200);
+    const { raw, updatedAt } = await readRawSettingsRow();
 
-    let appSecret = "";
-    if (storedSecret) {
-      try {
-        appSecret = decryptSecret(storedSecret);
-      } catch {
-        // คีย์ไม่ตรงหรือยังไม่ได้ตั้งคีย์ — ให้หน้าเว็บเห็นว่ายังใช้งานไม่ได้ ดีกว่าโยน error ทั้งหน้า
-        appSecret = "";
-      }
+    const tiktokRaw = raw.tiktok as Record<string, unknown> | undefined;
+    const appKey = clean(tiktokRaw?.appKey, 200);
+    const storedTikTokSecret = clean(tiktokRaw?.appSecret, 4000);
+    const serviceId = clean(tiktokRaw?.serviceId, 200);
+    const appSecret = await resolveEncryptedSecret(storedTikTokSecret, "{tiktok,appSecret}");
 
-      // ค่าเก่าที่เคยเก็บเป็นข้อความธรรมดา → เข้ารหัสทับทันทีเมื่อมีคีย์
-      if (
-        appSecret &&
-        !isEncryptedValue(storedSecret) &&
-        isEncryptionConfigured()
-      ) {
-        try {
-          await query(
-            `UPDATE app_settings
-             SET value_json = jsonb_set(value_json, '{tiktok,appSecret}', to_jsonb($2::text)),
-                 updated_at = now()
-             WHERE setting_key = $1`,
-            [SETTINGS_KEY, encryptSecret(appSecret)],
-          );
-        } catch {
-          // เข้ารหัสซ้ำไม่สำเร็จไม่ควรทำให้อ่านค่าไม่ได้
-        }
-      }
-    }
+    const shopeeRaw = raw.shopee as Record<string, unknown> | undefined;
+    const partnerId = clean(shopeeRaw?.partnerId, 50);
+    const storedShopeeKey = clean(shopeeRaw?.partnerKey, 4000);
+    const env = normalizeShopeeEnv(shopeeRaw?.env);
+    const redirectBaseUrl = clean(shopeeRaw?.redirectBaseUrl, 500) || null;
+    const partnerKey = await resolveEncryptedSecret(storedShopeeKey, "{shopee,partnerKey}");
 
     return {
       tiktok: appKey && appSecret && serviceId ? { appKey, appSecret, serviceId } : null,
-      updatedAt: row?.updated_at ?? null,
+      shopee:
+        partnerId && partnerKey
+          ? { partnerId, partnerKey, env, redirectBaseUrl }
+          : null,
+      updatedAt,
     };
   } catch {
     // ฐานข้อมูลยังไม่พร้อม (ระหว่าง build) — ถือว่ายังไม่ตั้งค่า
-    return { tiktok: null, updatedAt: null };
+    return { tiktok: null, shopee: null, updatedAt: null };
   }
 }
 
@@ -103,9 +134,13 @@ export async function saveTikTokConfig(
   if (appSecret.length < 20) throw new Error("App Secret สั้นเกินไป — คัดลอกมาครบหรือยัง");
   if (!serviceId) throw new Error("ยังไม่ได้กรอก Service ID");
 
-  const stored = await getPlatformConfig();
+  const { raw } = await readRawSettingsRow();
+  const prevTikTok =
+    raw.tiktok && typeof raw.tiktok === "object"
+      ? (raw.tiktok as Record<string, unknown>)
+      : {};
   const next = {
-    ...(stored.tiktok ?? {}),
+    ...prevTikTok,
     appKey,
     // เก็บเฉพาะข้อความที่เข้ารหัสแล้ว — คีย์ถอดรหัสอยู่ใน env ไม่ได้อยู่ในฐานข้อมูล
     appSecret: encryptSecret(appSecret),
@@ -119,10 +154,82 @@ export async function saveTikTokConfig(
        value_json = EXCLUDED.value_json,
        updated_by = EXCLUDED.updated_by,
        updated_at = now()`,
-    [SETTINGS_KEY, JSON.stringify({ tiktok: next }), updatedBy],
+    [SETTINGS_KEY, JSON.stringify({ ...raw, tiktok: next }), updatedBy],
   );
 
   return { appKey, appSecret, serviceId };
+}
+
+export interface SaveShopeeConfigInput {
+  partnerId?: unknown;
+  partnerKey?: unknown;
+  env?: unknown;
+  redirectBaseUrl?: unknown;
+}
+
+export async function saveShopeeConfig(
+  input: SaveShopeeConfigInput,
+  updatedBy: string,
+): Promise<ShopeeAppConfig> {
+  if (process.env.NODE_ENV === "production" && !isEncryptionConfigured()) {
+    throw new Error(
+      "ต้องตั้งค่า PLATFORM_SECRET_KEY (base64 32 ไบต์) ก่อนบันทึก credential ใน production",
+    );
+  }
+
+  const partnerId = clean(input.partnerId, 50);
+  const partnerKeyInput = clean(input.partnerKey, 500);
+  const env: ShopeeEnvironment = normalizeShopeeEnv(input.env);
+  const rawRedirect = clean(input.redirectBaseUrl, 500);
+
+  if (!/^\d+$/.test(partnerId)) {
+    throw new Error("Partner ID ต้องเป็นตัวเลขเท่านั้น");
+  }
+
+  let redirectBaseUrl: string | null = null;
+  if (rawRedirect) {
+    let parsed: URL;
+    try {
+      parsed = new URL(rawRedirect);
+    } catch {
+      throw new Error("Redirect Domain ต้องขึ้นต้นด้วย http:// หรือ https://");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Redirect Domain ต้องใช้ http:// หรือ https:// เท่านั้น");
+    }
+    redirectBaseUrl = parsed.origin;
+  }
+
+  const existing = await getPlatformConfig();
+  const partnerKey = partnerKeyInput || existing.shopee?.partnerKey || "";
+  if (partnerKey.length < 20) {
+    throw new Error("Partner Key สั้นเกินไป — คัดลอกมาครบหรือยัง");
+  }
+
+  const { raw } = await readRawSettingsRow();
+  const prevShopee =
+    raw.shopee && typeof raw.shopee === "object"
+      ? (raw.shopee as Record<string, unknown>)
+      : {};
+  const next = {
+    ...prevShopee,
+    partnerId,
+    partnerKey: encryptSecret(partnerKey),
+    env,
+    redirectBaseUrl,
+  };
+
+  await query(
+    `INSERT INTO app_settings (setting_key, value_json, updated_by, updated_at)
+     VALUES ($1, $2::jsonb, $3, now())
+     ON CONFLICT (setting_key) DO UPDATE SET
+       value_json = EXCLUDED.value_json,
+       updated_by = EXCLUDED.updated_by,
+       updated_at = now()`,
+    [SETTINGS_KEY, JSON.stringify({ ...raw, shopee: next }), updatedBy],
+  );
+
+  return { partnerId, partnerKey, env, redirectBaseUrl };
 }
 
 export interface PlatformAccountRow {
@@ -172,6 +279,23 @@ export async function listPlatformAccounts(platform: string): Promise<PlatformAc
   }
 }
 
+/** รายชื่อแพลตฟอร์มที่มีร้าน status='connected' อยู่จริง (ใช้เปิด/ปิดแท็บใน /platform) */
+export async function getConnectedPlatforms(): Promise<Array<"tiktok" | "shopee" | "facebook">> {
+  try {
+    const rows = await query<{ platform: string }>(
+      `SELECT DISTINCT platform FROM platform_accounts WHERE status = 'connected'`,
+    );
+    const out = new Set<"tiktok" | "shopee" | "facebook">(["tiktok"]);
+    for (const row of rows) {
+      if (row.platform === "Shopee") out.add("shopee");
+      if (row.platform === "Facebook") out.add("facebook");
+    }
+    return [...out];
+  } catch {
+    return ["tiktok"];
+  }
+}
+
 export async function getPlatformAccountRow(
   platform: string,
   accountKey: string,
@@ -198,8 +322,31 @@ export interface SaveTikTokShopInput {
   region: string | null;
 }
 
-/** บันทึก/อัปเดตร้านที่เชื่อมแล้ว — หนึ่งร้านต่อหนึ่งแถว (platform + shop id) */
-export async function saveTikTokShop(input: SaveTikTokShopInput): Promise<void> {
+async function upsertPlatformAccount({
+  platform,
+  shopId,
+  shopCipher,
+  shopName,
+  sellerName,
+  region,
+  accessToken,
+  refreshToken,
+  accessTokenExpiresAt,
+  refreshTokenExpiresAt,
+  grantedScopes,
+}: {
+  platform: string;
+  shopId: string;
+  shopCipher: string | null;
+  shopName: string;
+  sellerName: string | null;
+  region: string | null;
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresAt: Date;
+  refreshTokenExpiresAt: Date;
+  grantedScopes: string[];
+}): Promise<void> {
   await query(
     `INSERT INTO platform_accounts (
        platform, account_key, shop_id, shop_cipher, shop_name, seller_name, region,
@@ -222,20 +369,65 @@ export async function saveTikTokShop(input: SaveTikTokShopInput): Promise<void> 
        connected_at = now(),
        updated_at = now()`,
     [
-      TIKTOK_PLATFORM,
-      input.shop.id,
-      input.shop.id,
-      input.shop.cipher,
-      input.shop.name,
-      input.sellerName,
-      input.region ?? input.shop.region,
-      input.accessToken,
-      input.refreshToken,
-      input.accessTokenExpiresAt,
-      input.refreshTokenExpiresAt,
-      input.grantedScopes,
+      platform,
+      shopId,
+      shopId,
+      shopCipher,
+      shopName,
+      sellerName,
+      region,
+      accessToken,
+      refreshToken,
+      accessTokenExpiresAt,
+      refreshTokenExpiresAt,
+      grantedScopes,
     ],
   );
+}
+
+/** บันทึก/อัปเดตร้าน TikTok ที่เชื่อมแล้ว — หนึ่งร้านต่อหนึ่งแถว (platform + shop id) */
+export async function saveTikTokShop(input: SaveTikTokShopInput): Promise<void> {
+  await upsertPlatformAccount({
+    platform: TIKTOK_PLATFORM,
+    shopId: input.shop.id,
+    shopCipher: input.shop.cipher,
+    shopName: input.shop.name,
+    sellerName: input.sellerName,
+    region: input.region ?? input.shop.region,
+    accessToken: input.accessToken,
+    refreshToken: input.refreshToken,
+    accessTokenExpiresAt: input.accessTokenExpiresAt,
+    refreshTokenExpiresAt: input.refreshTokenExpiresAt,
+    grantedScopes: input.grantedScopes,
+  });
+}
+
+export interface SaveShopeeShopInput {
+  shopId: string;
+  shopName: string;
+  region: string | null;
+  env: ShopeeEnvironment;
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresAt: Date;
+  refreshTokenExpiresAt: Date;
+}
+
+/** บันทึก/อัปเดตร้าน Shopee (Sandbox / Live) */
+export async function saveShopeeShop(input: SaveShopeeShopInput): Promise<void> {
+  await upsertPlatformAccount({
+    platform: SHOPEE_PLATFORM,
+    shopId: input.shopId,
+    shopCipher: input.env,
+    shopName: input.shopName,
+    sellerName: input.shopName,
+    region: input.region,
+    accessToken: input.accessToken,
+    refreshToken: input.refreshToken,
+    accessTokenExpiresAt: input.accessTokenExpiresAt,
+    refreshTokenExpiresAt: input.refreshTokenExpiresAt,
+    grantedScopes: [input.env],
+  });
 }
 
 export async function updateAccountTokens({
