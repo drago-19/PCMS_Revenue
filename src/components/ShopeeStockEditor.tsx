@@ -49,12 +49,15 @@ export function ShopeeStockEditor({
       body.set("itemId", String(itemId));
       body.set("image", file);
       const response = await fetch("/api/platform/shopee/items/image", { method: "POST", body });
-      const data = (await response.json()) as { error?: string };
+      const data = (await response.json()) as { error?: string; imageUrl?: string | null };
       if (!response.ok) {
         toast.error(data.error ?? "เปลี่ยนรูปไม่สำเร็จ");
         return;
       }
-      toast.success("เปลี่ยนรูปสินค้าบน Shopee แล้ว");
+      toast.success(
+        data.imageUrl ? `เปลี่ยนรูปแล้ว · Shopee เก็บรูป: ${data.imageUrl}` : "เปลี่ยนรูปสินค้าบน Shopee แล้ว",
+        { duration: 10000 },
+      );
       router.refresh();
     } catch {
       toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
