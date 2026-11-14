@@ -54,9 +54,9 @@ export async function POST(request: Request) {
   const accountKey = String(form.get("accountKey") ?? "").trim();
   const image = form.get("image");
 
-  if (itemName.length < 3 || itemName.length > 120) {
+  if (itemName.length < 20 || itemName.length > 120) {
     return Response.json(
-      { error: "ชื่อสินค้าต้องยาว 3–120 ตัวอักษร", requestId: auth.requestId },
+      { error: "ชื่อสินค้าต้องยาว 20–120 ตัวอักษร (ข้อกำหนดของ Shopee)", requestId: auth.requestId },
       { status: 400, headers: { "x-request-id": auth.requestId } },
     );
   }

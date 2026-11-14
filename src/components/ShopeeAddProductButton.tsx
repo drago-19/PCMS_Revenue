@@ -174,10 +174,23 @@ export function ShopeeAddProductButton({ accountKey }: { accountKey: string }) {
                 value={form.itemName}
                 onChange={(event) => set("itemName", event.target.value)}
                 aria-label="ชื่อสินค้า"
+                aria-describedby="shopee-name-hint"
                 className="h-10"
+                minLength={20}
                 maxLength={120}
                 required
               />
+              <span
+                id="shopee-name-hint"
+                className={cn(
+                  "text-[12px] leading-5",
+                  form.itemName.length > 0 && form.itemName.length < 20
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground",
+                )}
+              >
+                Shopee ต้องการ 20–120 ตัวอักษร ({form.itemName.length}/120)
+              </span>
             </label>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
