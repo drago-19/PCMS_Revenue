@@ -186,6 +186,9 @@ export default async function SettingsPage({
                 partnerId: platformConfig.shopee?.partnerId ?? null,
                 env: platformConfig.shopee?.env ?? "sandbox",
                 redirectBaseUrl: platformConfig.shopee?.redirectBaseUrl ?? null,
+                pushCallbackUrl: platformConfig.shopee
+                  ? `${(platformConfig.shopee.redirectBaseUrl ?? "https://revenue.goldpulse-ai.com").replace(/\/+$/, "")}/api/platform/shopee/webhook?token=${createHmac("sha256", platformConfig.shopee.partnerKey).update("shopee-push").digest("hex").slice(0, 32)}`
+                  : null,
                 accounts: shopeeAccounts.map((account) => ({
                   accountKey: account.accountKey,
                   shopName: account.shopName,
