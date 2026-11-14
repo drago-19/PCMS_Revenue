@@ -1159,6 +1159,9 @@ export async function addShopeeItem(
     imageId,
     logisticIds,
     sellerSku,
+    brandName,
+    tierVariation,
+    models,
   }: {
     accessToken: string;
     shopId: string;
@@ -1171,6 +1174,9 @@ export async function addShopeeItem(
     imageId: string;
     logisticIds: number[];
     sellerSku?: string;
+    brandName?: string;
+    tierVariation?: Array<{ name: string; options: string[] }>;
+    models?: Array<{ optionIndexes: number[]; price: number; stock: number; sku?: string }>;
   },
 ): Promise<{ itemId: number }> {
   const payload = await callShopeeApi<{ item_id?: number }>({
@@ -1189,9 +1195,22 @@ export async function addShopeeItem(
       logistic_info: logisticIds.map((id) => ({ logistic_id: id, enabled: true })),
       category_id: categoryId,
       image: { image_id_list: [imageId] },
-      seller_stock: [{ stock }],
-      // Shopee บังคับให้ระบุแบรนด์ — ไม่มีแบรนด์ใช้ brand_id 0 "No Brand"
-      brand: { brand_id: 0, original_brand_name: "No Brand" },
+      ...(tierVariation && tierVariation.length > 0 && models && models.length > 0
+        ? {
+            tier_variation: tierVariation.map((tier) => ({
+              name: tier.name.trim().slice(0, 14),
+              option_list: tier.options.map((option) => ({ option: option.trim().slice(0, 20) })),
+            })),
+            model_list: models.map((model) => ({
+              tier_index: model.optionIndexes,
+              original_price: model.price,
+              seller_stock: [{ stock: model.stock }],
+              ...(model.sku ? { model_sku: model.sku } : {}),
+            })),
+          }
+        : { seller_stock: [{ stock }] }),
+      // Shopee บังคับให้ระบุแบรนด์ — ใช้ brand_id 0 พร้อมชื่อที่ผู้ใช้กรอก
+      brand: { brand_id: 0, original_brand_name: brandName?.trim() || "No Brand" },
       ...(sellerSku ? { item_sku: sellerSku } : {}),
     },
   });
@@ -1201,6 +1220,66 @@ export async function addShopeeItem(
     throw new ShopeeApiError("Shopee ไม่ได้คืน item_id หลังสร้างสินค้า");
   }
   return { itemId };
+}
+
+/** แก้ราคาสินค้า (ทั้งสินค้าเดี่ยวและรายตัวเลือก) */
+export async function updateShopeePrice(
+  config: ShopeeAppConfig,
+  {
+    accessToken,
+    shopId,
+    itemId,
+    price,
+    modelId = 0,
+  }: { accessToken: string; shopId: string; itemId: number; price: number; modelId?: number },
+): Promise<{ failureList: unknown[] }> {
+  const payload = await callShopeeApi<{ failure_list?: unknown[] }>({
+    config,
+    path: "/api/v2/product/update_price",
+    method: "POST",
+    accessToken,
+    shopId,
+    body: {
+      item_id: itemId,
+      price_list: [{ model_id: modelId, original_price: price }],
+    },
+  });
+
+  return { failureList: payload.response?.failure_list ?? [] };
+}
+
+/** แก้ชื่อ/คำอธิบาย/รูปของสินค้า — ส่งเฉพาะฟิลด์ที่ต้องการเปลี่ยน */
+export async function updateShopeeItem(
+  config: ShopeeAppConfig,
+  {
+    accessToken,
+    shopId,
+    itemId,
+    itemName,
+    description,
+    imageId,
+  }: {
+    accessToken: string;
+    shopId: string;
+    itemId: number;
+    itemName?: string;
+    description?: string;
+    imageId?: string;
+  },
+): Promise<void> {
+  const body: Record<string, unknown> = { item_id: itemId };
+  if (itemName) body.item_name = itemName;
+  if (description) body.description = description;
+  if (imageId) body.image = { image_id_list: [imageId] };
+
+  await callShopeeApi<unknown>({
+    config,
+    path: "/api/v2/product/update_item",
+    method: "POST",
+    accessToken,
+    shopId,
+    body,
+  });
 }
 
 /**

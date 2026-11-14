@@ -33,6 +33,35 @@ export function ShopeeStockEditor({
   const [value, setValue] = useState(String(quantity));
   const [busy, setBusy] = useState<Action | null>(null);
   const [askDelete, setAskDelete] = useState(false);
+  const [price, setPrice] = useState("");
+  const [itemName, setItemName] = useState("");
+  const [description, setDescription] = useState("");
+  const [savingItem, setSavingItem] = useState(false);
+
+  async function saveItemFields(payload: { price?: number; itemName?: string; description?: string }, done: string) {
+    setSavingItem(true);
+    try {
+      const response = await fetch("/api/platform/shopee/items/update", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accountKey, itemId, modelId, ...payload }),
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        toast.error(data.error ?? "แก้ไขข้อมูลไม่สำเร็จ");
+        return;
+      }
+      toast.success(done);
+      setPrice("");
+      setItemName("");
+      setDescription("");
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
+    } finally {
+      setSavingItem(false);
+    }
+  }
 
   const [itemIdRaw, modelIdRaw] = skuId.split(":");
   const itemId = Number.parseInt(itemIdRaw ?? "", 10);
@@ -93,6 +122,70 @@ export function ShopeeStockEditor({
           {busy === "set_stock" ? "กำลังบันทึก…" : "บันทึกจำนวน"}
         </Button>
       </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] font-bold">ราคาใหม่ (บาท)</span>
+          <Input
+            inputMode="decimal"
+            value={price}
+            onChange={(event) => setPrice(event.target.value.replace(/[^0-9.]/g, ""))}
+            placeholder="เช่น 159"
+            aria-label="ราคาใหม่บน Shopee"
+            className="h-10"
+          />
+        </label>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 sm:self-end"
+          disabled={savingItem || !price || !Number.isFinite(Number.parseFloat(price))}
+          onClick={() => saveItemFields({ price: Number.parseFloat(price) }, "แก้ราคาบน Shopee แล้ว")}
+        >
+          {savingItem ? "กำลังบันทึก…" : "บันทึกราคา"}
+        </Button>
+      </div>
+
+      <details className="rounded-lg border border-border bg-background/60 p-2">
+        <summary className="cursor-pointer text-[12px] font-bold">แก้ชื่อ / คำอธิบายสินค้า</summary>
+        <div className="mt-2 flex flex-col gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px]">ชื่อใหม่ (20–120 ตัวอักษร)</span>
+            <Input
+              value={itemName}
+              onChange={(event) => setItemName(event.target.value)}
+              aria-label="ชื่อสินค้าใหม่"
+              className="h-10"
+              maxLength={120}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px]">คำอธิบายใหม่ (60–500 ตัวอักษร)</span>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              aria-label="คำอธิบายสินค้าใหม่"
+              maxLength={500}
+              rows={3}
+              className="min-h-20 w-full rounded-md border border-border bg-background px-2 py-2 text-[12.5px]"
+            />
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 self-start"
+            disabled={savingItem || (!itemName && !description)}
+            onClick={() =>
+              saveItemFields(
+                { itemName: itemName || undefined, description: description || undefined },
+                "บันทึกข้อความบน Shopee แล้ว",
+              )
+            }
+          >
+            {savingItem ? "กำลังบันทึก…" : "บันทึกชื่อ/คำอธิบาย"}
+          </Button>
+        </div>
+      </details>
 
       <div className="flex flex-wrap gap-2">
         <Button

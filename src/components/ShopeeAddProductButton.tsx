@@ -49,9 +49,35 @@ export function ShopeeAddProductButton({ accountKey }: { accountKey: string }) {
     stock: "0",
     weight: "0.2",
     categoryKeyword: "",
+    categoryId: "",
+    categoryName: "",
+    brandName: "No Brand",
     sellerSku: "",
     description: "",
   });
+  const [categoryResults, setCategoryResults] = useState<Array<{ id: number; name: string }>>([]);
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [models, setModels] = useState<Array<{ label: string; price: string; stock: string }>>([]);
+
+  async function searchCategories() {
+    setCategoryBusy(true);
+    try {
+      const response = await fetch(
+        `/api/platform/shopee/categories?q=${encodeURIComponent(form.categoryKeyword.trim())}`,
+      );
+      const data = (await response.json()) as { items?: Array<{ id: number; name: string }>; error?: string };
+      if (!response.ok) {
+        toast.error(data.error ?? "ค้นหมวดหมู่ไม่สำเร็จ");
+        return;
+      }
+      setCategoryResults(data.items ?? []);
+      if ((data.items ?? []).length === 0) toast.error("ไม่พบหมวดหมู่ที่ตรงกับคำค้น");
+    } catch {
+      toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
 
   // คืนหน่วยความจำของ URL ชั่วคราวเมื่อรูปเปลี่ยนหรือปิดฟอร์ม
   useEffect(() => {
@@ -120,6 +146,14 @@ export function ShopeeAddProductButton({ accountKey }: { accountKey: string }) {
     body.set("stock", form.stock);
     body.set("weight", form.weight);
     body.set("categoryKeyword", form.categoryKeyword);
+    body.set("categoryId", form.categoryId);
+    body.set("brandName", form.brandName);
+    if (models.length > 0) {
+      body.set(
+        "models",
+        JSON.stringify(models.map((row) => ({ label: row.label, price: Number(row.price), stock: Number(row.stock) }))),
+      );
+    }
     body.set("sellerSku", form.sellerSku);
     body.set("description", form.description);
     body.set("image", picked.file);
@@ -134,7 +168,20 @@ export function ShopeeAddProductButton({ accountKey }: { accountKey: string }) {
       }
       toast.success(`สร้างสินค้าแล้ว (item ${data.itemId}) หมวด ${data.category ?? "—"}`);
       closeDialog();
-      setForm({ itemName: "", price: "", stock: "0", weight: "0.2", categoryKeyword: "", sellerSku: "", description: "" });
+      setForm({
+        itemName: "",
+        price: "",
+        stock: "0",
+        weight: "0.2",
+        categoryKeyword: "",
+        categoryId: "",
+        categoryName: "",
+        brandName: "No Brand",
+        sellerSku: "",
+        description: "",
+      });
+      setModels([]);
+      setCategoryResults([]);
       router.refresh();
     } catch {
       toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
@@ -238,17 +285,144 @@ export function ShopeeAddProductButton({ accountKey }: { accountKey: string }) {
               </label>
             </div>
 
-            <label className="flex flex-col gap-1" htmlFor="shopee-item-category">
-              <span className="text-[12px] font-bold">คำค้นหมวดหมู่</span>
+            <div className="flex flex-col gap-1">
+              <span className="text-[12px] font-bold">หมวดหมู่สินค้า</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  value={form.categoryKeyword}
+                  onChange={(event) => set("categoryKeyword", event.target.value)}
+                  placeholder="ค้นหมวด เช่น แก้ว, เสื้อผ้า"
+                  aria-label="ค้นหมวดหมู่สินค้า"
+                  className="h-10 min-w-0 flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10"
+                  disabled={categoryBusy}
+                  onClick={() => void searchCategories()}
+                >
+                  {categoryBusy ? "กำลังค้น…" : "ค้นหมวด"}
+                </Button>
+              </div>
+              {form.categoryId ? (
+                <p className="text-[12px] leading-5 text-muted-foreground">
+                  เลือกไว้: {form.categoryName} (id {form.categoryId}) — ถ้าไม่เลือก ระบบจะเลือกหมวดให้อัตโนมัติ
+                </p>
+              ) : (
+                <p className="text-[12px] leading-5 text-muted-foreground">
+                  ไม่เลือกก็ได้ ระบบจะเลือกหมวดใบแรกที่ตรงกับคำค้นให้
+                </p>
+              )}
+              {categoryResults.length > 0 ? (
+                <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-lg border border-border p-2">
+                  {categoryResults.map((row) => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      className={cn(
+                        "min-h-10 rounded-md px-2 text-left text-[12.5px]",
+                        String(row.id) === form.categoryId ? "bg-primary/10 font-bold" : "hover:bg-muted",
+                      )}
+                      onClick={() => {
+                        setForm((prev) => ({ ...prev, categoryId: String(row.id), categoryName: row.name }));
+                        setCategoryResults([]);
+                      }}
+                    >
+                      {row.name} <span className="text-muted-foreground">#{row.id}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <label className="flex flex-col gap-1" htmlFor="shopee-item-brand">
+              <span className="text-[12px] font-bold">แบรนด์</span>
               <Input
-                id="shopee-item-category"
-                value={form.categoryKeyword}
-                onChange={(event) => set("categoryKeyword", event.target.value)}
-                placeholder="เช่น แก้ว, เสื้อผ้า (เว้นว่างได้)"
-                aria-label="คำค้นหมวดหมู่"
+                id="shopee-item-brand"
+                value={form.brandName}
+                onChange={(event) => set("brandName", event.target.value)}
+                aria-label="แบรนด์"
                 className="h-10"
+                maxLength={60}
               />
+              <span className="text-[12px] leading-5 text-muted-foreground">
+                ค่าเริ่มต้น “No Brand” — Shopee บังคับต้องมีแบรนด์
+              </span>
             </label>
+
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[12px] font-bold">ตัวเลือกสินค้า (เช่น ไซส์/สี)</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10"
+                  disabled={models.length >= 20}
+                  onClick={() => setModels((prev) => [...prev, { label: "", price: form.price || "0", stock: "0" }])}
+                >
+                  เพิ่มตัวเลือก
+                </Button>
+              </div>
+              {models.length === 0 ? (
+                <span className="text-[12px] leading-5 text-muted-foreground">
+                  ถ้าไม่เพิ่ม ระบบจะสร้างสินค้าแบบไม่มีตัวเลือกโดยใช้ราคา/สต็อกด้านบน
+                </span>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {models.map((row, index) => (
+                    <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_6rem_auto]">
+                      <Input
+                        value={row.label}
+                        onChange={(event) =>
+                          setModels((prev) => prev.map((item, i) => (i === index ? { ...item, label: event.target.value } : item)))
+                        }
+                        placeholder="ชื่อตัวเลือก เช่น M / สีขาว"
+                        aria-label={`ชื่อตัวเลือกที่ ${index + 1}`}
+                        className="h-10"
+                        maxLength={20}
+                      />
+                      <Input
+                        inputMode="decimal"
+                        value={row.price}
+                        onChange={(event) =>
+                          setModels((prev) =>
+                            prev.map((item, i) =>
+                              i === index ? { ...item, price: event.target.value.replace(/[^0-9.]/g, "") } : item,
+                            ),
+                          )
+                        }
+                        placeholder="ราคา"
+                        aria-label={`ราคาของตัวเลือกที่ ${index + 1}`}
+                        className="h-10"
+                      />
+                      <Input
+                        inputMode="numeric"
+                        value={row.stock}
+                        onChange={(event) =>
+                          setModels((prev) =>
+                            prev.map((item, i) =>
+                              i === index ? { ...item, stock: event.target.value.replace(/[^0-9]/g, "") } : item,
+                            ),
+                          )
+                        }
+                        placeholder="สต็อก"
+                        aria-label={`สต็อกของตัวเลือกที่ ${index + 1}`}
+                        className="h-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-10"
+                        onClick={() => setModels((prev) => prev.filter((_, i) => i !== index))}
+                      >
+                        ลบ
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <label className="flex flex-col gap-1" htmlFor="shopee-item-sku">
               <span className="text-[12px] font-bold">รหัสสินค้า (SKU)</span>

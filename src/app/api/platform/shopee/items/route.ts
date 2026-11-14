@@ -52,7 +52,49 @@ export async function POST(request: Request) {
   const stock = toNumber(form.get("stock"));
   const weight = toNumber(form.get("weight"));
   const accountKey = String(form.get("accountKey") ?? "").trim();
+  const brandName = String(form.get("brandName") ?? "").trim();
+  const categoryIdRaw = String(form.get("categoryId") ?? "").trim();
+  const modelsRaw = String(form.get("models") ?? "").trim();
   const image = form.get("image");
+
+  interface ModelInput {
+    label: string;
+    price: number;
+    stock: number;
+  }
+  let models: ModelInput[] = [];
+  if (modelsRaw) {
+    try {
+      const parsed = JSON.parse(modelsRaw) as ModelInput[];
+      models = parsed
+        .filter((row) => typeof row?.label === "string" && row.label.trim().length > 0)
+        .slice(0, 20)
+        .map((row) => ({
+          label: row.label.trim().slice(0, 20),
+          price: Number(row.price),
+          stock: Number(row.stock),
+        }));
+    } catch {
+      return Response.json(
+        { error: "ข้อมูลตัวเลือกสินค้าไม่ถูกต้อง", requestId: auth.requestId },
+        { status: 400, headers: { "x-request-id": auth.requestId } },
+      );
+    }
+  }
+  for (const model of models) {
+    if (!Number.isFinite(model.price) || model.price <= 0 || model.price > MAX_PRICE) {
+      return Response.json(
+        { error: `ราคาของตัวเลือก “${model.label}” ไม่ถูกต้อง`, requestId: auth.requestId },
+        { status: 400, headers: { "x-request-id": auth.requestId } },
+      );
+    }
+    if (!Number.isInteger(model.stock) || model.stock < 0 || model.stock > MAX_STOCK) {
+      return Response.json(
+        { error: `สต็อกของตัวเลือก “${model.label}” ไม่ถูกต้อง`, requestId: auth.requestId },
+        { status: 400, headers: { "x-request-id": auth.requestId } },
+      );
+    }
+  }
 
   if (itemName.length < 20 || itemName.length > 120) {
     return Response.json(
@@ -121,7 +163,10 @@ export async function POST(request: Request) {
     const ctx = await ensureValidShopeeToken(target.accountKey, config.shopee);
     const scope = { accessToken: ctx.accessToken, shopId: ctx.shopId };
 
-    const category = await resolveShopeeLeafCategory(config.shopee, categoryKeyword, scope);
+    const explicitCategoryId = Number.parseInt(categoryIdRaw, 10);
+    const category = Number.isInteger(explicitCategoryId) && explicitCategoryId > 0
+      ? { categoryId: explicitCategoryId, name: String(explicitCategoryId) }
+      : await resolveShopeeLeafCategory(config.shopee, categoryKeyword, scope);
     if (!category) {
       throw new ShopeeApiError("ไม่พบหมวดหมู่สินค้าที่ใช้ได้จาก Shopee");
     }
@@ -156,6 +201,12 @@ export async function POST(request: Request) {
       imageId: uploaded.imageId,
       logisticIds,
       sellerSku: sellerSku || undefined,
+      brandName: brandName || undefined,
+      tierVariation: models.length > 0 ? [{ name: "ตัวเลือก", options: models.map((row) => row.label) }] : undefined,
+      models:
+        models.length > 0
+          ? models.map((row, index) => ({ optionIndexes: [index], price: row.price, stock: row.stock }))
+          : undefined,
     });
 
     await recordAuditLog({
