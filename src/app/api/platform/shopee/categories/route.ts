@@ -28,7 +28,18 @@ export async function GET(request: Request) {
 
   try {
     const ctx = await ensureValidShopeeToken(account.accountKey, config.shopee);
-    const categories = await listShopeeCategories(config.shopee, { accessToken: ctx.accessToken, shopId: ctx.shopId });
+    const scope = { accessToken: ctx.accessToken, shopId: ctx.shopId };
+
+    let categories = await listShopeeCategories(config.shopee, scope);
+    // บางสภาพแวดล้อม (sandbox) ไม่ส่งชื่อหมวดกลับมาเป็นภาษาไทย — ลองภาษาอังกฤษแทน
+    const leavesTh = categories.filter((row) => !row.hasChildren);
+    if (leavesTh.length > 0 && leavesTh.every((row) => /^\d+$/.test(row.name.trim()))) {
+      const fallback = await listShopeeCategories(config.shopee, { ...scope, language: "en" });
+      if (fallback.some((row) => !row.hasChildren && !/^\d+$/.test(row.name.trim()))) {
+        categories = fallback;
+      }
+    }
+
     const leaves = categories.filter((row) => !row.hasChildren && row.name.trim().length > 0);
     const matched = q ? leaves.filter((row) => row.name.toLowerCase().includes(q)) : leaves;
 

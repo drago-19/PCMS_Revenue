@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,32 @@ export function ShopeeStockEditor({
   const [itemName, setItemName] = useState("");
   const [description, setDescription] = useState("");
   const [savingItem, setSavingItem] = useState(false);
+  const [imageBusy, setImageBusy] = useState(false);
+  const imageRef = useRef<HTMLInputElement>(null);
+
+  async function changeImage(file: File | undefined) {
+    if (!file) return;
+    setImageBusy(true);
+    try {
+      const body = new FormData();
+      body.set("accountKey", accountKey);
+      body.set("itemId", String(itemId));
+      body.set("image", file);
+      const response = await fetch("/api/platform/shopee/items/image", { method: "POST", body });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        toast.error(data.error ?? "เปลี่ยนรูปไม่สำเร็จ");
+        return;
+      }
+      toast.success("เปลี่ยนรูปสินค้าบน Shopee แล้ว");
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
+    } finally {
+      setImageBusy(false);
+      if (imageRef.current) imageRef.current.value = "";
+    }
+  }
 
   async function saveItemFields(payload: { price?: number; itemName?: string; description?: string }, done: string) {
     setSavingItem(true);
@@ -186,6 +212,21 @@ export function ShopeeStockEditor({
           </Button>
         </div>
       </details>
+
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-background/60 p-2">
+        <span className="text-[12px] font-bold">เปลี่ยนรูปสินค้า</span>
+        <input
+          ref={imageRef}
+          type="file"
+          accept="image/jpeg,image/png"
+          aria-label="รูปสินค้าใหม่"
+          className="min-h-10 w-full rounded-md border border-border bg-background px-2 py-2 text-[12.5px]"
+          onChange={(event) => void changeImage(event.target.files?.[0])}
+        />
+        <span className="text-[12px] leading-5 text-muted-foreground">
+          JPG หรือ PNG ไม่เกิน 2 MB — รูปใหม่จะแทนรูปหลักทันที{imageBusy ? " (กำลังอัปโหลด…)" : ""}
+        </span>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <Button

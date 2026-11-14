@@ -1018,7 +1018,7 @@ export interface ShopeeCategory {
 /** รายการหมวดหมู่สินค้าทั้งหมดของ Shopee (ใช้เลือกหมวดตอนสร้างสินค้า) */
 export async function listShopeeCategories(
   config: ShopeeAppConfig,
-  { accessToken, shopId }: { accessToken: string; shopId: string },
+  { accessToken, shopId, language = "th" }: { accessToken: string; shopId: string; language?: string },
 ): Promise<ShopeeCategory[]> {
   const payload = await callShopeeApi<{
     category_list?: Array<{
@@ -1030,7 +1030,7 @@ export async function listShopeeCategories(
   }>({
     config,
     path: "/api/v2/product/get_category",
-    query: { language: "th" },
+    query: { language },
     accessToken,
     shopId,
   });
