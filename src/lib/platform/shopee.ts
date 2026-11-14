@@ -1221,18 +1221,8 @@ export async function addShopeeItem(
           name: tier.name.trim().slice(0, 14),
           option_list: tier.options.map((option) => ({ option: option.trim().slice(0, 20) })),
         })),
-      },
-    });
-
-    await callShopeeApi<unknown>({
-      config,
-      path: "/api/v2/product/add_model",
-      method: "POST",
-      accessToken,
-      shopId,
-      body: {
-        item_id: itemId,
-        model_list: models.map((model) => ({
+        // Shopee ต้องการรายการตัวเลือก (model) มาพร้อมกันในคำขอนี้
+        model: models.map((model) => ({
           tier_index: model.optionIndexes,
           original_price: model.price,
           seller_stock: [{ stock: model.stock }],
