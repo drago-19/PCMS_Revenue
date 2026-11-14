@@ -5,6 +5,7 @@ import {
   getPlatformAccountRow,
   getPlatformConfig,
   listPlatformAccounts,
+  setWebhookRegisteredAt,
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
 
@@ -77,6 +78,11 @@ export async function POST(request: Request) {
         error: err instanceof Error ? err.message : "สมัครไม่สำเร็จ",
       });
     }
+  }
+
+  // เก็บเวลาที่สมัครสำเร็จ เพื่อให้หน้าตั้งค่าขึ้นว่า "เปิดแล้ว" แม้รีเฟรชใหม่
+  if (results.length > 0 && results.every((item) => item.ok)) {
+    await setWebhookRegisteredAt(TIKTOK_PLATFORM, new Date().toISOString());
   }
 
   return Response.json(

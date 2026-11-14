@@ -25,6 +25,8 @@ export interface TikTokConfigView {
   configured: boolean;
   appKey: string | null;
   serviceId: string | null;
+  /** เวลาที่สมัคร webhook สำเร็จ (มีค่า = แสดงว่าสมัครแล้ว ไม่ต้องกดซ้ำ) */
+  webhookRegisteredAt?: string | null;
   accounts: TikTokAccountView[];
 }
 
@@ -85,7 +87,7 @@ export function TikTokConnectCard({
   const [saving, setSaving] = useState(false);
   const [testingKey, setTestingKey] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
-  const [registered, setRegistered] = useState(false);
+  const [registered, setRegistered] = useState(Boolean(config.webhookRegisteredAt));
   const [testResult, setTestResult] = useState<Record<string, string>>({});
 
   async function handleSave() {

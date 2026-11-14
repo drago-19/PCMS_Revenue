@@ -31,6 +31,23 @@ export async function getActiveShopId(platform: string): Promise<string | null> 
   return typeof value === "string" && value ? value : null;
 }
 
+/** เวลาที่สมัคร webhook กับ TikTok สำเร็จครั้งล่าสุด (ไว้แสดงว่าสมัครแล้ว) */
+export async function getWebhookRegisteredAt(platform: string): Promise<string | null> {
+  const { raw } = await readRawSettingsRow();
+  const value = raw[`webhookRegisteredAt_${platform}`];
+  return typeof value === "string" && value ? value : null;
+}
+
+export async function setWebhookRegisteredAt(platform: string, at: string): Promise<void> {
+  await query(
+    `UPDATE app_settings
+        SET value_json = jsonb_set(COALESCE(value_json, '{}'::jsonb), ARRAY[$2::text], to_jsonb($3::text), true),
+            updated_at = now()
+      WHERE setting_key = $1`,
+    [SETTINGS_KEY, `webhookRegisteredAt_${platform}`, at],
+  );
+}
+
 export async function setActiveShopId(platform: string, shopId: string): Promise<void> {
   // jsonb_set สร้างคีย์ซ้อนชั้นไม่ได้ — ต้องสร้าง activeShop เป็น object ก่อนแล้วค่อยใส่ค่าร้าน
   await query(

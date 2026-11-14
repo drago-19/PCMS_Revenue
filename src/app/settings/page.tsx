@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { getActiveCompanyId } from "@/lib/db";
 import {
   getActiveShopId,
+  getWebhookRegisteredAt,
   getPlatformConfig,
   listPlatformAccounts,
   SHOPEE_PLATFORM,
@@ -68,12 +69,14 @@ export default async function SettingsPage({
     requestHost.startsWith("127.0.0.1") ||
     requestHost.startsWith("0.0.0.0");
 
-  const [platformConfig, tiktokAccounts, shopeeAccounts, tiktokActiveShopId] = await Promise.all([
-    getPlatformConfig(),
-    listPlatformAccounts(TIKTOK_PLATFORM),
-    listPlatformAccounts(SHOPEE_PLATFORM),
-    getActiveShopId(TIKTOK_PLATFORM),
-  ]);
+  const [platformConfig, tiktokAccounts, shopeeAccounts, tiktokActiveShopId, tiktokWebhookRegisteredAt] =
+    await Promise.all([
+      getPlatformConfig(),
+      listPlatformAccounts(TIKTOK_PLATFORM),
+      listPlatformAccounts(SHOPEE_PLATFORM),
+      getActiveShopId(TIKTOK_PLATFORM),
+      getWebhookRegisteredAt(TIKTOK_PLATFORM),
+    ]);
 
   const activeShopeeShopId = await getActiveShopId(SHOPEE_PLATFORM);
   const shopeeParam = Array.isArray(params.shopee) ? params.shopee[0] : params.shopee;
@@ -168,6 +171,7 @@ export default async function SettingsPage({
                 configured: Boolean(platformConfig.tiktok),
                 appKey: platformConfig.tiktok?.appKey ?? null,
                 serviceId: platformConfig.tiktok?.serviceId ?? null,
+                webhookRegisteredAt: tiktokWebhookRegisteredAt,
                 accounts: tiktokAccounts.map((account) => ({
                   accountKey: account.accountKey,
                   shopName: account.shopName,
