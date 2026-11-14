@@ -10,6 +10,8 @@ import { SyncNowButton } from "@/components/SyncNowButton";
 import { activePresetKey, periodPresets, thaiDateTime } from "@/lib/platform/period";
 import { platformDbName, type PlatformKey } from "@/lib/platform/platforms";
 import { getLastSyncAt } from "@/lib/platform/sync-state";
+import { isSandboxShopName } from "@/lib/platform/platforms";
+import { getActiveShopId } from "@/lib/platform/store";
 import { cn } from "@/lib/utils";
 
 export type PlatformAccount = { accountKey: string; shopName: string | null };
@@ -63,7 +65,14 @@ export async function PlatformPeriodBar({
   const isCustom = Boolean((from || to) && !activeKey);
 
   // ชื่อร้านต้องเห็นเสมอ — แม้มีร้านเดียว เพราะตัวเลขทั้งหมดเป็นของร้านนั้น
-  const accountList = accounts ?? [];
+  // โหมดทดสอบ (ร้านที่ใช้อยู่เป็น SANDBOX_): เห็นเฉพาะร้านทดสอบ
+  // — กันการกดเข้าไปดูข้อมูลร้านจริงจากแถบนี้ระหว่างทดสอบ
+  const allAccounts = accounts ?? [];
+  const activeShopId = await getActiveShopId("TikTok");
+  const testMode = isSandboxShopName(
+    allAccounts.find((account) => account.accountKey === activeShopId)?.shopName,
+  );
+  const accountList = testMode ? allAccounts.filter((account) => isSandboxShopName(account.shopName)) : allAccounts;
   const shopLabel = (() => {
     if (shop) {
       const found = accountList.find((account) => account.accountKey === shop);
