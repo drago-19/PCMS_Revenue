@@ -72,7 +72,8 @@ export async function PlatformPeriodBar({
   const testMode = isSandboxShopName(
     allAccounts.find((account) => account.accountKey === activeShopId)?.shopName,
   );
-  const accountList = testMode ? allAccounts.filter((account) => isSandboxShopName(account.shopName)) : allAccounts;
+  // แสดงเฉพาะร้านของโหมดที่ใช้อยู่: โหมดจริง = ร้านจริง, โหมดทดสอบ = ร้านทดสอบ
+  const accountList = allAccounts.filter((account) => isSandboxShopName(account.shopName) === testMode);
   const shopLabel = (() => {
     if (shop) {
       const found = accountList.find((account) => account.accountKey === shop);
