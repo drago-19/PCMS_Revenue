@@ -118,6 +118,14 @@ export function proxy(request: NextRequest) {
       );
     }
 
+    // ผู้ใช้สิทธิ์ "platform" (เช่น ฝ่ายขาย) เรียกได้เฉพาะ API ของหมวดแพลตฟอร์ม
+    if (String(session.role) === "platform" && !pathname.startsWith("/api/platform/")) {
+      return applySecurityHeaders(
+        NextResponse.json({ error: "บัญชีนี้ใช้ได้เฉพาะหมวดแพลตฟอร์ม", requestId }, { status: 403 }),
+        requestId,
+      );
+    }
+
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-request-id", requestId);
     requestHeaders.set("x-auth-user", session.sub);
@@ -138,6 +146,17 @@ export function proxy(request: NextRequest) {
       loginUrl.searchParams.set("next", fullTarget);
     }
     return applySecurityHeaders(NextResponse.redirect(loginUrl), requestId);
+  }
+
+  // ผู้ใช้สิทธิ์ "platform" เห็นได้เฉพาะหมวดแพลตฟอร์มกับหน้าตั้งค่า (แท็บเชื่อมต่อ)
+  if (String(session.role) === "platform") {
+    const allowed =
+      pathname === "/platform" ||
+      pathname.startsWith("/platform/") ||
+      pathname === "/settings";
+    if (!allowed) {
+      return applySecurityHeaders(NextResponse.redirect(new URL("/platform", request.url)), requestId);
+    }
   }
 
   const requestHeaders = new Headers(request.headers);
