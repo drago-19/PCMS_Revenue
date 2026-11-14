@@ -1195,6 +1195,8 @@ export async function addShopeeItem(
       logistic_info: logisticIds.map((id) => ({ logistic_id: id, enabled: true })),
       category_id: categoryId,
       image: { image_id_list: [imageId] },
+      // Shopee ต้องการ seller_stock ระดับสินค้าเสมอ แม้สินค้าจะมีตัวเลือก
+      seller_stock: [{ stock }],
       ...(tierVariation && tierVariation.length > 0 && models && models.length > 0
         ? {
             tier_variation: tierVariation.map((tier) => ({
@@ -1208,7 +1210,7 @@ export async function addShopeeItem(
               ...(model.sku ? { model_sku: model.sku } : {}),
             })),
           }
-        : { seller_stock: [{ stock }] }),
+        : {}),
       // Shopee บังคับให้ระบุแบรนด์ — ใช้ brand_id 0 พร้อมชื่อที่ผู้ใช้กรอก
       brand: { brand_id: 0, original_brand_name: brandName?.trim() || "No Brand" },
       ...(sellerSku ? { item_sku: sellerSku } : {}),
