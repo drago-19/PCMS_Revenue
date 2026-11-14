@@ -26,6 +26,7 @@ export interface ShopeeConfigView {
   partnerId: string | null;
   env: "sandbox" | "live";
   redirectBaseUrl: string | null;
+  pushCallbackUrl?: string | null;
   accounts: ShopeeAccountView[];
 }
 
@@ -45,7 +46,9 @@ export function ShopeeConnectCard({
 }) {
   const router = useRouter();
   const accounts = config.accounts;
-  const webhookUrl = `${(config.redirectBaseUrl ?? (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/+$/, "")}/api/platform/shopee/webhook`;
+  const webhookUrl =
+    config.pushCallbackUrl ??
+    `${(config.redirectBaseUrl ?? (typeof window === "undefined" ? "" : window.location.origin)).replace(/\/+$/, "")}/api/platform/shopee/webhook`;
 
   async function handleCopyWebhook() {
     try {

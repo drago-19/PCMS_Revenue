@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { recordAuditLog, requireAdmin, requireApiAuth } from "@/lib/auth";
 import {
   getPlatformConfig,
@@ -18,6 +19,13 @@ export async function GET(request: Request) {
   const config = await getPlatformConfig();
   const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
 
+  function buildPushCallbackUrl(shopee: { partnerKey: string; redirectBaseUrl?: string | null } | null | undefined) {
+    if (!shopee) return null;
+    const base = (shopee.redirectBaseUrl ?? "https://revenue.goldpulse-ai.com").replace(/\/+$/, "");
+    const token = createHmac("sha256", shopee.partnerKey).update("shopee-push").digest("hex").slice(0, 32);
+    return `${base}/api/platform/shopee/webhook?token=${token}`;
+  }
+
   return Response.json(
     {
       ok: true,
@@ -25,6 +33,7 @@ export async function GET(request: Request) {
       partnerId: config.shopee?.partnerId ?? null,
       env: config.shopee?.env ?? "sandbox",
       redirectBaseUrl: config.shopee?.redirectBaseUrl ?? null,
+      pushCallbackUrl: buildPushCallbackUrl(config.shopee),
       accounts,
       requestId: auth.requestId,
     },
