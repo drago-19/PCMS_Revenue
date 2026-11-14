@@ -11,7 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
-import { getConnectedPlatforms, getPlatformConfig, listPlatformAccounts } from "@/lib/platform/store";
+import {
+  getActiveShopId,
+  getConnectedPlatforms,
+  getPlatformConfig,
+  listPlatformAccounts,
+} from "@/lib/platform/store";
 import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
 import { loadOrderTracking } from "@/lib/platform/tracking";
 import { CopyButton } from "@/components/CopyButton";
@@ -85,7 +90,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const params = await searchParams;
   const status = read(params, "status");
   const search = read(params, "q").trim();
-  const shop = read(params, "shop") || undefined;
+  // ไม่ระบุร้าน = ใช้ร้านตามโหมดจริง/ทดสอบที่เลือกไว้
+  const shop = read(params, "shop") || (await getActiveShopId("TikTok")) || undefined;
   const fromParam = read(params, "from") || undefined;
   const toParam = read(params, "to") || undefined;
   // keyset: ?after=<เวลา|เลขออเดอร์> เดินหน้า · ?before=... ถอยหลัง (ไม่มี OFFSET แล้ว)

@@ -16,7 +16,7 @@ import { Card } from "@/components/ui/card";
 import { getCustomerInsights, type AreaRow, type TopCustomer } from "@/lib/platform/customers";
 import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import { thaiRange } from "@/lib/platform/period";
-import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
+import { getActiveShopId, getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
@@ -139,7 +139,8 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
   const params = await searchParams;
   const fromParam = read(params, "from");
   const toParam = read(params, "to");
-  const selectedShop = read(params, "shop") || undefined;
+  // ไม่ระบุร้าน = ใช้ร้านตามโหมดจริง/ทดสอบที่เลือกไว้
+  const selectedShop = read(params, "shop") || (await getActiveShopId("TikTok")) || undefined;
   const platform = readPlatform(read(params, "platform"));
   const dbPlatform = platformDbName(platform);
 

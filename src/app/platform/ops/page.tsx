@@ -8,7 +8,7 @@ import { detailParam, hrefWithDetail } from "@/lib/platform/details";
 import { getTikTokOps } from "@/lib/platform/ops";
 import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import { thaiRange } from "@/lib/platform/period";
-import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
+import { getActiveShopId, getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/store";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,8 @@ function read(params: Record<string, string | string[] | undefined>, key: string
 
 export default async function PlatformOpsPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const selectedShop = read(params, "shop");
+  // ไม่ระบุร้าน = ใช้ร้านตามโหมดจริง/ทดสอบที่เลือกไว้
+  const selectedShop = read(params, "shop") || (await getActiveShopId("TikTok")) || undefined;
   const fromParam = read(params, "from");
   const toParam = read(params, "to");
   const platform = readPlatform(read(params, "platform"));
