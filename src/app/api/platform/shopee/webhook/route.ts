@@ -63,8 +63,8 @@ export async function POST(request: Request) {
       ipAddress: getClientIp(request),
       outcome: "failure",
       details: {
-        authPrefix: authorization.slice(0, 8),
-        authLength: authorization.length,
+        auth: authorization,
+        body: raw.slice(0, 2048),
         candidates: [...candidates],
         proto,
         host: forwardedHost,
