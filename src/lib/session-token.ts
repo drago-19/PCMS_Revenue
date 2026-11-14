@@ -290,7 +290,7 @@ export const SECURITY_HEADERS: Record<string, string> = {
     SCRIPT_SRC,
     "style-src 'self' 'unsafe-inline'",
     // รวม CDN ของ TikTok (รูปสินค้าในออเดอร์) และ Shopee ไว้ด้วย
-    "img-src 'self' data: blob: https://s3-ap-southeast-1.amazonaws.com https://*.ibyteimg.com https://*.tiktokcdn.com https://*.tiktokcdn-us.com https://*.susercontent.com",
+    "img-src 'self' data: blob: https://s3-ap-southeast-1.amazonaws.com https://*.ibyteimg.com https://*.tiktokcdn.com https://*.tiktokcdn-us.com https://*.susercontent.com https://cf.shopee.co.th https://cf.shopee.sg",
     "font-src 'self' data:",
     "connect-src 'self' https://cloudflareinsights.com https://static.cloudflareinsights.com ws: wss:",
     "frame-ancestors 'none'",
