@@ -34,12 +34,28 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "too_large" }, { status: 413 });
   }
 
-  const authorization = request.headers.get("authorization") ?? "";
-  const expected = createHmac("sha256", config.shopee.partnerKey)
-    .update(`${request.url}|${raw}`)
-    .digest("hex");
+  const partnerKey = config.shopee.partnerKey;
+  const authorization = (request.headers.get("authorization") ?? "").trim();
 
-  if (!authorization || !safeEqual(expected, authorization.trim())) {
+  // หลัง reverse proxy ค่า request.url อาจเป็น http:// หรือใช้ host ภายใน
+  // จึงลองทุกรูปแบบของ URL ที่ Shopee ใช้คำนวณ แล้วยอมรับถ้าตัวใดตัวหนึ่งตรง
+  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
+  const proto = request.headers.get("x-forwarded-proto") ?? "https";
+  const { pathname, search } = new URL(request.url);
+  const candidates = new Set<string>([
+    request.url,
+    request.url.replace(/^http:/, "https:"),
+    `${proto}://${forwardedHost}${pathname}${search}`,
+    `https://${forwardedHost}${pathname}${search}`,
+  ]);
+
+  const matched = authorization
+    ? [...candidates].some((base) =>
+        safeEqual(createHmac("sha256", partnerKey).update(`${base}|${raw}`).digest("hex"), authorization),
+      )
+    : false;
+
+  if (!matched) {
     return Response.json({ ok: false, error: "bad_signature" }, { status: 401 });
   }
 
