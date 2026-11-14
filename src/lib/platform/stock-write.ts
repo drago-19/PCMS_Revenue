@@ -50,7 +50,36 @@ function toWarehouses(sku: NonNullable<NonNullable<ProductDetail["product"]>["sk
  * 2. เทียบกับจำนวนที่ผู้ใช้เห็นตอนกด — ถ้าขายไประหว่างนั้นให้ปฏิเสธ ไม่เขียนทับ
  * 3. ส่งเป็นส่วนต่าง (±) ไม่ใช่ค่าสัมบูรณ์ และส่งครบทุกคลังของ SKU
  */
-export async function adjustStock(input: {
+/**
+ * ล็อกต่อ SKU ภายในโพรเซส — กันสองคำขอที่มาพร้อมกันอ่านค่าเดียวกันแล้วเขียนทับกัน
+ * (แอปเรารันคอนเทนเนอร์เดียว ถ้าขยายหลายอินสแตนซ์ต้องเปลี่ยนเป็น advisory lock ของ DB)
+ */
+const skuLocks = new Map<string, Promise<unknown>>();
+
+function withSkuLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = skuLocks.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(work);
+  skuLocks.set(
+    key,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return next;
+}
+
+export function adjustStock(input: {
+  shopId: string;
+  productId: string;
+  skuId: string;
+  delta: number;
+  expectedQuantity: number;
+}): Promise<{ quantity: number; warehouses: Warehouse[] }> {
+  return withSkuLock(`${input.shopId}:${input.skuId}`, () => adjustStockInner(input));
+}
+
+async function adjustStockInner(input: {
   shopId: string;
   productId: string;
   skuId: string;
