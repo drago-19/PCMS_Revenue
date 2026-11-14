@@ -183,6 +183,7 @@ export default async function SettingsPage({
 
             <ShopeeConnectCard
               hostIsLocal={hostIsLocal}
+              activeShopId={activeShopeeShopId}
               config={{
                 configured: Boolean(platformConfig.shopee),
                 partnerId: platformConfig.shopee?.partnerId ?? null,
