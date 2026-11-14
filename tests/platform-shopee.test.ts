@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import {
+  addShopeeItem,
   buildShopeeAuthorizeUrl,
   exchangeShopeeAuthCode,
   getShopeeEscrowDetail,
@@ -497,6 +498,44 @@ test("setShopeeStock / unlistShopeeItem / deleteShopeeItem: ยิง path แ�
     await deleteShopeeItem(SANDBOX_CONFIG, { accessToken: "atk", shopId: "22556677", itemId: 102 });
     assert.equal(calls[2].path, "/api/v2/product/delete_item");
     assert.equal(calls[2].body.item_id, 102);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("addShopeeItem: ส่ง brand, image_id_list, seller_stock และ logistics ครบตามที่ Shopee บังคับ", async () => {
+  resetShopeeClockOffset();
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+    calls.push({ path: url.pathname, body });
+    return jsonResponse({ response: { item_id: 803953054 } });
+  };
+
+  try {
+    const created = await addShopeeItem(SANDBOX_CONFIG, {
+      accessToken: "atk",
+      shopId: "22556677",
+      itemName: "แก้วทดสอบ",
+      description: "รายละเอียดสินค้าทดสอบที่ยาวพอสำหรับ Shopee อย่างน้อยหกสิบตัวอักษรตามที่กำหนด",
+      price: 159,
+      stock: 30,
+      weightKg: 0.25,
+      categoryId: 400358,
+      imageId: "img_123",
+      logisticIds: [71001, 71002],
+    });
+
+    assert.equal(created.itemId, 803953054);
+    assert.equal(calls[0].path, "/api/v2/product/add_item");
+    assert.deepEqual(calls[0].body.brand, { brand_id: 0, original_brand_name: "No Brand" });
+    assert.deepEqual(calls[0].body.image, { image_id_list: ["img_123"] });
+    assert.deepEqual(calls[0].body.seller_stock, [{ stock: 30 }]);
+    assert.equal(calls[0].body.category_id, 400358);
+    assert.equal((calls[0].body.logistic_info as unknown[]).length, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }

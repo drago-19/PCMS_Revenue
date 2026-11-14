@@ -1008,6 +1008,201 @@ export async function unlistShopeeItem(
   };
 }
 
+export interface ShopeeCategory {
+  categoryId: number;
+  parentId: number;
+  name: string;
+  hasChildren: boolean;
+}
+
+/** รายการหมวดหมู่สินค้าทั้งหมดของ Shopee (ใช้เลือกหมวดตอนสร้างสินค้า) */
+export async function listShopeeCategories(
+  config: ShopeeAppConfig,
+  { accessToken, shopId }: { accessToken: string; shopId: string },
+): Promise<ShopeeCategory[]> {
+  const payload = await callShopeeApi<{
+    category_list?: Array<{
+      category_id?: number;
+      parent_category_id?: number;
+      category_name?: string;
+      has_children?: boolean;
+    }>;
+  }>({
+    config,
+    path: "/api/v2/product/get_category",
+    query: { language: "th" },
+    accessToken,
+    shopId,
+  });
+
+  return (payload.response?.category_list ?? [])
+    .filter((row) => typeof row?.category_id === "number")
+    .map((row) => ({
+      categoryId: Number(row.category_id),
+      parentId: row.parent_category_id ?? 0,
+      name: row.category_name ?? String(row.category_id),
+      hasChildren: Boolean(row.has_children),
+    }));
+}
+
+/**
+ * เลือกหมวดใบสุดท้าย (has_children = false) ตามคำค้น
+ * ถ้าไม่พบคำที่ตรง จะคืนใบแรกที่เจอ เพื่อให้สร้างสินค้าทดสอบได้
+ */
+export async function resolveShopeeLeafCategory(
+  config: ShopeeAppConfig,
+  keyword: string,
+  scope: { accessToken: string; shopId: string },
+): Promise<ShopeeCategory | null> {
+  const categories = await listShopeeCategories(config, scope);
+  const leaves = categories.filter((row) => !row.hasChildren);
+  const needle = keyword.trim().toLowerCase();
+  if (needle) {
+    const exact = leaves.find((row) => row.name.toLowerCase().includes(needle));
+    if (exact) return exact;
+  }
+  return leaves[0] ?? null;
+}
+
+/** ช่องทางขนส่งที่ร้านเปิดใช้ — ต้องส่งไปตอนสร้างสินค้า */
+export async function listShopeeLogistics(
+  config: ShopeeAppConfig,
+  { accessToken, shopId }: { accessToken: string; shopId: string },
+): Promise<Array<{ channelId: number; name: string }>> {
+  const payload = await callShopeeApi<{
+    logistics_channel_list?: Array<{
+      logistics_channel_id?: number;
+      logistics_channel_name?: string;
+      enabled?: boolean;
+    }>;
+  }>({
+    config,
+    path: "/api/v2/logistics/get_channel_list",
+    accessToken,
+    shopId,
+  });
+
+  return (payload.response?.logistics_channel_list ?? [])
+    .filter((row) => typeof row?.logistics_channel_id === "number")
+    .map((row) => ({
+      channelId: Number(row.logistics_channel_id),
+      name: row.logistics_channel_name ?? String(row.logistics_channel_id),
+    }));
+}
+
+/** อัปโหลดรูปเข้าคลังมีเดียของ Shopee แล้วคืน image_id สำหรับใช้สร้างสินค้า */
+export async function uploadShopeeImage(
+  config: ShopeeAppConfig,
+  {
+    accessToken,
+    shopId,
+    data,
+    fileName,
+  }: { accessToken: string; shopId: string; data: Uint8Array; fileName: string },
+): Promise<{ imageId: string; imageUrl: string | null }> {
+  const path = "/api/v2/media_space/upload_image";
+  const timestamp = String(shopeeNowSeconds());
+  const sign = signShopeeShopRequest({
+    partnerId: config.partnerId,
+    path,
+    timestamp,
+    accessToken,
+    shopId,
+    partnerKey: config.partnerKey,
+  });
+
+  const url = new URL(getShopeeBaseUrl(config.env) + path);
+  url.searchParams.set("partner_id", config.partnerId);
+  url.searchParams.set("timestamp", timestamp);
+  url.searchParams.set("sign", sign);
+  url.searchParams.set("access_token", accessToken);
+  url.searchParams.set("shop_id", shopId);
+
+  const form = new FormData();
+  const safeName = fileName.trim() || "product.jpg";
+  form.append("image", new Blob([new Uint8Array(data)], { type: "image/jpeg" }), safeName);
+
+  await acquireSlot();
+  const response = await safeFetch(url, config.partnerKey, {
+    method: "POST",
+    cache: "no-store",
+    body: form,
+  }).finally(() => releaseSlot());
+
+  const payload = await readJson<{
+    image_info?: { image_id?: string; image_url?: string };
+  }>(response);
+
+  if (!response.ok || !payload || (payload.error && payload.error !== "") || !payload.response?.image_info?.image_id) {
+    const msg = payload?.message || payload?.error || `อัปโหลดรูปไม่สำเร็จ (HTTP ${response.status})`;
+    throw new ShopeeApiError(redactShopeeSecret(msg, config.partnerKey), payload?.error ?? null, payload?.request_id ?? null);
+  }
+
+  return {
+    imageId: String(payload.response.image_info.image_id),
+    imageUrl: payload.response.image_info.image_url ?? null,
+  };
+}
+
+/** สร้างสินค้าใหม่บน Shopee — คืน item_id ที่สร้างได้ */
+export async function addShopeeItem(
+  config: ShopeeAppConfig,
+  {
+    accessToken,
+    shopId,
+    itemName,
+    description,
+    price,
+    stock,
+    weightKg,
+    categoryId,
+    imageId,
+    logisticIds,
+    sellerSku,
+  }: {
+    accessToken: string;
+    shopId: string;
+    itemName: string;
+    description: string;
+    price: number;
+    stock: number;
+    weightKg: number;
+    categoryId: number;
+    imageId: string;
+    logisticIds: number[];
+    sellerSku?: string;
+  },
+): Promise<{ itemId: number }> {
+  const payload = await callShopeeApi<{ item_id?: number }>({
+    config,
+    path: "/api/v2/product/add_item",
+    method: "POST",
+    accessToken,
+    shopId,
+    body: {
+      original_price: price,
+      description: description || itemName,
+      item_name: itemName,
+      item_status: "NORMAL",
+      weight: weightKg,
+      dimension: { package_length: 10, package_width: 10, package_height: 10 },
+      logistic_info: logisticIds.map((id) => ({ logistic_id: id, enabled: true })),
+      category_id: categoryId,
+      image: { image_id_list: [imageId] },
+      seller_stock: [{ stock }],
+      // Shopee บังคับให้ระบุแบรนด์ — ไม่มีแบรนด์ใช้ brand_id 0 "No Brand"
+      brand: { brand_id: 0, original_brand_name: "No Brand" },
+      ...(sellerSku ? { item_sku: sellerSku } : {}),
+    },
+  });
+
+  const itemId = payload.response?.item_id;
+  if (typeof itemId !== "number") {
+    throw new ShopeeApiError("Shopee ไม่ได้คืน item_id หลังสร้างสินค้า");
+  }
+  return { itemId };
+}
+
 /** ลบสินค้าถาวร — Shopee ลบไม่ได้ถ้าสินค้ายังอยู่ในโปรโมชั่นหรือมีออเดอร์ค้าง */
 export async function deleteShopeeItem(
   config: ShopeeAppConfig,

@@ -26,6 +26,7 @@ import { getConnectedPlatforms, listPlatformAccounts } from "@/lib/platform/stor
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
+import { ShopeeAddProductButton } from "@/components/ShopeeAddProductButton";
 
 export const dynamic = "force-dynamic";
 
@@ -202,15 +203,18 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           lastSync ? thaiDateTime(lastSync) : "ยังไม่เคยดึง"
         }`}
         actions={
-          <Button asChild size="sm" variant="outline">
-            <Link
-              href={`/platform/stocks?${syncParams.toString()}`}
-              scroll={false}
-              prefetch={false}
-            >
-              ดึงสต็อกล่าสุด
-            </Link>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {platform === "shopee" ? <ShopeeAddProductButton accountKey={shopId ?? ""} /> : null}
+            <Button asChild size="sm" variant="outline">
+              <Link
+                href={`/platform/stocks?${syncParams.toString()}`}
+                scroll={false}
+                prefetch={false}
+              >
+                ดึงสต็อกล่าสุด
+              </Link>
+            </Button>
+          </div>
         }
       />
 
