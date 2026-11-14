@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { recordAuditLog } from "@/lib/auth";
-import { redactShopeeSecret, shopeeNowSeconds } from "@/lib/platform/shopee";
+import { redactShopeeSecret } from "@/lib/platform/shopee";
 import { ensureValidShopeeToken, syncShopeeOrdersAndFinance } from "@/lib/platform/shopee-sync";
 import { getPlatformConfig, listPlatformAccounts, SHOPEE_PLATFORM } from "@/lib/platform/store";
 import { getClientIp } from "@/lib/session-token";
@@ -10,9 +10,6 @@ export const dynamic = "force-dynamic";
 
 /** รหัส push ของ Shopee ที่เกี่ยวกับออเดอร์ — ที่เหลือตอบรับแล้วข้ามไป */
 const ORDER_PUSH_CODES = new Set([2, 3, 4]);
-/** ยอมรับ timestamp ที่ต่างจากนาฬิกาเราไม่เกิน 10 นาที (กัน replay) */
-const MAX_SKEW_SECONDS = 600;
-const PATH = "/api/platform/shopee/webhook";
 
 function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a, "utf8");
@@ -23,43 +20,31 @@ function safeEqual(a: string, b: string): boolean {
 
 /**
  * รับ push (webhook) จาก Shopee เมื่อสถานะออเดอร์เปลี่ยน
- * ลายเซ็น: HMAC_SHA256(partner_key, partner_id + path + timestamp) ส่งมาใน query string
- * ตอบ 200 เสมอหลังลายเซ็นผ่าน เพื่อไม่ให้ Shopee ยิงซ้ำโดยไม่จำเป็น
+ * Shopee เซ็นใน header `Authorization` = HMAC_SHA256(partner_key, url + "|" + body) แบบ hex
+ * (ตาม Push Authorization ในคู่มือ developer-guide/18) — ไม่ใช่ query string
  */
 export async function POST(request: Request) {
-  const url = new URL(request.url);
-  const partnerId = url.searchParams.get("partner_id") ?? "";
-  const timestamp = url.searchParams.get("timestamp") ?? "";
-  const sign = url.searchParams.get("sign") ?? "";
-
   const config = await getPlatformConfig();
   if (!config.shopee) {
     return Response.json({ ok: false, error: "shopee_not_configured" }, { status: 400 });
   }
 
-  if (partnerId !== String(config.shopee.partnerId)) {
-    return Response.json({ ok: false, error: "bad_partner" }, { status: 401 });
+  const raw = await request.text();
+  if (raw.length > 64 * 1024) {
+    return Response.json({ ok: false, error: "too_large" }, { status: 413 });
   }
 
+  const authorization = request.headers.get("authorization") ?? "";
   const expected = createHmac("sha256", config.shopee.partnerKey)
-    .update(`${partnerId}${PATH}${timestamp}`)
+    .update(`${request.url}|${raw}`)
     .digest("hex");
-  if (!sign || !safeEqual(expected, sign)) {
+
+  if (!authorization || !safeEqual(expected, authorization.trim())) {
     return Response.json({ ok: false, error: "bad_signature" }, { status: 401 });
   }
 
-  const sentAt = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(sentAt) || Math.abs(shopeeNowSeconds() - sentAt) > MAX_SKEW_SECONDS) {
-    return Response.json({ ok: false, error: "stale_timestamp" }, { status: 401 });
-  }
-
-  // push ทดสอบจาก Shopee บางครั้งส่ง body ว่างหรือไม่ใช่ JSON — ลายเซ็นผ่านแล้วให้ถือว่าโอเค
   let body: { shop_id?: number | string; code?: number; timestamp?: number } = {};
   try {
-    const raw = await request.text();
-    if (raw.length > 64 * 1024) {
-      return Response.json({ ok: false, error: "too_large" }, { status: 413 });
-    }
     if (raw.trim().length > 0) {
       body = JSON.parse(raw) as typeof body;
     }
@@ -82,7 +67,7 @@ export async function POST(request: Request) {
 
   try {
     const ctx = await ensureValidShopeeToken(account.accountKey, config.shopee);
-    const now = shopeeNowSeconds();
+    const now = Math.floor(Date.now() / 1000);
     // ดึงย้อน 60 นาที เพราะ push อาจมาช้ากว่าหรือมาหลายครั้งติดกัน
     const result = await syncShopeeOrdersAndFinance(ctx, {
       fromUnix: now - 3600,
@@ -96,21 +81,20 @@ export async function POST(request: Request) {
       ipAddress: getClientIp(request),
       outcome: "success",
       details: { code, shopId, orders: result.orders, finance: result.orderFinance },
-      requestId: `push-${timestamp}-${shopId}`,
+      requestId: `push-${String(body.timestamp ?? now)}-${shopId}`,
     });
 
     return Response.json({ ok: true, code, orders: result.orders }, { status: 200 });
   } catch (err) {
-    const raw = err instanceof Error ? err.message : "ประมวลผล push ไม่สำเร็จ";
-    const message = redactShopeeSecret(raw, config.shopee.partnerKey);
+    const message = err instanceof Error ? err.message : "ประมวลผล push ไม่สำเร็จ";
     await recordAuditLog({
       actor: "shopee-push",
       action: "platform.shopee.push",
       ipAddress: getClientIp(request),
       outcome: "failure",
-      details: { code, shopId, message },
-      requestId: `push-${timestamp}-${shopId}`,
+      details: { code, shopId, message: redactShopeeSecret(message, config.shopee.partnerKey) },
+      requestId: `push-${String(body.timestamp ?? Math.floor(Date.now() / 1000))}-${shopId}`,
     });
-    return Response.json({ ok: true, processed: false, error: message }, { status: 200 });
+    return Response.json({ ok: true, processed: false }, { status: 200 });
   }
 }
