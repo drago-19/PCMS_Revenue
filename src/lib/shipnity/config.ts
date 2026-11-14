@@ -7,6 +7,12 @@
 import type { CompanyId } from "@/lib/db";
 import { query, queryOne } from "@/lib/db";
 import {
+  decryptSecret,
+  encryptSecret,
+  isEncryptedValue,
+  isEncryptionConfigured,
+} from "@/lib/platform/secrets";
+import {
   fetchOrdersPage,
   shipnityCredentialsFromEnv,
   type ShipnityCredentials,
@@ -81,6 +87,33 @@ export function parseShipnityAccounts(value: unknown): ShipnityAccount[] {
   return single ? [single] : [];
 }
 
+/**
+ * ถอดรหัส token ที่อ่านจาก app_settings — แถวเก่าที่ยังเป็นข้อความธรรมดา
+ * จะถูกเข้ารหัสเก็บกลับให้อัตโนมัติเมื่อมีคีย์ (ครั้งเดียวต่อแถว)
+ */
+async function decryptStoredAccounts(accounts: ShipnityAccount[]): Promise<ShipnityAccount[]> {
+  let needsRewrite = false;
+
+  const plain = accounts.map((account) => {
+    if (!isEncryptedValue(account.token)) {
+      needsRewrite = true;
+      return account;
+    }
+    return { ...account, token: decryptSecret(account.token) };
+  });
+
+  if (needsRewrite && isEncryptionConfigured()) {
+    const encrypted = plain.map((account) => ({ ...account, token: encryptSecret(account.token) }));
+    void query(
+      `UPDATE app_settings SET value_json = $2::jsonb, updated_at = now()
+       WHERE setting_key = $1`,
+      [SETTING_KEY, JSON.stringify({ accounts: encrypted })],
+    ).catch(() => {});
+  }
+
+  return plain;
+}
+
 /** บัญชีที่กรอกไว้ในระบบของบริษัทที่กำลังใช้งานอยู่ */
 export async function getStoredShipnityAccounts(): Promise<{
   accounts: ShipnityAccount[];
@@ -92,7 +125,7 @@ export async function getStoredShipnityAccounts(): Promise<{
       [SETTING_KEY],
     );
     if (!row?.value_json) return { accounts: [], updatedAt: null };
-    return { accounts: parseShipnityAccounts(row.value_json), updatedAt: row.updated_at };
+    return { accounts: await decryptStoredAccounts(parseShipnityAccounts(row.value_json)), updatedAt: row.updated_at };
   } catch {
     // ฐานข้อมูลยังไม่พร้อม (เช่นระหว่าง build) — ถือว่ายังไม่ได้ตั้งค่า
     return { accounts: [], updatedAt: null };
@@ -216,7 +249,13 @@ export async function addShipnityAccount(
        value_json = EXCLUDED.value_json,
        updated_by = EXCLUDED.updated_by,
        updated_at = now()`,
-    [SETTING_KEY, JSON.stringify({ accounts: next }), updatedBy],
+    [
+      SETTING_KEY,
+      JSON.stringify({
+        accounts: next.map((account) => ({ ...account, token: encryptSecret(account.token) })),
+      }),
+      updatedBy,
+    ],
   );
 
   return {
@@ -246,6 +285,11 @@ export async function removeShipnityAccount(id?: string): Promise<void> {
   await query(
     `UPDATE app_settings SET value_json = $2::jsonb, updated_at = now(), updated_by = 'system'
      WHERE setting_key = $1`,
-    [SETTING_KEY, JSON.stringify({ accounts: next })],
+    [
+      SETTING_KEY,
+      JSON.stringify({
+        accounts: next.map((account) => ({ ...account, token: encryptSecret(account.token) })),
+      }),
+    ],
   );
 }
