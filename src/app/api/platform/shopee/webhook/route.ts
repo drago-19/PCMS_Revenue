@@ -53,15 +53,18 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "stale_timestamp" }, { status: 401 });
   }
 
+  // push ทดสอบจาก Shopee บางครั้งส่ง body ว่างหรือไม่ใช่ JSON — ลายเซ็นผ่านแล้วให้ถือว่าโอเค
   let body: { shop_id?: number | string; code?: number; timestamp?: number } = {};
   try {
     const raw = await request.text();
     if (raw.length > 64 * 1024) {
       return Response.json({ ok: false, error: "too_large" }, { status: 413 });
     }
-    body = JSON.parse(raw) as typeof body;
+    if (raw.trim().length > 0) {
+      body = JSON.parse(raw) as typeof body;
+    }
   } catch {
-    return Response.json({ ok: false, error: "bad_body" }, { status: 400 });
+    body = {};
   }
 
   const shopId = String(body.shop_id ?? "").trim();
