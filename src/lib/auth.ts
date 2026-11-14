@@ -17,6 +17,7 @@ import {
 } from "./session-token";
 
 export const BCRYPT_COST = 12; // Hard Gate: bcrypt cost >= 10
+export const MIN_PASSWORD_LENGTH = 12; // รหัสผ่านขั้นต่ำสำหรับบัญชีผู้ใช้
 export const MAX_LOGIN_ATTEMPTS = 5; // Hard Gate: 5 failed attempts
 export const BLOCK_DURATION_MS = 15 * 60 * 1000; // Hard Gate: block 15 minutes
 export const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
@@ -441,4 +442,27 @@ export function requireApiAuth(
   companyContextStorage.enterWith(session.companyId ?? "dragon19");
 
   return { ok: true, session, ip, requestId };
+}
+
+/**
+ * เหมือน requireApiAuth แต่ต้องเป็นแอดมินเท่านั้น
+ * ใช้กับ route ที่แตะ credential ของแพลตฟอร์ม การตั้งค่าองค์กร หรือลบข้อมูลทั้งหมด
+ */
+export function requireAdmin(
+  request: Request,
+): ReturnType<typeof requireApiAuth> {
+  const auth = requireApiAuth(request);
+  if (!auth.ok) return auth;
+
+  if (auth.session.role !== "admin") {
+    return {
+      ok: false,
+      response: Response.json(
+        { error: "เฉพาะผู้ดูแลระบบเท่านั้นที่ทำรายการนี้ได้", requestId: auth.requestId },
+        { status: 403, headers: { "x-request-id": auth.requestId } },
+      ),
+    };
+  }
+
+  return auth;
 }

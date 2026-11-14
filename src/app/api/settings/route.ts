@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { requireApiAuth } from "@/lib/auth";
+import { requireAdmin, requireApiAuth } from "@/lib/auth";
 import { getDocumentSettings, saveDocumentSettings } from "@/lib/settings";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const auth = requireApiAuth(request);
+  const auth = requireAdmin(request);
   if (!auth.ok) return auth.response;
 
   let body: Record<string, unknown>;

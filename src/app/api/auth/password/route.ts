@@ -2,11 +2,13 @@ import {
   BCRYPT_COST,
   ensureAdminUser,
   hashPassword,
+  MIN_PASSWORD_LENGTH,
   recordAuditLog,
   requireApiAuth,
   verifyPassword,
 } from "@/lib/auth";
 import { withTransaction } from "@/lib/db";
+import { notePasswordChanged } from "@/lib/session-revocation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,9 +46,12 @@ export async function POST(request: Request) {
     );
   }
 
-  if (newPassword.length < 6 || newPassword.length > 128) {
+  if (newPassword.length < MIN_PASSWORD_LENGTH || newPassword.length > 128) {
     return Response.json(
-      { error: "รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย 6 ตัวอักษร (ไม่เกิน 128 ตัวอักษร)", requestId: auth.requestId },
+      {
+        error: `รหัสผ่านใหม่ต้องมีความยาวอย่างน้อย ${MIN_PASSWORD_LENGTH} ตัวอักษร (ไม่เกิน 128 ตัวอักษร)`,
+        requestId: auth.requestId,
+      },
       { status: 400, headers: { "x-request-id": auth.requestId } },
     );
   }
@@ -69,13 +74,14 @@ export async function POST(request: Request) {
   }
 
   const newHash = await hashPassword(newPassword, BCRYPT_COST);
+  const changedAtSeconds = Math.floor(Date.now() / 1000);
 
   await withTransaction(async (client) => {
     await client.query(
       `UPDATE public.app_users
-       SET password_hash = $2, updated_at = now()
+       SET password_hash = $2, password_changed_at = to_timestamp($3), updated_at = now()
        WHERE username = $1`,
-      [admin.username, newHash],
+      [admin.username, newHash, changedAtSeconds],
     );
     await recordAuditLog(
       {
@@ -88,6 +94,9 @@ export async function POST(request: Request) {
       client,
     );
   });
+
+  // ตัด session ที่ออกก่อนการเปลี่ยนรหัสผ่านทันที (อุปกรณ์อื่นต้องล็อกอินใหม่)
+  notePasswordChanged(admin.username, changedAtSeconds);
 
   return Response.json(
     { ok: true, message: "เปลี่ยนรหัสผ่านเรียบร้อยแล้ว", requestId: auth.requestId },

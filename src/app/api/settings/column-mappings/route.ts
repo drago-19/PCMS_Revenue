@@ -1,4 +1,4 @@
-import { recordAuditLog, requireApiAuth } from "@/lib/auth";
+import { recordAuditLog, requireAdmin, requireApiAuth } from "@/lib/auth";
 import {
   getColumnMappingRules,
   saveColumnMappingRules,
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const auth = requireApiAuth(request);
+  const auth = requireAdmin(request);
   if (!auth.ok) return auth.response;
 
   const rate = checkApiRateLimit(`column_mappings_write:${auth.ip}`, 30, 60_000);
@@ -113,7 +113,7 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = requireApiAuth(request);
+  const auth = requireAdmin(request);
   if (!auth.ok) return auth.response;
 
   const rate = checkApiRateLimit(`column_mappings_write:${auth.ip}`, 30, 60_000);

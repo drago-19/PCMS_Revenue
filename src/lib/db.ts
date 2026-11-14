@@ -5,9 +5,10 @@ import {
   verifySessionToken,
   type CompanyId,
 } from "./session-token";
+import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-14-v66";
+const SCHEMA_VERSION = "2026-11-14-v67";
 
 export type { CompanyId };
 
@@ -321,6 +322,8 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 ): Promise<T[]> {
   if (!db) {
     await ensureSchema();
+    // อ่านเวลาเปลี่ยนรหัสผ่านล่าสุดครั้งแรกของโปรเซส (memoized)
+    void seedSessionCutoffs();
   }
   const target = db ?? getPool();
   if (target === getPool()) {
@@ -883,8 +886,13 @@ CREATE TABLE IF NOT EXISTS app_users (
   username TEXT PRIMARY KEY,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'admin',
+  password_changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- เวลาที่รหัสผ่านเปลี่ยนล่าสุด — session ที่ออกก่อนหน้านั้นถูกเพิกถอน
+-- (ตารางเดิมที่ยังไม่มีคอลัมน์นี้จะได้ค่าเริ่มต้น = เวลาที่อัปเดต schema)
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS app_settings (
   setting_key TEXT PRIMARY KEY,

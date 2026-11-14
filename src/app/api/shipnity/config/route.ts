@@ -1,5 +1,5 @@
 import { getActiveCompanyId } from "@/lib/db";
-import { requireApiAuth } from "@/lib/auth";
+import { requireAdmin, requireApiAuth } from "@/lib/auth";
 import { clearDayOrdersCache } from "@/lib/shipnity/cache";
 import { getShipnityConnectionStatus, removeShipnityAccount } from "@/lib/shipnity/config";
 
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = requireApiAuth(request);
+  const auth = requireAdmin(request);
   if (!auth.ok) return auth.response;
 
   const id = new URL(request.url).searchParams.get("id")?.trim() || undefined;

@@ -1,4 +1,4 @@
-import { recordAuditLog, requireApiAuth } from "@/lib/auth";
+import { recordAuditLog, requireAdmin, requireApiAuth } from "@/lib/auth";
 import { saveColumnMappingRules } from "@/lib/column-mapping-settings";
 import { runWithCompany } from "@/lib/db";
 import { importWorkbook, type ImportProgressEvent, type ImportResult } from "@/lib/ingest/import-service";
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function DELETE(request: Request) {
-  const auth = requireApiAuth(request);
+  const auth = requireAdmin(request);
   if (!auth.ok) return auth.response;
 
   const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 30, 60_000);

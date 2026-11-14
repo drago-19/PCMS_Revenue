@@ -14,7 +14,9 @@ import {
   hashPassword,
   isRetiredDefaultCredential,
   MAX_LOGIN_ATTEMPTS,
+  MIN_PASSWORD_LENGTH,
   recordMemoryLoginFailure,
+  requireAdmin,
   requireApiAuth,
   verifyPassword,
 } from "../src/lib/auth";
@@ -27,6 +29,7 @@ import {
   verifyCsrfOrigin,
   verifySessionToken,
 } from "../src/lib/session-token";
+import { notePasswordChanged } from "../src/lib/session-revocation";
 import { proxy } from "../src/proxy";
 
 test("hashes passwords with bcrypt cost >= 10 and verifies accurately", async () => {
@@ -342,4 +345,54 @@ test("production CSP does not allow eval", (t) => {
   }
   const csp = SECURITY_HEADERS["Content-Security-Policy"] ?? "";
   assert.ok(!csp.includes("unsafe-eval"), "CSP ของ production ต้องไม่เปิด unsafe-eval");
+});
+
+test("revokes sessions issued before the last password change", () => {
+  const before = Math.floor(Date.now() / 1000) - 60;
+  const oldToken = createSessionToken({
+    username: "revoke-check",
+    role: "admin",
+    nowSeconds: before,
+  });
+  assert.ok(verifySessionToken(oldToken, { nowSeconds: before + 10 }));
+
+  notePasswordChanged("revoke-check", before + 30);
+
+  // token ที่ออกก่อนการเปลี่ยนรหัสผ่านใช้ไม่ได้แล้ว
+  assert.equal(verifySessionToken(oldToken, { nowSeconds: before + 40 }), null);
+
+  // token ที่ออกหลังการเปลี่ยนรหัสผ่านยังใช้ได้ตามปกติ
+  const newToken = createSessionToken({
+    username: "revoke-check",
+    role: "admin",
+    nowSeconds: before + 45,
+  });
+  assert.ok(verifySessionToken(newToken, { nowSeconds: before + 50 }));
+});
+
+test("requires the admin role for privileged routes", () => {
+  const requestFor = (role: "admin" | "staff") => {
+    const token = createSessionToken({
+      username: role === "admin" ? "admin" : "staff-check",
+      role,
+    });
+    return new Request("http://localhost:3001/api/settings", {
+      method: "PUT",
+      headers: {
+        host: "localhost:3001",
+        origin: "http://localhost:3001",
+        cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+      },
+    });
+  };
+
+  assert.equal(requireAdmin(requestFor("admin")).ok, true);
+
+  const staff = requireAdmin(requestFor("staff"));
+  assert.equal(staff.ok, false);
+  if (!staff.ok) assert.equal(staff.response.status, 403);
+});
+
+test("password policy requires at least 12 characters", () => {
+  assert.ok(MIN_PASSWORD_LENGTH >= 12);
 });

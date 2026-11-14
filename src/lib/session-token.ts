@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { isSessionRevoked } from "./session-revocation";
 
 export const SESSION_COOKIE_NAME = "pcms_rev_session";
 export const MAX_SESSION_TTL_SECONDS = 24 * 60 * 60; // 24 hours (Hard Gate: <= 24h)
@@ -127,6 +128,8 @@ export function verifySessionToken(
     if (parsed.exp <= now) return null;
     if (parsed.exp - parsed.iat > MAX_SESSION_TTL_SECONDS) return null;
     if (parsed.iat > now + 60) return null;
+    // เปลี่ยนรหัสผ่านแล้ว token ที่ออกก่อนหน้านั้นใช้ไม่ได้อีก
+    if (isSessionRevoked(parsed.sub, parsed.iat)) return null;
 
     const resolvedCompanyId: CompanyId =
       parsed.companyId === "seeheng" ||

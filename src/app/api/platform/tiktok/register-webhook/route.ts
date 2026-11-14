@@ -1,4 +1,4 @@
-import { requireApiAuth } from "@/lib/auth";
+import { requireAdmin, requireApiAuth } from "@/lib/auth";
 import { appUrl } from "@/lib/platform/base-url";
 import { registerWebhooks, type TikTokAppConfig } from "@/lib/platform/tiktok";
 import {
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * เรียกครั้งเดียวหลังเชื่อมร้าน — TikTok จะแจ้งเราเมื่อสถานะออเดอร์/คืนเงิน/ที่อยู่เปลี่ยน
  */
 export async function POST(request: Request) {
-  const auth = requireApiAuth(request);
+  const auth = requireAdmin(request);
   if (!auth.ok) return auth.response;
 
   const config = await getPlatformConfig();
