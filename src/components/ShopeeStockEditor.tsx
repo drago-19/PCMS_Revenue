@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 type Action = "set_stock" | "unlist" | "delete";
 
@@ -216,22 +217,37 @@ export function ShopeeStockEditor({
         </div>
       </details>
 
-      <div className="flex flex-col gap-2 rounded-lg border border-border bg-background/60 p-2">
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-background/60 p-3">
         <span className="text-[12px] font-bold">เปลี่ยนรูปสินค้า</span>
         <input
           ref={imageRef}
+          id="shopee-item-image-change"
           type="file"
           accept="image/jpeg,image/png"
+          className="sr-only"
           aria-label="รูปสินค้าใหม่"
-          className="min-h-10 w-full rounded-md border border-border bg-background px-2 py-2 text-[12.5px]"
           onChange={(event) => void changeImage(event.target.files?.[0])}
         />
-        <span className="text-[12px] leading-5 text-muted-foreground">
-          JPG หรือ PNG ไม่เกิน 2 MB — รูปใหม่จะแทนรูปหลักทันที{imageBusy ? " (กำลังอัปโหลด…)" : ""}
-        </span>
+        <label
+          htmlFor="shopee-item-image-change"
+          className={cn(
+            "flex min-h-22 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-4 text-center transition-colors",
+            "hover:border-primary/60 hover:bg-muted/50 focus-within:border-primary",
+            imageBusy ? "opacity-60" : null,
+          )}
+        >
+          <span className="text-[12.5px] font-bold text-foreground">
+            {imageBusy ? "กำลังอัปโหลด…" : "เลือกรูปใหม่"}
+          </span>
+          <span className="text-[12px] text-muted-foreground">
+            JPG หรือ PNG · แนะนำ 1000×1000 px (1:1) · ไม่เกิน 2 MB
+          </span>
+        </label>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+        <span className="text-[12px] font-bold text-destructive">จัดการสินค้า</span>
+        <div className="flex flex-wrap gap-2">
         <Button
           type="button"
           variant="outline"
@@ -250,6 +266,7 @@ export function ShopeeStockEditor({
         >
           {busy === "delete" ? "กำลังลบ…" : "ลบสินค้า"}
         </Button>
+        </div>
       </div>
 
       <Dialog open={askDelete} onOpenChange={setAskDelete}>

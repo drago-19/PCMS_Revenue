@@ -489,7 +489,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               </p>
             </DialogHeader>
 
-            {skuDetail.productId ? (
+            {platform !== "shopee" && skuDetail.productId ? (
               <StockHoldActions
                 shopId={shopId ?? ""}
                 productId={skuDetail.productId}
@@ -502,7 +502,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               />
             ) : null}
 
-            {skuDetail.productId ? (
+            {platform !== "shopee" && skuDetail.productId ? (
               <StockAdjustForm
                 shopId={shopId}
                 productId={skuDetail.productId}
@@ -517,7 +517,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               <div className="flex items-center gap-3">
                 <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
                   {skuDetail.imageUrl ? (
-                    <img src={skuDetail.imageUrl} alt="" className="size-full object-cover" />
+                    <a
+                      href={skuDetail.imageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="เปิดดูรูปสินค้าขนาดเต็ม"
+                      className="block size-full"
+                    >
+                      <img src={skuDetail.imageUrl} alt="" className="size-full object-cover" />
+                    </a>
                   ) : null}
                 </span>
                 <div>
