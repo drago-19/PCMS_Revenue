@@ -207,33 +207,47 @@ async function adjustStockInner(input: {
   let finalQuantity = next;
   let corrected = false;
   if (!fromDb) {
-    try {
-      const verify = await callTikTokApi<ProductDetail>({
-        ...ctx,
-        path: `/product/202309/products/${encodeURIComponent(productId)}`,
-      });
-      const skuAfter = (verify.skus ?? []).find((row) => String(row.id) === skuId);
-      if (skuAfter) {
+    // อ่านกลับทันทีหลังเขียนอาจได้ค่าเก่าจาก cache ของ TikTok — ต้องอ่านซ้ำจนได้ค่าที่นิ่ง
+    // สองครั้งติดกันก่อนจึงเชื่อ (ไม่เช่นนั้นจะแจ้ง "มีคนซื้อ" ทั้งที่ไม่มีคนซื้อ)
+    let previous: { quantity: number; warehouses: Warehouse[] } | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      try {
+        const verify = await callTikTokApi<ProductDetail>({
+          ...ctx,
+          path: `/product/202309/products/${encodeURIComponent(productId)}`,
+        });
+        const skuAfter = (verify.skus ?? []).find((row) => String(row.id) === skuId);
+        if (!skuAfter) break;
         const after = toWarehouses(skuAfter);
         const afterTotal = after.reduce((sum, item) => sum + item.quantity, 0);
-        if (afterTotal !== next) {
-          finalWarehouses = after;
-          finalQuantity = afterTotal;
-          corrected = true;
-          console.warn("[stock-write] ยอดหลังเขียนไม่ตรงกับที่ส่งไป — มีคนซื้อระหว่างนั้น", {
-            shopId,
-            skuId,
-            sent: next,
-            actual: afterTotal,
-          });
+        if (previous && previous.quantity === afterTotal) {
+          if (afterTotal !== next) {
+            finalWarehouses = after;
+            finalQuantity = afterTotal;
+            corrected = true;
+            console.warn("[stock-write] ยอดหลังเขียนไม่ตรงกับที่ส่งไป — มีคนซื้อระหว่างนั้น", {
+              shopId,
+              skuId,
+              sent: next,
+              actual: afterTotal,
+            });
+          }
+          break;
         }
+        previous = { quantity: afterTotal, warehouses: after };
+        // ค่าที่อ่านได้ตรงกับที่เราส่งไปแล้ว = ไม่มีอะไรเปลี่ยนหลังเขียน จบได้เลย
+        if (afterTotal === next) break;
+      } catch (error) {
+        console.warn("[stock-write] ตรวจยอดหลังเขียนไม่สำเร็จ", {
+          shopId,
+          skuId,
+          error: error instanceof Error ? error.message : error,
+        });
+        break;
       }
-    } catch (error) {
-      console.warn("[stock-write] ตรวจยอดหลังเขียนไม่สำเร็จ", {
-        shopId,
-        skuId,
-        error: error instanceof Error ? error.message : error,
-      });
     }
   }
 

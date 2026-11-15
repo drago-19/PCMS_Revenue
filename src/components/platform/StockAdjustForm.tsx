@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,13 +37,19 @@ export function StockAdjustForm({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // ยอดฐานที่ใช้คำนวณ — อัปเดตจากผลตอบของเซิร์ฟเวอร์ทันทีหลังบันทึก
+  // เพราะหน้าจออาจยังถือค่าเดิมอยู่ (RSC ไม่ได้ส่งค่าใหม่มาในรอบนั้น)
+  const [base, setBase] = useState(quantity);
+
+  useEffect(() => {
+    setBase(quantity);
+  }, [quantity]);
 
   const clamp = (value: number) => Math.min(MAX_AMOUNT, Math.max(1, Math.trunc(value)));
-  const removeDisabled = quantity <= 0;
+  const removeDisabled = base <= 0;
   // ลดได้ไม่เกินของที่มี — กันยอดติดลบก่อนถึงเซิร์ฟเวอร์
-  const effective = mode === "remove" ? Math.min(amount, Math.max(quantity, 0)) : amount;
-  const nextQuantity = mode === "add" ? quantity + effective : Math.max(quantity - effective, 0);
-
+  const effective = mode === "remove" ? Math.min(amount, Math.max(base, 0)) : amount;
+  const nextQuantity = mode === "add" ? base + effective : Math.max(base - effective, 0);
   const submit = async () => {
     if (saving) return;
     setSaving(true);
@@ -54,7 +60,7 @@ export function StockAdjustForm({
       const res = await fetch("/api/platform/tiktok/stock/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, productId, skuId, delta, expectedQuantity: quantity }),
+        body: JSON.stringify({ shopId, productId, skuId, delta, expectedQuantity: base }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -77,6 +83,7 @@ export function StockAdjustForm({
           : `อัปเดตแล้ว — คงเหลือรวมตอนนี้ ${data.quantity ?? "?"}`,
       );
       setAmount(1);
+      if (typeof data.quantity === "number") setBase(data.quantity);
       router.refresh();
     } catch {
       setError("เชื่อมต่อไม่สำเร็จ — ลองใหม่อีกครั้ง");
@@ -160,7 +167,7 @@ export function StockAdjustForm({
           size="icon"
           aria-label="จำนวนที่จะปรับขึ้นหนึ่ง"
           onClick={() => setAmount((value) => clamp(value + 1))}
-          disabled={saving || (mode === "remove" && effective >= quantity)}
+          disabled={saving || (mode === "remove" && effective >= base)}
           className="size-11"
         >
           <PlusIcon className="size-5" aria-hidden="true" />
@@ -186,7 +193,7 @@ export function StockAdjustForm({
       </div>
 
       <p className="text-center text-[13px]">
-        คงเหลือ <span className="font-bold tabular-nums">{quantity}</span>
+        คงเหลือ <span className="font-bold tabular-nums">{base}</span>
         <span aria-hidden="true"> → </span>
         <span className="sr-only">จะเป็น</span>
         <span
