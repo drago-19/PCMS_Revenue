@@ -78,7 +78,7 @@ export function adjustStock(input: {
   skuId: string;
   delta: number;
   expectedQuantity: number;
-}): Promise<{ quantity: number; warehouses: Warehouse[] }> {
+}): Promise<{ quantity: number; warehouses: Warehouse[]; corrected: boolean }> {
   return withSkuLock(`${input.shopId}:${input.skuId}`, () => adjustStockInner(input));
 }
 
@@ -88,7 +88,7 @@ async function adjustStockInner(input: {
   skuId: string;
   delta: number;
   expectedQuantity: number;
-}): Promise<{ quantity: number; warehouses: Warehouse[] }> {
+}): Promise<{ quantity: number; warehouses: Warehouse[]; corrected: boolean }> {
   const { shopId, productId, skuId } = input;
   const delta = Math.trunc(input.delta);
   if (!Number.isFinite(delta) || delta === 0) {
@@ -200,18 +200,55 @@ async function adjustStockInner(input: {
     throw new StockWriteError("rejected", failure.message ?? failure.detail ?? "TikTok ปฏิเสธการแก้สต็อก");
   }
 
+  // ตรวจหลังเขียน: การส่งยอดรวมขึ้น TikTok แปลว่าถ้ามีคนซื้อในเสี้ยววินาทีที่คำขอกำลังเดินทาง
+  // ยอดที่เราส่งไปอาจทับยอดที่เพิ่งขาย — อ่านกลับทันทีเพื่อให้ DB และหน้าจอตรงกับที่ TikTok มีจริง
+  // (อ่านไม่ได้ก็ไม่ทำให้การบันทึกที่สำเร็จแล้วล้มทั้งงาน)
+  let finalWarehouses = nextWarehouses;
+  let finalQuantity = next;
+  let corrected = false;
+  if (!fromDb) {
+    try {
+      const verify = await callTikTokApi<ProductDetail>({
+        ...ctx,
+        path: `/product/202309/products/${encodeURIComponent(productId)}`,
+      });
+      const skuAfter = (verify.skus ?? []).find((row) => String(row.id) === skuId);
+      if (skuAfter) {
+        const after = toWarehouses(skuAfter);
+        const afterTotal = after.reduce((sum, item) => sum + item.quantity, 0);
+        if (afterTotal !== next) {
+          finalWarehouses = after;
+          finalQuantity = afterTotal;
+          corrected = true;
+          console.warn("[stock-write] ยอดหลังเขียนไม่ตรงกับที่ส่งไป — มีคนซื้อระหว่างนั้น", {
+            shopId,
+            skuId,
+            sent: next,
+            actual: afterTotal,
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("[stock-write] ตรวจยอดหลังเขียนไม่สำเร็จ", {
+        shopId,
+        skuId,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   await query(
     `UPDATE platform_stock
         SET quantity = $3, warehouses = $4::jsonb, updated_at = now()
       WHERE shop_id = $1 AND sku_id = $2`,
-    [shopId, skuId, next, JSON.stringify(nextWarehouses)],
+    [shopId, skuId, finalQuantity, JSON.stringify(finalWarehouses)],
   );
   await query(
     `INSERT INTO platform_stock_movements
        (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [TIKTOK_PLATFORM, shopId, skuId, sellerSku, null, current, next, delta],
+    [TIKTOK_PLATFORM, shopId, skuId, sellerSku, null, current, finalQuantity, finalQuantity - current],
   );
 
-  return { quantity: next, warehouses: nextWarehouses };
+  return { quantity: finalQuantity, warehouses: finalWarehouses, corrected };
 }

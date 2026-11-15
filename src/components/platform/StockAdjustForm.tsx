@@ -48,6 +48,7 @@ export function StockAdjustForm({
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         quantity?: number;
+        corrected?: boolean;
         detail?: { current?: number } | null;
       };
       if (!res.ok) {
@@ -59,7 +60,11 @@ export function StockAdjustForm({
         router.refresh();
         return;
       }
-      setMessage(`อัปเดตแล้ว — คงเหลือรวมตอนนี้ ${data.quantity ?? "?"}`);
+      setMessage(
+        data.corrected
+          ? `บันทึกแล้ว แต่มีคนซื้อระหว่างนั้น — คงเหลือจริงตอนนี้ ${data.quantity ?? "?"}`
+          : `อัปเดตแล้ว — คงเหลือรวมตอนนี้ ${data.quantity ?? "?"}`,
+      );
       setDelta("");
       router.refresh();
     } finally {
