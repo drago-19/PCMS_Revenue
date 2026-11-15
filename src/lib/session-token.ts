@@ -9,7 +9,7 @@ export type CompanyId = "dragon19" | "seeheng";
 
 export interface SessionPayload {
   sub: string;
-  role: "admin" | "staff";
+  role: "admin" | "staff" | "platform";
   companyId?: CompanyId;
   iat: number;
   exp: number;
@@ -52,7 +52,7 @@ function signSegment(segment: string, secret: string): Buffer {
 export function createSessionToken(
   input: {
     username: string;
-    role?: "admin" | "staff";
+    role?: "admin" | "staff" | "platform";
     companyId?: CompanyId;
     ttlSeconds?: number;
     nowSeconds?: number;
@@ -115,7 +115,7 @@ export function verifySessionToken(
     if (
       typeof parsed.sub !== "string" ||
       !parsed.sub.trim() ||
-      (parsed.role !== "admin" && parsed.role !== "staff") ||
+      (parsed.role !== "admin" && parsed.role !== "staff" && parsed.role !== "platform") ||
       typeof parsed.iat !== "number" ||
       typeof parsed.exp !== "number" ||
       typeof parsed.jti !== "string"

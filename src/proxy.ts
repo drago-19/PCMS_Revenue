@@ -119,7 +119,10 @@ export function proxy(request: NextRequest) {
     }
 
     // ผู้ใช้สิทธิ์ "platform" (เช่น ฝ่ายขาย) เรียกได้เฉพาะ API ของหมวดแพลตฟอร์ม
-    if (String(session.role) === "platform" && !pathname.startsWith("/api/platform/")) {
+    // และการเปลี่ยนรหัสผ่านของตัวเอง (หน้าตั้งค่าในเมนูผู้ใช้เรียกเส้นนี้)
+    const platformApiAllowed =
+      pathname.startsWith("/api/platform/") || pathname === "/api/auth/password";
+    if (String(session.role) === "platform" && !platformApiAllowed) {
       return applySecurityHeaders(
         NextResponse.json({ error: "บัญชีนี้ใช้ได้เฉพาะหมวดแพลตฟอร์ม", requestId }, { status: 403 }),
         requestId,

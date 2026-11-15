@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { cookies } from "next/headers";
 import { Suspense, type ReactNode } from "react";
 import { NavigationProgress } from "@/components/NavigationProgress";
 import { Sidebar } from "@/components/Sidebar";
@@ -8,6 +9,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getActiveCompanyId } from "@/lib/db";
 import { getDocumentSettings } from "@/lib/settings";
+import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session-token";
 import "./globals.css";
 
 const notoSansThai = localFont({
@@ -45,6 +47,9 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const companyId = await getActiveCompanyId();
   const settings = await getDocumentSettings();
+  // role ใช้ตัดสินว่าเมนูด้านซ้ายจะแสดงหมวดไหน (บัญชี "platform" เห็นเฉพาะหมวดแพลตฟอร์ม)
+  const session = verifySessionToken((await cookies()).get(SESSION_COOKIE_NAME)?.value);
+  const role = session?.role ?? "admin";
   return (
     <html
       lang="th"
@@ -57,7 +62,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           </Suspense>
           <WindowTitleBar companyId={companyId} companyName={settings.name} />
           <div className="app-shell has-[[data-login-page]]:!grid-cols-1">
-            <Sidebar companyId={companyId} companyName={settings.name} />
+            <Sidebar companyId={companyId} companyName={settings.name} role={role} />
             <div className="app-main">
               <main className="app-content">{children}</main>
             </div>

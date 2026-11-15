@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createHmac } from "node:crypto";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { DocumentSettingsClient } from "@/components/DocumentSettingsClient";
 import { PageHeader } from "@/components/PageHeader";
 import { ShipnityConnectForm } from "@/components/ShipnityConnectForm";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/platform/store";
 import { getCompanyDefaultSeller, getDocumentSettings } from "@/lib/settings";
 import { getShipnityConnectionStatus } from "@/lib/shipnity/config";
+import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session-token";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,13 @@ export default async function SettingsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const activeTab = readTab(params.tab);
+  // บัญชี "platform" (เช่น ฝ่ายขาย) เห็นเฉพาะแท็บเชื่อมต่อแพลตฟอร์ม — ไม่เห็น Shipnity/ข้อมูลบริษัท
+  const sessionRole = verifySessionToken((await cookies()).get(SESSION_COOKIE_NAME)?.value)?.role;
+  const platformOnly = sessionRole === "platform";
+  const visibleTabs = platformOnly
+    ? TABS.filter((tab) => tab.key === "platforms")
+    : TABS;
+  const activeTab: TabKey = platformOnly ? "platforms" : readTab(params.tab);
 
   const companyId = await getActiveCompanyId();
   const settings = await getDocumentSettings(undefined, true);
@@ -103,7 +110,11 @@ export default async function SettingsPage({
       <PageHeader
         eyebrow="PCMS Revenue · Document & Company Settings"
         title="ตั้งค่าเอกสาร / ข้อมูลบริษัท"
-        description="แยกเป็น 3 แท็บ: การเชื่อมต่อแพลตฟอร์ม การเชื่อมต่อ Shipnity และข้อมูลบริษัทที่พิมพ์ลงเอกสาร"
+        description={
+          platformOnly
+            ? "เชื่อมต่อร้านค้ากับ TikTok Shop และ Shopee"
+            : "แยกเป็น 3 แท็บ: การเชื่อมต่อแพลตฟอร์ม การเชื่อมต่อ Shipnity และข้อมูลบริษัทที่พิมพ์ลงเอกสาร"
+        }
       />
 
       <div
@@ -112,7 +123,7 @@ export default async function SettingsPage({
         aria-label="หมวดการตั้งค่า"
       >
         <div className="inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const active = tab.key === activeTab;
             const href = tab.key === "company" ? "/settings" : `/settings?tab=${tab.key}`;
             return (
@@ -135,7 +146,7 @@ export default async function SettingsPage({
           })}
         </div>
         <p className="min-w-0 text-xs text-[#64748b]">
-          {TABS.find((tab) => tab.key === activeTab)?.hint}
+          {visibleTabs.find((tab) => tab.key === activeTab)?.hint}
         </p>
       </div>
 

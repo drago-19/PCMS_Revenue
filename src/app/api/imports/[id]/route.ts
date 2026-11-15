@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { recordAuditLog, requireApiAuth } from "@/lib/auth";
+import { denyPlatformRole, recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { toggleImportAccountingMode } from "@/lib/ingest/import-service";
 import {
   deleteImport,
@@ -36,6 +36,8 @@ export async function GET(
 ) {
   const auth = requireApiAuth(request);
   if (!auth.ok) return auth.response;
+  const denied = denyPlatformRole(auth.session, auth.requestId);
+  if (denied) return denied;
 
   const rate = checkApiRateLimit(`imports_read:${auth.ip}`, 120, 60_000);
   if (!rate.allowed) {
@@ -156,6 +158,8 @@ export async function DELETE(
 ) {
   const auth = requireApiAuth(request);
   if (!auth.ok) return auth.response;
+  const denied = denyPlatformRole(auth.session, auth.requestId);
+  if (denied) return denied;
 
   const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 30, 60_000);
   if (!rate.allowed) {
@@ -207,6 +211,8 @@ export async function PATCH(
 ) {
   const auth = requireApiAuth(request);
   if (!auth.ok) return auth.response;
+  const denied = denyPlatformRole(auth.session, auth.requestId);
+  if (denied) return denied;
 
   const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 30, 60_000);
   if (!rate.allowed) {

@@ -1,4 +1,4 @@
-import { recordAuditLog, requireAdmin, requireApiAuth } from "@/lib/auth";
+import { denyPlatformRole, recordAuditLog, requireAdmin, requireApiAuth } from "@/lib/auth";
 import { saveColumnMappingRules } from "@/lib/column-mapping-settings";
 import { runWithCompany } from "@/lib/db";
 import { importWorkbook, type ImportProgressEvent, type ImportResult } from "@/lib/ingest/import-service";
@@ -55,6 +55,8 @@ export type ImportStreamMessage =
 export async function POST(request: Request) {
   const auth = requireApiAuth(request);
   if (!auth.ok) return auth.response;
+  const denied = denyPlatformRole(auth.session, auth.requestId);
+  if (denied) return denied;
 
   const rate = checkApiRateLimit(`imports_write:${auth.ip}`, 300, 60_000);
   if (!rate.allowed) {

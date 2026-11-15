@@ -121,20 +121,53 @@ export function isRetiredDefaultCredential(username: string, password: string): 
   );
 }
 
+function normalizeRole(role: string): "admin" | "staff" | "platform" {
+  if (role === "staff") return "staff";
+  if (role === "platform") return "platform";
+  return "admin";
+}
+
 export async function ensureAdminUser(
   db?: Queryable,
   targetUsername?: string,
 ): Promise<{
   username: string;
   passwordHash: string;
-  role: "admin" | "staff";
+  role: "admin" | "staff" | "platform";
   companyId: CompanyId;
 }> {
   await ensureSchema();
   const target = db ?? getPool();
-  const requested = (targetUsername ?? "").trim().toLowerCase();
-  const isSeeheng = requested === "seeheng";
-  const username = isSeeheng ? "seeheng" : getConfiguredAdminUsername();
+  const requested = (targetUsername ?? "").trim();
+  const lowerRequested = requested.toLowerCase();
+  const isSeeheng = lowerRequested === "seeheng";
+  const defaultUsername = getConfiguredAdminUsername();
+
+  // บัญชีเพิ่มเติม (เช่น ฝ่ายขายที่เห็นเฉพาะหมวดแพลตฟอร์ม) สร้างด้วย
+  // scripts/create-platform-user.ts — ต้องค้นด้วยชื่อที่พิมพ์มาจริง ไม่ใช่แทนที่ด้วย admin
+  if (requested && !isSeeheng && lowerRequested !== defaultUsername.toLowerCase()) {
+    const extraRes = await target.query<{
+      username: string;
+      password_hash: string;
+      role: string;
+    }>(
+      "SELECT username, password_hash, role FROM public.app_users WHERE LOWER(username) = LOWER($1)",
+      [requested],
+    );
+    const extra = extraRes.rows[0];
+    if (extra) {
+      return {
+        username: extra.username,
+        passwordHash: extra.password_hash,
+        role: normalizeRole(extra.role),
+        companyId: "dragon19",
+      };
+    }
+    // ไม่พบผู้ใช้: คืนชื่อว่างเพื่อให้ผู้เรียกเทียบกับ dummy hash (ไม่รั่วว่ามีบัญชีนี้หรือไม่)
+    return { username: "", passwordHash: "", role: "staff", companyId: "dragon19" };
+  }
+
+  const username = isSeeheng ? "seeheng" : defaultUsername;
   const companyId: CompanyId = isSeeheng ? "seeheng" : "dragon19";
 
   const existingRes = await target.query<{
@@ -151,7 +184,7 @@ export async function ensureAdminUser(
     return {
       username: existing.username,
       passwordHash: existing.password_hash,
-      role: existing.role === "staff" ? "staff" : "admin",
+      role: normalizeRole(existing.role),
       companyId,
     };
   }
@@ -448,6 +481,19 @@ export function requireApiAuth(
  * เหมือน requireApiAuth แต่ต้องเป็นแอดมินเท่านั้น
  * ใช้กับ route ที่แตะ credential ของแพลตฟอร์ม การตั้งค่าองค์กร หรือลบข้อมูลทั้งหมด
  */
+// บัญชี role "platform" ถูกจำกัดสิทธิ์ที่ proxy แล้ว แต่ /api/imports อยู่นอก matcher
+// จึงต้องเช็กซ้ำใน route เอง
+export function denyPlatformRole(
+  session: { role?: string },
+  requestId: string,
+): Response | null {
+  if (String(session.role) !== "platform") return null;
+  return Response.json(
+    { error: "บัญชีนี้ใช้ได้เฉพาะหมวดแพลตฟอร์ม", requestId },
+    { status: 403, headers: { "x-request-id": requestId } },
+  );
+}
+
 export function requireAdmin(
   request: Request,
 ): ReturnType<typeof requireApiAuth> {

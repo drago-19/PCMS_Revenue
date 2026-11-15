@@ -639,9 +639,11 @@ function AccountingSidebarSubMenu({
 function NavLinks({
   pathname,
   onNavigate,
+  role,
 }: {
   pathname: string;
   onNavigate?: () => void;
+  role?: "admin" | "staff" | "platform";
 }) {
   const [accountingExpanded, setAccountingExpanded] = useState(
     () =>
@@ -662,13 +664,19 @@ function NavLinks({
     }
   }, [pathname]);
 
+  // บัญชีฝ่ายขาย (role "platform") เห็นเฉพาะหมวดแพลตฟอร์มกับหน้าตั้งค่าที่ใช้เชื่อมร้าน
+  const visibleItems =
+    role === "platform"
+      ? items.filter((item) => item.href === "/platform" || item.href === "/settings")
+      : items;
+
   return (
     <div className="sidebar-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-0.5">
       <span className="px-3 text-[11px] font-bold tracking-[0.12em] uppercase text-[#64748b]">
         หมวดหมู่เมนูหลัก
       </span>
       <nav className="nav flex flex-col gap-1.5" aria-label="เมนูหลัก">
-        {items.map((item) => {
+        {visibleItems.map((item) => {
           const active = item.match(pathname);
           const Icon = item.icon;
           const isAccounting = item.href === "/accounting";
@@ -940,9 +948,11 @@ function AccountControls({
 export function Sidebar({
   companyId = "dragon19",
   companyName,
+  role = "admin",
 }: {
   companyId?: "dragon19" | "seeheng";
   companyName?: string;
+  role?: "admin" | "staff" | "platform";
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -1024,7 +1034,7 @@ export function Sidebar({
               </SheetDescription>
             </SheetHeader>
 
-            <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
+            <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} role={role} />
 
             <AccountControls
               companyId={companyId}
@@ -1061,7 +1071,7 @@ export function Sidebar({
           </span>
         </Link>
 
-        <NavLinks pathname={pathname} />
+        <NavLinks pathname={pathname} role={role} />
 
         <AccountControls companyId={companyId} companyName={companySubLabel} />
       </aside>
