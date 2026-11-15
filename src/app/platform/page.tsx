@@ -114,6 +114,9 @@ export default async function PlatformOverviewPage({ searchParams }: { searchPar
         <PlatformOverviewView
           analytics={analytics}
           detailHref={(_kind, value) => hrefWithDetail("/platform", params, detailParam("kpi", value))}
+          connected={isConnected && (accounts.length > 0 || selectedShop !== undefined)}
+          shopName={accounts.find((account) => account.accountKey === selectedShop)?.shopName ?? accounts[0]?.shopName ?? null}
+          shopId={selectedShop ?? null}
         />
       </PlatformBody>
 

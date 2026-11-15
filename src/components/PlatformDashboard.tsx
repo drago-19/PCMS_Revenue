@@ -145,6 +145,9 @@ const ALERT_STYLES: Record<string, string> = {
 export function PlatformOverviewView({
   analytics,
   detailHref,
+  connected = false,
+  shopName = null,
+  shopId = null,
 }: {
   analytics: TikTokAnalytics & {
     perShop?: Array<{ shopId: string; settlement: number; orders: number; cancelled: number }>;
@@ -153,9 +156,35 @@ export function PlatformOverviewView({
   };
   /** ลิงก์ไปป๊อปอัปออเดอร์เบื้องหลังตัวเลขในการ์ด */
   detailHref?: (kind: "kpi", value: string) => string;
+  /** ร้านที่เลือกเชื่อมต่ออยู่แล้วหรือยัง — ใช้แยก "ยังไม่เชื่อม" ออกจาก "ยังไม่มีออเดอร์" */
+  connected?: boolean;
+  shopName?: string | null;
+  shopId?: string | null;
 }) {
   const kpiHref = (value: string) => (detailHref ? detailHref("kpi", value) : undefined);
   if (!analytics.hasData) {
+    if (connected) {
+      return (
+        <EmptyState
+          icon={<IconWallet size={22} aria-hidden="true" />}
+          title="ยังไม่มีออเดอร์ในช่วงนี้"
+          description={`${shopName ? `ร้าน ${shopName} ` : "ร้านที่เลือก "}เชื่อมต่ออยู่แล้ว แต่ช่วงเวลานี้ยังไม่มีออเดอร์ — ลองเลือกช่วงเวลาอื่น หรือไปดูจำนวนสต็อกของร้าน`}
+          action={
+            <Button asChild>
+              <Link
+                href={
+                  shopId
+                    ? `/platform/stocks?shop=${encodeURIComponent(shopId)}`
+                    : "/platform/stocks"
+                }
+              >
+                ไปที่หน้าสต็อก
+              </Link>
+            </Button>
+          }
+        />
+      );
+    }
     return (
       <EmptyState
         icon={<IconWallet size={22} aria-hidden="true" />}
