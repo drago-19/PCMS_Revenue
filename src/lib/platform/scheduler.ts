@@ -16,9 +16,9 @@ const LOOKBACK_HOURS = LOOKBACK_MINUTES / 60;
 const STATEMENT_EVERY_TICKS = Math.max(1, Math.round((10 * 60 * 1000) / INTERVAL_MS));
 // สต็อก: ดึงทั้งแคตตาล็อกใช้แค่ 2 คำขอต่อร้าน จึงตั้งรอบสั้น (60 วินาที) แยกจากออเดอร์
 // รอบเต็มใช้เป็นตัวไล่เก็บ (reconcile) — ตั้งห่างไว้ เพราะเส้นทางหลักคือ webhook + หน้าจอ
-// ดึงไล่เก็บทุก 5 นาที (2 คำขอต่อร้านต่อรอบ) — การแก้ที่ฝั่ง TikTok จึงเห็นภายในรอบนี้
-// เส้นทางที่เร็วกว่า: webhook ออเดอร์/คืนสินค้า และการกด "ดึงสต็อกล่าสุด"
-const STOCK_INTERVAL_MS = Number(process.env.PLATFORM_STOCK_INTERVAL_MS ?? 5 * 60 * 1000);
+// ดึงไล่เก็บทุก 60 วินาที (2 คำขอต่อร้านต่อรอบ) — TikTok ไม่มี webhook แจ้งตอนสต็อกเปลี่ยน
+// การแก้ที่ฝั่ง TikTok จึงเห็นภายใน ~1 นาที + รอบรีเฟรชของหน้าจอ
+const STOCK_INTERVAL_MS = Number(process.env.PLATFORM_STOCK_INTERVAL_MS ?? 60 * 1000);
 // คำขอคืนสินค้าเปลี่ยนไม่บ่อยแต่ต้องเห็นเร็ว (ของถูกเปิดขายทันทีที่ plataform ปิดออเดอร์)
 const RETURNS_INTERVAL_MS = Number(process.env.PLATFORM_RETURNS_INTERVAL_MS ?? 10 * 60 * 1000);
 // สรุปรายวันเป็นข้อมูลสรุป — คํานวณทุก 15 นาทีก็พอ

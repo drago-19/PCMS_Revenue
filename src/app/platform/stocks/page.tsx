@@ -247,7 +247,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
       <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">
         <span>จำนวนคงเหลือดึงจาก {platformTab(platform).label} เข้า DB เราอัตโนมัติ — หน้านี้รีเฟรชตัวเองให้เห็นค่าล่าสุด</span>
-        <PlatformAutoRefresh seconds={60} />
+        <PlatformAutoRefresh seconds={30} />
       </p>
 
       {syncError ? (
