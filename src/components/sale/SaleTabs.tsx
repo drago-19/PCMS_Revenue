@@ -48,7 +48,8 @@ export function SaleTabs() {
       aria-label="เมนูฝ่ายขาย"
       className={cn(
         "flex min-w-0 gap-1 overflow-x-auto border-b border-border pb-1",
-        "min-[1100px]:sticky min-[1100px]:top-[var(--wco-offset,0px)] min-[1100px]:z-30",
+        // ติดใต้แถบหัว (สูง 56px) — ถ้าใช้ top 0 เมนูจะเลื่อนไปซ่อนใต้แถบหัวตอนสกรอล
+        "min-[1100px]:sticky min-[1100px]:top-[56px] min-[1100px]:z-30",
         "min-[1100px]:w-[198px] min-[1100px]:shrink-0 min-[1100px]:flex-col min-[1100px]:overflow-visible",
         "min-[1100px]:border-b-0 min-[1100px]:border-r min-[1100px]:pb-0 min-[1100px]:pr-2",
       )}
