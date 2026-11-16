@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SaleChrome } from "@/components/sale/SaleChrome";
 import { getActiveCompanyId } from "@/lib/db";
 import { getDocumentSettings } from "@/lib/settings";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session-token";
@@ -50,6 +51,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // role ใช้ตัดสินว่าเมนูด้านซ้ายจะแสดงหมวดไหน (บัญชี "platform" เห็นเฉพาะหมวดแพลตฟอร์ม)
   const session = verifySessionToken((await cookies()).get(SESSION_COOKIE_NAME)?.value);
   const role = session?.role ?? "admin";
+  // ชื่อบัญชีที่ล็อกอินอยู่ — ใช้ตัดสินว่าบัญชีนี้ควรเห็นปุ่มอะไรในเมนูบัญชี
+  const username = session?.sub ?? null;
   return (
     <html
       lang="th"
@@ -60,9 +63,16 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           <Suspense fallback={null}>
             <NavigationProgress />
           </Suspense>
-          <WindowTitleBar companyId={companyId} companyName={settings.name} />
-          <div className="app-shell has-[[data-login-page]]:!grid-cols-1">
-            <Sidebar companyId={companyId} companyName={settings.name} role={role} />
+          {/* บัญชีฝ่ายขาย (platform) ใช้เปลือกสว่างของหมวด /sale — ไม่แตะเปลือกของ Dragon19 */}
+          {role === "platform" ? (
+            <SaleChrome companyName={settings.name} />
+          ) : (
+            <WindowTitleBar companyId={companyId} companyName={settings.name} />
+          )}
+          <div className={`app-shell has-[[data-login-page]]:!grid-cols-1 ${role === "platform" ? "!grid-cols-1" : ""}`}>
+            {role === "platform" ? null : (
+              <Sidebar companyId={companyId} companyName={settings.name} role={role} username={username} />
+            )}
             <div className="app-main">
               <main className="app-content">{children}</main>
             </div>

@@ -3,6 +3,7 @@
 // ป้ายช่วงเวลาติดสถานะเสมอ: ไม่มี from/to ใน URL = 30 วัน (ค่าปริยาย)
 // ไม่มีการเคลื่อนไหวโดยตั้งใจ: การเปลี่ยนช่วงคือการเปลี่ยนตัวเลข ต้องนิ่งเพื่อเทียบ
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { PeriodPicker } from "@/components/PeriodPicker";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
@@ -42,6 +43,7 @@ export async function PlatformPeriodBar({
   showSync = false,
   autoRefreshSeconds,
   lastSyncedAt,
+  refreshNode,
 }: {
   basePath: string;
   from?: string;
@@ -53,6 +55,8 @@ export async function PlatformPeriodBar({
   showSync?: boolean;
   autoRefreshSeconds?: number;
   lastSyncedAt?: string | null;
+  /** อ็อบเจ็กต์นับถอยหลังที่หน้าอยากใช้เอง — ไม่ส่งมาก็จบที่ PlatformAutoRefresh เดิม */
+  refreshNode?: ReactNode;
 }) {
   const mergedExtraQuery: Record<string, string | undefined> = {
     ...(platform !== "tiktok" ? { platform } : {}),
@@ -174,7 +178,9 @@ export async function PlatformPeriodBar({
           {shopLabel && (syncedAt || autoRefreshSeconds) ? <span aria-hidden="true">·</span> : null}
           {syncedAt ? <span>ข้อมูลถึง {thaiDateTime(syncedAt)}</span> : null}
           {syncedAt && autoRefreshSeconds ? <span aria-hidden="true">·</span> : null}
-          {autoRefreshSeconds ? <PlatformAutoRefresh seconds={autoRefreshSeconds} /> : null}
+          {autoRefreshSeconds ? (
+            refreshNode ?? <PlatformAutoRefresh seconds={autoRefreshSeconds} />
+          ) : null}
         </p>
       ) : null}
     </div>

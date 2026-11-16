@@ -151,14 +151,12 @@ export function proxy(request: NextRequest) {
     return applySecurityHeaders(NextResponse.redirect(loginUrl), requestId);
   }
 
-  // ผู้ใช้สิทธิ์ "platform" เห็นได้เฉพาะหมวดแพลตฟอร์มกับหน้าตั้งค่า (แท็บเชื่อมต่อ)
+  // ผู้ใช้สิทธิ์ "platform" (ฝ่ายขาย) ใช้ได้เฉพาะหมวด /sale ของตัวเอง
+  // แยกเส้นทางจาก /platform ของ Dragon19 โดยสิ้นเชิง — เปิดที่อื่นจะถูกพากลับ /sale
   if (String(session.role) === "platform") {
-    const allowed =
-      pathname === "/platform" ||
-      pathname.startsWith("/platform/") ||
-      pathname === "/settings";
+    const allowed = pathname === "/sale" || pathname.startsWith("/sale/");
     if (!allowed) {
-      return applySecurityHeaders(NextResponse.redirect(new URL("/platform", request.url)), requestId);
+      return applySecurityHeaders(NextResponse.redirect(new URL("/sale", request.url)), requestId);
     }
   }
 
