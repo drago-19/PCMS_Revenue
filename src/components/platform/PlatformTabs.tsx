@@ -54,7 +54,7 @@ export function PlatformTabs() {
   // จอแคบ: แถบนี้เลื่อนแนวนอนได้ ถ้าเปิดหน้ามาจากลิงก์ตรง แท็บที่เปิดอยู่จะอยู่นอกจอ
   // เลื่อนให้เห็นแท็บนั้นเสมอ เพื่อให้รู้ว่าตัวเองอยู่ส่วนไหน
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    activeRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
   }, [pathname]);
 
   // คงร้าน/ช่วงเวลา/แพลตฟอร์มที่กำลังดูอยู่ไว้ทั้งชุด เพื่อไม่ต้องเลือกใหม่ทุกครั้งที่สลับหน้า
