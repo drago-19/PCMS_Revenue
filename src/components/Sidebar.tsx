@@ -760,13 +760,21 @@ function NavLinks({
   );
 }
 
+/**
+ * บัญชีสาธิตสำหรับให้ฝ่ายขายลองใช้ — รหัสใช้ร่วมกันทั้งทีม
+ * จึงไม่ให้เปลี่ยนรหัสผ่านจากในระบบ (เปลี่ยนแล้วคนอื่นที่ใช้บัญชีนี้เข้าไม่ได้)
+ */
+const DEMO_ACCOUNTS = new Set(["sales-demo"]);
+
 function AccountControls({
   companyId = "dragon19",
   companyName,
+  username,
   onAction,
 }: {
   companyId?: "dragon19" | "seeheng";
   companyName?: string;
+  username?: string | null;
   onAction?: () => void;
 }) {
   const router = useRouter();
@@ -781,6 +789,9 @@ function AccountControls({
     (companyId === "seeheng"
       ? "บริษัท ซีเฮง จำกัด"
       : "บริษัท ดราก้อน 19 จำกัด");
+
+  // บัญชีสาธิตซ่อนทั้งปุ่มและกล่องเปลี่ยนรหัสผ่าน
+  const canChangePassword = !DEMO_ACCOUNTS.has((username ?? "").trim().toLowerCase());
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -847,86 +858,88 @@ function AccountControls({
       <div className="mt-2.5 flex flex-col gap-2">
         <PwaInstallControl variant="sidebar" />
 
-        <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
-          <DialogTrigger asChild>
-            <Button
-              type="button"
-              variant="outline-light"
-              size="sm"
-              className="w-full justify-start text-xs"
-            >
-              <KeyRoundIcon className="size-3.5" />
-              เปลี่ยนรหัสผ่าน
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="no-print">
-            <DialogHeader className="pr-11">
-              <DialogTitle>เปลี่ยนรหัสผ่านผู้ดูแลระบบ</DialogTitle>
-              <DialogDescription>
-                รหัสผ่านใหม่จะถูกเข้ารหัสอย่างปลอดภัยและบันทึกในฐานข้อมูลทันที
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleChangePassword} className="flex flex-col gap-3.5">
-              {pwdError ? (
-                <div
-                  role="alert"
-                  className="rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-center text-xs font-semibold text-[#b91c1c] text-balance"
-                >
-                  {pwdError}
+        {canChangePassword ? (
+          <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
+            <DialogTrigger asChild>
+              <Button
+                type="button"
+                variant="outline-light"
+                size="sm"
+                className="w-full justify-start text-xs"
+              >
+                <KeyRoundIcon className="size-3.5" />
+                เปลี่ยนรหัสผ่าน
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="no-print">
+              <DialogHeader className="pr-11">
+                <DialogTitle>เปลี่ยนรหัสผ่านผู้ดูแลระบบ</DialogTitle>
+                <DialogDescription>
+                  รหัสผ่านใหม่จะถูกเข้ารหัสอย่างปลอดภัยและบันทึกในฐานข้อมูลทันที
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleChangePassword} className="flex flex-col gap-3.5">
+                {pwdError ? (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-center text-xs font-semibold text-[#b91c1c] text-balance"
+                  >
+                    {pwdError}
+                  </div>
+                ) : null}
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="current-password-input"
+                    className="text-xs font-bold text-[#0f172a]"
+                  >
+                    รหัสผ่านปัจจุบัน
+                  </label>
+                  <Input
+                    id="current-password-input"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    disabled={savingPwd}
+                    placeholder="กรอกรหัสผ่านปัจจุบัน"
+                    required
+                  />
                 </div>
-              ) : null}
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor="current-password-input"
-                  className="text-xs font-bold text-[#0f172a]"
-                >
-                  รหัสผ่านปัจจุบัน
-                </label>
-                <Input
-                  id="current-password-input"
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  disabled={savingPwd}
-                  placeholder="กรอกรหัสผ่านปัจจุบัน"
-                  required
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label
-                  htmlFor="new-password-input"
-                  className="text-xs font-bold text-[#0f172a]"
-                >
-                  รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)
-                </label>
-                <Input
-                  id="new-password-input"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  disabled={savingPwd}
-                  placeholder="กรอกรหัสผ่านใหม่"
-                  required
-                />
-              </div>
-              <DialogFooter className="gap-2 pt-2">
-                <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={savingPwd}>
-                    ยกเลิก
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="new-password-input"
+                    className="text-xs font-bold text-[#0f172a]"
+                  >
+                    รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)
+                  </label>
+                  <Input
+                    id="new-password-input"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    disabled={savingPwd}
+                    placeholder="กรอกรหัสผ่านใหม่"
+                    required
+                  />
+                </div>
+                <DialogFooter className="gap-2 pt-2">
+                  <DialogClose asChild>
+                    <Button type="button" variant="outline" disabled={savingPwd}>
+                      ยกเลิก
+                    </Button>
+                  </DialogClose>
+                  <Button
+                    type="submit"
+                    variant="default"
+                    loading={savingPwd}
+                    disabled={savingPwd}
+                  >
+                    บันทึกรหัสผ่านใหม่
                   </Button>
-                </DialogClose>
-                <Button
-                  type="submit"
-                  variant="default"
-                  loading={savingPwd}
-                  disabled={savingPwd}
-                >
-                  บันทึกรหัสผ่านใหม่
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        ) : null}
 
         <Button
           type="button"
@@ -949,10 +962,12 @@ export function Sidebar({
   companyId = "dragon19",
   companyName,
   role = "admin",
+  username,
 }: {
   companyId?: "dragon19" | "seeheng";
   companyName?: string;
   role?: "admin" | "staff" | "platform";
+  username?: string | null;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -1039,6 +1054,7 @@ export function Sidebar({
             <AccountControls
               companyId={companyId}
               companyName={companySubLabel}
+              username={username}
               onAction={() => setOpen(false)}
             />
           </SheetContent>
@@ -1073,7 +1089,7 @@ export function Sidebar({
 
         <NavLinks pathname={pathname} role={role} />
 
-        <AccountControls companyId={companyId} companyName={companySubLabel} />
+        <AccountControls companyId={companyId} companyName={companySubLabel} username={username} />
       </aside>
     </>
   );
