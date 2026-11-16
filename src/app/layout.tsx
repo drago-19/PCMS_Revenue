@@ -65,7 +65,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           </Suspense>
           {/* บัญชีฝ่ายขาย (platform) ใช้เปลือกสว่างของหมวด /sale — ไม่แตะเปลือกของ Dragon19 */}
           {role === "platform" ? (
-            <SaleChrome companyName={settings.name} />
+            <SaleChrome />
           ) : (
             <WindowTitleBar companyId={companyId} companyName={settings.name} />
           )}

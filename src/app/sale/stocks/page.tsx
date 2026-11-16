@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SaleHeader } from "@/components/sale/SaleHeader";
 import { SaleStat } from "@/components/sale/SaleStat";
+import { ImagePreview } from "@/components/sale/ImagePreview";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -648,21 +649,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-3 min-[520px]:flex-row min-[520px]:items-start">
-                <a
-                  href={skuDetail.imageUrl ?? "#"}
-                  target={skuDetail.imageUrl ? "_blank" : undefined}
-                  rel="noreferrer"
-                  aria-label={skuDetail.imageUrl ? "เปิดดูรูปสินค้าขนาดเต็ม" : "ไม่มีรูปสินค้า"}
-                  className="block size-20 shrink-0 overflow-hidden rounded-xl border border-border bg-muted"
-                >
-                  {skuDetail.imageUrl ? (
-                    <img
-                      src={platformImageSrc(skuDetail.imageUrl) ?? skuDetail.imageUrl}
-                      alt=""
-                      className="size-full object-cover"
-                    />
-                  ) : null}
-                </a>
+                {skuDetail.imageUrl ? (
+                  // กดแล้วเปิดป๊อปอัพในหน้านี้ ไม่เด้งออกไปหน้าอื่น
+                  <ImagePreview
+                    src={platformImageSrc(skuDetail.imageUrl) ?? skuDetail.imageUrl}
+                    alt={skuDetail.productName ?? "รูปสินค้า"}
+                  />
+                ) : (
+                  <span className="block size-20 shrink-0 rounded-xl border border-border bg-muted" />
+                )}
                 <dl className="grid flex-1 grid-cols-2 gap-2 min-[520px]:grid-cols-4">
                   <div className="rounded-xl border border-border/70 bg-card p-3">
                     <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">คงเหลือรวม</dt>
