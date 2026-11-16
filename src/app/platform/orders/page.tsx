@@ -6,6 +6,7 @@ import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
 import { CloseableDialog } from "@/components/platform/CloseableDialog";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { parseStamp } from "@/lib/platform/period";
+import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -362,7 +363,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                     {item.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={item.imageUrl}
+                        src={platformImageSrc(item.imageUrl) ?? item.imageUrl}
                         alt={item.name}
                         width={48}
                         height={48}

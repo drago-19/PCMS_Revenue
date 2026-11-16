@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getPlatformOrder } from "@/lib/platform/orders";
 import { platformDbName, readPlatform } from "@/lib/platform/platforms";
+import { platformImageSrc } from "@/lib/platform/image-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -93,7 +94,7 @@ export default async function OrderDetailPage({
                           // รูปจาก CDN ของ TikTok — ใช้ <img> ธรรมดาเพราะ domain นอก config ของ next/image
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={item.imageUrl}
+                            src={platformImageSrc(item.imageUrl) ?? item.imageUrl}
                             alt={item.name}
                             width={44}
                             height={44}

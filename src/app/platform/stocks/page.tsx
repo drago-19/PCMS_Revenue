@@ -22,6 +22,7 @@ import {
   type StockListFilter,
 } from "@/lib/platform/stock";
 import { isSandboxShopName } from "@/lib/platform/platforms";
+import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { cn } from "@/lib/utils";
 import {
   getActiveShopId,
@@ -359,7 +360,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
                         {row.imageUrl ? (
-                          <img src={row.imageUrl} alt="" loading="lazy" className="size-full object-cover" />
+                          <img src={platformImageSrc(row.imageUrl) ?? row.imageUrl} alt="" loading="lazy" className="size-full object-cover" />
                         ) : null}
                       </span>
                       <span className="max-w-[240px] truncate">{row.productName ?? "—"}</span>
@@ -524,7 +525,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                       aria-label="เปิดดูรูปสินค้าขนาดเต็ม"
                       className="block size-full"
                     >
-                      <img src={skuDetail.imageUrl} alt="" className="size-full object-cover" />
+                      <img src={platformImageSrc(skuDetail.imageUrl) ?? skuDetail.imageUrl} alt="" className="size-full object-cover" />
                     </a>
                   ) : null}
                 </span>

@@ -57,7 +57,7 @@ export function PlatformNav({
                   "inline-flex min-h-[44px] items-center whitespace-nowrap border-b-2 px-3 text-[13.5px] font-bold transition-colors",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                   isActive
-                    ? "border-foreground text-foreground"
+                    ? "rounded-t-lg border-[color:var(--primary)] bg-[color:var(--accent)] text-[color:var(--accent-foreground)]"
                     : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
                 )}
               >
