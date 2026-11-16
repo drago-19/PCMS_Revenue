@@ -139,7 +139,15 @@ export function ensureSchema(): Promise<void> {
           }
 
         await client.query("SET search_path TO public");
-        await client.query(SCHEMA_SQL);
+        // DDL ต้องล็อกตารางแบบ exclusive — ถ้ามีหน้าจอเปิดค้างอ่านตารางอยู่ มันจะรอจนกว่าจะว่าง
+        // ซึ่งเคยทำให้ทุกคำขอที่ตามมาค้างเป็นนาที. ให้รอไม่เกิน 3 วินาทีแล้วเลิกพยายาม
+        // (throw → ตัว catch ด้านล่างล้าง cache ให้คำขอถัดไปลองใหม่ตอนตารางว่าง)
+        await client.query("SET LOCAL lock_timeout = '3s'");
+        try {
+          await client.query(SCHEMA_SQL);
+        } finally {
+          await client.query("SET LOCAL lock_timeout = 0").catch(() => {});
+        }
         const { reconcileAndSyncThreeFiles, refreshSummaryTables, saveOmsOrdersBatch } = await import("./ingest/import-service");
         const { detectAndParseOmsInput } = await import("./ingest/oms-parse");
         const { decompressFileBlob } = await import("./file-blob");
