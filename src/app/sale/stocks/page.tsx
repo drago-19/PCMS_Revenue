@@ -335,32 +335,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           ) : null}
         </form>
 
-        {/* ประวัติ cambios: ปุ่มสรุปรอบล่าสุด (5 นาที) + เปิดป๊อปอัปรายการ */}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Button asChild size="sm" variant="outline">
-            <Link href={listHref({ history: "1" })} scroll={false} className="gap-2">
-              ประวัติเปลี่ยนแปลง
-              {changeStats.changes > 0 ? (
-                <span className="flex items-center gap-1 text-[11.5px] font-bold">
-                  {changeStats.added > 0 ? (
-                    <span style={{ color: "var(--ok)" }}>+{changeStats.added}</span>
-                  ) : null}
-                  {changeStats.removed < 0 ? (
-                    <span style={{ color: "var(--danger)" }}>{changeStats.removed}</span>
-                  ) : null}
-                  <span className="text-muted-foreground">· {changeStats.changes} รายการ</span>
-                </span>
-              ) : null}
-            </Link>
-          </Button>
-          <span className="text-[12px] text-muted-foreground">
-            {changeStats.changes > 0
-              ? "ตัวเลขคือการเคลื่อนไหวในรอบ 5 นาทีล่าสุด"
-              : "ยังไม่มีการเคลื่อนไหวใน 5 นาทีล่าสุด"}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="กรองตามสถานะสต็อก">
+          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="กรองตามสถานะสต็อก">
           {filterTabs.map((tab) => {
             const active = tab.key === filter;
             return (
@@ -382,6 +358,30 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               </Link>
             );
           })}
+          </div>
+
+          {/* ปุ่มประวัติอยู่ขวาสุดของแถวเดียวกับปุ่มกรอง — เลขคือการเคลื่อนไหวรอบ 5 นาทีล่าสุด */}
+          <Button asChild size="sm" variant="outline" className="ms-auto shrink-0">
+            <Link
+              href={listHref({ history: "1" })}
+              scroll={false}
+              className="gap-2"
+              title="การเคลื่อนไหวสต็อกในรอบ 5 นาทีล่าสุด — กดเพื่อดูรายการ 30 นาทีล่าสุด"
+            >
+              ประวัติเปลี่ยนแปลง
+              {changeStats.changes > 0 ? (
+                <span className="flex items-center gap-1 text-[11.5px] font-bold">
+                  {changeStats.added > 0 ? (
+                    <span style={{ color: "var(--ok)" }}>+{changeStats.added}</span>
+                  ) : null}
+                  {changeStats.removed < 0 ? (
+                    <span style={{ color: "var(--danger)" }}>{changeStats.removed}</span>
+                  ) : null}
+                  <span className="text-muted-foreground">· {changeStats.changes} รายการ</span>
+                </span>
+              ) : null}
+            </Link>
+          </Button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-[12.5px]">
