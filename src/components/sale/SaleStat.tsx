@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { CompactValueToggle } from "@/components/CompactValueToggle";
 import { cn } from "@/lib/utils";
 
 /**
@@ -79,8 +80,8 @@ export function SaleStat({
           tone === "negative" && "text-[color:var(--danger)]",
         )}
       >
-        {format === "money" ? "฿" : ""}
-        {total}
+        {/* ตัวเลขยาว ๆ ย่อแบบหน้า /bills — กดที่ตัวเลขเพื่อสลับย่อ/เต็ม */}
+        <CompactValueToggle value={`${format === "money" ? "฿" : ""}${total}`} />
       </p>
       {hint ? <p className="mt-0.5 text-[11.5px] leading-4 text-muted-foreground">{hint}</p> : null}
     </div>
