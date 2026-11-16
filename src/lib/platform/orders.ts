@@ -5,6 +5,8 @@ import { query, queryOne } from "@/lib/db";
 export interface OrderRow {
   orderId: string;
   status: string;
+  /** มีสินค้าที่ติดธงพรีออเดอร์ในออเดอร์นี้ (ธงตั้งเองในระบบ) */
+  preorder: boolean;
   createTime: string | null;
   totalAmount: number;
   currency: string | null;
@@ -51,6 +53,8 @@ export interface OrderFilter {
   search?: string;
   from?: string; // YYYY-MM-DD
   to?: string; // YYYY-MM-DD
+  /** เฉพาะออเดอร์ที่มีสินค้าติดธงพรีออเดอร์ (ธงตั้งเองในระบบ) */
+  preorder?: boolean
   /** เลิกใช้แล้ว — ใช้ cursor แทน (คงไว้เพื่อไม่ให้จุดเรียกเก่าพัง) */
   page?: number;
   /** keyset: ต่อจากแถวนี้ (เวลา + เลขที่ออเดอร์) · back = ถอยไปหน้าใหม่กว่า */
@@ -70,6 +74,15 @@ function buildOrderWhere(filter: OrderFilter): { where: string[]; params: unknow
   if (filter.status) {
     params.push(filter.status);
     where.push(`o.order_status = $${params.length}::text`);
+  }
+  if (filter.preorder) {
+    where.push(`EXISTS (
+      SELECT 1 FROM platform_order_items i3
+      JOIN platform_stock s3
+        ON s3.platform = i3.platform AND s3.shop_id = i3.shop_id AND s3.sku_id = i3.sku_id
+      WHERE i3.platform = o.platform AND i3.shop_id = o.shop_id AND i3.order_id = o.order_id
+        AND (s3.is_preorder OR s3.pre_sale_type IS NOT NULL)
+    )`);
   }
   if (filter.search) {
     params.push(`%${filter.search}%`);
@@ -122,6 +135,7 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
     item_count: string;
     settlement: string | null;
     cancel_reason: string | null;
+    preorder: boolean;
   }>(
     `SELECT o.order_id,
             o.order_status,
@@ -131,7 +145,15 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
             (SELECT count(*) FROM platform_order_items i
               WHERE i.platform = o.platform AND i.shop_id = o.shop_id AND i.order_id = o.order_id)::text AS item_count,
             f.settlement_amount::text AS settlement,
-            o.cancel_reason
+            o.cancel_reason,
+            EXISTS (
+              SELECT 1
+                FROM platform_order_items i
+                JOIN platform_stock s
+                  ON s.platform = i.platform AND s.shop_id = i.shop_id AND s.sku_id = i.sku_id
+               WHERE i.platform = o.platform AND i.shop_id = o.shop_id AND i.order_id = o.order_id
+                 AND (s.is_preorder OR s.pre_sale_type IS NOT NULL)
+            ) AS preorder
      FROM platform_orders o
      -- รวมเป็นแถวเดียวต่อออเดอร์: ออเดอร์ที่มีทั้งรายการขายและ adjustment จะได้ไม่โผล่ซ้ำ
      LEFT JOIN (
@@ -185,6 +207,7 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
       itemCount: num(row.item_count),
       settlement: row.settlement === null ? null : num(row.settlement),
       cancelReason: row.cancel_reason,
+      preorder: Boolean(row.preorder),
       firstName: firstItems.get(row.order_id)?.name ?? null,
       firstImage: firstItems.get(row.order_id)?.image ?? null,
     })),
@@ -196,6 +219,10 @@ export interface OrderSummary {
   settlement: number;
   cancelled: number;
   items: number;
+  /** ชิ้นรวมของทุกออเดอร์ในช่วง (บวก quantity) */
+  pieces: number;
+  /** จำนวน SKU ที่ไม่ซ้ำ */
+  skus: number;
 }
 
 /** สรุปตามเงื่อนไขกรองเดียวกับรายการ — ใช้แสดงแถบสรุปเหนือตาราง */
@@ -214,8 +241,10 @@ export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary
     params,
   );
 
-  const itemRow = await query<{ items: string }>(
-    `SELECT count(*)::text AS items
+  const itemRow = await query<{ items: string; pieces: string; skus: string }>(
+    `SELECT count(*)::text AS items,
+            COALESCE(sum(i.quantity),0)::text AS pieces,
+            count(DISTINCT i.sku_id)::text AS skus
      FROM platform_order_items i
      JOIN platform_orders o
        ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
@@ -228,6 +257,8 @@ export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary
     settlement: num(totals[0]?.settlement),
     cancelled: num(totals[0]?.cancelled),
     items: num(itemRow[0]?.items),
+    pieces: num(itemRow[0]?.pieces),
+    skus: num(itemRow[0]?.skus),
   };
 }
 

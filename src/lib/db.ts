@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-14-v69";
+const SCHEMA_VERSION = "2026-11-14-v72";
 
 export type { CompanyId };
 
@@ -1082,6 +1082,17 @@ CREATE TABLE IF NOT EXISTS platform_stock (
 
 ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT 'TikTok';
+-- ข้อมูลสินค้าที่หน้าเว็บแสดง/ใช้ตัดสินใจ — เก็บจากรายละเอียดสินค้าตอนซิงก์
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS price NUMERIC(14,2);
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS currency TEXT;
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS product_status TEXT;
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS category TEXT;
+-- รหัสหมวดปลายทาง (ใช้ตอนสร้างสินค้าใหม่ให้อยู่หมวดเดียวกัน)
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS category_id TEXT;
+-- ธงพรีออเดอร์: TikTok ไม่มีฟิลด์นี้ใน API จึงตั้งเองราย SKU แล้ว mark ออเดอร์ที่ผูกกับ SKU นั้น
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS is_preorder BOOLEAN NOT NULL DEFAULT false;
+-- ประเภทพรีเซลจาก TikTok (pre_sale.type) — ว่าง = สินค้าปกติ
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS pre_sale_type TEXT;
 -- ต้องสร้างหลังตาราง platform_stock เท่านั้น (ก่อนหน้านี้อยู่ก่อน CREATE TABLE ทำให้สร้างฐานข้อมูลใหม่ไม่ผ่าน)
 CREATE INDEX IF NOT EXISTS platform_stock_shop_idx ON platform_stock (shop_id, quantity DESC);
 CREATE INDEX IF NOT EXISTS platform_stock_platform_shop_idx ON platform_stock (platform, shop_id, quantity DESC);

@@ -142,30 +142,69 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
 
   const moves = collected.filter((item) => before.has(item.skuId) && before.get(item.skuId) !== item.quantity);
 
-  // รูปสินค้า: ผลค้นหาไม่ส่งรูปมา ต้องขอรายละเอียดทีละสินค้า (เฉพาะที่ยังไม่มีรูป)
+  // รายละเอียดสินค้า: ผลค้นหาไม่ส่งรูป/สถานะ/ราคามา ต้องขอทีละสินค้า
+  // (เฉพาะที่ยังไม่มีข้อมูล — ครั้งแรกของแต่ละสินค้าเท่านั้น ไม่ใช่ทุกรอบ)
   const productIds = [...new Set(collected.map((item) => item.productId).filter((id): id is string => Boolean(id)))];
-  const haveImage = await query<{ product_id: string }>(
-    `SELECT DISTINCT product_id FROM platform_stock WHERE platform = $1 AND shop_id = $2 AND coalesce(image_url, '') <> ''`,
+  const haveMeta = await query<{ product_id: string }>(
+    `SELECT DISTINCT product_id FROM platform_stock
+      WHERE platform = $1 AND shop_id = $2
+        AND coalesce(image_url, '') <> '' AND product_status IS NOT NULL AND category_id IS NOT NULL`,
     [TIKTOK_PLATFORM, shopId],
   );
-  const withImage = new Set(haveImage.map((row) => row.product_id));
-  const needImage = productIds.filter((id) => !withImage.has(id)).slice(0, 200);
+  const withMeta = new Set(haveMeta.map((row) => row.product_id));
+  const needMeta = productIds.filter((id) => !withMeta.has(id)).slice(0, 200);
 
-  if (needImage.length > 0) {
-    const found: Array<{ productId: string; imageUrl: string }> = [];
-    for (let index = 0; index < needImage.length; index += 3) {
-      const batch = needImage.slice(index, index + 3);
+  type DetailPayload = {
+    status?: string;
+    category_chains?: Array<{ id?: string; local_name?: string; name?: string; is_leaf?: boolean }>;
+    main_images?: Array<{ thumb_urls?: string[]; uri?: string }>;
+    skus?: Array<{
+      id?: string;
+      price?: {
+        tax_exclusive?: { currency?: string; sale_price?: string };
+        sale_price?: string;
+        currency?: string;
+        pre_sale?: { type?: string; fulfillment_type?: { handling_duration_days?: number; release_date?: number } };
+      };
+    }>;
+  };
+
+  if (needMeta.length > 0) {
+    const found: Array<{
+      productId: string;
+      imageUrl: string | null;
+      status: string | null;
+      category: string | null;
+      categoryId: string | null;
+      prices: Array<{ skuId: string; price: string | null; currency: string | null; preSaleType: string | null }>;
+    }> = [];
+
+    for (let index = 0; index < needMeta.length; index += 3) {
+      const batch = needMeta.slice(index, index + 3);
       const results = await Promise.all(
         batch.map(async (productId) => {
           try {
-            const detail = await callTikTokApi<{ main_images?: Array<{ thumb_urls?: string[]; uri?: string }> }>({
+            const detail = await callTikTokApi<DetailPayload>({
               config: config.tiktok!,
               accessToken: account.accessToken!,
               path: `/product/202309/products/${productId}`,
               query: { shop_cipher: account.shopCipher! },
             });
             const image = detail.main_images?.[0]?.thumb_urls?.[0] ?? detail.main_images?.[0]?.uri ?? null;
-            return image ? { productId, imageUrl: image } : null;
+            const category =
+              (detail.category_chains ?? [])
+                .map((chain) => chain.local_name ?? chain.name ?? "")
+                .filter(Boolean)
+                .join(" › ") || null;
+            const categoryId =
+              [...(detail.category_chains ?? [])].reverse().find((chain) => chain.id)?.id ?? null;
+            const prices = (detail.skus ?? []).flatMap((sku) => {
+              if (!sku.id) return [];
+              const price = sku.price?.tax_exclusive?.sale_price ?? sku.price?.sale_price ?? null;
+              const currency = sku.price?.tax_exclusive?.currency ?? sku.price?.currency ?? null;
+              return [{ skuId: String(sku.id), price, currency, preSaleType: sku.price?.pre_sale?.type ?? null }];
+            });
+            return { productId, imageUrl: image, status: detail.status ?? null, category, categoryId, prices };
           } catch {
             return null;
           }
@@ -176,11 +215,48 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
 
     if (found.length > 0) {
       await query(
-        `UPDATE platform_stock s SET image_url = item.image_url
-           FROM unnest($3::text[], $4::text[]) AS item(product_id, image_url)
+        `UPDATE platform_stock s
+            SET image_url = coalesce(item.image_url, s.image_url),
+                product_status = coalesce(item.status, s.product_status),
+                category = coalesce(item.category, s.category),
+                category_id = coalesce(item.category_id, s.category_id)
+           FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+                AS item(product_id, image_url, status, category, category_id)
           WHERE s.platform = $1 AND s.shop_id = $2 AND s.product_id = item.product_id`,
-        [TIKTOK_PLATFORM, shopId, found.map((item) => item.productId), found.map((item) => item.imageUrl)],
+        [
+          TIKTOK_PLATFORM,
+          shopId,
+          found.map((item) => item.productId),
+          found.map((item) => item.imageUrl),
+          found.map((item) => item.status),
+          found.map((item) => item.category),
+          found.map((item) => item.categoryId),
+        ],
       );
+
+      const priced = found.flatMap((item) =>
+        item.prices
+          .filter((row) => row.price !== null || row.currency !== null)
+          .map((row) => ({ ...row })),
+      );
+      if (priced.length > 0) {
+        await query(
+          `UPDATE platform_stock s
+              SET price = nullif(item.price, '')::numeric,
+                  currency = nullif(item.currency, ''),
+                  pre_sale_type = nullif(item.pre_sale_type, '')
+             FROM unnest($3::text[], $4::text[], $5::text[], $6::text[]) AS item(sku_id, price, currency, pre_sale_type)
+            WHERE s.platform = $1 AND s.shop_id = $2 AND s.sku_id = item.sku_id`,
+          [
+            TIKTOK_PLATFORM,
+            shopId,
+            priced.map((row) => row.skuId),
+            priced.map((row) => row.price ?? ""),
+            priced.map((row) => row.currency ?? ""),
+            priced.map((row) => row.preSaleType ?? ""),
+          ],
+        );
+      }
     }
   }
 
@@ -201,6 +277,14 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
       ],
     );
   }
+
+  // บันทึกรอบที่ดึงสำเร็จ เพื่อให้หน้าจอแสดง "ดึงล่าสุดเมื่อไร" ได้จริง
+  // แม้รอบนั้นไม่มีค่าไหนเปลี่ยน (ไม่เช่นนั้นเวลาจะค้างอยู่ที่การเปลี่ยนครั้งสุดท้าย)
+  await query(
+    `INSERT INTO platform_sync_runs (platform, kind, status, rows_written, started_at, finished_at)
+     VALUES ($1, 'stock', 'done', $2, now(), now())`,
+    [TIKTOK_PLATFORM, moves.length],
+  );
 
   return { skus: collected.length, changed: moves.length };
 }
@@ -442,8 +526,13 @@ export async function getStockMovements(
 }
 
 export async function getLastStockSync(shopId: string, platform = TIKTOK_PLATFORM): Promise<string | null> {
+  // ใช้เวลาทั้งสองอย่าง: รอบที่ดึงมาล่าสุด และเวลาที่ค่าจริงเปลี่ยนล่าสุด
+  // (ถ้าดึงแล้วไม่มีอะไรเปลี่ยน max(updated_at) จะค้างเก่า — ผู้ใช้จะคิดว่าข้อมูลเก่า)
   const rows = await query<{ at: string | null }>(
-    `SELECT max(updated_at)::text AS at FROM platform_stock WHERE platform = $1 AND shop_id = $2`,
+    `SELECT greatest(
+              coalesce((SELECT max(finished_at) FROM platform_sync_runs WHERE platform = $1 AND kind = 'stock'), 'epoch'::timestamptz),
+              coalesce((SELECT max(updated_at) FROM platform_stock WHERE platform = $1 AND shop_id = $2), 'epoch'::timestamptz)
+            )::text AS at`,
     [platform, shopId],
   );
   return rows[0]?.at ?? null;
@@ -467,6 +556,15 @@ export type SkuDetail = {
   warehouses: Array<{ warehouseId: string; quantity: number }>;
   updatedAt: string;
   imageUrl: string | null;
+  /** ราคาขาย (จาก TikTok) และสกุลเงิน — null เมื่อยังไม่เคยดึงรายละเอียด */
+  price: number | null;
+  currency: string | null;
+  /** สถานะสินค้าบน TikTok เช่น ACTIVATE / DRAFT */
+  productStatus: string | null;
+  /** เส้นทางหมวดหมู่ เช่น "ของเล่นและงานอดิเรก › ของเล่นก่อสร้าง" */
+  category: string | null;
+  /** ธงพรีออเดอร์ที่ตั้งเองในระบบ (TikTok ไม่ส่งฟิลด์นี้มา) */
+  isPreorder: boolean;
   orders: SkuOrderRow[];
   movements: StockMovement[];
 };
@@ -486,9 +584,14 @@ export async function getSkuDetail(
     updated_at: string;
     image_url: string | null;
     product_id: string | null;
+    price: string | null;
+    currency: string | null;
+    product_status: string | null;
+    category: string | null;
+    is_preorder: boolean;
   }>(
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
-            s.image_url, s.product_id
+            s.image_url, s.product_id, s.price::text AS price, s.currency, s.product_status, s.category, s.is_preorder
        FROM platform_stock s
       WHERE s.platform = $1 AND s.shop_id = $2 AND s.sku_id = $3
       LIMIT 1`,
@@ -620,6 +723,11 @@ export async function getSkuDetail(
     updatedAt: row.updated_at,
     productId: row.product_id ?? null,
     imageUrl,
+    price: row.price === null ? null : Number(row.price),
+    currency: row.currency,
+    productStatus: row.product_status,
+    category: row.category,
+    isPreorder: Boolean(row.is_preorder),
     orders: orders.map((order) => ({
       orderId: order.order_id,
       quantity: Number(order.quantity ?? 0),

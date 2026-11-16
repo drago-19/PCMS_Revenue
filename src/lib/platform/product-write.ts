@@ -94,3 +94,68 @@ export async function updateProductImages({
   if (failure?.message) throw new Error(failure.message);
   return { ok: true };
 }
+
+/**
+ * สร้างสินค้าใหม่บน TikTok (สถานะเริ่มต้นเป็นแบบร่าง)
+ * ต้องมี uri ของรูปที่อัปโหลดด้วย use_case=MAIN_IMAGE แล้ว และหมวดปลายทางที่มีอยู่จริง
+ */
+export async function createProduct({
+  shopId,
+  title,
+  description,
+  categoryId,
+  imageUri,
+  sellerSku,
+  price,
+  quantity,
+  weightGrams,
+  warehouseId,
+}: {
+  shopId: string;
+  title: string;
+  description: string;
+  categoryId: string;
+  imageUri: string;
+  sellerSku: string;
+  price: number;
+  quantity: number;
+  weightGrams: number;
+  warehouseId: string;
+}): Promise<{ productId: string }> {
+  const ctx = await requireShop(shopId);
+  const result = await callTikTokApi<{
+    data?: { product_id?: string };
+    product_id?: string;
+    errors?: Array<{ message?: string }>;
+  }>({
+    config: ctx.appConfig,
+    accessToken: ctx.accessToken,
+    query: { shop_cipher: ctx.shopCipher },
+    method: "POST",
+    path: "/product/202309/products",
+    body: {
+      title,
+      description,
+      category_id: categoryId,
+      // ร้านที่ขายหลายภูมิภาคต้องใช้หมวดเวอร์ชัน 2 (TikTok ปฏิเสธ v1 ด้วย error ชัดเจน)
+      category_version: "v2",
+      main_images: [{ uri: imageUri }],
+      package_weight: { value: String(weightGrams), unit: "GRAM" },
+      skus: [
+        {
+          seller_sku: sellerSku,
+          // ตามสคีมาของ TikTok: price = { amount, currency } (amount คือราคาขายจริงก่อนลด)
+          price: { amount: price.toFixed(2), currency: "THB" },
+          inventory: [{ warehouse_id: warehouseId, quantity }],
+        },
+      ],
+    },
+  });
+
+  const failure = result.errors?.[0];
+  if (failure?.message) throw new Error(failure.message);
+
+  const productId = result.data?.product_id ?? result.product_id ?? null;
+  if (!productId) throw new Error("TikTok ไม่คืนรหัสสินค้า");
+  return { productId };
+}
