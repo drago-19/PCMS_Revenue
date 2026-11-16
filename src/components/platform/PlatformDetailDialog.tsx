@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PLATFORM_THEME } from "@/lib/platform/theme";
 import { parseStamp } from "@/lib/platform/period";
 import type { DetailView } from "@/lib/platform/details";
 
@@ -70,7 +71,7 @@ export function PlatformDetailDialog({ view, closeHref }: { view: DetailView; cl
         if (!open) router.push(closeHref);
       }}
     >
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl" style={PLATFORM_THEME}>
         <DialogHeader className="pr-11">
           <DialogTitle className="text-[16px] leading-6">{view.title}</DialogTitle>
           <p className="text-[12px] leading-5 text-muted-foreground">{view.description}</p>

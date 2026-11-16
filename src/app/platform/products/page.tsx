@@ -1,6 +1,5 @@
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformProductsView } from "@/components/platform/PlatformProductsView";
-import { PlatformNav } from "@/components/platform/PlatformNav";
 import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
 import { PlatformDetail } from "@/components/platform/PlatformDetailSlot";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
@@ -56,8 +55,6 @@ export default async function PlatformProductsPage({ searchParams }: { searchPar
       />
 
       <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
-        <PlatformNav active="products" from={fromParam} to={toParam} shop={selectedShop} platform={platform} />
-
         <PlatformPeriodBar
           basePath="/platform/products"
           from={fromParam}

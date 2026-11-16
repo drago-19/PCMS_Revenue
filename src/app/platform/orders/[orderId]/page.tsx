@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
-import { PlatformNav } from "@/components/platform/PlatformNav";
 import { thaiDateTime } from "@/lib/platform/period";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -62,8 +61,6 @@ export default async function OrderDetailPage({
         title={`ออเดอร์ ${order.orderId}`}
         description={`${order.currency ?? "THB"} · ${order.items.length} รายการ · ยอดสั่งซื้อ ฿${money(order.totalAmount)}`}
       />
-
-      <PlatformNav active="orders" shop={shop} platform={platform} />
 
       <div className="grid grid-cols-1 gap-3 min-[980px]:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-3">

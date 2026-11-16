@@ -1,6 +1,5 @@
 import { PageHeader } from "@/components/PageHeader";
 import { PlatformStat, signedMoney } from "@/components/platform/PlatformCards";
-import { PlatformNav } from "@/components/platform/PlatformNav";
 import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
 import { PlatformDetail } from "@/components/platform/PlatformDetailSlot";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
@@ -58,8 +57,6 @@ export default async function PlatformStatementsPage({
       />
 
       <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
-      <PlatformNav active="statements" from={params.from} to={params.to} platform={platform} />
-
       <PlatformPeriodBar
         basePath="/platform/statements"
         from={params.from}

@@ -1,14 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader, StatCard } from "@/components/PageHeader";
-import { PlatformNav } from "@/components/platform/PlatformNav";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { CloseableDialog } from "@/components/platform/CloseableDialog";
-import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import { syncShopeeStock } from "@/lib/platform/shopee-sync";
 import {
@@ -23,6 +20,10 @@ import {
 } from "@/lib/platform/stock";
 import { isSandboxShopName } from "@/lib/platform/platforms";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
+import { CloseableDialog } from "@/components/platform/CloseableDialog";
+import { ClickableRow } from "@/components/platform/ClickableRow";
+import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PLATFORM_THEME } from "@/lib/platform/theme";
 import { cn } from "@/lib/utils";
 import {
   getActiveShopId,
@@ -32,6 +33,8 @@ import {
 import { thaiDateTime } from "@/lib/platform/period";
 import { PlatformAutoRefresh } from "@/components/PlatformAutoRefresh";
 import { StockAdjustForm } from "@/components/platform/StockAdjustForm";
+import { ProductTitleForm } from "@/components/platform/ProductTitleForm";
+import { ProductImageForm } from "@/components/platform/ProductImageForm";
 import { StockHoldActions } from "@/components/platform/StockHoldActions";
 import { listOpenHolds } from "@/lib/platform/stock-hold";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
@@ -161,6 +164,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const search = (params.q ?? "").trim();
   const filter: StockListFilter =
     params.filter === "out" || params.filter === "low" ? params.filter : "all";
+  // ป๊อปอัปแยกหน้าที่: ค่าเริ่มต้น = ข้อมูลสินค้า, "stock" = ปรับสต็อก, "edit" = แก้ไขสินค้า
+  const actionParam = (params as Record<string, string | undefined>).action;
+  const action = actionParam === "stock" || actionParam === "edit" ? actionParam : "info";
   const [list, counts, movements, lastSync, skuDetail] = await Promise.all([
     getStockPage(shopId, { search, filter, page: pageNumber, pageSize: PAGE_SIZE, platform: dbPlatform }),
     getStockCounts(shopId, dbPlatform),
@@ -243,8 +249,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         shop={shopId}
         connectedPlatforms={connectedPlatforms}
       />
-
-      <PlatformNav active="stocks" shop={shopId} platform={platform} />
 
       <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">
         <span>จำนวนคงเหลือดึงจาก {platformTab(platform).label} เข้า DB เราอัตโนมัติ — หน้านี้รีเฟรชตัวเองให้เห็นค่าล่าสุด</span>
@@ -334,8 +338,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-[12.5px]">
-            <thead>
-              <tr className="border-b border-border text-[11.5px] text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <tr className="border-b border-border text-[11px] font-bold tracking-wide uppercase text-muted-foreground">
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัส SKU</th>
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">สินค้า</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือรวม</th>
@@ -346,15 +350,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.skuId} className="border-b border-border last:border-0">
+                <ClickableRow
+                  key={row.skuId}
+                  href={`${listHref({ page: current })}&sku=${encodeURIComponent(row.skuId)}`}
+                  label={`เปิดรายละเอียด ${row.sellerSku || row.skuId}`}
+                >
                   <td className="py-1.5 pr-2">
-                    <Link
-                      href={`${listHref({ page: current })}&sku=${encodeURIComponent(row.skuId)}`}
-                      scroll={false}
-                      className="mono underline underline-offset-2 hover:text-foreground"
-                    >
+                    <span className="mono underline underline-offset-2">
                       {row.sellerSku || row.skuId}
-                    </Link>
+                    </span>
                   </td>
                   <td className="py-1.5 pr-2">
                     <span className="flex min-w-0 items-center gap-2">
@@ -374,7 +378,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                   </td>
                   <td className="mono py-1.5 pr-2 text-right text-muted-foreground">{num(row.warehouses.length)}</td>
                   <td className="py-1.5 text-right text-muted-foreground">{thaiDateTime(row.updatedAt)}</td>
-                </tr>
+                </ClickableRow>
               ))}
               {rows.length === 0 ? (
                 <tr>
@@ -476,10 +480,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       </p>
 
       {skuDetail ? (
-        <CloseableDialog
-          closeHref={listHref({ page: current })}
-        >
-          <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
+        <CloseableDialog closeHref={listHref({ page: current })}>
+          <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-3xl" style={PLATFORM_THEME}>
             <DialogHeader className="pr-11">
               <DialogTitle className="text-[16px] leading-6">
                 {skuDetail.productName ?? skuDetail.sellerSku ?? "สินค้า"}
@@ -490,7 +492,36 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               </p>
             </DialogHeader>
 
-            {platform !== "shopee" && skuDetail.productId ? (
+            {/* สองงานแยกป๊อปอัปกัน: ปรับสต็อก กับ แก้ไขสินค้า */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button asChild size="sm" variant={action === "stock" ? "default" : "outline"}>
+                <Link
+                  href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}&action=stock`}
+                  scroll={false}
+                >
+                  ปรับสต็อก
+                </Link>
+              </Button>
+              <Button asChild size="sm" variant={action === "edit" ? "default" : "outline"}>
+                <Link
+                  href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}&action=edit`}
+                  scroll={false}
+                >
+                  แก้ไขสินค้า
+                </Link>
+              </Button>
+              {action !== "info" ? (
+                <Link
+                  href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}`}
+                  scroll={false}
+                  className="text-[12px] font-bold text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  ← กลับไปข้อมูลสินค้า
+                </Link>
+              ) : null}
+            </div>
+
+            {platform !== "shopee" && skuDetail.productId && action === "stock" ? (
               <StockHoldActions
                 shopId={shopId ?? ""}
                 productId={skuDetail.productId}
@@ -503,7 +534,23 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               />
             ) : null}
 
-            {platform !== "shopee" && skuDetail.productId ? (
+            {platform !== "shopee" && skuDetail.productId && isSandboxShopName(shopName) && action === "edit" ? (
+              <ProductTitleForm
+                shopId={shopId}
+                productId={skuDetail.productId}
+                title={skuDetail.productName ?? ""}
+              />
+            ) : null}
+
+            {platform !== "shopee" && skuDetail.productId && isSandboxShopName(shopName) && action === "edit" ? (
+              <ProductImageForm
+                shopId={shopId}
+                productId={skuDetail.productId}
+                currentImageUrl={skuDetail.imageUrl ? platformImageSrc(skuDetail.imageUrl) : null}
+              />
+            ) : null}
+
+            {platform !== "shopee" && skuDetail.productId && action === "stock" ? (
               <StockAdjustForm
                 shopId={shopId}
                 productId={skuDetail.productId}
@@ -515,24 +562,36 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
             ) : null}
 
             <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3">
-                <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
+              <div className="flex flex-col gap-3 min-[520px]:flex-row min-[520px]:items-start">
+                <a
+                  href={skuDetail.imageUrl ?? "#"}
+                  target={skuDetail.imageUrl ? "_blank" : undefined}
+                  rel="noreferrer"
+                  aria-label={skuDetail.imageUrl ? "เปิดดูรูปสินค้าขนาดเต็ม" : "ไม่มีรูปสินค้า"}
+                  className="block size-20 shrink-0 overflow-hidden rounded-xl border border-border bg-muted"
+                >
                   {skuDetail.imageUrl ? (
-                    <a
-                      href={skuDetail.imageUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label="เปิดดูรูปสินค้าขนาดเต็ม"
-                      className="block size-full"
-                    >
-                      <img src={platformImageSrc(skuDetail.imageUrl) ?? skuDetail.imageUrl} alt="" className="size-full object-cover" />
-                    </a>
+                    <img
+                      src={platformImageSrc(skuDetail.imageUrl) ?? skuDetail.imageUrl}
+                      alt=""
+                      className="size-full object-cover"
+                    />
                   ) : null}
-                </span>
-                <div>
-                  <p className="text-[12px] text-muted-foreground">คงเหลือรวม</p>
-                  <p className="mono text-[24px] font-bold leading-tight">{num(skuDetail.quantity)}</p>
-                </div>
+                </a>
+                <dl className="grid flex-1 grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-border/70 bg-card p-3">
+                    <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">คงเหลือรวม</dt>
+                    <dd className="mono text-[26px] font-bold leading-tight">{num(skuDetail.quantity)}</dd>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-card p-3">
+                    <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">จำนวนคลัง</dt>
+                    <dd className="mono text-[26px] font-bold leading-tight">{num(skuDetail.warehouses.length)}</dd>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-card p-3">
+                    <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">กำลังตีกลับ</dt>
+                    <dd className="mono text-[26px] font-bold leading-tight">{num(skuDetail.inTransit)}</dd>
+                  </div>
+                </dl>
               </div>
 
               {platform === "shopee" ? (
@@ -543,12 +602,14 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 />
               ) : null}
 
+              <div className="grid gap-5 min-[720px]:grid-cols-2 min-[720px]:items-start">
+              <div className="flex min-w-0 flex-col gap-4">
               {skuDetail.warehouses.length > 0 ? (
                 <div>
                   <h3 className="text-[13px] font-bold">แยกตามคลัง</h3>
-                  <ul className="flex list-none flex-col gap-1 p-0 text-[12.5px]">
+                  <ul className="grid list-none grid-cols-1 gap-1 p-0 text-[12.5px] min-[520px]:grid-cols-2">
                     {skuDetail.warehouses.map((warehouse) => (
-                      <li key={warehouse.warehouseId} className="flex justify-between gap-2">
+                      <li key={warehouse.warehouseId} className="flex justify-between gap-2 rounded-md bg-muted/40 px-2 py-1">
                         <span className="mono text-muted-foreground">{warehouse.warehouseId}</span>
                         <span className="mono font-bold">{num(warehouse.quantity)}</span>
                       </li>
@@ -586,7 +647,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 )}
               </div>
 
-              <div>
+              </div>
+              <div className="min-w-0">
                 <h3 className="text-[13px] font-bold">ประวัติการเปลี่ยนแปลงที่บันทึกไว้</h3>
                 {skuDetail.movements.length === 0 ? (
                   <p className="text-[12.5px] text-muted-foreground">
@@ -611,6 +673,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                     ))}
                   </ul>
                 )}
+              </div>
               </div>
             </div>
           </DialogContent>

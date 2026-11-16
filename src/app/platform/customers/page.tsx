@@ -7,7 +7,6 @@ import { EmptyState, PageHeader } from "@/components/PageHeader";
 import { PlatformStat } from "@/components/platform/PlatformCards";
 import { PlatformDetail } from "@/components/platform/PlatformDetailSlot";
 import { detailParam, hrefWithDetail } from "@/lib/platform/details";
-import { PlatformNav } from "@/components/platform/PlatformNav";
 import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { IconReceipt } from "@/components/icons";
@@ -182,8 +181,6 @@ export default async function CustomersPage({ searchParams }: { searchParams: Se
       />
 
       <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
-        <PlatformNav active="customers" from={fromParam} to={toParam} shop={selectedShop} platform={platform} />
-
         <PlatformPeriodBar
           basePath="/platform/customers"
           from={fromParam || undefined}

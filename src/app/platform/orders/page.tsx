@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { EmptyState, PageHeader } from "@/components/PageHeader";
 import { PlatformStat } from "@/components/platform/PlatformCards";
-import { PlatformNav } from "@/components/platform/PlatformNav";
 import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
 import { CloseableDialog } from "@/components/platform/CloseableDialog";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { parseStamp } from "@/lib/platform/period";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
+import { PLATFORM_THEME } from "@/lib/platform/theme";
 import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -166,8 +166,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
       />
 
       <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
-      <PlatformNav active="orders" from={fromParam} to={toParam} shop={shop} platform={platform} />
-
       {!isAppConfigured && accounts.length === 0 ? (
         <EmptyState
           icon={<IconReceipt size={22} aria-hidden="true" />}
@@ -344,7 +342,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
 
       {detail ? (
         <CloseableDialog closeHref={queryFor({})}>
-          <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl" style={PLATFORM_THEME}>
             <DialogHeader className="pr-11">
               <DialogTitle className="flex flex-wrap items-center gap-2 text-[16px]">
                 <span className="mono">ออเดอร์ {detail.orderId}</span>
