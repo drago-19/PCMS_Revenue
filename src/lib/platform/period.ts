@@ -87,7 +87,9 @@ export function periodPresets(): PeriodPreset[] {
   return [
     { key: "today", label: "วันนี้", from: today(), to: today() },
     { key: "7d", label: "7 วัน", from: daysAgo(7) },
-    { key: DEFAULT_PRESET_KEY, label: "30 วัน" },
+    // ต้องส่งช่วงวันที่จริง ไม่ใช่ปล่อยว่าง: หน้าออเดอร์กรองด้วย from/to ตรง ๆ
+    // ถ้าเว้นว่างจะเท่ากับไม่กรองเลย แล้วยอด \"30 วัน\" ออกมาเท่ากับ \"ทั้งปี\"
+    { key: DEFAULT_PRESET_KEY, label: "30 วัน", from: daysAgo(29), to: today() },
     { key: "month", label: "เดือนนี้", from: monthStart() },
     { key: "prevmonth", label: "เดือนก่อน", from: prevMonthStart(), to: prevMonthEnd() },
     { key: "year", label: "ทั้งปี 69", from: YEAR_START },
@@ -100,7 +102,8 @@ export function periodPresets(): PeriodPreset[] {
  * คืน null เมื่อเป็นช่วงที่ผู้ใช้เลือกเองด้วยปฏิทิน
  */
 export function activePresetKey(from?: string, to?: string): string | null {
-  if (!from && !to) return DEFAULT_PRESET_KEY;
+  // ไม่มีช่วงวันที่ = ยังไม่ได้เลือกช่วง (ข้อมูลทั้งก้อน) — ไม่ติดป้ายช่วงใด
+  if (!from && !to) return null;
   const found = periodPresets().find(
     (preset) => preset.from && preset.from === from && (preset.to ?? "") === (to ?? ""),
   );

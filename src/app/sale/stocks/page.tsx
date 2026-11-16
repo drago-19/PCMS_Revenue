@@ -38,7 +38,6 @@ import { SaleAutoRefresh } from "@/components/sale/SaleAutoRefresh";
 import { SaleStockAdjustForm } from "@/components/sale/SaleStockAdjustForm";
 import { ProductTitleForm } from "@/components/platform/ProductTitleForm";
 import { ProductImageForm } from "@/components/platform/ProductImageForm";
-import { SaleChangeToast } from "@/components/sale/SaleChangeToast";
 import { StockHoldActions } from "@/components/platform/StockHoldActions";
 import { listOpenHolds } from "@/lib/platform/stock-hold";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
@@ -303,12 +302,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         />
       </div>
 
-      <SaleChangeToast
-        // ใช้จำนวน "รายการที่สต็อกขยับวันนี้" ของทั้งร้านเป็นสัญญาณ — จึงเด้งแม้กรองสถานะอื่นอยู่
-        title="สต็อกเปลี่ยน"
-        scopeKey={["stockfeed", shopId ?? "", dbPlatform].join("|")}
-        metrics={[{ label: "รายการที่ขยับวันนี้", value: changeStats.today }]}
-      />
 
       <Card padding="padded" className="flex min-w-0 flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { SALE_THEME } from "@/lib/sale/theme";
 import { SaleTabs } from "@/components/sale/SaleTabs";
+import { SalePulseToast } from "@/components/sale/SalePulseToast";
 
 // หมวด "ฝ่ายขาย" (/sale) — เส้นทางแยกจาก /platform ของ Dragon19 โดยสิ้นเชิง
 // ธีมเมนูและหัวข้อหน้าของหมวดนี้อยู่ในโฟลเดอร์ของตัวเอง แก้แล้วไม่กระทบหน้าฝั่ง CEO
@@ -12,6 +13,8 @@ export default function SaleLayout({ children }: { children: ReactNode }) {
     >
       <SaleTabs />
       <div className="min-w-0 flex-1">{children}</div>
+      {/* ตัวเฝ้าของใหม่: เด้งแจ้งเตือนแม้หน้ากำลังกรองสถานะอื่นอยู่ */}
+      <SalePulseToast />
     </div>
   );
 }

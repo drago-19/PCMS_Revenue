@@ -7,7 +7,6 @@ import { CloseableDialog } from "@/components/platform/CloseableDialog";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { parseStamp } from "@/lib/platform/period";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
-import { SaleChangeToast } from "@/components/sale/SaleChangeToast";
 import { SaleAutoRefresh } from "@/components/sale/SaleAutoRefresh";
 import { SALE_THEME } from "@/lib/sale/theme";
 import { IconReceipt } from "@/components/icons";
@@ -56,7 +55,7 @@ const STATUS_STYLE: Record<string, string> = {
   DELIVERED: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
   COMPLETED: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
   CANCELLED: "border-[#f5c2bd] bg-[#fdf3f2] text-[#8a1c14]",
-  UNPAID: "border-border bg-muted text-muted-foreground",
+  UNPAID: "border-[#c7d2fe] bg-[#eef2ff] text-[#3730a3]",
   ON_HOLD: "border-border bg-muted text-muted-foreground",
 };
 
@@ -243,10 +242,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                     aria-selected={active}
                     className={cn(
                       "inline-flex min-h-[38px] items-center rounded-full border px-3 text-[12.5px] font-bold transition-colors",
-                      active
-                        ? (tab.key && STATUS_STYLE[tab.key]) ||
-                          "border-[color:var(--primary)] bg-[color:var(--primary)] text-[color:var(--primary-foreground)]"
-                        : "border-border text-muted-foreground hover:bg-muted",
+                      // ปุ่มมีสีตามสถานะตลอดเวลา — กดแล้วเพิ่มความชัด (ไม่ใช่เปลี่ยนจากเทาเป็นสี)
+                      (tab.key && STATUS_STYLE[tab.key]) || "border-border text-muted-foreground",
+                      active && "ring-2 ring-current/30 ring-offset-1 ring-offset-[color:var(--background)]",
+                      !active && "opacity-90 hover:opacity-100",
                     )}
                   >
                     {tab.label}
@@ -286,13 +285,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               scopeKey={summaryScope}
             />
           </div>
-
-          <SaleChangeToast
-            // ใช้ยอดออเดอร์ของวันนี้ "ทั้งร้าน" เป็นสัญญาณ — จึงเด้งแม้กำลังกรองสถานะอื่นอยู่
-            scopeKey={["feed", shop ?? "", dbPlatform].join("|")}
-            title="มีออเดอร์ใหม่"
-            metrics={[{ label: "ออเดอร์วันนี้", value: ordersToday }]}
-          />
 
           <Card padding="padded" className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center justify-between gap-2 text-[12.5px] text-muted-foreground">
