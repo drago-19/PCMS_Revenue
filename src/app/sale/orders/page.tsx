@@ -128,6 +128,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
     getOrderSummary(filter),
     detailId ? getPlatformOrder(detailId, shop, dbPlatform) : Promise.resolve(null),
   ]);
+  // ชุดข้อมูลที่กำลังดูอยู่ — ใช้ทั้งกับการแจ้งเตือนและป้ายส่วนต่าง (เปลี่ยนชุด = ไม่ใช่ของใหม่)
+  const summaryScope = [shop, status, search, fromParam, toParam, preorderOnly ? "pre" : "", afterRaw ?? "", beforeRaw ?? ""].join("|");
   const isAppConfigured = platform === "shopee" ? Boolean(config.shopee) : Boolean(config.tiktok);
 
   // เหตุการณ์พัสดุแบบละเอียด (ถึงศูนย์คัดแยก/นำส่ง) — ดึงเฉพาะออเดอร์ที่เปิดดูอยู่
@@ -266,16 +268,21 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
           {/* สรุปตามเงื่อนไขที่กรองอยู่ */}
           {/* สรุปช่วงที่กรองอยู่: ออเดอร์ · ชิ้นรวม · สินค้า (SKU ไม่ซ้ำ) · ยอดโอน */}
           <div className="grid grid-cols-2 gap-2.5 min-[900px]:grid-cols-5">
-            <SaleStat label="ออเดอร์" value={summary.orders} />
-            <SaleStat label="ชิ้นรวม" value={summary.pieces} />
-            <SaleStat label="สินค้า (SKU)" value={summary.skus} />
-            <SaleStat label="ยอดโอนรวม" value={summary.settlement} format="money" tone="positive" />
-            <SaleStat label="ยกเลิก" value={summary.cancelled} tone={summary.cancelled > 0 ? "negative" : "default"} />
+            <SaleStat label="ออเดอร์" value={summary.orders} scopeKey={summaryScope} />
+            <SaleStat label="ชิ้นรวม" value={summary.pieces} scopeKey={summaryScope} />
+            <SaleStat label="สินค้า (SKU)" value={summary.skus} scopeKey={summaryScope} />
+            <SaleStat label="ยอดโอนรวม" value={summary.settlement} format="money" tone="positive" scopeKey={summaryScope} />
+            <SaleStat
+              label="ยกเลิก"
+              value={summary.cancelled}
+              tone={summary.cancelled > 0 ? "negative" : "default"}
+              scopeKey={summaryScope}
+            />
           </div>
 
           <SaleChangeToast
             // เปลี่ยนสถานะ/คำค้น/ช่วงวันที่/ร้าน = คนละชุดข้อมูล ห้ามเทียบข้ามกัน
-            scopeKey={["orders", shop, status, search, fromParam, toParam, preorderOnly ? "pre" : "", afterRaw ?? "", beforeRaw ?? ""].join("|")}
+            scopeKey={summaryScope}
             metrics={[
               { label: "ออเดอร์", value: summary.orders },
               { label: "ชิ้นรวม", value: summary.pieces },

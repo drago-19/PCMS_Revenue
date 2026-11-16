@@ -183,6 +183,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       ? list.rows
       : (await getStockPage(shopId, { search, filter, page: current, pageSize: PAGE_SIZE, platform: dbPlatform })).rows;
 
+  // ชุดข้อมูลที่กำลังดูอยู่ — ใช้ทั้งกับการแจ้งเตือนและป้ายส่วนต่าง
+  const stockScope = [shopId ?? "", platform, search, filter, params.page ?? ""].join("|");
   const totalQty = counts.quantity;
   const inTransit = counts.inTransit;
   const outOfStock = counts.out;
@@ -276,20 +278,26 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       ) : null}
 
       <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
-        <SaleStat label="SKU ทั้งหมด" value={counts.all} hint={`นับเฉพาะที่มีใน ${platformTab(platform).label}`} />
-        <SaleStat label="ชิ้นคงเหลือรวม" value={totalQty} tone="positive" hint="รวมทุก SKU ทุกคลัง" />
+        <SaleStat label="SKU ทั้งหมด" value={counts.all} scopeKey={stockScope} hint={`นับเฉพาะที่มีใน ${platformTab(platform).label}`} />
+        <SaleStat label="ชิ้นคงเหลือรวม" value={totalQty} tone="positive" scopeKey={stockScope} hint="รวมทุก SKU ทุกคลัง" />
         <SaleStat
           label="สินค้าหมด"
           value={outOfStock}
           tone={outOfStock > 0 ? "negative" : "default"}
+          scopeKey={stockScope}
           hint="คงเหลือ 0 ชิ้น"
         />
-        <SaleStat label="กำลังตีกลับ" value={inTransit} hint="ลูกค้าส่งคืนแล้ว แต่ของยังไม่ถึงร้าน" />
+        <SaleStat
+          label="กำลังตีกลับ"
+          value={inTransit}
+          scopeKey={stockScope}
+          hint="ลูกค้าส่งคืนแล้ว แต่ของยังไม่ถึงร้าน"
+        />
       </div>
 
       <SaleChangeToast
         title="สต็อกอัปเดตแล้ว"
-        scopeKey={["stocks", shopId ?? "", platform, search, filter, params.page ?? ""].join("|")}
+        scopeKey={stockScope}
         metrics={[
           { label: "คงเหลือรวม", value: counts.quantity },
           { label: "สินค้าหมด", value: counts.out },
