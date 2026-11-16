@@ -4,6 +4,7 @@ import {
   listPlatformAccounts,
   TIKTOK_PLATFORM,
 } from "./store";
+import { query } from "@/lib/db";
 import {
   countStoredReturns,
   finishSyncRun,
@@ -47,7 +48,16 @@ export class SyncUnavailableError extends Error {
  * ร้านที่ต้องซิงก์ — ค่าเริ่มต้นคือทุกร้านที่เชื่อมต่อ (ไม่ใช่ร้านแรกเท่านั้น)
  * ส่ง shopId มาเมื่อต้องการซิงก์ร้านเดียว (เช่น กดดึงสดจากหน้าร้านนั้น)
  */
-async function buildContexts(onlyShopId?: string): Promise<Array<{ ctx: SyncContext; shopName: string }>> {
+interface ShopFailure {
+  accountKey: string;
+  shopName: string;
+  message: string;
+}
+
+async function buildContexts(onlyShopId?: string): Promise<{
+  contexts: Array<{ ctx: SyncContext; shopName: string }>;
+  failures: ShopFailure[];
+}> {
   const config = await getPlatformConfig();
   if (!config.tiktok) {
     throw new SyncUnavailableError("ยังไม่ได้ตั้งค่าแอป TikTok");
@@ -61,9 +71,28 @@ async function buildContexts(onlyShopId?: string): Promise<Array<{ ctx: SyncCont
   }
 
   const contexts: Array<{ ctx: SyncContext; shopName: string }> = [];
+  const failures: ShopFailure[] = [];
   for (const account of accounts) {
-    const row = await getPlatformAccountRow(TIKTOK_PLATFORM, account.accountKey);
-    if (!row?.accessToken || !row.shopCipher) continue;
+    // อ่าน token ไม่ได้ (เช่น คีย์ถอดรหัสเปลี่ยน) ต้องขึ้นเป็น "ร้านนี้ล้ม" ไม่ใช่ข้ามเงียบ ๆ
+    let row: Awaited<ReturnType<typeof getPlatformAccountRow>> = null;
+    try {
+      row = await getPlatformAccountRow(TIKTOK_PLATFORM, account.accountKey);
+    } catch (error) {
+      failures.push({
+        accountKey: account.accountKey,
+        shopName: account.shopName ?? account.accountKey,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+    if (!row?.accessToken || !row.shopCipher) {
+      failures.push({
+        accountKey: account.accountKey,
+        shopName: account.shopName ?? account.accountKey,
+        message: "อ่าน token ของร้านไม่ได้ (คีย์ถอดรหัสไม่ตรง) — ต้องเชื่อมร้านใหม่",
+      });
+      continue;
+    }
     contexts.push({
       ctx: {
         config: config.tiktok,
@@ -75,19 +104,21 @@ async function buildContexts(onlyShopId?: string): Promise<Array<{ ctx: SyncCont
     });
   }
   if (contexts.length === 0) {
-    throw new SyncUnavailableError("ไม่พบ token ของร้าน");
+    throw new SyncUnavailableError(
+      failures.length > 0 ? `อ่าน token ไม่ได้: ${failures.map((f) => f.shopName).join(", ")}` : "ไม่พบ token ของร้าน",
+    );
   }
 
-  return contexts;
+  return { contexts, failures };
 }
 
 /** ดึงออเดอร์ + เงินจาก TikTok ช่วงหนึ่ง แล้วบันทึกผลลง platform_sync_runs */
 export async function runTikTokSync(
   window: SyncWindow,
 ): Promise<{ stats: SyncStats; shopName: string }> {
-  const contexts = await buildContexts(window.shopId);
+  const { contexts, failures: brokenShops } = await buildContexts(window.shopId);
+  const failures: ShopFailure[] = [];
   const stats: SyncStats = { orders: 0, statements: 0, orderFinance: 0 };
-  const failures: Array<{ shopName: string; message: string }> = [];
 
   // วนทุกร้าน — ร้านหนึ่งล้มต้องไม่ทำให้ร้านอื่นหยุด
   for (const { ctx, shopName } of contexts) {
@@ -119,13 +150,30 @@ export async function runTikTokSync(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await finishSyncRun(runId, 0, message);
-      failures.push({ shopName, message });
+      failures.push({ accountKey: ctx.shopId, shopName, message });
     }
   }
 
   if (failures.length === contexts.length) {
     throw new Error(failures[0].message);
   }
+  // ร้านที่อ่าน token ไม่ได้: บันทึกเป็นรอบที่ล้มในประวัติ + ติด last_error ให้หน้าตั้งค่าเห็น
+  for (const broken of brokenShops) {
+    const runId = await startSyncRun(
+      TIKTOK_PLATFORM,
+      window.kind,
+      new Date(window.from * 1000),
+      new Date(window.to * 1000),
+    );
+    await finishSyncRun(runId, 0, `${broken.shopName}: ${broken.message}`);
+    await query(
+      `UPDATE platform_accounts SET last_error = $3, updated_at = now()
+        WHERE platform = $1 AND account_key = $2`,
+      [TIKTOK_PLATFORM, broken.accountKey, broken.message],
+    );
+    failures.push(broken);
+  }
+
   for (const failure of failures) {
     console.error(`[sync] ร้าน ${failure.shopName} ล้มเหลว: ${failure.message}`);
   }
@@ -143,7 +191,10 @@ const LIVE_RETURNS_LOOKBACK_DAYS = 7;
 
 /** ดึงคำขอคืนสินค้าของร้านเดียว — ครั้งแรกดึงย้อน 120 วัน หลังจากนั้น 7 วันล่าสุด */
 export async function runReturnsSync(shopId: string): Promise<number> {
-  const contexts = await buildContexts(shopId);
+  const { contexts, failures } = await buildContexts(shopId);
+  if (contexts.length === 0) {
+    throw new Error(failures[0]?.message ?? "ไม่พบ token ของร้าน");
+  }
   const { ctx } = contexts[0];
   const first = (await countStoredReturns(shopId)) === 0;
   const now = Math.floor(Date.now() / 1000);
