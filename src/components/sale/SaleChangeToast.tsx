@@ -9,18 +9,28 @@ import { toast } from "sonner";
  */
 export function SaleChangeToast({
   metrics,
+  scopeKey,
   title = "ข้อมูลอัปเดตแล้ว",
 }: {
   metrics: Array<{ label: string; value: number; unit?: string }>;
+  /** ตัวกรอง/ร้าน/ช่วงเวลาที่กำลังดู — เปลี่ยนชุดนี้คือเปลี่ยนข้อมูลคนละชุด ห้ามเทียบกัน */
+  scopeKey: string;
   title?: string;
 }) {
   const previous = useRef<Map<string, number> | null>(null);
+  const lastScope = useRef<string | null>(null);
 
   useEffect(() => {
     const current = new Map(metrics.map((metric) => [metric.label, metric.value]));
+    // เปลี่ยนตัวกรอง/ร้าน/ช่วงวันที่ = เป็นข้อมูลอีกชุด เริ่มนับใหม่ ไม่ใช่ \"มีของใหม่\"
+    if (lastScope.current !== scopeKey) {
+      lastScope.current = scopeKey;
+      previous.current = current;
+      return;
+    }
     const before = previous.current;
     previous.current = current;
-    // รอบแรกหลังเปิดหน้าเป็นแค่การจำค่า — หน้าใหม่/เปลี่ยนตัวกรองจึงไม่เด้งโดยไม่มีอะไรเปลี่ยน
+    // รอบแรกหลังเปิดหน้าเป็นแค่การจำค่า
     if (!before) return;
 
     const lines: string[] = [];
@@ -34,7 +44,7 @@ export function SaleChangeToast({
     if (lines.length === 0) return;
 
     toast.success(title, { description: lines.join(" · "), duration: 6000 });
-  }, [metrics, title]);
+  }, [metrics, scopeKey, title]);
 
   return null;
 }

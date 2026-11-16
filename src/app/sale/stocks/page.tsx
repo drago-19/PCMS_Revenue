@@ -289,6 +289,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
       <SaleChangeToast
         title="สต็อกอัปเดตแล้ว"
+        scopeKey={["stocks", shopId ?? "", platform, search, filter, params.page ?? ""].join("|")}
         metrics={[
           { label: "คงเหลือรวม", value: counts.quantity },
           { label: "สินค้าหมด", value: counts.out },

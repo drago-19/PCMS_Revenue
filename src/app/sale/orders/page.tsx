@@ -274,6 +274,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
           </div>
 
           <SaleChangeToast
+            // เปลี่ยนสถานะ/คำค้น/ช่วงวันที่/ร้าน = คนละชุดข้อมูล ห้ามเทียบข้ามกัน
+            scopeKey={["orders", shop, status, search, fromParam, toParam, preorderOnly ? "pre" : "", afterRaw ?? "", beforeRaw ?? ""].join("|")}
             metrics={[
               { label: "ออเดอร์", value: summary.orders },
               { label: "ชิ้นรวม", value: summary.pieces },
