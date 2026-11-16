@@ -21,7 +21,12 @@ import {
   getPlatformConfig,
   listPlatformAccounts,
 } from "@/lib/platform/store";
-import { getOrderSummary, getPlatformOrder, listPlatformOrders } from "@/lib/platform/orders";
+import {
+  countOrdersSinceToday,
+  getOrderSummary,
+  getPlatformOrder,
+  listPlatformOrders,
+} from "@/lib/platform/orders";
 import { loadOrderTracking } from "@/lib/platform/tracking";
 import { CopyButton } from "@/components/CopyButton";
 import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -34,6 +39,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 const STATUS_TABS = [
   { key: "", label: "ทั้งหมด" },
+  { key: "UNPAID", label: "รอชำระ" },
   { key: "AWAITING_SHIPMENT", label: "รอส่ง" },
   { key: "IN_TRANSIT", label: "กำลังส่ง" },
   { key: "DELIVERED", label: "ส่งถึง" },
@@ -120,13 +126,14 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
     to: toParam,
   };
 
-  const [config, accounts, connectedPlatforms, result, summary, detail] = await Promise.all([
+  const [config, accounts, connectedPlatforms, result, summary, detail, ordersToday] = await Promise.all([
     getPlatformConfig(),
     listPlatformAccounts(dbPlatform),
     getConnectedPlatforms(),
     listPlatformOrders({ ...filter, cursor, pageSize: 25 }),
     getOrderSummary(filter),
     detailId ? getPlatformOrder(detailId, shop, dbPlatform) : Promise.resolve(null),
+    countOrdersSinceToday({ platform: dbPlatform, shopId: shop }),
   ]);
   // ชุดข้อมูลที่กำลังดูอยู่ — ใช้ทั้งกับการแจ้งเตือนและป้ายส่วนต่าง (เปลี่ยนชุด = ไม่ใช่ของใหม่)
   const summaryScope = [shop, status, search, fromParam, toParam, preorderOnly ? "pre" : "", afterRaw ?? "", beforeRaw ?? ""].join("|");
@@ -281,13 +288,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
           </div>
 
           <SaleChangeToast
-            // เปลี่ยนสถานะ/คำค้น/ช่วงวันที่/ร้าน = คนละชุดข้อมูล ห้ามเทียบข้ามกัน
-            scopeKey={summaryScope}
-            metrics={[
-              { label: "ออเดอร์", value: summary.orders },
-              { label: "ชิ้นรวม", value: summary.pieces },
-              { label: "ยกเลิก", value: summary.cancelled },
-            ]}
+            // ใช้ยอดออเดอร์ของวันนี้ "ทั้งร้าน" เป็นสัญญาณ — จึงเด้งแม้กำลังกรองสถานะอื่นอยู่
+            scopeKey={["feed", shop ?? "", dbPlatform].join("|")}
+            title="มีออเดอร์ใหม่"
+            metrics={[{ label: "ออเดอร์วันนี้", value: ordersToday }]}
           />
 
           <Card padding="padded" className="flex min-w-0 flex-col gap-2">

@@ -102,6 +102,25 @@ function buildOrderWhere(filter: OrderFilter): { where: string[]; params: unknow
   return { where, params, platform };
 }
 
+export async function countOrdersSinceToday({
+  platform = "TikTok",
+  shopId,
+}: {
+  platform?: string;
+  shopId?: string | null;
+} = {}): Promise<number> {
+  // นับออเดอร์ของวันนี้ทั้งร้าน (ไม่สนตัวกรองบนจอ) — ใช้เป็นสัญญาณ "มีออเดอร์ใหม่"
+  const rows = await query<{ orders: string }>(
+    `SELECT count(*)::text AS orders
+       FROM platform_orders
+      WHERE platform = $1::text
+        AND ($2::text IS NULL OR shop_id = $2::text)
+        AND create_time >= date_trunc('day', now() AT TIME ZONE 'Asia/Bangkok') AT TIME ZONE 'Asia/Bangkok'`,
+    [platform, shopId ?? null],
+  );
+  return num(rows[0]?.orders);
+}
+
 export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: OrderRow[]; total: number }> {
   const { where, params, platform } = buildOrderWhere(filter);
 
