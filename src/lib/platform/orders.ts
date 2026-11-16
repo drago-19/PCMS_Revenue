@@ -221,27 +221,29 @@ export async function getOrderSummary(filter: OrderFilter): Promise<OrderSummary
   const { where, params } = buildOrderWhere(filter);
 
   // แยกเป็น 2 คำสั่งง่าย ๆ — เดิมนับรายการสินค้าแบบถามซ้ำทีละออเดอร์จนใช้เวลา ~57 วินาที
-  const totals = await query<{ orders: string; settlement: string; cancelled: string }>(
-    `SELECT count(DISTINCT o.order_id)::text AS orders,
+  // สองคำสั่งนี้ไม่ขึ้นแก่กัน — ยิงพร้อมกัน ประหยัดเวลารอไปหนึ่งรอบ
+  const [totals, itemRow] = await Promise.all([
+    query<{ orders: string; settlement: string; cancelled: string }>(
+      `SELECT count(DISTINCT o.order_id)::text AS orders,
             COALESCE(sum(f.settlement_amount),0)::text AS settlement,
             count(DISTINCT o.order_id) FILTER (WHERE o.order_status = 'CANCELLED')::text AS cancelled
      FROM platform_orders o
      LEFT JOIN platform_order_finance f
        ON f.platform = o.platform AND f.shop_id = o.shop_id AND f.order_id = o.order_id
-     WHERE ${where.join(" AND ")}`,
-    params,
-  );
-
-  const itemRow = await query<{ items: string; pieces: string; skus: string }>(
-    `SELECT count(*)::text AS items,
+       WHERE ${where.join(" AND ")}`,
+      params,
+    ),
+    query<{ items: string; pieces: string; skus: string }>(
+      `SELECT count(*)::text AS items,
             COALESCE(sum(i.quantity),0)::text AS pieces,
             count(DISTINCT i.sku_id)::text AS skus
      FROM platform_order_items i
      JOIN platform_orders o
        ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
-     WHERE ${where.join(" AND ")}`,
-    params,
-  );
+       WHERE ${where.join(" AND ")}`,
+      params,
+    ),
+  ]);
 
   return {
     orders: num(totals[0]?.orders),
