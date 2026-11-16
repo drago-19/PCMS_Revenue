@@ -13,8 +13,10 @@ import {
   getLastStockSync,
   getSkuDetail,
   getStockCounts,
+  getStockChangeStats,
   getStockMovements,
   getStockPage,
+  listRecentStockChanges,
   LOW_STOCK_THRESHOLD,
   syncStock,
   type StockListFilter,
@@ -59,6 +61,7 @@ type SearchParams = Promise<{
   before?: string;
   q?: string;
   filter?: string;
+  history?: string;
 }>;
 
 const PAGE_SIZE = 20;
@@ -156,6 +159,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       ? { skus: Number(params.synced), changed: Number(params.changed ?? 0) }
       : null;
   const pageNumber = Math.max(Number(params.page ?? "1") || 1, 1);
+  // ป๊อปอัป "ประวัติเปลี่ยนแปลง" เปิดด้วย ?history=1 (ใช้รูปแบบเดียวกับป๊อปอัปอื่นของหน้านี้)
+  const historyOpen = params.history === "1";
 
   // ประวัติการเปลี่ยนแปลง: ต่อหน้าด้วย keyset (เวลา|id) ทีละ 10 แถว ไม่ใช้ OFFSET
   const historyBack = Boolean(params.before);
@@ -169,12 +174,14 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   // ป๊อปอัปแยกหน้าที่: ค่าเริ่มต้น = ข้อมูลสินค้า, "stock" = ปรับสต็อก, "edit" = แก้ไขสินค้า
   const actionParam = (params as Record<string, string | undefined>).action;
   const action = actionParam === "stock" || actionParam === "edit" ? actionParam : "info";
-  const [list, counts, movements, lastSync, skuDetail] = await Promise.all([
+  const [list, counts, movements, lastSync, skuDetail, changeStats, recentChanges] = await Promise.all([
     getStockPage(shopId, { search, filter, page: pageNumber, pageSize: PAGE_SIZE, platform: dbPlatform }),
     getStockCounts(shopId, dbPlatform),
     getStockMovements(shopId, { limit: HISTORY_PAGE_SIZE, cursor: historyCursor, platform: dbPlatform }),
     getLastStockSync(shopId, dbPlatform),
     params.sku ? getSkuDetail(shopId, params.sku, dbPlatform) : Promise.resolve(null),
+    getStockChangeStats({ shopId, platform: dbPlatform }),
+    historyOpen ? listRecentStockChanges({ shopId, platform: dbPlatform, minutes: 30, limit: 100 }) : Promise.resolve([]),
   ]);
   const pageCount = Math.max(Math.ceil(list.total / PAGE_SIZE), 1);
   const current = Math.min(pageNumber, pageCount);
@@ -193,7 +200,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const heldBySku = platform === "tiktok" && shopId ? await listOpenHolds(shopId) : new Map<string, number>();
 
   // ลิงก์ที่คงคำค้นและตัวกรองไว้ขณะเปลี่ยนหน้า/ปิดป๊อปอัป
-  const listHref = (next: { page?: number; filter?: StockListFilter; q?: string }) => {
+  const listHref = (next: { page?: number; filter?: StockListFilter; q?: string; history?: string }) => {
     const qs = new URLSearchParams({ shop: shopId });
     if (platform !== "tiktok") qs.set("platform", platform);
     const nextSearch = next.q ?? search;
@@ -202,6 +209,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     if (nextSearch) qs.set("q", nextSearch);
     if (nextFilter !== "all") qs.set("filter", nextFilter);
     if (nextPage > 1) qs.set("page", String(nextPage));
+    if (next.history) qs.set("history", next.history);
     return `/sale/stocks?${qs.toString()}`;
   };
   const filterTabs: Array<{ key: StockListFilter; label: string; count: number }> = [
@@ -296,13 +304,10 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       </div>
 
       <SaleChangeToast
-        title="สต็อกอัปเดตแล้ว"
-        scopeKey={stockScope}
-        metrics={[
-          { label: "คงเหลือรวม", value: counts.quantity },
-          { label: "สินค้าหมด", value: counts.out },
-          { label: "กำลังตีกลับ", value: counts.inTransit },
-        ]}
+        // ใช้จำนวน "รายการที่สต็อกขยับวันนี้" ของทั้งร้านเป็นสัญญาณ — จึงเด้งแม้กรองสถานะอื่นอยู่
+        title="สต็อกเปลี่ยน"
+        scopeKey={["stockfeed", shopId ?? "", dbPlatform].join("|")}
+        metrics={[{ label: "รายการที่ขยับวันนี้", value: changeStats.today }]}
       />
 
       <Card padding="padded" className="flex min-w-0 flex-col gap-2">
@@ -336,6 +341,31 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
             </Button>
           ) : null}
         </form>
+
+        {/* ประวัติ cambios: ปุ่มสรุปรอบล่าสุด (5 นาที) + เปิดป๊อปอัปรายการ */}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link href={listHref({ history: "1" })} scroll={false} className="gap-2">
+              ประวัติเปลี่ยนแปลง
+              {changeStats.changes > 0 ? (
+                <span className="flex items-center gap-1 text-[11.5px] font-bold">
+                  {changeStats.added > 0 ? (
+                    <span style={{ color: "var(--ok)" }}>+{changeStats.added}</span>
+                  ) : null}
+                  {changeStats.removed < 0 ? (
+                    <span style={{ color: "var(--danger)" }}>{changeStats.removed}</span>
+                  ) : null}
+                  <span className="text-muted-foreground">· {changeStats.changes} รายการ</span>
+                </span>
+              ) : null}
+            </Link>
+          </Button>
+          <span className="text-[12px] text-muted-foreground">
+            {changeStats.changes > 0
+              ? "ตัวเลขคือการเคลื่อนไหวในรอบ 5 นาทีล่าสุด"
+              : "ยังไม่มีการเคลื่อนไหวใน 5 นาทีล่าสุด"}
+          </span>
+        </div>
 
         <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="กรองตามสถานะสต็อก">
           {filterTabs.map((tab) => {
@@ -502,6 +532,50 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         จาก TikTok ก่อน ส่วน Shopee แก้จำนวน ซ่อน และลบสินค้าได้จากช่องรายละเอียดสินค้า แล้วดึงค่ากลับมายืนยัน
         ประวัติจะบันทึกเฉพาะการเปลี่ยนแปลงที่ตรวจพบจากฝั่งแพลตฟอร์ม
       </p>
+
+      {historyOpen ? (
+        <CloseableDialog closeHref={listHref({})}>
+          <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-2xl" style={SALE_THEME}>
+            <DialogHeader className="pr-11">
+              <DialogTitle className="text-[16px] leading-6">ประวัติเปลี่ยนแปลงสต็อก</DialogTitle>
+            </DialogHeader>
+            <p className="text-[12.5px] leading-5 text-muted-foreground">
+              การเคลื่อนไหวในรอบ 30 นาทีล่าสุด — จากการซิงก์ TikTok และจากการกดปรับในระบบ
+              {changeStats.changes > 0
+                ? ` · รอบ 5 นาทีล่าสุด +${changeStats.added} / ${changeStats.removed}`
+                : ""}
+            </p>
+            {recentChanges.length === 0 ? (
+              <p className="rounded-lg border border-border bg-card px-3 py-6 text-center text-[13px] text-muted-foreground">
+                ยังไม่มีการเคลื่อนไหวสต็อกในช่วงนี้
+              </p>
+            ) : (
+              <ul className="flex min-w-0 list-none flex-col p-0">
+                {recentChanges.map((change) => (
+                  <li
+                    key={`${change.skuId}-${change.changedAt}-${change.delta}`}
+                    className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-border/70 py-2 last:border-0"
+                  >
+                    <span className="mono text-[12.5px] font-bold">{change.sellerSku ?? change.skuId}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">
+                      {change.productName ?? "—"}
+                    </span>
+                    <span className="text-[12px] text-muted-foreground tabular-nums">
+                      {change.fromQty ?? "?"} → {change.toQty}
+                    </span>
+                    <Badge variant={change.delta > 0 ? "success" : "danger"}>
+                      {change.delta > 0 ? `+${change.delta}` : change.delta}
+                    </Badge>
+                    <span className="text-[11.5px] text-muted-foreground tabular-nums">
+                      {thaiDateTime(change.changedAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DialogContent>
+        </CloseableDialog>
+      ) : null}
 
       {skuDetail ? (
         <CloseableDialog closeHref={listHref({ page: current })}>

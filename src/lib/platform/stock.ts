@@ -477,6 +477,90 @@ export async function getInTransitQty(
   return Number(rows[0]?.qty ?? 0);
 }
 
+/** สรุปความเคลื่อนไหวสต็อก: รอบ 5 นาทีล่าสุด (ใช้บนปุ่ม) + ยอดของวันนี้ (ใช้เป็นสัญญาณแจ้งเตือน) */
+export async function getStockChangeStats({
+  platform = TIKTOK_PLATFORM,
+  shopId,
+}: {
+  platform?: string;
+  shopId: string;
+}): Promise<{ changes: number; added: number; removed: number; latest: string | null; today: number }> {
+  const rows = await query<{
+    changes: string;
+    added: string;
+    removed: string;
+    latest: string | null;
+    today: string;
+  }>(
+    `SELECT count(*) FILTER (WHERE changed_at >= now() - interval '5 minutes')::text AS changes,
+            COALESCE(sum(delta) FILTER (WHERE delta > 0 AND changed_at >= now() - interval '5 minutes'), 0)::text AS added,
+            COALESCE(sum(delta) FILTER (WHERE delta < 0 AND changed_at >= now() - interval '5 minutes'), 0)::text AS removed,
+            max(changed_at)::text AS latest,
+            count(*) FILTER (WHERE changed_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Bangkok') AT TIME ZONE 'Asia/Bangkok')::text AS today
+       FROM platform_stock_movements
+      WHERE platform = $1::text AND shop_id = $2::text`,
+    [platform, shopId],
+  );
+  const row = rows[0];
+  return {
+    changes: Number(row?.changes ?? 0),
+    added: Number(row?.added ?? 0),
+    removed: Number(row?.removed ?? 0),
+    latest: row?.latest ?? null,
+    today: Number(row?.today ?? 0),
+  };
+}
+
+/** รายการสต็อกที่ขยับในช่วง N นาทีล่าสุด — ใช้ในป๊อปอัป "ประวัติเปลี่ยนแปลง" */
+export async function listRecentStockChanges({
+  platform = TIKTOK_PLATFORM,
+  shopId,
+  minutes = 5,
+  limit = 100,
+}: {
+  platform?: string;
+  shopId: string;
+  minutes?: number;
+  limit?: number;
+}): Promise<
+  Array<{
+    skuId: string;
+    sellerSku: string | null;
+    productName: string | null;
+    fromQty: number | null;
+    toQty: number;
+    delta: number;
+    changedAt: string;
+  }>
+> {
+  const rows = await query<{
+    sku_id: string;
+    seller_sku: string | null;
+    product_name: string | null;
+    from_qty: number | null;
+    to_qty: number;
+    delta: number;
+    changed_at: string;
+  }>(
+    `SELECT sku_id, seller_sku, product_name, from_qty, to_qty, delta, changed_at::text AS changed_at
+       FROM platform_stock_movements
+      WHERE platform = $1::text AND shop_id = $2::text
+        AND changed_at >= now() - ($3::int || ' minutes')::interval
+      ORDER BY changed_at DESC, id DESC
+      LIMIT $4::int`,
+    [platform, shopId, Math.max(1, minutes), Math.min(500, Math.max(1, limit))],
+  );
+  return rows.map((row) => ({
+    skuId: row.sku_id,
+    sellerSku: row.seller_sku,
+    productName: row.product_name,
+    fromQty: row.from_qty,
+    toQty: row.to_qty,
+    delta: row.delta,
+    changedAt: row.changed_at,
+  }));
+}
+
 export async function getStockMovements(
   shopId: string,
   options: { limit?: number; cursor?: StockMovementCursor; platform?: string } = {},
