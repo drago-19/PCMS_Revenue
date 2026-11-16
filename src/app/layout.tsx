@@ -77,7 +77,8 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <main className="app-content">{children}</main>
             </div>
           </div>
-          <Toaster position="bottom-right" richColors />
+          {/* แจ้งเตือนของฝ่ายขายอยู่มุมขวาบน (ตามที่ตกลง) — ฝั่ง Dragon19 คงมุมขวาล่างไว้เหมือนเดิม */}
+          <Toaster position={role === "platform" ? "top-right" : "bottom-right"} richColors />
         </TooltipProvider>
       </body>
     </html>

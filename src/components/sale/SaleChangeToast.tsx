@@ -15,25 +15,13 @@ export function SaleChangeToast({
   title?: string;
 }) {
   const previous = useRef<Map<string, number> | null>(null);
-  // ต้อง “ติดอาวุธ” จากการรีเฟรชอัตโนมัติเท่านั้น — เปลี่ยนหน้าหรือกดเมนูไม่ต้องเด้ง
-  const armed = useRef(false);
-
-  useEffect(() => {
-    const onRefresh = () => {
-      armed.current = true;
-    };
-    window.addEventListener("sale:refresh", onRefresh);
-    return () => window.removeEventListener("sale:refresh", onRefresh);
-  }, []);
 
   useEffect(() => {
     const current = new Map(metrics.map((metric) => [metric.label, metric.value]));
     const before = previous.current;
-    const wasArmed = armed.current;
-    armed.current = false;
     previous.current = current;
-    if (!before) return; // รอบแรกแค่จำค่าไว้ ไม่ต้องเด้ง
-    if (!wasArmed) return; // ค่าเปลี่ยนเพราะเปลี่ยนหน้า/ตัวกรอง — ไม่ใช่สัญญาณว่ามีข้อมูลใหม่
+    // รอบแรกหลังเปิดหน้าเป็นแค่การจำค่า — หน้าใหม่/เปลี่ยนตัวกรองจึงไม่เด้งโดยไม่มีอะไรเปลี่ยน
+    if (!before) return;
 
     const lines: string[] = [];
     for (const [label, value] of current) {

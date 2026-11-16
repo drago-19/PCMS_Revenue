@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { StatCard } from "@/components/PageHeader";
 import { SaleHeader } from "@/components/sale/SaleHeader";
+import { SaleStat } from "@/components/sale/SaleStat";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -276,19 +276,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       ) : null}
 
       <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
-        <StatCard label="SKU ทั้งหมด" value={num(counts.all)} hint={`นับเฉพาะที่มีใน ${platformTab(platform).label}`} />
-        <StatCard label="ชิ้นคงเหลือรวม" value={num(totalQty)} tone="positive" hint="รวมทุก SKU ทุกคลัง" />
-        <StatCard
+        <SaleStat label="SKU ทั้งหมด" value={counts.all} hint={`นับเฉพาะที่มีใน ${platformTab(platform).label}`} />
+        <SaleStat label="ชิ้นคงเหลือรวม" value={totalQty} tone="positive" hint="รวมทุก SKU ทุกคลัง" />
+        <SaleStat
           label="สินค้าหมด"
-          value={num(outOfStock)}
+          value={outOfStock}
           tone={outOfStock > 0 ? "negative" : "default"}
           hint="คงเหลือ 0 ชิ้น"
         />
-        <StatCard
-          label="กำลังตีกลับ"
-          value={num(inTransit)}
-          hint="ลูกค้าส่งคืนแล้ว แต่ของยังไม่ถึงร้าน"
-        />
+        <SaleStat label="กำลังตีกลับ" value={inTransit} hint="ลูกค้าส่งคืนแล้ว แต่ของยังไม่ถึงร้าน" />
       </div>
 
       <SaleChangeToast

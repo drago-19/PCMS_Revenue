@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { EmptyState } from "@/components/PageHeader";
 import { SaleHeader } from "@/components/sale/SaleHeader";
-import { PlatformStat } from "@/components/platform/PlatformCards";
+import { SaleStat } from "@/components/sale/SaleStat";
 import { PlatformPeriodBar } from "@/components/platform/PlatformPeriodBar";
 import { CloseableDialog } from "@/components/platform/CloseableDialog";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
@@ -266,15 +266,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
           {/* สรุปตามเงื่อนไขที่กรองอยู่ */}
           {/* สรุปช่วงที่กรองอยู่: ออเดอร์ · ชิ้นรวม · สินค้า (SKU ไม่ซ้ำ) · ยอดโอน */}
           <div className="grid grid-cols-2 gap-2.5 min-[900px]:grid-cols-5">
-            <PlatformStat label="ออเดอร์" value={summary.orders.toLocaleString("th-TH")} />
-            <PlatformStat label="ชิ้นรวม" value={summary.pieces.toLocaleString("th-TH")} />
-            <PlatformStat label="สินค้า (SKU)" value={summary.skus.toLocaleString("th-TH")} />
-            <PlatformStat label="ยอดโอนรวม" value={`฿${money(summary.settlement)}`} tone="positive" />
-            <PlatformStat
-              label="ยกเลิก"
-              value={summary.cancelled.toLocaleString("th-TH")}
-              tone={summary.cancelled > 0 ? "negative" : "default"}
-            />
+            <SaleStat label="ออเดอร์" value={summary.orders} />
+            <SaleStat label="ชิ้นรวม" value={summary.pieces} />
+            <SaleStat label="สินค้า (SKU)" value={summary.skus} />
+            <SaleStat label="ยอดโอนรวม" value={summary.settlement} format="money" tone="positive" />
+            <SaleStat label="ยกเลิก" value={summary.cancelled} tone={summary.cancelled > 0 ? "negative" : "default"} />
           </div>
 
           <SaleChangeToast
