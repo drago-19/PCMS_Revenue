@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 /**
@@ -11,6 +11,7 @@ import { toast } from "sonner";
  * ทำงานแยกจากการรีเฟรชหน้า จึงไม่พลาดแม้ผู้ใช้กำลังกรองสถานะอื่นอยู่
  */
 export function SalePulseToast({ shopId }: { shopId?: string }) {
+  const router = useRouter();
   const params = useSearchParams();
   const rawShop = params.get("shop") ?? shopId ?? "";
   // รหัสร้านเป็นตัวเลขเท่านั้น — กันค่าอื่นหลุดเข้าไปในคำขอ
@@ -41,9 +42,11 @@ export function SalePulseToast({ shopId }: { shopId?: string }) {
         if (stockDelta > 0) parts.push(`สต็อกขยับ ${stockDelta} รายการ`);
 
         toast.success(parts.join(" · "), {
-          description: "กดรีเฟรชเพื่อดูข้อมูลล่าสุด",
-          duration: 6000,
+          description: "กำลังอัปเดตข้อมูลบนหน้าให้แล้ว",
+          duration: 5000,
         });
+        // อัปเดตหน้าให้เลย ไม่ต้องให้ผู้ใช้กดรีเฟรชเอง
+        router.refresh();
       } catch {
         // เงียบไว้ — รอบหน้าลองใหม่เอง
       }
@@ -55,7 +58,7 @@ export function SalePulseToast({ shopId }: { shopId?: string }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [shop]);
+  }, [router, shop]);
 
   return null;
 }
