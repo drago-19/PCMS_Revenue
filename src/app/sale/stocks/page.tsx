@@ -36,7 +36,6 @@ import { SaleAutoRefresh } from "@/components/sale/SaleAutoRefresh";
 import { SaleStockAdjustForm } from "@/components/sale/SaleStockAdjustForm";
 import { ProductTitleForm } from "@/components/platform/ProductTitleForm";
 import { ProductImageForm } from "@/components/platform/ProductImageForm";
-import { PreorderToggle } from "@/components/sale/PreorderToggle";
 import { SaleChangeToast } from "@/components/sale/SaleChangeToast";
 import { StockHoldActions } from "@/components/platform/StockHoldActions";
 import { listOpenHolds } from "@/lib/platform/stock-hold";
@@ -634,10 +633,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 </span>
                 <span className="text-muted-foreground">{skuDetail.category ?? "ยังไม่มีข้อมูลหมวดหมู่"}</span>
               </div>
-
-              {platform !== "shopee" ? (
-                <PreorderToggle shopId={shopId} skuId={skuDetail.skuId} value={skuDetail.isPreorder} />
-              ) : null}
 
               {platform === "shopee" ? (
                 <ShopeeStockEditor

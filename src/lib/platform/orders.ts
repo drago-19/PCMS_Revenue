@@ -29,6 +29,10 @@ export interface OrderDetail {
   cancelReason: string | null;
   cancelUser: string | null;
   trackingNumber: string | null;
+  /** ชนิดออเดอร์จาก TikTok — PRE_ORDER = พรีออเดอร์ */
+  orderType: string | null;
+  /** วันที่ TikTok เริ่มจัดส่งของพรีออเดอร์ (ISO) — null ถ้าไม่ใช่พรีออเดอร์ */
+  releaseDate: string | null;
   /** ร้านที่ออเดอร์นี้อยู่ — ใช้ดึงเหตุการณ์พัสดุของร้านนั้น */
   shopId: string | null;
   /** เวลาที่ส่งข้อมูลให้ขนส่ง และเวลาที่ขนส่งรับพัสดุ — จาก raw_json ของ TikTok */
@@ -53,7 +57,7 @@ export interface OrderFilter {
   search?: string;
   from?: string; // YYYY-MM-DD
   to?: string; // YYYY-MM-DD
-  /** เฉพาะออเดอร์ที่มีสินค้าติดธงพรีออเดอร์ (ธงตั้งเองในระบบ) */
+  /** เฉพาะออเดอร์พรีออเดอร์ — อ่านจาก order_type ของ TikTok (ไม่ใช่ธงที่เราตั้งเอง) */
   preorder?: boolean
   /** เลิกใช้แล้ว — ใช้ cursor แทน (คงไว้เพื่อไม่ให้จุดเรียกเก่าพัง) */
   page?: number;
@@ -76,13 +80,7 @@ function buildOrderWhere(filter: OrderFilter): { where: string[]; params: unknow
     where.push(`o.order_status = $${params.length}::text`);
   }
   if (filter.preorder) {
-    where.push(`EXISTS (
-      SELECT 1 FROM platform_order_items i3
-      JOIN platform_stock s3
-        ON s3.platform = i3.platform AND s3.shop_id = i3.shop_id AND s3.sku_id = i3.sku_id
-      WHERE i3.platform = o.platform AND i3.shop_id = o.shop_id AND i3.order_id = o.order_id
-        AND (s3.is_preorder OR s3.pre_sale_type IS NOT NULL)
-    )`);
+    where.push(`o.order_type = 'PRE_ORDER'`);
   }
   if (filter.search) {
     params.push(`%${filter.search}%`);
@@ -146,14 +144,7 @@ export async function listPlatformOrders(filter: OrderFilter): Promise<{ rows: O
               WHERE i.platform = o.platform AND i.shop_id = o.shop_id AND i.order_id = o.order_id)::text AS item_count,
             f.settlement_amount::text AS settlement,
             o.cancel_reason,
-            EXISTS (
-              SELECT 1
-                FROM platform_order_items i
-                JOIN platform_stock s
-                  ON s.platform = i.platform AND s.shop_id = i.shop_id AND s.sku_id = i.sku_id
-               WHERE i.platform = o.platform AND i.shop_id = o.shop_id AND i.order_id = o.order_id
-                 AND (s.is_preorder OR s.pre_sale_type IS NOT NULL)
-            ) AS preorder
+            (o.order_type = 'PRE_ORDER') AS preorder
      FROM platform_orders o
      -- รวมเป็นแถวเดียวต่อออเดอร์: ออเดอร์ที่มีทั้งรายการขายและ adjustment จะได้ไม่โผล่ซ้ำ
      LEFT JOIN (
@@ -285,6 +276,8 @@ export async function getPlatformOrder(
     shipping_provider: string | null;
     rts_unix: string | null;
     collection_unix: string | null;
+    order_type: string | null;
+    release_date: string | null;
     item_cancel_user: string | null;
     total_amount: string | null;
     currency: string | null;
@@ -297,6 +290,7 @@ export async function getPlatformOrder(
             COALESCE(NULLIF(btrim(o.shipping_provider), ''), NULLIF(btrim(o.raw_json->>'shipping_provider'), ''), p.shipping_provider) AS shipping_provider,
             o.total_amount::text AS total_amount, o.currency, o.shop_id,
             o.raw_json->>'rts_time' AS rts_unix, o.raw_json->>'collection_time' AS collection_unix,
+            o.order_type, o.release_date::text AS release_date,
             (SELECT item->>'cancel_user'
                FROM jsonb_array_elements(coalesce(o.raw_json->'line_items', '[]'::jsonb)) AS item
               WHERE coalesce(item->>'cancel_user', '') <> ''
@@ -351,6 +345,8 @@ export async function getPlatformOrder(
     cancelUser: order.item_cancel_user ?? order.cancel_user ?? null,
     trackingNumber: order.tracking_number,
     shopId: order.shop_id ?? null,
+    orderType: order.order_type ?? null,
+    releaseDate: order.release_date ?? null,
     rtsTime: order.rts_unix ? new Date(Number(order.rts_unix) * 1000).toISOString() : null,
     collectionTime: order.collection_unix ? new Date(Number(order.collection_unix) * 1000).toISOString() : null,
     shippingProvider: order.shipping_provider,

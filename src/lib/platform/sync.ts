@@ -86,7 +86,7 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
   await runChunks(orders, async (chunk) => {
     const values: unknown[] = [];
     const tuples = chunk.map((order, rowIndex) => {
-      const base = rowIndex * 22;
+      const base = rowIndex * 24;
       values.push(
         PLATFORM,
         shopId,
@@ -110,8 +110,10 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
         order.province,
         order.district,
         order.postalCode,
+        order.orderType,
+        toTimestamp(order.releaseDate),
       );
-      const placeholders = Array.from({ length: 22 }, (_, index) => `$${base + index + 1}`);
+      const placeholders = Array.from({ length: 24 }, (_, index) => `$${base + index + 1}`);
       return `(${placeholders.join(",")})`;
     });
 
@@ -120,7 +122,7 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
          platform, shop_id, order_id, order_status, create_time, paid_time, shipped_time,
          delivered_time, cancelled_time, cancel_reason, cancel_user, currency, total_amount,
          tracking_number, shipping_provider, raw_json, buyer_user_id, recipient_name,
-         recipient_phone, province, district, postal_code
+         recipient_phone, province, district, postal_code, order_type, release_date
        ) VALUES ${tuples.join(",")}
        ON CONFLICT (platform, shop_id, order_id) DO UPDATE SET
          order_status = EXCLUDED.order_status,
@@ -134,6 +136,9 @@ export async function upsertOrders(shopId: string, orders: TikTokOrder[]): Promi
          tracking_number = EXCLUDED.tracking_number,
          shipping_provider = EXCLUDED.shipping_provider,
          raw_json = EXCLUDED.raw_json,
+         -- TikTok ส่ง order_type/release_date มาเฉพาะบาง endpoint — ห้ามล้างค่าที่มีอยู่ด้วย NULL
+         order_type = COALESCE(EXCLUDED.order_type, platform_orders.order_type),
+         release_date = COALESCE(EXCLUDED.release_date, platform_orders.release_date),
          -- ออเดอร์ที่ยังไม่จ่ายเงินไม่มีที่อยู่ส่งมา — ห้ามเขียนทับค่าที่เคยได้ด้วยค่าว่าง
          buyer_user_id = COALESCE(EXCLUDED.buyer_user_id, platform_orders.buyer_user_id),
          recipient_name = COALESCE(EXCLUDED.recipient_name, platform_orders.recipient_name),

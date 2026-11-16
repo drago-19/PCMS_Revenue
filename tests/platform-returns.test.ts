@@ -40,6 +40,8 @@ function makeOrder(id: string, lines: Array<{ lineItemId: string; skuId: string;
     province: null,
     district: null,
     postalCode: null,
+    orderType: null,
+    releaseDate: null,
     items: lines.map((line) => ({
       lineItemId: line.lineItemId,
       skuId: line.skuId,

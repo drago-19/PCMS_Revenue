@@ -41,6 +41,8 @@ function orderWithTwoUnits(): TikTokOrder {
     province: null,
     district: null,
     postalCode: null,
+    orderType: null,
+    releaseDate: null,
     items: [
       {
         lineItemId: "line-hold-1",

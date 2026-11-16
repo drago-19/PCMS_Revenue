@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-14-v72";
+const SCHEMA_VERSION = "2026-11-16-v73";
 
 export type { CompanyId };
 
@@ -988,6 +988,22 @@ ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS recipient_phone TEXT;
 ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS province TEXT;
 ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS district TEXT;
 ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS postal_code TEXT;
+
+-- ชนิดออเดอร์จาก TikTok: PRE_ORDER = พรีออเดอร์ — ต้องอ่านจากแพลตฟอร์ม ไม่ใช่ธงที่เราตั้งเอง
+-- release_date = วันที่ TikTok เริ่มจัดส่งของพรีออเดอร์ (ส่งมาเฉพาะ order_type=PRE_ORDER)
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS order_type TEXT;
+ALTER TABLE platform_orders ADD COLUMN IF NOT EXISTS release_date TIMESTAMPTZ;
+
+-- เติมย้อนหลังให้ออเดอร์ที่เคยดึงมาแล้วมี raw_json ในมือ
+UPDATE platform_orders
+   SET order_type = raw_json->>'order_type'
+ WHERE order_type IS NULL
+   AND COALESCE(raw_json->>'order_type', '') <> '';
+
+UPDATE platform_orders
+   SET release_date = to_timestamp((raw_json->>'release_date')::bigint)
+ WHERE release_date IS NULL
+   AND COALESCE(raw_json->>'release_date', '') ~ '^[0-9]+$';
 
 -- เติมย้อนหลังให้แถวที่ดึงมาก่อนมีคอลัมน์ — แถวที่เติมแล้วจะถูกข้าม จึงรันซ้ำได้ทุกครั้งที่เปิดระบบ
 UPDATE platform_orders SET

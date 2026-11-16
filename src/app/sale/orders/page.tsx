@@ -397,9 +397,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 <span className="mono">ออเดอร์ {detail.orderId}</span>
                 <CopyButton value={detail.orderId} label="คัดลอกเลขคำสั่งซื้อ" />
               </DialogTitle>
-              <p className="text-[13px] text-muted-foreground">
-                {detail.items.length} รายการ · ยอดสั่งซื้อ ฿{money(detail.totalAmount)} ·{" "}
-                {STATUS_LABEL[detail.status] ?? detail.status}
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
+                <span>
+                  {detail.items.length} รายการ · ยอดสั่งซื้อ ฿{money(detail.totalAmount)} ·{" "}
+                  {STATUS_LABEL[detail.status] ?? detail.status}
+                </span>
+                {detail.orderType === "PRE_ORDER" ? (
+                  <Badge variant="outline" className="border-[#e7d9b6] bg-[#fdf8ea] text-[#7a5c14]">
+                    พรีออเดอร์
+                    {detail.releaseDate
+                      ? ` · เริ่มจัดส่ง ${new Date(detail.releaseDate).toLocaleDateString("th-TH", {
+                          day: "numeric",
+                          month: "short",
+                          year: "2-digit",
+                          timeZone: "Asia/Bangkok",
+                        })}`
+                      : ""}
+                  </Badge>
+                ) : null}
               </p>
             </DialogHeader>
 

@@ -501,6 +501,10 @@ export interface TikTokOrder {
   province: string | null;
   district: string | null;
   postalCode: string | null;
+  /** ชนิดออเดอร์จาก TikTok — PRE_ORDER = พรีออเดอร์ (ไม่ใช่ธงที่เราตั้งเอง) */
+  orderType: string | null;
+  /** วันที่ TikTok เริ่มจัดส่ง — ส่งมาเฉพาะออเดอร์ PRE_ORDER (หน่วยวินาที) */
+  releaseDate: number | null;
   items: Array<{
     lineItemId: string;
     skuId: string | null;
@@ -603,6 +607,8 @@ export async function searchOrders({
       province: districtAt("L1"),
       district: districtAt("L2"),
       postalCode: str(address.postal_code),
+      orderType: str(row.order_type),
+      releaseDate: num(row.release_date),
       items: lineItems.map((item) => ({
         lineItemId: String(item.id ?? ""),
         skuId: str(item.sku_id),
