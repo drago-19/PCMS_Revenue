@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Package,
+  Receipt,
   ShoppingCart,
   Users,
   type LucideIcon,
@@ -31,6 +32,8 @@ type PlatformTab = {
 
 const TABS: PlatformTab[] = [
   { href: "/platform", label: "ภาพรวม", icon: LayoutDashboard, match: "/platform" },
+  // statement ไม่มีทางเข้าอื่นเลยนอกจำ url ตรง — ใส่แท็บกลับให้ฝั่ง CEO กดเข้าได้
+  { href: "/platform/statements", label: "ยอดโอน", icon: Receipt, match: "/platform/statements" },
   { href: "/platform/ops", label: "งานที่ต้องทำ", icon: ListChecks, match: "/platform/ops" },
   { href: "/platform/products", label: "สินค้าและเหตุผล", icon: Package, match: "/platform/products" },
   { href: "/platform/stocks", label: "สต็อก", icon: Boxes, match: "/platform/stocks" },
