@@ -238,28 +238,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         description={`จำนวนคงเหลือดึงจาก ${platformTab(platform).label} โดยตรง · ร้าน ${shopName} · เปลี่ยนแปลงล่าสุด ${
           lastSync ? thaiDateTime(lastSync) : "ยังไม่เคยดึง"
         }`}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {platform === "shopee" ? (
-              <ShopeeAddProductButton accountKey={shopId ?? ""} />
-            ) : (
-              <Button asChild size="sm">
-                <Link href={`/sale/products/new?platform=tiktok&shop=${encodeURIComponent(shopId ?? "")}`}>
-                  เพิ่มสินค้า
-                </Link>
-              </Button>
-            )}
-            <Button asChild size="sm" variant="outline">
-              <Link
-                href={`/sale/stocks?${syncParams.toString()}`}
-                scroll={false}
-                prefetch={false}
-              >
-                ดึงสต็อกล่าสุด
-              </Link>
-            </Button>
-          </div>
-        }
       />
 
       <PlatformSwitcher
@@ -360,14 +338,29 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           })}
           </div>
 
-          {/* ปุ่มประวัติอยู่ขวาสุดของแถวเดียวกับปุ่มกรอง — เลขคือการเคลื่อนไหวรอบ 5 นาทีล่าสุด */}
-          <Button asChild size="sm" variant="outline" className="ms-auto shrink-0">
-            <Link
-              href={listHref({ history: "1" })}
-              scroll={false}
-              className="gap-2"
-              title="การเคลื่อนไหวสต็อกในรอบ 5 นาทีล่าสุด — กดเพื่อดูรายการ 30 นาทีล่าสุด"
-            >
+          {/* ปุ่มงานหลักเรียงกันทางขวาของแถวตัวกรอง — เพิ่มสินค้า · ดึงสต็อกล่าสุด · ประวัติ */}
+          <div className="ms-auto flex flex-wrap items-center gap-2">
+            {platform === "shopee" ? (
+              <ShopeeAddProductButton accountKey={shopId ?? ""} />
+            ) : (
+              <Button asChild size="sm">
+                <Link href={`/sale/products/new?platform=tiktok&shop=${encodeURIComponent(shopId ?? "")}`}>
+                  เพิ่มสินค้า
+                </Link>
+              </Button>
+            )}
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/sale/stocks?${syncParams.toString()}`} scroll={false} prefetch={false}>
+                ดึงสต็อกล่าสุด
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline" className="shrink-0">
+              <Link
+                href={listHref({ history: "1" })}
+                scroll={false}
+                className="gap-2"
+                title="การเคลื่อนไหวสต็อกในรอบ 5 นาทีล่าสุด — กดเพื่อดูรายการ 30 นาทีล่าสุด"
+              >
               ประวัติเปลี่ยนแปลง
               {changeStats.changes > 0 ? (
                 <span className="flex items-center gap-1 text-[11.5px] font-bold">
@@ -379,9 +372,10 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                   ) : null}
                   <span className="text-muted-foreground">· {changeStats.changes} รายการ</span>
                 </span>
-              ) : null}
-            </Link>
-          </Button>
+                ) : null}
+              </Link>
+            </Button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-[12.5px]">
