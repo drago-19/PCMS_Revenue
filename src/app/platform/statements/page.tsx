@@ -26,13 +26,15 @@ function num(value: number): string {
 export default async function PlatformStatementsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; platform?: string; detail?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; platform?: string; detail?: string; shop?: string }>;
 }) {
   const params = await searchParams;
   const platform = readPlatform(params.platform);
   const dbPlatform = platformDbName(platform);
+  // ไม่ระบุร้าน = รวมทุกร้าน (ยอดรวมของบริษัท) · ระบุ ?shop= = เฉพาะร้านนั้น
+  const selectedShop = params.shop || undefined;
   const [statements, accounts, connectedPlatforms] = await Promise.all([
-    getTikTokStatements({ from: params.from, to: params.to, platform: dbPlatform }),
+    getTikTokStatements({ from: params.from, to: params.to, shopId: selectedShop, platform: dbPlatform }),
     listPlatformAccounts(dbPlatform),
     getConnectedPlatforms(),
   ]);
@@ -53,6 +55,7 @@ export default async function PlatformStatementsPage({
         basePath="/platform/statements"
         from={params.from}
         to={params.to}
+        shop={selectedShop}
         connectedPlatforms={connectedPlatforms}
       />
 
@@ -62,6 +65,7 @@ export default async function PlatformStatementsPage({
         from={params.from}
         to={params.to}
         platform={platform}
+        shop={selectedShop}
         accounts={accounts.map((account) => ({ accountKey: account.accountKey, shopName: account.shopName }))}
       />
 
@@ -124,6 +128,7 @@ export default async function PlatformStatementsPage({
         params={params}
         from={params.from}
         to={params.to}
+        shopId={selectedShop}
         platform={dbPlatform}
       />
     </div>
