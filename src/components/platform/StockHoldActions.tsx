@@ -86,11 +86,21 @@ export function StockHoldActions({
       </p>
       <div className="flex flex-wrap items-center gap-2">
         {held > 0 ? (
-          <Button onClick={() => run("release")} disabled={saving !== null} aria-busy={saving === "release"}>
+          <Button
+            onClick={() => run("release")}
+            disabled={saving !== null}
+            aria-busy={saving === "release"}
+            className="bg-[color:var(--ok)] text-white hover:bg-[color:var(--ok)]/90"
+          >
             {saving === "release" ? "กำลังคืน…" : `คืนสต็อก ${held} ชิ้น (รับของแล้ว)`}
           </Button>
         ) : (
-          <Button onClick={() => run("hold")} disabled={saving !== null} aria-busy={saving === "hold"}>
+          <Button
+            onClick={() => run("hold")}
+            disabled={saving !== null}
+            aria-busy={saving === "hold"}
+            className="bg-[color:var(--danger)] text-white hover:bg-[color:var(--danger)]/90"
+          >
             {saving === "hold" ? "กำลังกัน…" : `กันสต็อก ${inTransit} ชิ้น`}
           </Button>
         )}

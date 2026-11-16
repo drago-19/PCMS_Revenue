@@ -562,7 +562,8 @@ export async function getSkuDetail(
             [TIKTOK_PLATFORM, shopId, skuId],
           )
         )[0]?.at ?? row.updated_at;
-        row.image_url = row.image_url ?? image ?? null;
+        // รูปจาก TikTok คือความจริงล่าสุด — ทับค่าเดิมเสมอ (เดิมใช้ ?? เลยไม่ยอมเปลี่ยนตามหลังเปลี่ยนรูป)
+        row.image_url = image ?? row.image_url;
       } catch {
         // ดึงสดไม่ได้ก็แสดงค่าที่มีใน DB
       }

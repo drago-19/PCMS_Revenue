@@ -33,7 +33,7 @@ export function StockAdjustForm({
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<"add" | "remove">("add");
-  const [amount, setAmount] = useState(1);
+  const [amount, setAmount] = useState(0);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,8 +45,7 @@ export function StockAdjustForm({
     setBase(quantity);
   }, [quantity]);
 
-  const clamp = (value: number) => Math.min(MAX_AMOUNT, Math.max(1, Math.trunc(value)));
-  const removeDisabled = base <= 0;
+  const clamp = (value: number) => Math.min(MAX_AMOUNT, Math.max(0, Math.trunc(value)));  const removeDisabled = base <= 0;
   // ลดได้ไม่เกินของที่มี — กันยอดติดลบก่อนถึงเซิร์ฟเวอร์
   const effective = mode === "remove" ? Math.min(amount, Math.max(base, 0)) : amount;
   const nextQuantity = mode === "add" ? base + effective : Math.max(base - effective, 0);
@@ -82,7 +81,7 @@ export function StockAdjustForm({
           ? `บันทึกแล้ว แต่มีคนซื้อระหว่างนั้น — คงเหลือจริงตอนนี้ ${data.quantity ?? "?"}`
           : `อัปเดตแล้ว — คงเหลือรวมตอนนี้ ${data.quantity ?? "?"}`,
       );
-      setAmount(1);
+      setAmount(0);
       if (typeof data.quantity === "number") setBase(data.quantity);
       router.refresh();
     } catch {
@@ -122,8 +121,10 @@ export function StockAdjustForm({
           onClick={() => setMode("add")}
           aria-pressed={mode === "add"}
           className={cn(
-            "min-h-[40px] rounded-lg text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            mode === "add" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            "min-h-[40px] rounded-lg border text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            mode === "add"
+              ? "border-[color:var(--ok)] bg-[color:var(--ok-soft)] text-[color:var(--ok)]"
+              : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >
           เพิ่ม
@@ -134,8 +135,10 @@ export function StockAdjustForm({
           aria-pressed={mode === "remove"}
           disabled={removeDisabled}
           className={cn(
-            "min-h-[40px] rounded-lg text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
-            mode === "remove" ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            "min-h-[40px] rounded-lg border text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
+            mode === "remove"
+              ? "border-[color:var(--danger)] bg-[color:var(--danger-soft)] text-[color:var(--danger)]"
+              : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >
           ลด
@@ -149,7 +152,7 @@ export function StockAdjustForm({
           size="icon"
           aria-label="จำนวนที่จะปรับลงหนึ่ง"
           onClick={() => setAmount((value) => clamp(value - 1))}
-          disabled={saving || effective <= 1}
+          disabled={saving || amount <= 0}
           className="size-11"
         >
           <MinusIcon className="size-5" aria-hidden="true" />
@@ -182,14 +185,26 @@ export function StockAdjustForm({
             type="button"
             variant={effective === preset ? "secondary" : "outline"}
             size="sm"
-            onClick={() => setAmount(preset)}
+            onClick={() => setAmount((value) => clamp(value + preset))}
             disabled={saving}
-            aria-pressed={effective === preset}
-            className="min-h-[40px] min-w-[52px] px-3 tabular-nums"
+            aria-label={`บวกเพิ่ม ${preset}`}
+            className="min-h-[40px] min-w-[56px] px-3 tabular-nums"
           >
-            {preset}
+            +{preset}
           </Button>
         ))}
+        {amount > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setAmount(0)}
+            disabled={saving}
+            className="min-h-[40px] px-3 text-[12px] text-muted-foreground"
+          >
+            ล้าง
+          </Button>
+        ) : null}
       </div>
 
       <p className="text-center text-[13px]">
@@ -209,9 +224,14 @@ export function StockAdjustForm({
       <Button
         type="button"
         onClick={submit}
-        disabled={saving}
+        disabled={saving || effective < 1}
         aria-busy={saving}
-        className="min-h-[44px] w-full"
+        className={cn(
+          "min-h-[44px] w-full text-white",
+          mode === "add"
+            ? "bg-[color:var(--ok)] hover:bg-[color:var(--ok)]/90"
+            : "bg-[color:var(--danger)] hover:bg-[color:var(--danger)]/90",
+        )}
       >
         {saving
           ? "กำลังบันทึก…"

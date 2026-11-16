@@ -259,6 +259,40 @@ function unwrapEnvelope<T>(response: Response, payload: TikTokEnvelope<T> | null
   return (payload.data ?? {}) as T;
 }
 
+/**
+ * เรียก endpoint ที่รับไฟล์ (multipart/form-data) เช่น อัปโหลดรูปสินค้า
+ * TikTok คิดลายเซ็นจาก query เท่านั้น ไม่รวมเนื้อไฟล์ — จึงเซ็นด้วย rawBody ว่าง
+ */
+export async function callTikTokMultipart<T>({
+  config,
+  path,
+  query = {},
+  form,
+  accessToken,
+}: {
+  config: TikTokAppConfig;
+  path: string;
+  query?: Record<string, string>;
+  form: FormData;
+  accessToken?: string;
+}): Promise<T> {
+  await acquireSlot();
+  try {
+    const url = buildSignedApiUrl({ config, path, query, rawBody: "" });
+    const response = await safeFetch(url, config.appSecret, {
+      method: "POST",
+      cache: "no-store",
+      headers: accessToken ? { "x-tts-access-token": accessToken } : {},
+      body: form,
+    });
+    syncClockOffsetFromResponse(response);
+    const payload = await readJson<T>(response);
+    return unwrapEnvelope<T>(response, payload);
+  } finally {
+    releaseSlot();
+  }
+}
+
 export async function callTikTokApi<T>({
   config,
   path,
