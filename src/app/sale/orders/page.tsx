@@ -46,16 +46,28 @@ const STATUS_TABS = [
   { key: "CANCELLED", label: "ยกเลิก" },
 ] as const;
 
+/** ปุ่มที่กำลังเลือกอยู่ — ใช้สีเข้มทึบของสถานะนั้น จะได้ต่างจากปุ่มที่ยังไม่เลือกชัดเจน */
+const STATUS_STYLE_ACTIVE: Record<string, string> = {
+  UNPAID: "border-[#4338ca] bg-[#4338ca] text-white",
+  AWAITING_SHIPMENT: "border-[#b45309] bg-[#b45309] text-white",
+  AWAITING_COLLECTION: "border-[#b45309] bg-[#b45309] text-white",
+  PARTIALLY_SHIPPING: "border-[#1d4ed8] bg-[#1d4ed8] text-white",
+  IN_TRANSIT: "border-[#1d4ed8] bg-[#1d4ed8] text-white",
+  DELIVERED: "border-[#047857] bg-[#047857] text-white",
+  COMPLETED: "border-[#047857] bg-[#047857] text-white",
+  CANCELLED: "border-[#b42318] bg-[#b42318] text-white",
+};
+
 /** สีของป้ายสถานะ — แบ่งหมวดให้กวาดตาแล้วรู้ทันที */
 const STATUS_STYLE: Record<string, string> = {
-  AWAITING_SHIPMENT: "border-[#f5dfae] bg-[#fffbeb] text-[#7a4b0a]",
-  AWAITING_COLLECTION: "border-[#f5dfae] bg-[#fffbeb] text-[#7a4b0a]",
-  PARTIALLY_SHIPPING: "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]",
-  IN_TRANSIT: "border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]",
-  DELIVERED: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
-  COMPLETED: "border-[#bfe6d0] bg-[#f2fbf6] text-[#0d6b3c]",
-  CANCELLED: "border-[#f5c2bd] bg-[#fdf3f2] text-[#8a1c14]",
-  UNPAID: "border-[#c7d2fe] bg-[#eef2ff] text-[#3730a3]",
+  AWAITING_SHIPMENT: "border-[#f0d5a0] bg-[#fef3c7] text-[#7a4b0a]",
+  AWAITING_COLLECTION: "border-[#f0d5a0] bg-[#fef3c7] text-[#7a4b0a]",
+  PARTIALLY_SHIPPING: "border-[#a9cdf7] bg-[#dbeafe] text-[#1d4ed8]",
+  IN_TRANSIT: "border-[#a9cdf7] bg-[#dbeafe] text-[#1d4ed8]",
+  DELIVERED: "border-[#a7dfc0] bg-[#dcfce7] text-[#0d6b3c]",
+  COMPLETED: "border-[#a7dfc0] bg-[#dcfce7] text-[#0d6b3c]",
+  CANCELLED: "border-[#f3b4ae] bg-[#fee2e2] text-[#8a1c14]",
+  UNPAID: "border-[#b6c3fb] bg-[#e0e7ff] text-[#3730a3]",
   ON_HOLD: "border-border bg-muted text-muted-foreground",
 };
 
@@ -242,10 +254,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                     aria-selected={active}
                     className={cn(
                       "inline-flex min-h-[38px] items-center rounded-full border px-3 text-[12.5px] font-bold transition-colors",
-                      // ปุ่มมีสีตามสถานะตลอดเวลา — กดแล้วเพิ่มความชัด (ไม่ใช่เปลี่ยนจากเทาเป็นสี)
-                      (tab.key && STATUS_STYLE[tab.key]) || "border-border text-muted-foreground",
-                      active && "ring-2 ring-current/30 ring-offset-1 ring-offset-[color:var(--background)]",
-                      !active && "opacity-90 hover:opacity-100",
+                      // สีอ่อน = ยังไม่เลือก · สีเข้มทึบ = ตัวที่เลือกอยู่ (จะได้ไม่เหมือนกัน)
+                      active
+                        ? (tab.key && STATUS_STYLE_ACTIVE[tab.key]) || "border-slate-900 bg-slate-900 text-white"
+                        : (tab.key && STATUS_STYLE[tab.key]) || "border-border text-muted-foreground hover:bg-muted",
                     )}
                   >
                     {tab.label}
@@ -263,8 +275,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               className={cn(
                 "inline-flex min-h-[40px] items-center rounded-full border px-3 text-[12.5px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 preorderOnly
-                  ? "border-[#7a5c14] bg-[#fdf8ea] text-[#7a5c14]"
-                  : "border-border text-muted-foreground hover:bg-muted",
+                  ? "border-[#b45309] bg-[#b45309] text-white"
+                  : "border-[#e7c98a] bg-[#fef3c7] text-[#7a5c14] hover:bg-[#fde9b8]",
               )}
             >
               พรีออเดอร์
