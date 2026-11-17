@@ -121,13 +121,29 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
 
   if (collected.length === 0) return { skus: 0, changed: 0 };
 
-  // เขียนครั้งเดียวทั้งชุด (ไม่วนคิวรีต่อแถว) — ยอดเดิมดึงมาครั้งเดียวเพื่อเทียบ
-  const previous = await query<{ sku_id: string; quantity: number }>(
-    `SELECT sku_id, quantity FROM platform_stock WHERE platform = $1 AND shop_id = $2`,
-    [TIKTOK_PLATFORM, shopId],
+  // บันทึกประวัติก่อนเขียนยอดใหม่: ใส่แถวเฉพาะที่ฐานข้อมูลยังมียอดเดิมอยู่จริง
+  // ถ้าอีกทาง (กดปรับสต็อก) บันทึกการเปลี่ยนเดียวกันไปก่อนแล้ว จะไม่มีแถวซ้ำสองแถว
+  // ใช้ยอดที่อยู่ในฐานข้อมูล ณ ตอนบันทึกเป็น "ยอดเดิม" ไม่ใช่ค่าที่อ่านค้างไว้ตอนต้นรอบ
+  const recorded = await query<{ sku_id: string }>(
+    `INSERT INTO platform_stock_movements (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
+     SELECT $1, $2, item.sku_id, item.seller_sku, item.product_name, s.quantity, item.quantity, item.quantity - s.quantity
+       FROM unnest($3::text[], $4::text[], $5::text[], $6::int[])
+            AS item(sku_id, seller_sku, product_name, quantity)
+       JOIN platform_stock s
+         ON s.platform = $1 AND s.shop_id = $2 AND s.sku_id = item.sku_id
+      WHERE s.quantity <> item.quantity
+     RETURNING sku_id`,
+    [
+      TIKTOK_PLATFORM,
+      shopId,
+      collected.map((item) => item.skuId),
+      collected.map((item) => item.sellerSku),
+      collected.map((item) => item.productName),
+      collected.map((item) => item.quantity),
+    ],
   );
-  const before = new Map(previous.map((row) => [row.sku_id, Number(row.quantity ?? 0)]));
 
+  // เขียนครั้งเดียวทั้งชุด (ไม่วนคิวรีต่อแถว)
   await query(
     `INSERT INTO platform_stock (platform, shop_id, sku_id, product_id, seller_sku, product_name, quantity, warehouses, updated_at)
      SELECT $1, $2, item.sku_id, item.product_id, item.seller_sku, item.product_name, item.quantity, item.warehouses::jsonb, now()
@@ -154,8 +170,6 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
       collected.map((item) => JSON.stringify(item.warehouses)),
     ],
   );
-
-  const moves = collected.filter((item) => before.has(item.skuId) && before.get(item.skuId) !== item.quantity);
 
   // รายละเอียดสินค้า: ผลค้นหาไม่ส่งรูป/สถานะ/ราคามา ต้องขอทีละสินค้า
   // (เฉพาะที่ยังไม่มีข้อมูล — ครั้งแรกของแต่ละสินค้าเท่านั้น ไม่ใช่ทุกรอบ)
@@ -275,33 +289,15 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
     }
   }
 
-  if (moves.length > 0) {
-    await query(
-      `INSERT INTO platform_stock_movements (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
-       SELECT $1, $2, item.sku_id, item.seller_sku, item.product_name, item.from_qty, item.to_qty, item.to_qty - item.from_qty
-         FROM unnest($3::text[], $4::text[], $5::text[], $6::int[], $7::int[])
-              AS item(sku_id, seller_sku, product_name, from_qty, to_qty)`,
-      [
-        TIKTOK_PLATFORM,
-        shopId,
-        moves.map((item) => item.skuId),
-        moves.map((item) => item.sellerSku),
-        moves.map((item) => item.productName),
-        moves.map((item) => before.get(item.skuId) ?? 0),
-        moves.map((item) => item.quantity),
-      ],
-    );
-  }
-
   // บันทึกรอบที่ดึงสำเร็จ เพื่อให้หน้าจอแสดง "ดึงล่าสุดเมื่อไร" ได้จริง
   // แม้รอบนั้นไม่มีค่าไหนเปลี่ยน (ไม่เช่นนั้นเวลาจะค้างอยู่ที่การเปลี่ยนครั้งสุดท้าย)
   await query(
     `INSERT INTO platform_sync_runs (platform, kind, status, rows_written, started_at, finished_at)
      VALUES ($1, 'stock', 'done', $2, now(), now())`,
-    [TIKTOK_PLATFORM, moves.length],
+    [TIKTOK_PLATFORM, recorded.length],
   );
 
-  return { skus: collected.length, changed: moves.length };
+  return { skus: collected.length, changed: recorded.length };
 }
 
 /** ตัวกรองของหน้าสต็อก — ใช้เป็นคีย์สั้น ๆ ใน URL */

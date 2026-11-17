@@ -251,17 +251,26 @@ async function adjustStockInner(input: {
     }
   }
 
+  // เขียนยอดและบันทึกประวัติในคำสั่งเดียว: แถวประวัติถูกเขียนเฉพาะเมื่อยอดในฐานข้อมูล
+  // ยังเป็นยอดที่อ่านมาได้จริงตอนต้น (ถ้ารอบซิงก์บันทึกการเปลี่ยนเดียวกันไปก่อนแล้ว
+  // จะไม่เกิดประวัติซ้ำอีกแถวสำหรัยการเปลี่ยนครั้งเดียว)
   await query(
-    `UPDATE platform_stock
-        SET quantity = $3, warehouses = $4::jsonb, updated_at = now()
-      WHERE shop_id = $1 AND sku_id = $2`,
-    [shopId, skuId, finalQuantity, JSON.stringify(finalWarehouses)],
-  );
-  await query(
-    `INSERT INTO platform_stock_movements
+    `WITH previous AS (
+       SELECT quantity FROM platform_stock
+        WHERE shop_id = $1 AND sku_id = $2
+        FOR UPDATE
+     ), updated AS (
+       UPDATE platform_stock
+          SET quantity = $3, warehouses = $4::jsonb, updated_at = now()
+        WHERE shop_id = $1 AND sku_id = $2
+        RETURNING 1 AS done
+     )
+     INSERT INTO platform_stock_movements
        (platform, shop_id, sku_id, seller_sku, product_name, from_qty, to_qty, delta)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [TIKTOK_PLATFORM, shopId, skuId, sellerSku, null, current, finalQuantity, finalQuantity - current],
+     SELECT $5, $1, $2, $6, NULL, previous.quantity, $3, $3 - previous.quantity
+       FROM previous CROSS JOIN updated
+      WHERE previous.quantity IS DISTINCT FROM $3`,
+    [shopId, skuId, finalQuantity, JSON.stringify(finalWarehouses), TIKTOK_PLATFORM, sellerSku],
   );
 
   return { quantity: finalQuantity, warehouses: finalWarehouses, corrected };
