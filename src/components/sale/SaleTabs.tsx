@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Boxes, ListChecks, ShoppingCart, type LucideIcon } from "lucide-react";
+import { Boxes, ListChecks, PackageCheck, ShoppingCart, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +20,8 @@ const TABS: SaleTab[] = [
   { href: "/sale/ops", label: "งานที่ต้องทำ", icon: ListChecks },
   { href: "/sale/stocks", label: "สต็อก", icon: Boxes },
   { href: "/sale/orders", label: "ออเดอร์", icon: ShoppingCart },
+  // หน้าแพ็คอยู่ที่ /orders (นอกหมวด) — ใส่ไว้ข้าง ๆ แท็บออเดอร์ให้กดถึงง่าย
+  { href: "/orders", label: "ออเดอร์รอแพ็ค", icon: PackageCheck },
 ];
 
 export function SaleTabs() {

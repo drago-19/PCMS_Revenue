@@ -43,10 +43,6 @@ export function SaleChrome() {
       </span>
       {/* ดึงออเดอร์ + สต็อกทันที ไม่ต้องรอรอบอัตโนมัติ 30 วินาที */}
       <RefreshAllButton />
-      {/* หน้าแพ็คของบริษัทที่กำลังใช้งาน (เปิดให้ฝ่ายขายดูได้) */}
-      <Button asChild size="sm" variant="ghost" className="hidden min-[720px]:inline-flex">
-        <Link href="/orders">ออเดอร์รอแพ็ค</Link>
-      </Button>
       {/* ไม่มีกรอบ — ให้เข้าพวกกับเมนูข้อความและการออกจากระบบในแถบเดียวกัน */}
       <Button asChild size="sm" variant="ghost" className="hidden min-[560px]:inline-flex">
         <Link href="/sale/settings">ตั้งค่า</Link>

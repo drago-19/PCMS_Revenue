@@ -155,8 +155,19 @@ export function proxy(request: NextRequest) {
   // แยกเส้นทางจาก /platform ของ Dragon19 โดยสิ้นเชิง — เปิดที่อื่นจะถูกพากลับ /sale
   if (String(session.role) === "platform") {
     // ฝ่ายขายใช้หมวด /sale และหน้าแพ็ค /orders (อ่านอย่างเดียว)
+    // ฝ่ายขาย: หมวด /sale · หน้าแพ็ค /orders · และ API ที่หน้าแพ็คเรียกใช้อ่านข้อมูล (จำกัดเฉพาะที่ระบุ)
+    const packagingApi =
+      pathname === "/api/orders/packing" ||
+      pathname.startsWith("/api/orders/packing/") ||
+      pathname === "/api/orders/refresh" ||
+      pathname === "/api/shipnity/accounts" ||
+      pathname.startsWith("/api/shipnity/accounts/");
     const allowed =
-      pathname === "/sale" || pathname.startsWith("/sale/") || pathname === "/orders" || pathname.startsWith("/orders/");
+      pathname === "/sale" ||
+      pathname.startsWith("/sale/") ||
+      pathname === "/orders" ||
+      pathname.startsWith("/orders/") ||
+      packagingApi;
     if (!allowed) {
       return applySecurityHeaders(NextResponse.redirect(new URL("/sale", request.url)), requestId);
     }

@@ -25,6 +25,8 @@ export interface ShipnityAccount {
   label: string;
   email: string;
   token: string;
+  /** บริษัทที่บัญชีนี้สังกัด — รอบดึงออเดอร์จะใช้เฉพาะบัญชีของบริษัทที่กำลังทำงาน */
+  companyKey?: CompanyId;
 }
 
 /** ข้อมูลบัญชีที่ไม่มีความลับ ใช้ส่งไปหน้าจอ */
@@ -32,6 +34,7 @@ export interface ShipnityAccountPublic {
   id: string;
   label: string;
   email: string;
+  companyKey?: CompanyId;
 }
 
 export interface ConnectedShipnityAccount extends ShipnityCredentials {
@@ -60,7 +63,8 @@ function normalizeAccount(raw: unknown, index: number): ShipnityAccount | null {
   if (!email || !token) return null;
   const label = clean(data.label, 120) || email;
   const id = clean(data.id, 60) || `acct-${index + 1}`;
-  return { id, label, email, token };
+  const companyKey: CompanyId = data.companyKey === "seeheng" ? "seeheng" : "dragon19";
+  return { id, label, email, token, companyKey };
 }
 
 /** แปลง value_json ที่เก็บไว้เป็นรายการบัญชี (รองรับรูปแบบเดี่ยวเดิม) */
@@ -99,13 +103,18 @@ async function decryptStoredAccounts(accounts: ShipnityAccount[]): Promise<Shipn
       needsRewrite = true;
       return account;
     }
-    return { ...account, token: decryptSecret(account.token) };
+    try {
+      return { ...account, token: decryptSecret(account.token) };
+    } catch {
+      // token เข้ารหัสด้วยคีย์เก่า/คีย์อื่น — ยังต้องเห็นบัญชีนี้ในรายการ (แค่ใช้งานไม่ได้จนกรอกใหม่)
+      return { ...account, token: "" };
+    }
   });
 
   if (needsRewrite && isEncryptionConfigured()) {
     const encrypted = plain.map((account) => ({ ...account, token: encryptSecret(account.token) }));
     void query(
-      `UPDATE app_settings SET value_json = $2::jsonb, updated_at = now()
+      `UPDATE public.app_settings SET value_json = $2::jsonb, updated_at = now()
        WHERE setting_key = $1`,
       [SETTING_KEY, JSON.stringify({ accounts: encrypted })],
     ).catch(() => {});
@@ -121,7 +130,8 @@ export async function getStoredShipnityAccounts(): Promise<{
 }> {
   try {
     const row = await queryOne<{ value_json: unknown; updated_at: string | null }>(
-      "SELECT value_json, updated_at::text AS updated_at FROM app_settings WHERE setting_key = $1",
+      // บัญชี Shipnity เป็นของกลางทั้งระบบ — แต่ละบัญชีระบุบริษัทของตัวเองใน companyKey
+      "SELECT value_json, updated_at::text AS updated_at FROM public.app_settings WHERE setting_key = $1",
       [SETTING_KEY],
     );
     if (!row?.value_json) return { accounts: [], updatedAt: null };
@@ -137,8 +147,10 @@ export async function resolveShipnityAccounts(
   companyId: CompanyId,
 ): Promise<ConnectedShipnityAccount[]> {
   const stored = await getStoredShipnityAccounts();
-  if (stored.accounts.length > 0) {
-    return stored.accounts.map((account) => ({
+  // เลือกเฉพาะบัญชีของบริษัทที่กำลังทำงาน (ค่าเก่าที่ไม่มี companyKey ถือเป็นดราก้อน 19)
+  const ownAccounts = stored.accounts.filter((account) => (account.companyKey ?? "dragon19") === companyId);
+  if (ownAccounts.length > 0) {
+    return ownAccounts.map((account) => ({
       id: account.id,
       label: account.label,
       email: account.email,

@@ -4,6 +4,8 @@ import { ShopeeConnectCard } from "@/components/ShopeeConnectCard";
 import { TikTokConnectCard } from "@/components/TikTokConnectCard";
 import { SaleHeader } from "@/components/sale/SaleHeader";
 import { ShopCompanyPicker } from "@/components/sale/ShopCompanyPicker";
+import { ShipnityAccountsCard } from "@/components/sale/ShipnityAccountsCard";
+import { getStoredShipnityAccounts } from "@/lib/shipnity/config";
 import { IconCheckCircle, IconInfo } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import {
@@ -57,6 +59,15 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
       company: await getShopCompany(account.accountKey),
     })),
   );
+
+  // บัญชี Shipnity ที่กรอกไว้แล้ว (แสดงในหน้าฝ่ายขาย พร้อมเลือกบริษัท)
+  const shipnity = await getStoredShipnityAccounts().catch(() => ({ accounts: [] as Array<{ id: string; label: string; email: string; companyKey?: "dragon19" | "seeheng" }> }));
+  const shipnityAccounts = shipnity.accounts.map((account) => ({
+    id: account.id,
+    label: account.label,
+    email: account.email,
+    companyKey: account.companyKey === "seeheng" ? ("seeheng" as const) : ("dragon19" as const),
+  }));
 
   // ผลลัพธ์จากการเชื่อม Shopee กลับมา (query ที่ OAuth ต่อท้ายให้)
   const shopeeParam = read(params, "shopee");
@@ -119,6 +130,8 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
           </div>
         </section>
       ) : null}
+
+      <ShipnityAccountsCard accounts={shipnityAccounts} />
 
       <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2">
         <TikTokConnectCard
