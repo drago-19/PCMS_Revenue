@@ -30,13 +30,24 @@ export function ProductImageForm({
   const [preview, setPreview] = useState<string | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [savedImage, setSavedImage] = useState<string | null>(currentImageUrl);
+  // รูปใหม่ที่เพิ่งได้จาก TikTok แต่ DB อาจยังไม่ตาม — ห้ามให้ข้อมูลเก่าจากเซิร์ฟเวอร์เขียนทับ
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (pendingUrl) {
+      // ต้องรอจน DB ตรงกับรูปใหม่ก่อน จึงเลิกใช้ค่ารอ
+      if (currentImageUrl === pendingUrl) {
+        setPendingUrl(null);
+        setSavedImage(currentImageUrl);
+        setMessage("รูปใหม่ขึ้นในระบบแล้ว");
+      }
+      return;
+    }
     setSavedImage(currentImageUrl);
-  }, [currentImageUrl]);
+  }, [currentImageUrl, pendingUrl]);
 
   useEffect(() => {
     return () => {
@@ -90,13 +101,14 @@ export function ProductImageForm({
         });
         const data = (await res.json().catch(() => ({}))) as { imageUrl?: string | null };
         if (data.imageUrl) {
+          setPendingUrl(data.imageUrl);
           setSavedImage(data.imageUrl);
           if (inputRef.current) inputRef.current.value = "";
           if (preview) URL.revokeObjectURL(preview);
           setPreview(null);
           setFileName(null);
           setSize(null);
-          setMessage("รูปใหม่ขึ้นในระบบแล้ว");
+          setMessage("บันทึกไปที่ TikTok แล้ว — กำลังอัปเดตรูปในระบบ…");
           router.refresh();
           return;
         }
@@ -126,15 +138,17 @@ export function ProductImageForm({
       }
 
       if (data.imageUrl) {
-        // ได้รูปใหม่จาก TikTok ทันที
+        // ได้ URL รูปใหม่จาก TikTok แล้ว แต่ DB อาจตามไม่ทัน — ตั้งเป็นค่ารอไว้ ไม่ให้ props เก่าทับ
+        setPendingUrl(data.imageUrl);
         setSavedImage(data.imageUrl);
         if (inputRef.current) inputRef.current.value = "";
         if (preview) URL.revokeObjectURL(preview);
         setPreview(null);
         setFileName(null);
         setSize(null);
-        setMessage("เปลี่ยนรูปหลักแล้ว — รูปที่เห็นคือรูปใหม่บน TikTok");
+        setMessage("บันทึกไปที่ TikTok แล้ว — กำลังอัปเดตรูปในระบบ…");
         router.refresh();
+        void waitForNewImage();
       } else {
         // TikTok ยังไม่สะท้อนรูปใหม่: ให้เห็นรูปที่เพิ่งเลือกไว้ก่อน แล้วคอยถามจนได้
         setMessage("บันทึกไปที่ TikTok แล้ว — กำลังรอรูปใหม่ขึ้นในระบบ…");

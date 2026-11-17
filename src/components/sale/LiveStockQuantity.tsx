@@ -1,29 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { usePendingValue } from "@/lib/sale/use-pending-value";
 
 /**
- * เลข "คงเหลือรวม" ในป๊อปอัพ SKU — อัปเดตทันทีที่กดปรับสต็อกสำเร็จ
+ * เลข "คงเหลือรวม" ในป๊อปอัพ SKU
  * ฟอร์มปรับสต็อกยิง event `sale:stock-updated` มาพร้อมค่าที่เซิร์ฟเวอร์อ่านกลับได้
- * แล้วค่อยให้ router.refresh() ประสานข้อมูลชุดเต็มตามมาอีกที
+ * ค่านี้จะขึ้นทันทีและไม่ถูกข้อมูลเก่าจากการรีเฟรชเขียนทับ (จนกว่า DB จะตรงกัน)
  */
 export function LiveStockQuantity({ skuId, initial }: { skuId: string; initial: number }) {
-  const [value, setValue] = useState(initial);
-
-  useEffect(() => {
-    setValue(initial);
-  }, [initial]);
+  const { value, commit } = usePendingValue(initial);
 
   useEffect(() => {
     const onUpdate = (event: Event) => {
       const detail = (event as CustomEvent<{ skuId?: string; quantity?: number }>).detail;
       if (detail?.skuId === skuId && typeof detail.quantity === "number") {
-        setValue(detail.quantity);
+        commit(detail.quantity);
       }
     };
     window.addEventListener("sale:stock-updated", onUpdate);
     return () => window.removeEventListener("sale:stock-updated", onUpdate);
-  }, [skuId]);
+  }, [skuId, commit]);
 
   return <span className="tabular-nums">{value.toLocaleString("th-TH")}</span>;
 }
