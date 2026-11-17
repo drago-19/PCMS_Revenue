@@ -92,6 +92,7 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
 
       <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2">
         <TikTokConnectCard
+          canEditConfig={false}
           hostIsLocal={hostIsLocal}
           activeShopId={tiktokActiveShopId}
           config={{
@@ -113,6 +114,7 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
         />
 
         <ShopeeConnectCard
+          canEditConfig={false}
           hostIsLocal={hostIsLocal}
           activeShopId={shopeeActiveShopId}
           config={{

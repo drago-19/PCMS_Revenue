@@ -41,12 +41,15 @@ export function TikTokConnectCard({
   config,
   hostIsLocal = false,
   activeShopId = null,
+  canEditConfig = true,
 }: {
   config: TikTokConfigView;
   /** เปิดจากเครื่อง dev — ลงทะเบียน webhook ไม่ได้ (จะไปทับของ production) */
   hostIsLocal?: boolean;
   /** ร้านที่ระบบใช้เป็นค่าเริ่มต้นอยู่ตอนนี้ */
   activeShopId?: string | null;
+  /** แก้ไข App Key/Secret + เปิด webhook ได้เฉพาะผู้ดูแลระบบ (ฝ่ายขายเห็นแค่การเชื่อมร้าน) */
+  canEditConfig?: boolean;
 }) {
   const router = useRouter();
   const accounts = config.accounts;
@@ -303,7 +306,7 @@ export function TikTokConnectCard({
         </ul>
       ) : null}
 
-      {editing ? (
+      {canEditConfig && editing ? (
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="tt-app-key" className="text-[13px] font-bold">
@@ -362,7 +365,7 @@ export function TikTokConnectCard({
               </a>
             </Button>
           ) : null}
-          {accounts.length > 0 && config.configured ? (
+          {canEditConfig && accounts.length > 0 && config.configured ? (
             <Button
               variant="outline"
               onClick={handleRegisterWebhook}
@@ -385,9 +388,14 @@ export function TikTokConnectCard({
                     : "เปิดรับแจ้งเตือนจาก TikTok"}
             </Button>
           ) : null}
-          <Button variant="ghost" onClick={() => setEditing(true)}>
-            แก้ไขค่าแอป
-          </Button>
+          {/* ตั้งค่า App Key/Secret และ Webhook เป็นงานของผู้ดูแลระบบ — ฝ่ายขายเห็นเฉพาะการเชื่อมร้าน */}
+          {canEditConfig ? (
+            <>
+              <Button variant="ghost" onClick={() => setEditing(true)}>
+                แก้ไขค่าแอป
+              </Button>
+            </>
+          ) : null}
         </div>
       )}
 

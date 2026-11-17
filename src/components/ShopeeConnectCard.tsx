@@ -41,10 +41,13 @@ export function ShopeeConnectCard({
   config,
   hostIsLocal = false,
   activeShopId = null,
+  canEditConfig = true,
 }: {
   config: ShopeeConfigView;
   hostIsLocal?: boolean;
   activeShopId?: string | null;
+  /** แก้ไข Partner ID/Key ได้เฉพาะผู้ดูแลระบบ (ฝ่ายขายเห็นแค่การเชื่อมร้าน) */
+  canEditConfig?: boolean;
 }) {
   const router = useRouter();
   const [switchingKey, setSwitchingKey] = useState<string | null>(null);
@@ -259,7 +262,7 @@ export function ShopeeConnectCard({
         </Badge>
       </div>
 
-      {editing ? (
+      {canEditConfig && editing ? (
         <div className="flex flex-col gap-2.5 rounded-lg border border-border bg-muted/30 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-foreground">โหมด:</span>
@@ -359,15 +362,17 @@ export function ShopeeConnectCard({
               </span>
             ) : null}
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="min-h-[40px]"
-            onClick={() => setEditing(true)}
-          >
-            แก้ไข Credential
-          </Button>
+          {canEditConfig ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="min-h-[40px]"
+              onClick={() => setEditing(true)}
+            >
+              แก้ไข Credential
+            </Button>
+          ) : null}
         </div>
       )}
 
