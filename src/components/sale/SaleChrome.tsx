@@ -40,7 +40,8 @@ export function SaleChrome() {
       <span className="hidden rounded-full bg-[color:var(--accent)] px-2.5 py-1 text-[11.5px] font-semibold text-[color:var(--accent-foreground)] min-[720px]:inline">
         ฝ่ายขาย
       </span>
-      <Button asChild size="sm" variant="outline" className="hidden min-[560px]:inline-flex">
+      {/* ไม่มีกรอบ — ให้เข้าพวกกับเมนูข้อความและการออกจากระบบในแถบเดียวกัน */}
+      <Button asChild size="sm" variant="ghost" className="hidden min-[560px]:inline-flex">
         <Link href="/sale/settings">ตั้งค่า</Link>
       </Button>
       <Button size="sm" variant="ghost" onClick={logout} disabled={loggingOut}>
