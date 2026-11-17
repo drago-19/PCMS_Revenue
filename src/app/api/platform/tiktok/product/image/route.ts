@@ -1,6 +1,10 @@
 import { recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { isSandboxShopName } from "@/lib/platform/platforms";
-import { updateProductImages, uploadProductImage } from "@/lib/platform/product-write";
+import {
+  refreshProductImageInDb,
+  updateProductImages,
+  uploadProductImage,
+} from "@/lib/platform/product-write";
 import { getPlatformAccountRow, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { getClientIp } from "@/lib/session-token";
 
@@ -59,6 +63,8 @@ export async function POST(request: Request) {
   try {
     const { uri } = await uploadProductImage({ shopId, file });
     await updateProductImages({ shopId, productId, uris: [uri] });
+    // อ่านรูปใหม่จำก TikTok แล้วบันทึกทับใน DB เพื่อให้หน้าจอเห็นรูปใหม่ทันที
+    const imageUrl = await refreshProductImageInDb({ shopId, productId }).catch(() => null);
     await recordAuditLog({
       actor: auth.session.sub,
       action: auditAction,
@@ -67,7 +73,7 @@ export async function POST(request: Request) {
       details: { shopId, productId, uri, bytes: file.size, type: file.type },
       requestId: auth.requestId,
     });
-    return Response.json({ ok: true, uri, requestId: auth.requestId });
+    return Response.json({ ok: true, uri, imageUrl, requestId: auth.requestId });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await recordAuditLog({

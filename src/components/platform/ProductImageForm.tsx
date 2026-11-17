@@ -60,7 +60,7 @@ export function ProductImageForm({
         setError(data.error ?? "อัปโหลดไม่สำเร็จ");
         return;
       }
-      setMessage("เปลี่ยนรูปหลักแล้ว — รอสักครู่ให้ระบบดึงรูปใหม่");
+      setMessage("เปลี่ยนรูปหลักแล้ว — ระบบดึงรูปใหม่มาแสดงให้แล้ว");
       if (inputRef.current) inputRef.current.value = "";
       pick(null);
       router.refresh();

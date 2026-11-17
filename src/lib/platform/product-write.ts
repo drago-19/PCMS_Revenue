@@ -1,3 +1,4 @@
+import { query } from "@/lib/db";
 import { callTikTokApi, callTikTokMultipart } from "./tiktok";
 import { getPlatformAccountRow, getPlatformConfig, TIKTOK_PLATFORM } from "./store";
 
@@ -71,6 +72,50 @@ export async function uploadProductImage({
 }
 
 /** ตั้งรูปหลักของสินค้าเป็นชุด uri ที่อัปโหลดไว้แล้ว */
+export async function refreshProductImageInDb({
+  shopId,
+  productId,
+}: {
+  shopId: string;
+  productId: string;
+}): Promise<string | null> {
+  const ctx = await requireShop(shopId);
+
+  // TikTok ใช้เวลาสักครู่กว่าจะสะท้อนรูปใหม่ใน Get Product — ลองอ่านซ้ำสั้น ๆ ก่อนยอมแพ้
+  // หมายเหตุ: response ของ endpoint นี้วาง main_images ไว้ชั้นบนสุด (ไม่ห่อใน data)
+  const readImageUrl = async () => {
+    const result = await callTikTokApi<{
+      main_images?: Array<{ thumb_urls?: string[]; uri?: string }>;
+      data?: { main_images?: Array<{ thumb_urls?: string[]; uri?: string }> };
+    }>({
+      config: ctx.appConfig,
+      accessToken: ctx.accessToken,
+      query: { shop_cipher: ctx.shopCipher },
+      method: "GET",
+      path: `/product/202309/products/${encodeURIComponent(productId)}`,
+    });
+    const images = result.main_images ?? result.data?.main_images ?? [];
+    return images[0]?.thumb_urls?.[0] ?? null;
+  };
+
+  let imageUrl: string | null = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    imageUrl = await readImageUrl().catch(() => null);
+    if (imageUrl) break;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  }
+  if (!imageUrl) return null;
+
+  // อัปเดตรูปในฐานข้อมูลทันที ไม่ต้องรอรอบซิงก์สต็อกรอบถัดไป
+  await query(
+    `UPDATE platform_stock
+        SET image_url = $1::text, updated_at = now()
+      WHERE platform = $2::text AND shop_id = $3::text AND product_id = $4::text`,
+    [imageUrl, TIKTOK_PLATFORM, shopId, productId],
+  );
+  return imageUrl;
+}
+
 export async function updateProductImages({
   shopId,
   productId,
