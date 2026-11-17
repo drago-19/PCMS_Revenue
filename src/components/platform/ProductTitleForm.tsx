@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { scheduleHardRefresh } from "@/lib/sale/refresh";
 import { Input } from "@/components/ui/input";
 
 /**
@@ -49,7 +50,9 @@ export function ProductTitleForm({
         new CustomEvent("sale:product-title-updated", { detail: { productId, title: trimmed } }),
       );
       setMessage("บันทึกชื่อใหม่แล้ว — ชื่อนี้แสดงบน TikTok แล้ว");
-      router.refresh();
+      // โหลดหน้าใหม่จากเซิร์ฟเวอร์แบบเต็ม เพื่อให้ตัวเลข/ชื่อ/รูปที่แสดงตรงกับฐานข้อมูลทันที
+      // (router.refresh() บางครั้งไม่ทำให้หน้าต่างป๊อปอัพวาดใหม่)
+      scheduleHardRefresh();
     } catch {
       setError("เชื่อมต่อไม่สำเร็จ — ลองใหม่อีกครั้ง");
     } finally {

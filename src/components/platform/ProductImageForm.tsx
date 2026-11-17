@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { scheduleHardRefresh } from "@/lib/sale/refresh";
 
 /**
  * เปลี่ยนรูปหลักของสินค้า
@@ -81,7 +82,8 @@ export function ProductImageForm({
           ? "เปลี่ยนรูปหลักแล้ว — รูปที่เห็นคือรูปใหม่บน TikTok"
           : "ส่งรูปใหม่ไปที่ TikTok แล้ว — รูปในระบบจะอัปเดตในรอบซิงก์ถัดไป",
       );
-      router.refresh();
+      // โหลดหน้าใหม่จากเซิร์ฟเวอร์แบบเต็ม เพื่อให้รูปที่แสดงตรงกับฐานข้อมูลทันที
+      scheduleHardRefresh();
     } catch {
       setError("เชื่อมต่อไม่สำเร็จ — ลองใหม่อีกครั้ง");
     } finally {
