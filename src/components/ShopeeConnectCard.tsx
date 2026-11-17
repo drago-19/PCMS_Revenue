@@ -459,6 +459,18 @@ export function ShopeeConnectCard({
         </div>
       ) : null}
 
+      {!config.configured ? (
+        // ไม่มี Partner ID/Key = ยังเชื่อมร้านไม่ได้ — แสดงปุ่มกดไม่ได้พร้อมเหตุผล ดีกว่าซ่อนหาย
+        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+          <Button size="sm" disabled className="min-h-[40px]">
+            เชื่อมร้าน Shopee (OAuth)
+          </Button>
+          <span className="text-[12px] text-muted-foreground">
+            ยังไม่ได้ตั้งค่า Partner ID / Partner Key — ผู้ดูแลระบบต้องตั้งค่าก่อน
+          </span>
+        </div>
+      ) : null}
+
       {config.configured ? (
         <>
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
