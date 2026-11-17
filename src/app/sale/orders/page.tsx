@@ -197,6 +197,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
         to={toParam}
         shop={shop}
         connectedPlatforms={connectedPlatforms}
+        tones="platform"
       />
 
       <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>

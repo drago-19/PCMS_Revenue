@@ -12,6 +12,22 @@ import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { PLATFORM_TABS, platformTab, type PlatformKey } from "@/lib/platform/platforms";
 
+/** สีประจำแพลตฟอร์ม — ใช้เฉพาะเมื่อผู้เรียกขอ (tones="platform") เพื่อไม่กระทบหน้าของ Dragon19 */
+const PLATFORM_TONE: Record<PlatformKey, { active: string; idle: string }> = {
+  tiktok: {
+    active: "border-[#111827] bg-[#111827] text-white",
+    idle: "border-[#d1d5db] bg-[#f3f4f6] text-[#111827] hover:bg-[#e5e7eb]",
+  },
+  shopee: {
+    active: "border-[#ee4d2d] bg-[#ee4d2d] text-white",
+    idle: "border-[#f6c6b8] bg-[#fef2ee] text-[#c2410c] hover:bg-[#fde3da]",
+  },
+  facebook: {
+    active: "border-[#1877f2] bg-[#1877f2] text-white",
+    idle: "border-[#bcd6fb] bg-[#eff6ff] text-[#1d4ed8] hover:bg-[#dbeafe]",
+  },
+};
+
 /** ตัวสลับแพลตฟอร์ม — เก็บช่วงเวลาไว้ (ไม่พก shop ID ข้ามแพลตฟอร์ม) */
 export function PlatformSwitcher({
   platform,
@@ -20,6 +36,7 @@ export function PlatformSwitcher({
   to,
   shop,
   connectedPlatforms,
+  tones = "plain",
 }: {
   platform: PlatformKey;
   basePath: string;
@@ -27,6 +44,8 @@ export function PlatformSwitcher({
   to?: string;
   shop?: string;
   connectedPlatforms?: PlatformKey[];
+  /** "platform" = ใส่สีประจำแพลตฟอร์ม (หน้าฝ่ายขาย) · "plain" = หน้าตาเดิมของ /platform */
+  tones?: "plain" | "platform";
 }) {
   return (
     <nav aria-label="เลือกแพลตฟอร์ม" className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -48,11 +67,16 @@ export function PlatformSwitcher({
             className={cn(
               "inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-bold transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              active
-                ? "border-foreground bg-foreground text-background"
-                : isConnected
-                  ? "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                  : "border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+              tones === "platform"
+                ? // สีประจำแพลตฟอร์ม — ตัวที่เลือกเป็นสีทึบ ตัวอื่นเป็นสีอ่อนของมัน
+                  active
+                  ? PLATFORM_TONE[tab.key].active
+                  : cn(PLATFORM_TONE[tab.key].idle, !isConnected && "border-dashed opacity-70")
+                : active
+                  ? "border-foreground bg-foreground text-background"
+                  : isConnected
+                    ? "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                    : "border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
             {tab.label}

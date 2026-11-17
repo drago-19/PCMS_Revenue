@@ -248,6 +248,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         basePath="/sale/stocks"
         shop={shopId}
         connectedPlatforms={connectedPlatforms}
+        tones="platform"
       />
 
       <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">

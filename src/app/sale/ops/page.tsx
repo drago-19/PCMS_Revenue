@@ -50,6 +50,7 @@ export default async function PlatformOpsPage({ searchParams }: { searchParams: 
         to={toParam}
         shop={selectedShop}
         connectedPlatforms={connectedPlatforms}
+        tones="platform"
       />
 
       <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
