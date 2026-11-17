@@ -79,16 +79,25 @@ export function SaleStockAdjustForm({
         detail?: { current?: number } | null;
       };
       if (!res.ok) {
-        setError(
-          data.detail?.current != null
-            ? `${data.error ?? "แก้ไม่สำเร็จ"} — กดปิดแล้วเปิดใหม่เพื่อดูค่าล่าสุด`
-            : (data.error ?? "แก้ไม่สำเร็จ"),
-        );
-        // ย้อนเลขที่เดาไว้กลับเป็นค่าเดิม เพราะการบันทึกไม่สำเร็จ
+        // ยอดขยับไประหว่างนั้น (ตอนไลฟ์เกิดตลอด): รับยอดล่าสุดมาเป็นฐานใหม่
+        // แล้วคงจำนวนที่กรอกไว้ เพื่อให้กดยืนยันซ้ำได้ในคลิกเดียว
+        const fresh = data.detail?.current;
+        if (typeof fresh === "number") {
+          setBase(fresh);
+          setError(
+            `${data.error ?? "แก้ไม่สำเร็จ"} — ยอดล่าสุดคือ ${fresh} กดยืนยันอีกครั้งเพื่อ${
+              mode === "add" ? "เพิ่ม" : "ลด"
+            } ${effective} บนยอดใหม่`,
+          );
+        } else {
+          setError(data.error ?? "แก้ไม่สำเร็จ");
+        }
+        // ย้อนเลขที่เดาไว้กลับเป็นยอดจริงที่เพิ่งได้มา
         window.dispatchEvent(
-          new CustomEvent("sale:stock-updated", { detail: { skuId, quantity: base } }),
+          new CustomEvent("sale:stock-updated", {
+            detail: { skuId, quantity: typeof fresh === "number" ? fresh : base },
+          }),
         );
-        router.refresh();
         return;
       }
       setMessage(

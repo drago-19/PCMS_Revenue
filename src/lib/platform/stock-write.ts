@@ -40,6 +40,31 @@ type ProductDetail = {
 /** สถานะที่ TikTok ยอมให้แก้สต็อก — FREEZE/DELETED ส่งไปจะถูกตีกลับ */
 const WRITABLE_STATUS = new Set(["DRAFT", "PENDING", "FAILED", "ACTIVATE", "SELLER_DEACTIVATED"]);
 
+// TikTok ตอบข้อผิดพลาดชั่วคราวเป็นครั้งคราว (500 หรือ envelope แปลก ๆ) โดยเฉพาะตอนไลฟ์
+// ที่มีคำขอแทรกเข้ามาถี่ — ลองส่งซ้ำด้วยคำขอเดิมได้ เพราะยอดที่ส่งเป็นค่าสัมบูรณ์
+const WRITE_ATTEMPTS = 3;
+const WRITE_RETRY_DELAYS_MS = [300, 700];
+
+/**
+ * เรียก TikTok ซ้ำเมื่อเจอข้อผิดพลาดชั่วคราว — การปฏิเสธทางธุรกิจ (StockWriteError)
+ * ไม่ลองซ้ำเพราะยิงกี่ครั้งก็ได้ผลเดิม
+ */
+async function callTikTokWithRetry<T>(run: () => Promise<T>, attempts = WRITE_ATTEMPTS): Promise<T> {
+  let lastFailure: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, WRITE_RETRY_DELAYS_MS[attempt - 1] ?? 700));
+    }
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof StockWriteError) throw error;
+      lastFailure = error;
+    }
+  }
+  throw lastFailure instanceof Error ? lastFailure : new Error("TikTok ไม่ตอบสนอง");
+}
+
 function toWarehouses(sku: NonNullable<ProductDetail["skus"]>[number]): Warehouse[] {
   return (sku.inventory ?? [])
     .filter((item) => item.warehouse_id)
@@ -127,10 +152,12 @@ async function adjustStockInner(input: {
   let sellerSku: string | null = null;
   let fromDb = false;
   try {
-    const detail = await callTikTokApi<ProductDetail>({
-      ...ctx,
-      path: `/product/202309/products/${encodeURIComponent(productId)}`,
-    });
+    const detail = await callTikTokWithRetry(() =>
+      callTikTokApi<ProductDetail>({
+        ...ctx,
+        path: `/product/202309/products/${encodeURIComponent(productId)}`,
+      }),
+    );
     const product = detail;
     const status = product.status ?? product.product_status;
     if (!product.skus?.length) {
@@ -182,19 +209,34 @@ async function adjustStockInner(input: {
   );
   const next = nextWarehouses.reduce((sum, item) => sum + item.quantity, 0);
 
-  const result = await callTikTokApi<{ errors?: Array<{ message?: string; detail?: string }> }>({
-    ...ctx,
-    method: "POST",
-    path: `/product/202309/products/${encodeURIComponent(productId)}/inventory/update`,
-    body: {
-      skus: [
-        {
-          id: skuId,
-          inventory: nextWarehouses.map((item) => ({ warehouse_id: item.warehouseId, quantity: item.quantity })),
-        },
-      ],
-    },
-  });
+  type UpdateResult = { errors?: Array<{ message?: string; detail?: string }> };
+  const updateBody = {
+    skus: [
+      {
+        id: skuId,
+        inventory: nextWarehouses.map((item) => ({ warehouse_id: item.warehouseId, quantity: item.quantity })),
+      },
+    ],
+  };
+  let result: UpdateResult;
+  try {
+    result = await callTikTokWithRetry(() =>
+      callTikTokApi<UpdateResult>({
+        ...ctx,
+        method: "POST",
+        path: `/product/202309/products/${encodeURIComponent(productId)}/inventory/update`,
+        body: updateBody,
+      }),
+    );
+  } catch (error) {
+    if (error instanceof StockWriteError) throw error;
+    throw new StockWriteError(
+      "api",
+      `TikTok ไม่รับคำขอแก้สต็อก (ลอง ${WRITE_ATTEMPTS} ครั้งแล้ว): ${
+        error instanceof Error ? error.message : "ไม่ทราบสาเหตุ"
+      }`,
+    );
+  }
   const failure = result.errors?.[0];
   if (failure) {
     throw new StockWriteError("rejected", failure.message ?? failure.detail ?? "TikTok ปฏิเสธการแก้สต็อก");
