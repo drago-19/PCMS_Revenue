@@ -147,7 +147,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
   const target = accountKey
     ? accounts.find((account) => account.accountKey === accountKey)
     : accounts.find((account) => account.status === "connected") ?? accounts[0];

@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     return Response.json({ error: "ยังไม่ได้ตั้งค่าแอป Shopee" }, { status: 400 });
   }
 
-  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
   const account = accounts.find((row) => row.status === "connected") ?? accounts[0];
   if (!account) {
     return Response.json({ error: "ยังไม่ได้เชื่อมร้าน Shopee" }, { status: 400 });

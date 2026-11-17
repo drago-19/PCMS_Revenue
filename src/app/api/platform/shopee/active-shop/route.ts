@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "ต้องระบุร้าน", requestId: auth.requestId }, { status: 400 });
   }
 
-  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
   const account = accounts.find((row) => row.accountKey === shopId);
   if (!account) {
     return Response.json({ error: "ไม่พบร้านนี้ในระบบ", requestId: auth.requestId }, { status: 404 });

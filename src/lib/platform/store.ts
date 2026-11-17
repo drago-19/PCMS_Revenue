@@ -4,7 +4,7 @@
 // - token ของ "ร้านที่ authorize แล้ว" เก็บในตาราง platform_accounts
 // ไม่อ่าน/ไม่เขียนตารางของระบบบิลเดิมเลย
 
-import { query, queryOne } from "@/lib/db";
+import { getActiveCompanyId, query, queryOne } from "@/lib/db";
 import type { CompanyId } from "@/lib/session-token";
 import {
   decryptSecret,
@@ -337,11 +337,20 @@ export async function setShopCompany(shopId: string, company: CompanyId): Promis
   );
 }
 
-export async function listPlatformAccounts(platform: string): Promise<PlatformAccountPublic[]> {
+export async function listPlatformAccounts(
+  platform: string,
+  scope: "active" | "all" = "active",
+): Promise<PlatformAccountPublic[]> {
   try {
+    // ค่าเริ่มต้น = เฉพาะร้านของบริษัทที่กำลังใช้งานอยู่ (ดราก้อนเห็นเฉพาะร้านของดราก้อน)
+    // งานภายในที่ต้องเห็นทุกร้าน (ซิงก์, webhook, หน้าตั้งค่า) ส่ง "all" เข้ามาเอง
+    const company = scope === "all" ? null : await getActiveCompanyId().catch(() => "dragon19" as const);
     return await query<PlatformAccountPublic>(
-      `SELECT ${ACCOUNT_COLUMNS} FROM public.platform_accounts WHERE platform = $1 ORDER BY updated_at DESC`,
-      [platform],
+      `SELECT ${ACCOUNT_COLUMNS} FROM public.platform_accounts
+        WHERE platform = $1::text
+          AND ($2::text IS NULL OR company_key = $2::text)
+        ORDER BY updated_at DESC`,
+      [platform, company],
     );
   } catch {
     return [];

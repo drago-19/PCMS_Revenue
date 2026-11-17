@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "ต้องระบุร้านและบริษัท", requestId: auth.requestId }, { status: 400 });
   }
 
-  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
   if (!accounts.some((row) => row.accountKey === shopId)) {
     return Response.json({ error: "ไม่พบร้านนี้ในระบบ", requestId: auth.requestId }, { status: 404 });
   }

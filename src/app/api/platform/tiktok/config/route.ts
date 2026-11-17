@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.response;
 
   const config = await getPlatformConfig();
-  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
 
   return Response.json(
     {

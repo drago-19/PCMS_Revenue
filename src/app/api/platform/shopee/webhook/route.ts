@@ -92,7 +92,7 @@ export async function POST(request: Request) {
   const shopId = String(body.shop_id ?? "").trim();
   const code = Number(body.code ?? 0);
 
-  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
   const account = accounts.find((row) => row.accountKey === shopId);
   if (!account) {
     return Response.json({ ok: true, ignored: "unknown_shop" }, { status: 200 });

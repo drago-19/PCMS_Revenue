@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       { status: 400, headers: { "x-request-id": auth.requestId } },
     );
   }
-  const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM)).filter(
+  const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM, "all")).filter(
     (row) => row.status === "connected" && row.shopCipher,
   );
 

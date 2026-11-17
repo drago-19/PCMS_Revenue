@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.response;
 
   const config = await getPlatformConfig();
-  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
 
   function buildPushCallbackUrl(shopee: { partnerKey: string; redirectBaseUrl?: string | null } | null | undefined) {
     if (!shopee) return null;

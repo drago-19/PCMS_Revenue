@@ -62,7 +62,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "ยังไม่ได้ตั้งค่าแอป Shopee", requestId: auth.requestId }, { status: 400 });
   }
 
-  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
   const requestedKey = typeof body.accountKey === "string" ? body.accountKey.trim() : "";
   const target = requestedKey
     ? accounts.find((account) => account.accountKey === requestedKey)

@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     // body ไม่ใช่ JSON — ใช้ค่าเริ่มต้น
   }
 
-  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
   const target = requestedKey
     ? accounts.find((account) => account.accountKey === requestedKey)
     : accounts.find((account) => account.status === "connected" && account.shopCipher)

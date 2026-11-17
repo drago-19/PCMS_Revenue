@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   }
 
-  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
   const account = accounts.find((row) => row.accountKey === shopId || row.shopId === shopId);
   if (!account?.shopCipher) {
     return Response.json({ ok: true });

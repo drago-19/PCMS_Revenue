@@ -79,8 +79,8 @@ export default async function SettingsPage({
   const [platformConfig, tiktokAccounts, shopeeAccounts, tiktokActiveShopId, tiktokWebhookRegisteredAt] =
     await Promise.all([
       getPlatformConfig(),
-      listPlatformAccounts(TIKTOK_PLATFORM),
-      listPlatformAccounts(SHOPEE_PLATFORM),
+      listPlatformAccounts(TIKTOK_PLATFORM, "all"),
+      listPlatformAccounts(SHOPEE_PLATFORM, "all"),
       getActiveShopId(TIKTOK_PLATFORM),
       getWebhookRegisteredAt(TIKTOK_PLATFORM),
     ]);

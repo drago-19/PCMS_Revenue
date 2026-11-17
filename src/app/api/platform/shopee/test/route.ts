@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     // ไม่ส่ง body หรือไม่ใช่ JSON ใช้ร้านเริ่มต้น
   }
 
-  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+  const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
   const target = requestedKey
     ? accounts.find((account) => account.accountKey === requestedKey)
     : accounts.find((account) => account.status === "connected") ?? accounts[0];
