@@ -154,7 +154,9 @@ export function proxy(request: NextRequest) {
   // ผู้ใช้สิทธิ์ "platform" (ฝ่ายขาย) ใช้ได้เฉพาะหมวด /sale ของตัวเอง
   // แยกเส้นทางจาก /platform ของ Dragon19 โดยสิ้นเชิง — เปิดที่อื่นจะถูกพากลับ /sale
   if (String(session.role) === "platform") {
-    const allowed = pathname === "/sale" || pathname.startsWith("/sale/");
+    // ฝ่ายขายใช้หมวด /sale และหน้าแพ็ค /orders (อ่านอย่างเดียว)
+    const allowed =
+      pathname === "/sale" || pathname.startsWith("/sale/") || pathname === "/orders" || pathname.startsWith("/orders/");
     if (!allowed) {
       return applySecurityHeaders(NextResponse.redirect(new URL("/sale", request.url)), requestId);
     }
