@@ -41,7 +41,7 @@ export async function getWebhookRegisteredAt(platform: string): Promise<string |
 
 export async function setWebhookRegisteredAt(platform: string, at: string): Promise<void> {
   await query(
-    `UPDATE app_settings
+    `UPDATE public.app_settings
         SET value_json = jsonb_set(COALESCE(value_json, '{}'::jsonb), ARRAY[$2::text], to_jsonb($3::text), true),
             updated_at = now()
       WHERE setting_key = $1`,
@@ -52,7 +52,7 @@ export async function setWebhookRegisteredAt(platform: string, at: string): Prom
 export async function setActiveShopId(platform: string, shopId: string): Promise<void> {
   // jsonb_set สร้างคีย์ซ้อนชั้นไม่ได้ — ต้องสร้าง activeShop เป็น object ก่อนแล้วค่อยใส่ค่าร้าน
   await query(
-    `UPDATE app_settings
+    `UPDATE public.app_settings
         SET value_json = jsonb_set(
               jsonb_set(
                 COALESCE(value_json, '{}'::jsonb),
@@ -114,7 +114,7 @@ async function resolveEncryptedSecret(
   if (plain && !isEncryptedValue(storedValue) && isEncryptionConfigured()) {
     try {
       await query(
-        `UPDATE app_settings
+        `UPDATE public.app_settings
          SET value_json = jsonb_set(value_json, $2::text[], to_jsonb($3::text)),
              updated_at = now()
          WHERE setting_key = $1`,
@@ -197,7 +197,7 @@ export async function saveTikTokConfig(
   };
 
   await query(
-    `INSERT INTO app_settings (setting_key, value_json, updated_by, updated_at)
+    `INSERT INTO public.app_settings (setting_key, value_json, updated_by, updated_at)
      VALUES ($1, $2::jsonb, $3, now())
      ON CONFLICT (setting_key) DO UPDATE SET
        value_json = EXCLUDED.value_json,
@@ -269,7 +269,7 @@ export async function saveShopeeConfig(
   };
 
   await query(
-    `INSERT INTO app_settings (setting_key, value_json, updated_by, updated_at)
+    `INSERT INTO public.app_settings (setting_key, value_json, updated_by, updated_at)
      VALUES ($1, $2::jsonb, $3, now())
      ON CONFLICT (setting_key) DO UPDATE SET
        value_json = EXCLUDED.value_json,
