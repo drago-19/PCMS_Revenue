@@ -293,10 +293,15 @@ export async function writeSyncState(
   values: { orderCount: number; lastError: string | null },
 ): Promise<void> {
   await query(
+    // รอบที่ล้มเหลวไม่นับเป็น "ดึงล่าสุด" — ไม่งั้นหน้าเว็บจะขึ้นเวลาใหม่ทั้งที่ข้อมูลยังเก่า
+    // (เก็บไว้แค่ last_error ให้หน้าจอบอกสาเหตุได้)
     `INSERT INTO shipnity_sync_state (account_key, last_sync_at, order_count, last_error)
      VALUES ($1, now(), $2, $3)
      ON CONFLICT (account_key) DO UPDATE SET
-       last_sync_at = now(),
+       last_sync_at = CASE
+         WHEN EXCLUDED.last_error IS NULL THEN now()
+         ELSE shipnity_sync_state.last_sync_at
+       END,
        order_count = EXCLUDED.order_count,
        last_error = EXCLUDED.last_error`,
     [accountKey, values.orderCount, values.lastError],

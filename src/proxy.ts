@@ -32,6 +32,22 @@ function safeRedirectTarget(rawTarget: string | null, baseUrl: string): string {
   }
 }
 
+/**
+ * เส้นทาง API ที่หน้าแพ็ค /orders เรียกใช้ — ฝ่ายขายต้องผ่านได้
+ * (ใช้ร่วมกันทั้งด่าน API และด่านหน้าเว็บด้านล่าง ไม่ให้สองที่หลุดจากกัน)
+ */
+function isPackingApi(pathname: string): boolean {
+  return (
+    pathname === "/api/orders/packing" ||
+    pathname.startsWith("/api/orders/packing/") ||
+    pathname === "/api/orders/refresh" ||
+    pathname === "/api/shipnity/accounts" ||
+    pathname.startsWith("/api/shipnity/accounts/") ||
+    // ปุ่ม "ดึงใหม่ล่าสุด" ของหน้าแพ็ค
+    pathname === "/api/shipnity/refresh"
+  );
+}
+
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const requestId =
@@ -119,9 +135,13 @@ export function proxy(request: NextRequest) {
     }
 
     // ผู้ใช้สิทธิ์ "platform" (เช่น ฝ่ายขาย) เรียกได้เฉพาะ API ของหมวดแพลตฟอร์ม
-    // และการเปลี่ยนรหัสผ่านของตัวเอง (หน้าตั้งค่าในเมนูผู้ใช้เรียกเส้นนี้)
+    // การเปลี่ยนรหัสผ่านของตัวเอง (หน้าตั้งค่าในเมนูผู้ใช้เรียกเส้นนี้)
+    // และ API ที่หน้าแพ็ค /orders ใช้ — ด่านนี้อยู่ก่อนด่านหน้าเว็บด้านล่าง ถ้าไม่ยกเว้นที่นี่
+    // ปุ่ม "ดึงข้อมูลล่าสุด"/"ดึงใหม่เลย" ของฝ่ายขายจะถูกตีกลับ 403 ทุกครั้ง
     const platformApiAllowed =
-      pathname.startsWith("/api/platform/") || pathname === "/api/auth/password";
+      pathname.startsWith("/api/platform/") ||
+      pathname === "/api/auth/password" ||
+      isPackingApi(pathname);
     if (String(session.role) === "platform" && !platformApiAllowed) {
       return applySecurityHeaders(
         NextResponse.json({ error: "บัญชีนี้ใช้ได้เฉพาะหมวดแพลตฟอร์ม", requestId }, { status: 403 }),
@@ -155,15 +175,7 @@ export function proxy(request: NextRequest) {
   // แยกเส้นทางจาก /platform ของ Dragon19 โดยสิ้นเชิง — เปิดที่อื่นจะถูกพากลับ /sale
   if (String(session.role) === "platform") {
     // ฝ่ายขายใช้หมวด /sale และหน้าแพ็ค /orders (อ่านอย่างเดียว)
-    // ฝ่ายขาย: หมวด /sale · หน้าแพ็ค /orders · และ API ที่หน้าแพ็คเรียกใช้อ่านข้อมูล (จำกัดเฉพาะที่ระบุ)
-    const packagingApi =
-      pathname === "/api/orders/packing" ||
-      pathname.startsWith("/api/orders/packing/") ||
-      pathname === "/api/orders/refresh" ||
-      pathname === "/api/shipnity/accounts" ||
-      pathname.startsWith("/api/shipnity/accounts/") ||
-      // ปุ่ม "ดึงใหม่ล่าสุด" ของหน้าแพ็ค
-      pathname === "/api/shipnity/refresh";
+    const packagingApi = isPackingApi(pathname);
     const allowed =
       pathname === "/sale" ||
       pathname.startsWith("/sale/") ||

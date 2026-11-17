@@ -158,6 +158,8 @@ export interface DayOrdersFromStore extends DayOrdersResult {
   syncedCount: number | null;
   /** จำนวนออเดอร์ที่ยังไม่ปิดรายการที่มีในฐานข้อมูล */
   storedOpen: number;
+  /** ข้อความ error ของรอบซิงก์ล่าสุด (null = รอบล่าสุดสำเร็จ) */
+  syncError: string | null;
 }
 
 /**
@@ -199,6 +201,7 @@ export async function loadDayOrdersFromStore(
     written,
     syncedCount: latest?.orderCount ?? null,
     storedOpen,
+    syncError: latest?.lastError ?? null,
   };
 }
 

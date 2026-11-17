@@ -222,6 +222,33 @@ test("Next.js proxy blocks unauthenticated pages/APIs and attaches security head
   assert.equal(authedRes.status, 200);
 });
 
+test("ฝ่ายขาย (role platform) เรียก API ของหน้าแพ็คได้ แต่ API อื่นยังถูกปฏิเสธ", () => {
+  const token = createSessionToken({ username: "sales-check", role: "platform" });
+  const call = (path: string) =>
+    proxy(
+      new NextRequest(`http://localhost:3001${path}`, {
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}` },
+      }),
+    );
+
+  // หน้าแพ็คและ API ที่หน้านั้นเรียก — เดิมถูกด่าน API ตีกลับ 403 "บัญชีนี้ใช้ได้เฉพาะหมวดแพลตฟอร์ม"
+  // จนปุ่ม "ดึงข้อมูลล่าสุด" ของฝ่ายขายกดไม่ได้และข้อมูลค้าง
+  for (const path of [
+    "/orders",
+    "/api/shipnity/refresh",
+    "/api/shipnity/accounts",
+    "/api/orders/refresh",
+    "/api/orders/packing",
+  ]) {
+    assert.equal(call(path).status, 200, `${path} ต้องผ่านสำหรับฝ่ายขาย`);
+  }
+
+  // นอกเหนือจากนั้นยังต้องถูกปฏิเสธเหมือนเดิม
+  for (const path of ["/api/imports", "/api/settings", "/api/shipnity/connect"]) {
+    assert.equal(call(path).status, 403, `${path} ต้องถูกปฏิเสธสำหรับฝ่ายขาย`);
+  }
+});
+
 test("PWA manifest, service worker, and icons are valid and publicly accessible via proxy", () => {
   const m = manifest();
   assert.equal(m.name, "PCMS Revenue");

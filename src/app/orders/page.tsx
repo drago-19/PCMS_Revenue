@@ -2,6 +2,7 @@
 import { PageHeader, StatCard } from "@/components/PageHeader";
 import { PackingAutoRefresh } from "@/components/PackingAutoRefresh";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { CourierFilter } from "@/components/CourierFilter";
 import { OrderDetailButton } from "@/components/OrderDetailButton";
 import { OrderDetailDialog, type OrderDetailView } from "@/components/OrderDetailDialog";
@@ -34,6 +35,7 @@ import {
   type PackingOrder,
 } from "@/lib/packing-rounds";
 import { getCompanyDefaultSeller } from "@/lib/settings";
+import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session-token";
 import { cn } from "@/lib/utils";
 import { loadDayOrdersFromStore, startShipnityBackgroundSync } from "@/lib/shipnity/sync";
 import { ShipnityError, type ShipnityOrder } from "@/lib/shipnity/client";
@@ -66,6 +68,8 @@ interface ShopResult {
   /** ออเดอร์ที่ยังไม่ชำระเงินของวันนี้ (หรือรวมของค้าง) */
   waiting: WaitingPaymentOrder[];
   error: string | null;
+  /** รอบดึงล่าสุดล้มเหลวหรือไม่ (ข้อความจาก Shipnity) — ข้อมูลบนหน้าเป็นชุดที่สำเร็จครั้งก่อน */
+  syncError: string | null;
   fetchedAt: string | null;
   complete: boolean;
   /** จำนวนออเดอร์ที่ดึงได้ในรอบซิงก์ล่าสุด (null = ยังไม่เคยซิงก์) */
@@ -437,6 +441,11 @@ export default async function PackingOrdersPage({
     return haystack.includes(queryLower);
   };
   const companyId = await getActiveCompanyId();
+  // บัญชีฝ่ายขาย (role "platform") ใช้หน้านี้เพื่อแพ็คของเท่านั้น — ไม่ต้องเห็นบรรทัด
+  // "Shipnity · Open API v2 · บริษัท …" ซึ่งเป็นข้อมูลของฝ่ายดูแลระบบ
+  // แต่ละรหัสเห็นบริษัทของตัวเองอยู่แล้วที่ป้ายใต้ชื่อบัญชีแต่ละอัน
+  const sessionRole = verifySessionToken((await cookies()).get(SESSION_COOKIE_NAME)?.value)?.role;
+  const salesOnly = sessionRole === "platform";
   const accounts = await resolveShipnityAccounts(companyId);
   const roundCompanies = [...new Set(accounts.map((account) => account.companyKey ?? "dragon19"))];
   const roundCompanyName = (key: string) =>
@@ -452,7 +461,7 @@ export default async function PackingOrdersPage({
 
   const header = (print: { imageUrls: string[]; rounds: PackingRoundOption[] }) => (
     <PageHeader
-      eyebrow={`Shipnity · Open API v2 · ${companyLabel}`}
+      eyebrow={salesOnly ? undefined : `Shipnity · Open API v2 · ${companyLabel}`}
       title="ออเดอร์รอแพ็ค"
       description={`${isToday ? "ของวันนี้" : `ย้อนหลัง ${formatDate(isoDay)}`} · ตัดรอบ ${CUTOFF_TEXT} · ข้อมูล ${formatDateTime(now.toISOString())}`}
       actions={
@@ -513,6 +522,7 @@ export default async function PackingOrdersPage({
             ? collectWaitingPaymentOrders(carry, isoDay, { carryOverOpen: true })
             : [],
         error: null,
+        syncError: day.syncError,
         fetchedAt: day.fetchedAt,
         complete: day.complete,
       });
@@ -532,6 +542,7 @@ export default async function PackingOrdersPage({
           error instanceof ShipnityError
             ? error.message
             : "ดึงข้อมูลจาก Shipnity ไม่สำเร็จ กรุณาลองโหลดหน้าใหม่",
+        syncError: null,
         fetchedAt: null,
         complete: true,
       });
@@ -670,6 +681,22 @@ export default async function PackingOrdersPage({
               ดึงข้อมูลร้าน {item.account.label} ไม่สำเร็จ
             </p>
             <p className="mt-1 text-sm text-muted-foreground">{item.error}</p>
+          </Card>
+        ))}
+
+      {results
+        .filter((item) => item.syncError)
+        .map((item) => (
+          <Card key={`sync-${item.account.id}`} className="border-amber-500/50 p-4">
+            <p className="text-sm font-semibold">
+              ดึงข้อมูลร้าน {item.account.label} รอบล่าสุดไม่สำเร็จ
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{item.syncError}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              ตัวเลขบนหน้านี้คือชุดที่ดึงสำเร็จครั้งล่าสุด
+              {item.fetchedAt ? ` (${formatDateTime(item.fetchedAt)})` : ""} — ตรวจ token/อีเมลของบัญชีนี้
+              ที่หน้าตั้งค่า Shipnity แล้วกด “ดึงใหม่เลย”
+            </p>
           </Card>
         ))}
 
