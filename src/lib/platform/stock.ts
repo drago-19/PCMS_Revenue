@@ -35,7 +35,20 @@ export type StockRow = {
   imageUrl: string | null;
   /** ชิ้นที่ลูกค้าส่งคืนแล้วแต่ยังไม่ถึงร้าน — ไม่ควรนับเป็นของพร้อมขาย */
   inTransit: number;
+  /** สถานะวางขายบน TikTok — ACTIVATE = เปดตะกร้า, SELLER_DEACTIVATED = ซ่อนตะกร้า */
+  productStatus: string | null;
 };
+
+/** ป้ายสถานะวางขายที่ใช้ร่วมกันทั้งตารางรายการและป๊อปอัป */
+export function productStatusLabel(status: string | null): string {
+  if (status === "ACTIVATE") return "เปิดตะกร้า";
+  if (status === "SELLER_DEACTIVATED") return "ซ่อนตะกร้า";
+  if (status === "PLATFORM_DEACTIVATED") return "ถูกระงับโดยแพลตฟอร์ม";
+  if (status === "DRAFT") return "แบบร่าง";
+  if (status === "PENDING") return "รอตรวจ";
+  if (status === "FAILED") return "ไม่ผ่านการตรวจ";
+  return status ?? "ไม่ทราบสถานะ";
+}
 
 export type StockMovement = {
   sellerSku: string | null;
@@ -353,6 +366,7 @@ type StockRowDb = {
   updated_at: string;
   stock_image: string | null;
   in_transit: number;
+  product_status: string | null;
 };
 
 function toStockRow(row: StockRowDb): StockRow {
@@ -365,6 +379,7 @@ function toStockRow(row: StockRowDb): StockRow {
     warehouses: row.warehouses ?? [],
     updatedAt: row.updated_at,
     imageUrl: row.stock_image,
+    productStatus: row.product_status,
   };
 }
 
@@ -445,7 +460,7 @@ export async function getStockPage(
 
   const rows = await query<StockRowDb>(
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
-            s.image_url AS stock_image, COALESCE(rt.in_transit, 0)::int AS in_transit
+            s.image_url AS stock_image, s.product_status, COALESCE(rt.in_transit, 0)::int AS in_transit
        ${STOCK_FROM}
        ${join}
       WHERE ${clause}

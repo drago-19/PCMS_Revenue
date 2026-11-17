@@ -22,6 +22,7 @@ import {
   listRecentStockChanges,
   LOW_STOCK_THRESHOLD,
   syncStock,
+  productStatusLabel,
   type StockListFilter,
 } from "@/lib/platform/stock";
 import { isSandboxShopName } from "@/lib/platform/platforms";
@@ -413,6 +414,16 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                         ) : null}
                       </span>
                       <span className="max-w-[240px] truncate">{row.productName ?? "—"}</span>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-md px-1.5 py-0.5 text-[10.5px] font-bold",
+                          row.productStatus === "ACTIVATE"
+                            ? "bg-[color:var(--ok-soft)] text-[color:var(--ok)]"
+                            : "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {productStatusLabel(row.productStatus)}
+                      </span>
                     </span>
                   </td>
                   <td className={`mono py-1.5 pr-2 text-right font-bold ${row.quantity <= 0 ? "text-[#b42318]" : ""}`}>
@@ -705,15 +716,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
               <div className="flex flex-wrap items-center gap-2 text-[12px]">
                 <span className="rounded-md bg-muted px-2 py-0.5 font-bold">
-                  {skuDetail.productStatus === "ACTIVATE"
-                    ? "วางขายอยู่"
-                    : skuDetail.productStatus === "DRAFT"
-                      ? "แบบร่าง"
-                      : skuDetail.productStatus === "SELLER_DEACTIVATED"
-                        ? "ปิดการขาย"
-                        : skuDetail.productStatus === "PLATFORM_DEACTIVATED"
-                          ? "ถูกระงับโดยแพลตฟอร์ม"
-                          : (skuDetail.productStatus ?? "ไม่ทราบสถานะ")}
+                  {productStatusLabel(skuDetail.productStatus)}
                 </span>
                 <span className="text-muted-foreground">{skuDetail.category ?? "ยังไม่มีข้อมูลหมวดหมู่"}</span>
               </div>
