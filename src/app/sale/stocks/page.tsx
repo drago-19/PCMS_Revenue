@@ -579,29 +579,42 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               </p>
             </DialogHeader>
 
-            {/* สองงานแยกกันเป็นปุ่มแบบสลับ (segmented): ปรับสต็อก กับ แก้ไขสินค้า */}
-            <div className="flex w-fit flex-wrap items-center gap-1 rounded-full border border-border bg-muted/50 p-1">
-              <Button asChild size="sm" variant={action === "stock" ? "default" : "outline"}>
-                <Link
-                  href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}&action=stock`}
-                  scroll={false}
-                >
-                  ปรับสต็อก
-                </Link>
-              </Button>
-              <Button asChild size="sm" variant={action === "edit" ? "default" : "outline"}>
-                <Link
-                  href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}&action=edit`}
-                  scroll={false}
-                >
-                  แก้ไขสินค้า
-                </Link>
-              </Button>
+            {/* ปุ่มสลับโหมด: สองช่วงกว้างเท่ากัน · ลิงก์ย้อนกลับอยู่นอกกรอบ ไม่ยัดรวมในก้อนเดียวกัน */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div
+                role="tablist"
+                aria-label="โหมดของป๊อปอัพสินค้า"
+                className="inline-grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/40 p-1"
+              >
+                {(
+                  [
+                    { key: "stock", label: "ปรับสต็อก" },
+                    { key: "edit", label: "แก้ไขสินค้า" },
+                  ] as const
+                ).map((mode) => (
+                  <Link
+                    key={mode.key}
+                    href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}&action=${mode.key}`}
+                    scroll={false}
+                    role="tab"
+                    aria-selected={action === mode.key}
+                    className={cn(
+                      "inline-flex min-h-[36px] min-w-[104px] items-center justify-center rounded-md px-3 text-[12.5px] font-bold transition-colors",
+                      "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none",
+                      action === mode.key
+                        ? "bg-[color:var(--primary)] text-[color:var(--primary-foreground)] shadow-sm"
+                        : "text-muted-foreground hover:bg-card hover:text-foreground",
+                    )}
+                  >
+                    {mode.label}
+                  </Link>
+                ))}
+              </div>
               {action !== "info" ? (
                 <Link
                   href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}`}
                   scroll={false}
-                  className="text-[12px] font-bold text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  className="text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:underline"
                 >
                   ← กลับไปข้อมูลสินค้า
                 </Link>
