@@ -200,6 +200,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const inTransit = counts.inTransit;
   const outOfStock = counts.out;
   const shopName = accounts.find((account) => account.accountKey === shopId)?.shopName ?? shopId;
+  // เปิดให้เขียนบนร้านจริงหรือยัง — ด่านเดียวกับฝั่งเซิร์ฟเวอร์ (stock-write.ts)
+  // ถ้าเปิดแล้วปุ่มต้องกดได้บนร้านจริง ไม่ใช่เทาค้างเพราะชื่อร้านไม่ขึ้นต้นด้วย SANDBOX_
+  const liveStockWrite = process.env.PLATFORM_STOCK_WRITE_LIVE === "1";
   // ที่กันสต็อกค้างไว้ (ขั้นที่ 2) — เฉพาะร้าน TikTok ที่เชื่อมอยู่
   const heldBySku = platform === "tiktok" && shopId ? await listOpenHolds(shopId) : new Map<string, number>();
 
@@ -647,7 +650,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 quantity={skuDetail.quantity}
                 inTransit={skuDetail.inTransit}
                 held={heldBySku.get(skuDetail.skuId) ?? 0}
-                canWrite={isSandboxShopName(shopName)}
+                canWrite={isSandboxShopName(shopName) || liveStockWrite}
                 blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
               />
             ) : null}
@@ -674,7 +677,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 productId={skuDetail.productId}
                 skuId={skuDetail.skuId}
                 quantity={skuDetail.quantity}
-                canWrite={isSandboxShopName(shopName)}
+                canWrite={isSandboxShopName(shopName) || liveStockWrite}
                 blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
               />
             ) : null}
@@ -725,7 +728,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                     shopId={shopId}
                     productId={skuDetail.productId}
                     productStatus={skuDetail.productStatus}
-                    canWrite={isSandboxShopName(shopName)}
+                    canWrite={isSandboxShopName(shopName) || liveStockWrite}
                     blockedReason="ร้านจริงยังไม่เปิดให้เปลี่ยนสถานะตะกร้า — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
                   />
                 ) : null}
