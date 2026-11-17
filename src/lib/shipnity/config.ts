@@ -41,6 +41,8 @@ export interface ConnectedShipnityAccount extends ShipnityCredentials {
   id: string;
   label: string;
   source: "db" | "env";
+  /** บริษัทที่บัญชีนี้สังกัด (ใช้แสดงบนหน้าแพ็ค/ใบแพ็ค) */
+  companyKey?: CompanyId;
 }
 
 export interface ShipnityConnectionStatus {
@@ -155,6 +157,7 @@ export async function resolveShipnityAccounts(
       label: account.label,
       email: account.email,
       token: account.token,
+      companyKey: account.companyKey ?? "dragon19",
       source: "db" as const,
     }));
   }

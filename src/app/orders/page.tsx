@@ -437,10 +437,22 @@ export default async function PackingOrdersPage({
     return haystack.includes(queryLower);
   };
   const companyId = await getActiveCompanyId();
+  const accounts = await resolveShipnityAccounts(companyId);
+  const roundCompanies = [...new Set(accounts.map((account) => account.companyKey ?? "dragon19"))];
+  const roundCompanyName = (key: string) =>
+    getCompanyDefaultSeller(key === "seeheng" ? "seeheng" : "dragon19").name;
+  // หัวกระดาษ/ใบแพ็คใช้บริษัทของบัญชีที่กำลังแพ็คจริง — ถ้ารอบนี้มีหลายบริษัทให้บอกว่าทั้งสอง
+  const companyLabel =
+    roundCompanies.length === 0
+      ? roundCompanyName(String(companyId))
+      : roundCompanies.length === 1
+        ? roundCompanyName(roundCompanies[0])
+        : "ทั้งสองบริษัท";
+  const accountCompanyShort = (key?: string) => (key === "seeheng" ? "ชีเฮง" : "ดราก้อน 19");
 
   const header = (print: { imageUrls: string[]; rounds: PackingRoundOption[] }) => (
     <PageHeader
-      eyebrow={`Shipnity · Open API v2 · ${getCompanyDefaultSeller(companyId).name}`}
+      eyebrow={`Shipnity · Open API v2 · ${companyLabel}`}
       title="ออเดอร์รอแพ็ค"
       description={`${isToday ? "ของวันนี้" : `ย้อนหลัง ${formatDate(isoDay)}`} · ตัดรอบ ${CUTOFF_TEXT} · ข้อมูล ${formatDateTime(now.toISOString())}`}
       actions={
@@ -453,7 +465,6 @@ export default async function PackingOrdersPage({
     />
   );
 
-  const accounts = await resolveShipnityAccounts(companyId);
   // งานเบื้องหลัง: อัปเดตออเดอร์เข้าฐานข้อมูลทุก 2 นาที (หน้าเว็บอ่านจากฐานข้อมูลเท่านั้น)
   startShipnityBackgroundSync(accounts);
 
@@ -753,7 +764,8 @@ export default async function PackingOrdersPage({
                         : "border-border bg-white text-foreground hover:bg-[#f1f5f9]"
                     }`}
                   >
-                    {item.account.label} · {item.summary?.totalOrders ?? 0} ออเดอร์
+                    {item.account.label} · {accountCompanyShort(item.account.companyKey)} ·{" "}
+                    {item.summary?.totalOrders ?? 0} ออเดอร์
                   </Link>
                 );
               })}

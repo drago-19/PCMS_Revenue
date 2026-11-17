@@ -161,7 +161,9 @@ export function proxy(request: NextRequest) {
       pathname.startsWith("/api/orders/packing/") ||
       pathname === "/api/orders/refresh" ||
       pathname === "/api/shipnity/accounts" ||
-      pathname.startsWith("/api/shipnity/accounts/");
+      pathname.startsWith("/api/shipnity/accounts/") ||
+      // ปุ่ม "ดึงใหม่ล่าสุด" ของหน้าแพ็ค
+      pathname === "/api/shipnity/refresh";
     const allowed =
       pathname === "/sale" ||
       pathname.startsWith("/sale/") ||
