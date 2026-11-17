@@ -4,6 +4,7 @@ import { SaleHeader } from "@/components/sale/SaleHeader";
 import { SaleStat } from "@/components/sale/SaleStat";
 import { ImagePreview } from "@/components/sale/ImagePreview";
 import { LiveStockQuantity } from "@/components/sale/LiveStockQuantity";
+import { LiveProductTitle } from "@/components/sale/LiveProductTitle";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -571,7 +572,11 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-3xl" style={SALE_THEME}>
             <DialogHeader className="pr-11">
               <DialogTitle className="text-[16px] leading-6">
-                {skuDetail.productName ?? skuDetail.sellerSku ?? "สินค้า"}
+                {/* ชื่อเปลี่ยนทันทีเมื่อบันทึกชื่อใหม่ (ไม่ต้องรอรีเฟรช) */}
+                <LiveProductTitle
+                  productId={skuDetail.productId ?? skuDetail.skuId}
+                  initial={skuDetail.productName ?? skuDetail.sellerSku ?? "สินค้า"}
+                />
               </DialogTitle>
               <p className="text-[12px] leading-5 text-muted-foreground">
                 SKU {platform === "shopee" ? "Shopee" : "TikTok"} {skuDetail.sellerSku ?? "—"} · อัปเดต{" "}

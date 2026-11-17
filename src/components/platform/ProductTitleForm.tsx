@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -43,7 +44,11 @@ export function ProductTitleForm({
         setError(data.error ?? "บันทึกไม่สำเร็จ");
         return;
       }
-      setMessage("บันทึกชื่อใหม่แล้ว");
+      // ให้หัวป๊อปอัพเปลี่ยนชื่อทันที ไม่ต้องรอข้อมูลชุดใหม่จากเซิร์ฟเวอร์
+      window.dispatchEvent(
+        new CustomEvent("sale:product-title-updated", { detail: { productId, title: trimmed } }),
+      );
+      setMessage("บันทึกชื่อใหม่แล้ว — ชื่อนี้แสดงบน TikTok แล้ว");
       router.refresh();
     } catch {
       setError("เชื่อมต่อไม่สำเร็จ — ลองใหม่อีกครั้ง");
@@ -74,7 +79,14 @@ export function ProductTitleForm({
           aria-busy={saving}
           className="min-h-[40px] shrink-0 bg-[color:var(--ok)] text-white hover:bg-[color:var(--ok)]/90"
         >
-          {saving ? "กำลังบันทึก…" : "บันทึกชื่อ"}
+          {saving ? (
+            <>
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              กำลังบันทึก…
+            </>
+          ) : (
+            "บันทึกชื่อ"
+          )}
         </Button>
       </div>
       <p className="text-[11.5px] leading-5 text-muted-foreground">

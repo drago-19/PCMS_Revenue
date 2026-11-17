@@ -40,6 +40,15 @@ export async function updateProductTitle({
 
   const failure = result.errors?.[0];
   if (failure?.message) throw new Error(failure.message);
+
+  // ชื่อใหม่ต้องเห็นทันทีในหน้าจอ ไม่ต้องรอรอบซิงก์ — เขียนทับในตารางสต็อกของเราเลย
+  await query(
+    `UPDATE platform_stock
+        SET product_name = $1::text, updated_at = now()
+      WHERE platform = $2::text AND shop_id = $3::text AND product_id = $4::text`,
+    [title, TIKTOK_PLATFORM, shopId, productId],
+  );
+
   return { ok: true };
 }
 
