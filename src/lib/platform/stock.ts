@@ -3,8 +3,13 @@
 // - เก็บยอดล่าสุดไว้เทียบ และบันทึกประวัติเมื่อยอดเปลี่ยน
 // - ยังอ่านอย่างเดียว: การเขียนกลับต้องได้สิทธิ์ Product (write) จาก TikTok ก่อน
 
-import { query } from "@/lib/db";
-import { getPlatformAccountRow, getPlatformConfig, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { query, runWithCompany } from "@/lib/db";
+import {
+  getPlatformAccountRow,
+  getPlatformConfig,
+  getShopCompany,
+  TIKTOK_PLATFORM,
+} from "@/lib/platform/store";
 import { callTikTokApi } from "@/lib/platform/tiktok";
 
 type ApiSku = {
@@ -43,8 +48,16 @@ export type StockMovement = {
 
 const PAGE_SIZE = 100;
 
-/** ดึงสต็อกล่าสุดจาก TikTok แล้วบันทึกยอด + ประวัติเมื่อเปลี่ยน */
+/**
+ * ดึงสต็อกล่าสุดจาก TikTok แล้วบันทึกยอด + ประวัติเมื่อเปลี่ยน
+ * ร้านอาจสังกัดบริษัทอื่น — ข้อมูลจึงถูกเขียนลง schema ของบริษัทที่ร้านอยู่
+ */
 export async function syncStock(shopId: string): Promise<{ skus: number; changed: number; error?: string }> {
+  const company = await getShopCompany(shopId).catch(() => "dragon19" as const);
+  return runWithCompany(company, () => syncStockInner(shopId));
+}
+
+async function syncStockInner(shopId: string): Promise<{ skus: number; changed: number; error?: string }> {
   const config = await getPlatformConfig();
   const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
   if (!config.tiktok || !account?.accessToken || !account.shopCipher) {

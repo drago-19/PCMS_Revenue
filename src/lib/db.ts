@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-16-v73";
+const SCHEMA_VERSION = "2026-11-17-v74";
 
 export type { CompanyId };
 
@@ -950,6 +950,11 @@ CREATE TABLE IF NOT EXISTS platform_accounts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (platform, account_key)
 );
+
+-- ร้านนี้สังกัดบริษัทไหน (dragon19 | seeheng)
+-- รอบซิงก์ใช้ค่านี้ตัดสินว่าจะเขียนข้อมูลของร้านนั้นลง schema ของบริษัทไหน
+-- ร้านที่มีอยู่ก่อนทั้งหมดอยู่บริษัท ดราก้อน 19
+ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS company_key TEXT NOT NULL DEFAULT 'dragon19';
 
 -- ข้อมูลที่ดึงจากแพลตฟอร์มมาเก็บไว้ทำรายงาน (แยกจากตารางบิลเดิมโดยสิ้นเชิง)
 CREATE TABLE IF NOT EXISTS platform_statements (

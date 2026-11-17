@@ -5,6 +5,7 @@
 // ไม่อ่าน/ไม่เขียนตารางของระบบบิลเดิมเลย
 
 import { query, queryOne } from "@/lib/db";
+import type { CompanyId } from "@/lib/session-token";
 import {
   decryptSecret,
   encryptSecret,
@@ -86,7 +87,8 @@ async function readRawSettingsRow(): Promise<{
   updatedAt: string | null;
 }> {
   const row = await queryOne<{ value_json: unknown; updated_at: string | null }>(
-    "SELECT value_json, updated_at::text AS updated_at FROM app_settings WHERE setting_key = $1",
+    // ค่าการเชื่อมต่อแพลตฟอร์มเป็นของกลางทั้งระบบ (ไม่แยกตามบริษัท) — อ่านจาก schema public เสมอ
+    "SELECT value_json, updated_at::text AS updated_at FROM public.app_settings WHERE setting_key = $1",
     [SETTINGS_KEY],
   );
   const raw =
@@ -315,10 +317,30 @@ const ACCOUNT_COLUMNS = `
   updated_at::text AS "updatedAt"
 `;
 
+/** บริษัทที่ร้านนี้สังกัด (ใช้ตัดสิน schema ที่ข้อมูลของร้านจะถูกเขียนลง) */
+export async function getShopCompany(shopId: string): Promise<CompanyId> {
+  const rows = await query<{ company_key: string | null }>(
+    `SELECT company_key FROM public.platform_accounts
+      WHERE platform = $1::text AND account_key = $2::text LIMIT 1`,
+    [TIKTOK_PLATFORM, shopId],
+  );
+  return rows[0]?.company_key === "seeheng" ? "seeheng" : "dragon19";
+}
+
+/** กำหนดบริษัทให้ร้าน — มีผลกับรอบซิงก์ครั้งถัดไป */
+export async function setShopCompany(shopId: string, company: CompanyId): Promise<void> {
+  await query(
+    `UPDATE public.platform_accounts
+        SET company_key = $3::text, updated_at = now()
+      WHERE platform = $1::text AND account_key = $2::text`,
+    [TIKTOK_PLATFORM, shopId, company],
+  );
+}
+
 export async function listPlatformAccounts(platform: string): Promise<PlatformAccountPublic[]> {
   try {
     return await query<PlatformAccountPublic>(
-      `SELECT ${ACCOUNT_COLUMNS} FROM platform_accounts WHERE platform = $1 ORDER BY updated_at DESC`,
+      `SELECT ${ACCOUNT_COLUMNS} FROM public.platform_accounts WHERE platform = $1 ORDER BY updated_at DESC`,
       [platform],
     );
   } catch {
@@ -330,7 +352,7 @@ export async function listPlatformAccounts(platform: string): Promise<PlatformAc
 export async function getConnectedPlatforms(): Promise<Array<"tiktok" | "shopee" | "facebook">> {
   try {
     const rows = await query<{ platform: string }>(
-      `SELECT DISTINCT platform FROM platform_accounts WHERE status = 'connected'`,
+      `SELECT DISTINCT platform FROM public.platform_accounts WHERE status = 'connected'`,
     );
     const out = new Set<"tiktok" | "shopee" | "facebook">(["tiktok"]);
     for (const row of rows) {
@@ -374,7 +396,7 @@ export async function getPlatformAccountRow(
       PlatformAccountPublic & { accessToken: string | null; refreshToken: string | null }
     >(
       `SELECT ${ACCOUNT_COLUMNS}, access_token AS "accessToken", refresh_token AS "refreshToken"
-       FROM platform_accounts WHERE platform = $1 AND account_key = $2`,
+       FROM public.platform_accounts WHERE platform = $1 AND account_key = $2`,
       [platform, accountKey],
     );
     if (!row) return null;

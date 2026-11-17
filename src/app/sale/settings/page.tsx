@@ -3,11 +3,13 @@ import { headers } from "next/headers";
 import { ShopeeConnectCard } from "@/components/ShopeeConnectCard";
 import { TikTokConnectCard } from "@/components/TikTokConnectCard";
 import { SaleHeader } from "@/components/sale/SaleHeader";
+import { ShopCompanyPicker } from "@/components/sale/ShopCompanyPicker";
 import { IconCheckCircle, IconInfo } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import {
   getActiveShopId,
   getPlatformConfig,
+  getShopCompany,
   getWebhookRegisteredAt,
   listPlatformAccounts,
   SHOPEE_PLATFORM,
@@ -46,6 +48,15 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
       getWebhookRegisteredAt(TIKTOK_PLATFORM),
       getActiveShopId(SHOPEE_PLATFORM),
     ]);
+
+  // บริษัทของแต่ละร้าน (ใช้เลือกได้ว่าร้านนี้เป็นของบริษัทไหน)
+  const shopCompanies = await Promise.all(
+    tiktokAccounts.map(async (account) => ({
+      shopId: account.accountKey,
+      shopName: account.shopName ?? account.accountKey,
+      company: await getShopCompany(account.accountKey),
+    })),
+  );
 
   // ผลลัพธ์จากการเชื่อม Shopee กลับมา (query ที่ OAuth ต่อท้ายให้)
   const shopeeParam = read(params, "shopee");
@@ -88,6 +99,25 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
           )}
           <span>{notice.text}</span>
         </div>
+      ) : null}
+
+      {shopCompanies.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-[13px] font-bold">บริษัทของแต่ละร้าน</h2>
+          <p className="text-[12px] leading-5 text-muted-foreground">
+            เลือกได้ว่าร้านนี้เป็นของบริษัทไหน — รอบซิงก์ถัดไปจะเขียนข้อมูลของร้านนั้นลงบริษัทที่เลือก
+          </p>
+          <div className="flex flex-col gap-2">
+            {shopCompanies.map((shop) => (
+              <ShopCompanyPicker
+                key={shop.shopId}
+                shopId={shop.shopId}
+                shopName={shop.shopName}
+                initialCompany={shop.company}
+              />
+            ))}
+          </div>
+        </section>
       ) : null}
 
       <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2">

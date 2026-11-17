@@ -1,10 +1,11 @@
 import {
   getPlatformAccountRow,
   getPlatformConfig,
+  getShopCompany,
   listPlatformAccounts,
   TIKTOK_PLATFORM,
 } from "./store";
-import { query } from "@/lib/db";
+import { query, runWithCompany } from "@/lib/db";
 import {
   countStoredReturns,
   finishSyncRun,
@@ -131,22 +132,27 @@ export async function runTikTokSync(
 
     try {
       const byUpdate = window.mode !== "create";
-      const orders = await syncOrders(
-        ctx,
-        window.from,
-        window.to,
-        byUpdate ? "update" : "create",
-      );
-      const statementFrom = byUpdate
-        ? window.from - LIVE_STATEMENT_LOOKBACK_DAYS * 86400
-        : window.from;
-      const money = window.skipStatements
-        ? { statements: 0, orderFinance: 0 }
-        : await syncStatements(ctx, statementFrom, window.to);
-      await finishSyncRun(runId, orders + money.statements + money.orderFinance, null);
-      stats.orders += orders;
-      stats.statements += money.statements;
-      stats.orderFinance += money.orderFinance;
+      // ร้านนี้อาจสังกัดบริษัทอื่น — เขียนข้อมูลลง schema ของบริษัทที่ร้านอยู่
+      const shopCompany = await getShopCompany(ctx.shopId).catch(() => "dragon19" as const);
+      const result = await runWithCompany(shopCompany, async () => {
+        const orders = await syncOrders(
+          ctx,
+          window.from,
+          window.to,
+          byUpdate ? "update" : "create",
+        );
+        const statementFrom = byUpdate
+          ? window.from - LIVE_STATEMENT_LOOKBACK_DAYS * 86400
+          : window.from;
+        const money = window.skipStatements
+          ? { statements: 0, orderFinance: 0 }
+          : await syncStatements(ctx, statementFrom, window.to);
+        await finishSyncRun(runId, orders + money.statements + money.orderFinance, null);
+        return { orders, money };
+      });
+      stats.orders += result.orders;
+      stats.statements += result.money.statements;
+      stats.orderFinance += result.money.orderFinance;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await finishSyncRun(runId, 0, message);
@@ -196,10 +202,11 @@ export async function runReturnsSync(shopId: string): Promise<number> {
     throw new Error(failures[0]?.message ?? "ไม่พบ token ของร้าน");
   }
   const { ctx } = contexts[0];
-  const first = (await countStoredReturns(shopId)) === 0;
+  const shopCompany = await getShopCompany(ctx.shopId).catch(() => "dragon19" as const);
+  const first = (await runWithCompany(shopCompany, () => countStoredReturns(shopId))) === 0;
   const now = Math.floor(Date.now() / 1000);
   const days = first ? FIRST_RETURNS_LOOKBACK_DAYS : LIVE_RETURNS_LOOKBACK_DAYS;
-  return syncReturns(ctx, now - days * 86400, now, first ? "create" : "update");
+  return runWithCompany(shopCompany, () => syncReturns(ctx, now - days * 86400, now, first ? "create" : "update"));
 }
 
 
