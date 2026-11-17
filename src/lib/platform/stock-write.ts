@@ -327,7 +327,7 @@ export async function setProductVisibility(input: {
   shopId: string;
   productId: string;
   visible: boolean;
-}): Promise<{ productId: string; productStatus: "ACTIVATE" | "SELLER_DEACTIVATED" }> {
+}): Promise<{ productId: string; productStatus: string }> {
   const { shopId, productId, visible } = input;
   if (!shopId || !productId) {
     throw new StockWriteError("rejected", "ไม่พบร้านหรือสินค้าที่ต้องการเปลี่ยนสถานะ");
@@ -356,8 +356,9 @@ export async function setProductVisibility(input: {
   }
 
   const productStatus = visible ? "ACTIVATE" : "SELLER_DEACTIVATED";
+  let result: { errors?: Array<{ message?: string; detail?: string }> };
   try {
-    await callTikTokWithRetry(() =>
+    result = await callTikTokWithRetry(() =>
       callTikTokApi<{ errors?: Array<{ message?: string; detail?: string }> }>({
         config: config.tiktok!,
         accessToken,
@@ -374,13 +375,46 @@ export async function setProductVisibility(input: {
     );
   }
 
+  // TikTok อาจตอบ 200 พร้อม errors[] ในตัว — ต้องอ่านก่อน ไม่ใช่ถือว่าสำเร็จ
+  const failure = result.errors?.[0];
+  if (failure) {
+    throw new StockWriteError(
+      "rejected",
+      failure.message ?? failure.detail ?? "TikTok ปฏิเสธการเปลี่ยนสถานะตะกร้า",
+    );
+  }
+
+  // ยืนยันจาก TikTok อีกรอบว่าสถานะเปลี่ยนจริง ก่อนบอกผู้ใช้ว่าสำเร็จ
+  let confirmed: string | null = null;
+  try {
+    const detail = await callTikTokWithRetry(() =>
+      callTikTokApi<{ status?: string }>({
+        config: config.tiktok!,
+        accessToken,
+        query: { shop_cipher: shopCipher },
+        path: `/product/202309/products/${encodeURIComponent(productId)}`,
+      }),
+    );
+    confirmed = detail.status ?? null;
+  } catch {
+    confirmed = null;
+  }
+  // เปิดขายอาจเข้าคิวตรวจของ TikTok (PENDING) — ถือว่ารับคำขอแล้ว แต่ป้ายบนหน้าจอต้องบอกตามจริง
+  if (confirmed !== productStatus && !(visible && confirmed === "PENDING")) {
+    throw new StockWriteError(
+      "api",
+      `TikTok รับคำสั่งแล้วแต่สถานะยังไม่เปลี่ยน (สถานะที่อ่านได้: ${confirmed ?? "อ่านไม่ได้"})`,
+    );
+  }
+  const storedStatus = confirmed ?? productStatus;
+
   // อัปเดตสถานะในฐานข้อมูลทันที ให้ป้ายบนหน้าจอเปลี่ยนโดยไม่ต้องรอรอบซิงก์
   await query(
     `UPDATE platform_stock
         SET product_status = $3, updated_at = now()
       WHERE platform = $1 AND shop_id = $2 AND product_id = $4`,
-    [TIKTOK_PLATFORM, shopId, productStatus, productId],
+    [TIKTOK_PLATFORM, shopId, storedStatus, productId],
   );
 
-  return { productId, productStatus };
+  return { productId, productStatus: storedStatus };
 }
