@@ -2,6 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SALE_THEME } from "@/lib/sale/theme";
 
 const COMPANIES = [
   { key: "dragon19", label: "ดราก้อน 19" },
@@ -58,22 +66,23 @@ export function ShopCompanyPicker({
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{shopName}</span>
-      <label htmlFor={`company-${shopId}`} className="text-[11.5px] text-muted-foreground">
-        บริษัท
-      </label>
-      <select
-        id={`company-${shopId}`}
-        value={company}
-        disabled={saving}
-        onChange={(event) => void change(event.target.value as CompanyKey)}
-        className="min-h-[36px] rounded-md border border-border bg-background px-2 text-[12.5px] font-semibold focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
-      >
-        {COMPANIES.map((item) => (
-          <option key={item.key} value={item.key}>
-            {item.label}
-          </option>
-        ))}
-      </select>
+      <span className="text-[11.5px] text-muted-foreground">บริษัท</span>
+      {/* ใช้ Select ของ shadcn เพื่อให้รายการที่กดลงมาใช้สีธีมเดียวกับหน้าเว็บ (select ของเบราว์เซอร์จัดสีไม่ได้) */}
+      <Select value={company} onValueChange={(next) => void change(next as CompanyKey)} disabled={saving}>
+        <SelectTrigger
+          aria-label={`บริษัทของร้าน ${shopName}`}
+          className="min-h-[36px] w-[132px] text-[12.5px] font-semibold"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent style={SALE_THEME}>
+          {COMPANIES.map((item) => (
+            <SelectItem key={item.key} value={item.key} className="text-[12.5px]">
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {saving ? <span className="text-[11.5px] text-muted-foreground">กำลังบันทึก…</span> : null}
       {error ? (
         <span role="alert" className="w-full text-[11.5px] text-[color:var(--danger)]">
