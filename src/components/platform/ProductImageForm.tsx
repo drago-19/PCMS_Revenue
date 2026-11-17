@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Upload } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { scheduleHardRefresh } from "@/lib/sale/refresh";
 
 /** TikTok ยอมรับรูปหลักขนาด 300×300 ถึง 20000×20000 px */
 const MIN_SIDE = 300;
@@ -24,6 +24,7 @@ export function ProductImageForm({
   productId: string;
   currentImageUrl?: string | null;
 }) {
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -77,6 +78,35 @@ export function ProductImageForm({
     image.src = url;
   };
 
+  /** คอยถามเซิร์ฟเวอร์จนรูปใหม่ถูกบันทึกลง DB แล้วค่อยสลับให้เห็น */
+  const waitForNewImage = async () => {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      try {
+        const res = await fetch("/api/platform/tiktok/product/image/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shopId, productId }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { imageUrl?: string | null };
+        if (data.imageUrl) {
+          setSavedImage(data.imageUrl);
+          if (inputRef.current) inputRef.current.value = "";
+          if (preview) URL.revokeObjectURL(preview);
+          setPreview(null);
+          setFileName(null);
+          setSize(null);
+          setMessage("รูปใหม่ขึ้นในระบบแล้ว");
+          router.refresh();
+          return;
+        }
+      } catch {
+        // รอบหน้าลองใหม่
+      }
+    }
+    setMessage("ส่งรูปไป TikTok แล้ว — รูปในระบบจะอัปเดตในรอบซิงก์ถัดไป");
+  };
+
   const upload = async () => {
     const file = inputRef.current?.files?.[0];
     if (!file || saving || tooSmall || tooLarge) return;
@@ -94,15 +124,22 @@ export function ProductImageForm({
         setError(data.error ?? "อัปโหลดไม่สำเร็จ");
         return;
       }
-      if (data.imageUrl) setSavedImage(data.imageUrl);
-      if (inputRef.current) inputRef.current.value = "";
-      pick(null);
-      setMessage(
-        data.imageUrl
-          ? "เปลี่ยนรูปหลักแล้ว — รูปที่เห็นคือรูปใหม่บน TikTok"
-          : "ส่งรูปใหม่ไปที่ TikTok แล้ว — รูปในระบบจะอัปเดตในรอบซิงก์ถัดไป",
-      );
-      scheduleHardRefresh();
+
+      if (data.imageUrl) {
+        // ได้รูปใหม่จาก TikTok ทันที
+        setSavedImage(data.imageUrl);
+        if (inputRef.current) inputRef.current.value = "";
+        if (preview) URL.revokeObjectURL(preview);
+        setPreview(null);
+        setFileName(null);
+        setSize(null);
+        setMessage("เปลี่ยนรูปหลักแล้ว — รูปที่เห็นคือรูปใหม่บน TikTok");
+        router.refresh();
+      } else {
+        // TikTok ยังไม่สะท้อนรูปใหม่: ให้เห็นรูปที่เพิ่งเลือกไว้ก่อน แล้วคอยถามจนได้
+        setMessage("บันทึกไปที่ TikTok แล้ว — กำลังรอรูปใหม่ขึ้นในระบบ…");
+        void waitForNewImage();
+      }
     } catch {
       setError("เชื่อมต่อไม่สำเร็จ — ลองใหม่อีกครั้ง");
     } finally {
