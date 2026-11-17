@@ -137,7 +137,9 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
        SET platform = EXCLUDED.platform,
            product_id = EXCLUDED.product_id,
            seller_sku = EXCLUDED.seller_sku,
-           product_name = EXCLUDED.product_name,
+           -- ชื่อ/รูปที่ฝ่ายขายเพิ่งแก้: ห้ามซิงก์เขียนทับด้วยค่าจาก TikTok ที่ยังไม่ตาม (10 นาที)
+           product_name = CASE WHEN platform_stock.name_locked_until > now()
+                               THEN platform_stock.product_name ELSE EXCLUDED.product_name END,
            quantity = EXCLUDED.quantity,
            warehouses = EXCLUDED.warehouses,
            updated_at = now()`,
@@ -229,7 +231,7 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
     if (found.length > 0) {
       await query(
         `UPDATE platform_stock s
-            SET image_url = coalesce(item.image_url, s.image_url),
+            SET image_url = CASE WHEN s.image_locked_until > now() THEN s.image_url ELSE coalesce(item.image_url, s.image_url) END,
                 product_status = coalesce(item.status, s.product_status),
                 category = coalesce(item.category, s.category),
                 category_id = coalesce(item.category_id, s.category_id)
@@ -732,8 +734,9 @@ export async function getSkuDetail(
           await query(
             `UPDATE platform_stock
                 SET quantity = $4, warehouses = $5::jsonb,
-                    image_url = COALESCE($6, image_url),
-                    product_name = COALESCE($7, product_name),
+                    -- ค่าที่ฝ่ายขายเพิ่งแก้และยังล็อกอยู่ ห้ามซิงก์เขียนทับ
+                    image_url = CASE WHEN image_locked_until > now() THEN image_url ELSE COALESCE($6, image_url) END,
+                    product_name = CASE WHEN name_locked_until > now() THEN product_name ELSE COALESCE($7, product_name) END,
                     updated_at = now()
               WHERE platform = $1 AND shop_id = $2 AND sku_id = $3`,
             [TIKTOK_PLATFORM, shopId, sku.id, fresh, JSON.stringify(warehouses), image ?? null, detail.title ?? null],

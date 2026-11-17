@@ -44,7 +44,9 @@ export async function updateProductTitle({
   // ชื่อใหม่ต้องเห็นทันทีในหน้าจอ ไม่ต้องรอรอบซิงก์ — เขียนทับในตารางสต็อกของเราเลย
   await query(
     `UPDATE platform_stock
-        SET product_name = $1::text, updated_at = now()
+        SET product_name = $1::text,
+            name_locked_until = now() + interval '10 minutes',
+            updated_at = now()
       WHERE platform = $2::text AND shop_id = $3::text AND product_id = $4::text`,
     [title, TIKTOK_PLATFORM, shopId, productId],
   );
@@ -118,7 +120,9 @@ export async function refreshProductImageInDb({
   // อัปเดตรูปในฐานข้อมูลทันที ไม่ต้องรอรอบซิงก์สต็อกรอบถัดไป
   await query(
     `UPDATE platform_stock
-        SET image_url = $1::text, updated_at = now()
+        SET image_url = $1::text,
+            image_locked_until = now() + interval '10 minutes',
+            updated_at = now()
       WHERE platform = $2::text AND shop_id = $3::text AND product_id = $4::text`,
     [imageUrl, TIKTOK_PLATFORM, shopId, productId],
   );
