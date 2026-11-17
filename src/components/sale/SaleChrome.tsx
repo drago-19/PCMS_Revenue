@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SALE_THEME } from "@/lib/sale/theme";
 import { SaleTabs } from "@/components/sale/SaleTabs";
+import { RefreshAllButton } from "@/components/sale/RefreshAllButton";
 
 /**
  * เปลือกบนของบัญชี "ฝ่ายขาย" — แถบสว่างแบบระบบร้านค้า ใช้เฉพาะหมวด /sale
@@ -40,6 +41,8 @@ export function SaleChrome() {
       <span className="hidden rounded-full bg-[color:var(--accent)] px-2.5 py-1 text-[11.5px] font-semibold text-[color:var(--accent-foreground)] min-[720px]:inline">
         ฝ่ายขาย
       </span>
+      {/* ดึงออเดอร์ + สต็อกทันที ไม่ต้องรอรอบอัตโนมัติ 30 วินาที */}
+      <RefreshAllButton />
       {/* ไม่มีกรอบ — ให้เข้าพวกกับเมนูข้อความและการออกจากระบบในแถบเดียวกัน */}
       <Button asChild size="sm" variant="ghost" className="hidden min-[560px]:inline-flex">
         <Link href="/sale/settings">ตั้งค่า</Link>
