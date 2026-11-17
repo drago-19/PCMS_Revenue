@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { SaleHeader } from "@/components/sale/SaleHeader";
 import { SaleStat } from "@/components/sale/SaleStat";
 import { ImagePreview } from "@/components/sale/ImagePreview";
+import { LiveStockQuantity } from "@/components/sale/LiveStockQuantity";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -578,8 +579,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               </p>
             </DialogHeader>
 
-            {/* สองงานแยกป๊อปอัปกัน: ปรับสต็อก กับ แก้ไขสินค้า */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* สองงานแยกกันเป็นปุ่มแบบสลับ (segmented): ปรับสต็อก กับ แก้ไขสินค้า */}
+            <div className="flex w-fit flex-wrap items-center gap-1 rounded-full border border-border bg-muted/50 p-1">
               <Button asChild size="sm" variant={action === "stock" ? "default" : "outline"}>
                 <Link
                   href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}&action=stock`}
@@ -656,12 +657,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                     alt={skuDetail.productName ?? "รูปสินค้า"}
                   />
                 ) : (
-                  <span className="block size-20 shrink-0 rounded-xl border border-border bg-muted" />
+                  <span className="block size-20 shrink-0 rounded-xl border border-border bg-muted min-[720px]:size-28" />
                 )}
-                <dl className="grid flex-1 grid-cols-2 gap-2 min-[520px]:grid-cols-4">
+                <dl className="grid min-w-0 flex-1 grid-cols-2 gap-2 min-[720px]:grid-cols-4">
                   <div className="rounded-xl border border-border/70 bg-card p-3">
                     <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">คงเหลือรวม</dt>
-                    <dd className="mono text-[26px] font-bold leading-tight">{num(skuDetail.quantity)}</dd>
+                    <dd className="mono text-[26px] font-bold leading-tight">
+                      {/* ขยับทันทีเมื่อกดปรับสต็อก (ไม่ต้องรอรีเฟรช) */}
+                      <LiveStockQuantity skuId={skuDetail.skuId} initial={skuDetail.quantity} />
+                    </dd>
                   </div>
                   <div className="rounded-xl border border-border/70 bg-card p-3">
                     <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">ราคาขาย</dt>
@@ -703,7 +707,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 />
               ) : null}
 
-              <div className="grid gap-5 min-[720px]:grid-cols-2 min-[720px]:items-start">
+              <div className="grid gap-5 min-[900px]:grid-cols-2 min-[900px]:items-start">
               <div className="flex min-w-0 flex-col gap-4">
               {skuDetail.warehouses.length > 0 ? (
                 <div>

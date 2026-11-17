@@ -24,7 +24,7 @@ export function ImagePreview({
           type="button"
           aria-label="ดูรูปสินค้าขนาดใหญ่"
           className={cn(
-            "block size-20 shrink-0 cursor-zoom-in overflow-hidden rounded-xl border border-border bg-muted",
+            "block size-20 shrink-0 cursor-zoom-in overflow-hidden rounded-xl border border-border bg-muted min-[720px]:size-28",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
             className,
           )}

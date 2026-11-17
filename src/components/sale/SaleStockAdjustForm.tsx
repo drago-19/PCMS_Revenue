@@ -63,6 +63,10 @@ export function SaleStockAdjustForm({
     setMessage(null);
     try {
       const delta = mode === "add" ? effective : -effective;
+      // ขึ้นเลขบนหน้าจอทันทีแบบไม่ต้องรอ API — ถ้าล้มเหลวจะย้อนกลับด้านล่าง
+      window.dispatchEvent(
+        new CustomEvent("sale:stock-updated", { detail: { skuId, quantity: Math.max(0, base + delta) } }),
+      );
       const res = await fetch("/api/platform/tiktok/stock/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -80,6 +84,10 @@ export function SaleStockAdjustForm({
             ? `${data.error ?? "แก้ไม่สำเร็จ"} — กดปิดแล้วเปิดใหม่เพื่อดูค่าล่าสุด`
             : (data.error ?? "แก้ไม่สำเร็จ"),
         );
+        // ย้อนเลขที่เดาไว้กลับเป็นค่าเดิม เพราะการบันทึกไม่สำเร็จ
+        window.dispatchEvent(
+          new CustomEvent("sale:stock-updated", { detail: { skuId, quantity: base } }),
+        );
         router.refresh();
         return;
       }
@@ -90,6 +98,12 @@ export function SaleStockAdjustForm({
       );
       setAmount(0);
       if (typeof data.quantity === "number") setBase(data.quantity);
+      // ให้ตัวเลขในป๊อปอัพขยับทันที ไม่ต้องรอข้อมูลชุดใหม่จากเซิร์ฟเวอร์
+      if (typeof data.quantity === "number") {
+        window.dispatchEvent(
+          new CustomEvent("sale:stock-updated", { detail: { skuId, quantity: data.quantity } }),
+        );
+      }
       router.refresh();
     } catch {
       setError("เชื่อมต่อไม่สำเร็จ — ลองใหม่อีกครั้ง");
