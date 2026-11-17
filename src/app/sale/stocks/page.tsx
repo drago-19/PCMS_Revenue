@@ -174,7 +174,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   // ค้นหา/กรองในฐานข้อมูลตั้งแต่ต้น — ไม่ดึงทุกแถวขึ้นมากรองในหน้าเว็บ
   const search = (params.q ?? "").trim();
   const filter: StockListFilter =
-    params.filter === "out" || params.filter === "low" ? params.filter : "all";
+    params.filter === "out" || params.filter === "low" || params.filter === "open" || params.filter === "hidden"
+      ? params.filter
+      : "all";
   // ป๊อปอัปแยกหน้าที่: ค่าเริ่มต้น = ข้อมูลสินค้า, "stock" = ปรับสต็อก, "edit" = แก้ไขสินค้า
   const actionParam = (params as Record<string, string | undefined>).action;
   const action = actionParam === "stock" || actionParam === "edit" ? actionParam : "info";
@@ -219,8 +221,10 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     if (next.history) qs.set("history", next.history);
     return `/sale/stocks?${qs.toString()}`;
   };
-  const filterTabs: Array<{ key: StockListFilter; label: string; count: number }> = [
+  const filterTabs: Array<{ key: StockListFilter; label: string; count: number; tone?: "open" | "hidden" }> = [
     { key: "all", label: "ทั้งหมด", count: counts.all },
+    { key: "open", label: "เปิดตะกร้า", count: counts.open, tone: "open" },
+    { key: "hidden", label: "ซ่อนตะกร้า", count: counts.hidden, tone: "hidden" },
     { key: "out", label: "ของหมด", count: counts.out },
     { key: "low", label: `เหลือน้อย ≤${LOW_STOCK_THRESHOLD}`, count: counts.low },
   ];
@@ -327,22 +331,35 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           {filterTabs.map((tab) => {
             const active = tab.key === filter;
             return (
-              <Link
-                key={tab.key}
-                href={listHref({ filter: tab.key })}
-                scroll={false}
-                role="tab"
-                aria-selected={active}
-                className={cn(
-                  "inline-flex min-h-[40px] items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-bold transition-colors",
-                  active
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-border text-muted-foreground hover:bg-muted",
-                )}
-              >
-                {tab.label}
-                <span className="tabular-nums opacity-80">{num(tab.count)}</span>
-              </Link>
+              <span key={tab.key} className="contents">
+                {tab.key === "out" ? (
+                  <span aria-hidden className="mx-0.5 h-5 w-px self-center bg-border" />
+                ) : null}
+                <Link
+                  href={listHref({ filter: tab.key })}
+                  scroll={false}
+                  role="tab"
+                  aria-selected={active}
+                  className={cn(
+                    "inline-flex min-h-[40px] items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-bold transition-colors",
+                    active
+                      ? tab.tone === "open"
+                        ? "border-[color:var(--ok)] bg-[color:var(--ok-soft)] text-[color:var(--ok)]"
+                        : tab.tone === "hidden"
+                          ? "border-rose-300 bg-rose-50 text-rose-700"
+                          : "border-slate-900 bg-slate-900 text-white"
+                      : "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {tab.tone === "open" ? (
+                    <span aria-hidden className="size-1.5 rounded-full bg-[color:var(--ok)]" />
+                  ) : tab.tone === "hidden" ? (
+                    <span aria-hidden className="size-1.5 rounded-full bg-rose-400" />
+                  ) : null}
+                  {tab.label}
+                  <span className="tabular-nums opacity-80">{num(tab.count)}</span>
+                </Link>
+              </span>
             );
           })}
           </div>

@@ -47,6 +47,8 @@ export function productStatusLabel(status: string | null): string {
   if (status === "DRAFT") return "แบบร่าง";
   if (status === "PENDING") return "รอตรวจ";
   if (status === "FAILED") return "ไม่ผ่านการตรวจ";
+  if (status === "DELETED") return "ลบแล้ว";
+  if (status === "FREEZE") return "ถูกพักการขาย";
   return status ?? "ไม่ทราบสถานะ";
 }
 
@@ -314,7 +316,7 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
 }
 
 /** ตัวกรองของหน้าสต็อก — ใช้เป็นคีย์สั้น ๆ ใน URL */
-export type StockListFilter = "all" | "out" | "low";
+export type StockListFilter = "all" | "out" | "low" | "open" | "hidden";
 
 /** เกณฑ์ "ใกล้หมด" — เหลือไม่เกิน 5 ชิ้น */
 export const LOW_STOCK_THRESHOLD = 5;
@@ -350,6 +352,8 @@ function inTransitJoin(statusParam: string): string {
 const STOCK_FILTER_SQL: Record<Exclude<StockListFilter, "all">, string> = {
   out: "s.quantity <= 0",
   low: `s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD}`,
+  open: "s.product_status = 'ACTIVATE'",
+  hidden: "s.product_status IS DISTINCT FROM 'ACTIVATE'",
 };
 
 /** กัน % _ และ backslash ไม่ให้คำค้นของผู้ใช้กลายเป็นไวลด์การ์ด */
@@ -387,6 +391,10 @@ export type StockCounts = {
   all: number;
   out: number;
   low: number;
+  /** สินค้าที่ยังเปิดตะกร้าขายอยู่ */
+  open: number;
+  /** สินค้าที่ถูกซ่อนตะกร้า (หรือถูกลบ/รอตรวจ) */
+  hidden: number;
   quantity: number;
   /** ชิ้นที่กำลังเดินกลับร้าน — ยังไม่ควรนับเป็นของพร้อมขาย */
   inTransit: number;
@@ -402,12 +410,16 @@ export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM)
     all: number;
     out: number;
     low: number;
+    open: number;
+    hidden: number;
     quantity: number;
     in_transit: number;
   }>(
     `SELECT count(*)::int AS all,
             count(*) FILTER (WHERE s.quantity <= 0)::int AS out,
             count(*) FILTER (WHERE s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD})::int AS low,
+            count(*) FILTER (WHERE s.product_status = 'ACTIVATE')::int AS open,
+            count(*) FILTER (WHERE s.product_status IS DISTINCT FROM 'ACTIVATE')::int AS hidden,
             COALESCE(sum(s.quantity), 0)::int AS quantity,
             COALESCE(sum(rt.in_transit), 0)::int AS in_transit
        ${STOCK_FROM}
@@ -420,6 +432,8 @@ export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM)
     all: Number(row?.all ?? 0),
     out: Number(row?.out ?? 0),
     low: Number(row?.low ?? 0),
+    open: Number(row?.open ?? 0),
+    hidden: Number(row?.hidden ?? 0),
     quantity: Number(row?.quantity ?? 0),
     inTransit: Number(row?.in_transit ?? 0),
   };
@@ -464,7 +478,8 @@ export async function getStockPage(
        ${STOCK_FROM}
        ${join}
       WHERE ${clause}
-      ORDER BY s.quantity DESC, s.seller_sku ASC, s.sku_id ASC
+      -- ของที่ยังเปิดตะกร้าขึ้นก่อน แล้วค่อยเรียงตามจำนวนคงเหลือ
+      ORDER BY (s.product_status = 'ACTIVATE') DESC NULLS LAST, s.quantity DESC, s.seller_sku ASC, s.sku_id ASC
       LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
     params as never[],
   );
