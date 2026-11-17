@@ -720,8 +720,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 />
               ) : null}
 
-              <div className="grid gap-5 min-[900px]:grid-cols-2 min-[900px]:items-start">
-              <div className="flex min-w-0 flex-col gap-4">
+              <div className="grid items-start gap-3 min-[720px]:grid-cols-2">
+              <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-3">
               {skuDetail.warehouses.length > 0 ? (
                 <div>
                   <h3 className="text-[13px] font-bold">แยกตามคลัง</h3>
@@ -766,21 +766,28 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               </div>
 
               </div>
-              <div className="min-w-0">
-                <h3 className="text-[13px] font-bold">ประวัติการเปลี่ยนแปลงที่บันทึกไว้</h3>
+              <div className="min-w-0 rounded-xl border border-border bg-card p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <h3 className="text-[13px] font-bold">ประวัติการเปลี่ยนแปลง</h3>
+                  <span className="text-[11.5px] text-muted-foreground tabular-nums">
+                    {num(skuDetail.movements.length)} รายการล่าสุด
+                  </span>
+                </div>
                 {skuDetail.movements.length === 0 ? (
                   <p className="text-[12.5px] text-muted-foreground">
                     ยังไม่มีการเปลี่ยนแปลงที่ตรวจพบ — จะเริ่มบันทึกเมื่อยอดจาก TikTok เปลี่ยน
                   </p>
                 ) : (
-                  <ul className="flex list-none flex-col p-0">
+                  <ul className="mt-1 flex max-h-[240px] list-none flex-col overflow-y-auto p-0">
                     {skuDetail.movements.map((movement, index) => (
                       <li
                         key={`${movement.changedAt}-${index}`}
-                        className="flex flex-wrap items-baseline gap-x-2 border-b border-border/70 py-1.5 text-[12.5px] last:border-0"
+                        className="grid grid-cols-[1fr_auto_auto] items-center gap-x-2 border-b border-border/60 py-2 text-[12.5px] last:border-0"
                       >
-                        <span className="text-muted-foreground">{thaiDateTime(movement.changedAt)}</span>
-                        <span className="mono">
+                        <span className="text-[11.5px] text-muted-foreground tabular-nums">
+                          {thaiDateTime(movement.changedAt)}
+                        </span>
+                        <span className="mono tabular-nums">
                           {num(movement.fromQty ?? 0)} → <b>{num(movement.toQty)}</b>
                         </span>
                         <Badge variant={movement.delta > 0 ? "success" : "danger"}>
