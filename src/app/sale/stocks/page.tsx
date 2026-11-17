@@ -39,6 +39,7 @@ import {
 } from "@/lib/platform/store";
 import { thaiDateTime } from "@/lib/platform/period";
 import { SaleAutoRefresh } from "@/components/sale/SaleAutoRefresh";
+import { SaleProductVisibilityButton } from "@/components/sale/SaleProductVisibilityButton";
 import { SaleStockAdjustForm } from "@/components/sale/SaleStockAdjustForm";
 import { ProductTitleForm } from "@/components/platform/ProductTitleForm";
 import { ProductImageForm } from "@/components/platform/ProductImageForm";
@@ -719,6 +720,15 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                   {productStatusLabel(skuDetail.productStatus)}
                 </span>
                 <span className="text-muted-foreground">{skuDetail.category ?? "ยังไม่มีข้อมูลหมวดหมู่"}</span>
+                {platform !== "shopee" && skuDetail.productId ? (
+                  <SaleProductVisibilityButton
+                    shopId={shopId}
+                    productId={skuDetail.productId}
+                    productStatus={skuDetail.productStatus}
+                    canWrite={isSandboxShopName(shopName)}
+                    blockedReason="ร้านจริงยังไม่เปิดให้เปลี่ยนสถานะตะกร้า — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
+                  />
+                ) : null}
               </div>
 
               {platform === "shopee" ? (

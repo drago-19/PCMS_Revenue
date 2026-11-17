@@ -317,3 +317,70 @@ async function adjustStockInner(input: {
 
   return { quantity: finalQuantity, warehouses: finalWarehouses, corrected };
 }
+
+/**
+ * เปิด/ซ่อนตะกร้าของสินค้าทั้งตัว (ไม่ใช่ราย SKU) ที่ TikTok
+ * ใช้ด่านเดียวกับปรับสต็อก: ร้านทดสอบทำได้เสมอ ร้านจริงต้องเปิด PLATFORM_STOCK_WRITE_LIVE=1
+ * เอกสาร TikTok: POST /product/202309/products/deactivate (หรือ /activate) ซ่อน/เปิดจากผู้ซื้อทันที
+ */
+export async function setProductVisibility(input: {
+  shopId: string;
+  productId: string;
+  visible: boolean;
+}): Promise<{ productId: string; productStatus: "ACTIVATE" | "SELLER_DEACTIVATED" }> {
+  const { shopId, productId, visible } = input;
+  if (!shopId || !productId) {
+    throw new StockWriteError("rejected", "ไม่พบร้านหรือสินค้าที่ต้องการเปลี่ยนสถานะ");
+  }
+
+  const config = await getPlatformConfig();
+  if (!config.tiktok) throw new StockWriteError("not_allowed", "ยังไม่ได้ตั้งค่าแอป TikTok");
+
+  const accounts = await query<{ shop_name: string | null }>(
+    `SELECT shop_name FROM platform_accounts WHERE platform = $1 AND account_key = $2`,
+    [TIKTOK_PLATFORM, shopId],
+  );
+  const shopName = accounts[0]?.shop_name ?? null;
+  if (!isSandboxShopName(shopName) && !liveWriteAllowed()) {
+    throw new StockWriteError(
+      "not_allowed",
+      "ร้านจริงยังไม่เปิดให้เปลี่ยนสถานะตะกร้า — ทดสอบบนร้านทดสอบให้ผ่านก่อน",
+    );
+  }
+
+  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const accessToken = account?.accessToken ?? "";
+  const shopCipher = account?.shopCipher ?? "";
+  if (!accessToken || !shopCipher) {
+    throw new StockWriteError("not_allowed", "ร้านนี้ยังไม่ได้เชื่อมต่อ TikTok");
+  }
+
+  const productStatus = visible ? "ACTIVATE" : "SELLER_DEACTIVATED";
+  try {
+    await callTikTokWithRetry(() =>
+      callTikTokApi<{ errors?: Array<{ message?: string; detail?: string }> }>({
+        config: config.tiktok!,
+        accessToken,
+        method: "POST",
+        path: `/product/202309/products/${visible ? "activate" : "deactivate"}`,
+        query: { shop_cipher: shopCipher },
+        body: { product_ids: [productId] },
+      }),
+    );
+  } catch (error) {
+    throw new StockWriteError(
+      "api",
+      `TikTok ไม่รับคำขอเปลี่ยนสถานะตะกร้า: ${error instanceof Error ? error.message : "ไม่ทราบสาเหตุ"}`,
+    );
+  }
+
+  // อัปเดตสถานะในฐานข้อมูลทันที ให้ป้ายบนหน้าจอเปลี่ยนโดยไม่ต้องรอรอบซิงก์
+  await query(
+    `UPDATE platform_stock
+        SET product_status = $3, updated_at = now()
+      WHERE platform = $1 AND shop_id = $2 AND product_id = $4`,
+    [TIKTOK_PLATFORM, shopId, productStatus, productId],
+  );
+
+  return { productId, productStatus };
+}
