@@ -56,7 +56,7 @@ export function startScheduledSync(): void {
           : `[scheduled-sync] ออเดอร์ ${stats.orders} · เว้น statement รอบนี้`,
       );
 
-      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
 
       // สรุปรายวัน: ทุก 15 นาที
       if (tickCount % SUMMARY_EVERY_TICKS === 0) {
@@ -79,7 +79,7 @@ export function startScheduledSync(): void {
     }
 
     try {
-      const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+      const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
       const connectedShopee = shopeeAccounts.filter((a) => a.status === "connected");
       const shopeeTo = shopeeNowSeconds();
       const shopeeFrom = shopeeTo - LOOKBACK_HOURS * 3600;
@@ -114,7 +114,7 @@ export function startScheduledSync(): void {
     if (stockRunning) return;
     stockRunning = true;
     try {
-      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
       for (const account of accounts) {
         try {
           const result = await syncStock(account.accountKey);
@@ -133,7 +133,7 @@ export function startScheduledSync(): void {
         }
       }
 
-      const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+      const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
       for (const account of shopeeAccounts.filter((a) => a.status === "connected")) {
         try {
           const result = await syncShopeeStock(account.accountKey);
@@ -160,7 +160,7 @@ export function startScheduledSync(): void {
     if (returnsRunning) return;
     returnsRunning = true;
     try {
-      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM);
+      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
       for (const account of accounts.filter((a) => a.status === "connected")) {
         try {
           const written = await runReturnsSync(account.accountKey);

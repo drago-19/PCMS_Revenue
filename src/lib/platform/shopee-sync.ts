@@ -348,7 +348,7 @@ export async function syncShopeeOrdersAndFinance(
 export async function syncShopeeStock(targetShopId?: string): Promise<{ skus: number; changed: number }> {
   let shopId = targetShopId;
   if (!shopId) {
-    const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+    const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
     const target = accounts.find((row) => row.status === "connected");
     if (!target) {
       throw new SyncUnavailableError("ยังไม่มีร้าน Shopee ที่เชื่อมต่อ");
@@ -454,7 +454,7 @@ export interface ShopeeSyncResult {
 export async function runShopeeSync(window: ShopeeSyncWindow): Promise<ShopeeSyncResult> {
   let targetShopId = window.shopId;
   if (!targetShopId) {
-    const accounts = await listPlatformAccounts(SHOPEE_PLATFORM);
+    const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
     const target = accounts.find((row) => row.status === "connected");
     if (!target) {
       throw new SyncUnavailableError("ยังไม่มีร้าน Shopee ที่เชื่อมต่อ");

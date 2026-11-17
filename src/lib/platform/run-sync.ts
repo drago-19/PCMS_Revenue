@@ -64,7 +64,7 @@ async function buildContexts(onlyShopId?: string): Promise<{
     throw new SyncUnavailableError("ยังไม่ได้ตั้งค่าแอป TikTok");
   }
 
-  const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM)).filter(
+  const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM, "all")).filter(
     (row) => row.status === "connected" && (!onlyShopId || row.accountKey === onlyShopId),
   );
   if (accounts.length === 0) {
