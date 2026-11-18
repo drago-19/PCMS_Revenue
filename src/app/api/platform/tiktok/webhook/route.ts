@@ -32,6 +32,8 @@ export async function POST(request: Request) {
 
   const signature = request.headers.get("authorization");
   if (!verifyWebhookSignature({ rawBody, signature, appSecret: config.tiktok.appSecret })) {
+    // บันทึกไว้เสมอ — ไม่มีบรรทัดนี้จะแยกไม่ออกว่า "TikTok ไม่ส่งมา" กับ "ส่งมาแต่ลายเซ็นไม่ผ่าน"
+    console.warn(`[webhook] ปฏิเสธลายเซ็น · body ${rawBody.length} ไบต์`);
     return Response.json({ ok: false, error: "bad signature" }, { status: 401 });
   }
 
@@ -43,8 +45,12 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   }
 
-  const shopId = payload.shop_id;
-  const eventType = payload.type ?? "UNKNOWN";
+  // TikTok บางเหตุการณ์ส่ง shop_id มาเป็นตัวเลข — เทียบแบบสตริงตรง ๆ ไม่ได้ ไม่งั้นจะข้ามร้านไปเงียบ ๆ
+  // ตัดขึ้นบรรทัดใหม่ก่อน log — ค่ามาจาก body ของคนนอก
+  const clean = (value: unknown) => String(value ?? "").replace(/[\r\n]/g, " ").slice(0, 60);
+  const shopId = payload.shop_id == null ? "" : clean(payload.shop_id);
+  const eventType = clean(payload.type ?? "UNKNOWN");
+  console.log(`[webhook] เข้ามา ${eventType} · ร้าน ${shopId || "(ไม่มี)"}`);
 
   if (!shopId) {
     return Response.json({ ok: true });
@@ -53,6 +59,7 @@ export async function POST(request: Request) {
   const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
   const account = accounts.find((row) => row.accountKey === shopId || row.shopId === shopId);
   if (!account?.shopCipher) {
+    console.warn(`[webhook] ไม่รู้จักร้าน ${shopId} — ข้าม`);
     return Response.json({ ok: true });
   }
 
