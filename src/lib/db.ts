@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-17-v75";
+const SCHEMA_VERSION = "2026-11-18-v76";
 
 export type { CompanyId };
 
@@ -955,6 +955,9 @@ CREATE TABLE IF NOT EXISTS platform_accounts (
 -- รอบซิงก์ใช้ค่านี้ตัดสินว่าจะเขียนข้อมูลของร้านนั้นลง schema ของบริษัทไหน
 -- ร้านที่มีอยู่ก่อนทั้งหมดอยู่บริษัท ดราก้อน 19
 ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS company_key TEXT NOT NULL DEFAULT 'dragon19';
+
+-- ซ่อนร้านออกจากรายการเลือก โดยไม่ตัดการเชื่อมต่อ: token/สิทธิ์ยังอยู่ เปิดกลับได้จากหน้าตั้งค่า
+ALTER TABLE platform_accounts ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT false;
 
 -- ชื่อ/รูปที่ฝ่ายขายเพิ่งแก้ในระบบ: ล็อกไว้ชั่วคราวไม่ให้รอบซิงก์เขียนทับด้วยค่าเก่าจาก TikTok
 ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS name_locked_until TIMESTAMPTZ;

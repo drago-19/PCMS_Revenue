@@ -16,6 +16,8 @@ export interface TikTokAccountView {
   shopCipher: string | null;
   region: string | null;
   status: string;
+  /** ซ่อนร้านออกจากรายการเลือก (token/การเชื่อมต่อยังอยู่) */
+  hidden?: boolean;
   lastError: string | null;
   accessTokenExpiresAt: string | null;
   connectedAt: string | null;
@@ -54,12 +56,37 @@ export function TikTokConnectCard({
   const router = useRouter();
   const accounts = config.accounts;
   const [switchingKey, setSwitchingKey] = useState<string | null>(null);
+  const [hidingKey, setHidingKey] = useState<string | null>(null);
   const sandboxAccounts = accounts.filter((account) => isSandboxShopName(account.shopName));
   const realAccounts = accounts.filter((account) => !isSandboxShopName(account.shopName));
   // โหมดปัจจุบันอ่านจากร้านที่เลือกอยู่ว่าเป็นร้านทดสอบหรือร้านจริง
   const modeIsTest = isSandboxShopName(
     accounts.find((account) => account.accountKey === activeShopId)?.shopName,
   );
+
+  /** ซ่อน/แสดงร้านในรายการเลือก — ไม่ตัดการเชื่อมต่อ token จึงเปิดกลับได้ทุกเมื่อ */
+  const handleSetHidden = async (shopId: string, hidden: boolean) => {
+    if (hidingKey) return;
+    setHidingKey(shopId);
+    try {
+      const res = await fetch("/api/platform/accounts/hidden", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopId, hidden }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "ทำรายการไม่สำเร็จ");
+        return;
+      }
+      toast.success(hidden ? "ซ่อนร้านแล้ว — token ยังอยู่ เปิดกลับได้ทุกเมื่อ" : "แสดงร้านนี้กลับมาแล้ว");
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
+    } finally {
+      setHidingKey(null);
+    }
+  };
 
   /** สลับร้านเริ่มต้น (จริง ↔ ทดสอบ) — ไม่เขียนข้อมูลใด ๆ ทั้งสิ้น */
   const handleSetActive = async (shopId: string) => {
@@ -250,6 +277,7 @@ export function TikTokConnectCard({
                     <span className="truncate">{account.shopName ?? account.accountKey}</span>
                     {isSandboxShopName(account.shopName) ? <Badge variant="warning">ทดสอบ</Badge> : null}
                     {activeShopId === account.accountKey ? <Badge variant="neutral">กำลังใช้อยู่</Badge> : null}
+                    {account.hidden ? <Badge variant="warning">ซ่อนอยู่</Badge> : null}
                   </p>
                   <p className="text-[12.5px] text-muted-foreground">
                     {account.region ?? "—"} · เชื่อม {formatDateTime(account.connectedAt)} · token ถึง{" "}
@@ -287,6 +315,18 @@ export function TikTokConnectCard({
                   aria-busy={testingKey === account.accountKey}
                 >
                   {testingKey === account.accountKey ? "กำลังดึง…" : "ทดสอบดึง Statement"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleSetHidden(account.accountKey, !account.hidden)}
+                  disabled={hidingKey !== null}
+                  aria-busy={hidingKey === account.accountKey}
+                >
+                  {hidingKey === account.accountKey
+                    ? "กำลังบันทึก…"
+                    : account.hidden
+                      ? "แสดงร้านนี้"
+                      : "ซ่อนร้านนี้"}
                 </Button>
                 <Button
                   variant={activeShopId === account.accountKey ? "secondary" : "default"}

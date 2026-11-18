@@ -292,6 +292,8 @@ export interface PlatformAccountRow {
   region: string | null;
   grantedScopes: string[];
   status: string;
+  /** ซ่อนออกจากรายการเลือกของหน้าจออื่น (การเชื่อมต่อ/token ยังอยู่) */
+  hidden: boolean;
   lastError: string | null;
   accessTokenExpiresAt: string | null;
   connectedAt: string | null;
@@ -311,6 +313,7 @@ const ACCOUNT_COLUMNS = `
   region,
   granted_scopes AS "grantedScopes",
   status,
+  hidden,
   last_error AS "lastError",
   access_token_expires_at::text AS "accessTokenExpiresAt",
   connected_at::text AS "connectedAt",
@@ -325,6 +328,16 @@ export async function getShopCompany(shopId: string): Promise<CompanyId> {
     [TIKTOK_PLATFORM, shopId],
   );
   return rows[0]?.company_key === "seeheng" ? "seeheng" : "dragon19";
+}
+
+/** ซ่อน/แสดงร้านในรายการเลือก — ไม่ตัดการเชื่อมต่อ token ยังอยู่ครบ เปิดกลับได้ทุกเมื่อ */
+export async function setShopHidden(shopId: string, hidden: boolean): Promise<void> {
+  await query(
+    `UPDATE public.platform_accounts
+        SET hidden = $2::boolean, updated_at = now()
+      WHERE platform = $1::text AND account_key = $3::text`,
+    [TIKTOK_PLATFORM, hidden, shopId],
+  );
 }
 
 /** กำหนดบริษัทให้ร้าน — มีผลกับรอบซิงก์ครั้งถัดไป */
@@ -349,6 +362,8 @@ export async function listPlatformAccounts(
       `SELECT ${ACCOUNT_COLUMNS} FROM public.platform_accounts
         WHERE platform = $1::text
           AND ($2::text IS NULL OR company_key = $2::text)
+          -- ร้านที่ถูกซ่อนจะไม่โผล่ในรายการเลือกของหน้าจออื่น (หน้าตั้งค่าส่ง "all" จึงยังเห็นครบ)
+          ${scope === "active" ? "AND hidden = false" : ""}
         ORDER BY updated_at DESC`,
       [platform, company],
     );
