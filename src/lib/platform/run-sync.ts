@@ -64,11 +64,20 @@ async function buildContexts(onlyShopId?: string): Promise<{
     throw new SyncUnavailableError("ยังไม่ได้ตั้งค่าแอป TikTok");
   }
 
-  const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM, "all")).filter(
-    (row) => row.status === "connected" && (!onlyShopId || row.accountKey === onlyShopId),
+  const connected = (await listPlatformAccounts(TIKTOK_PLATFORM, "all")).filter(
+    (row) => row.status === "connected",
+  );
+  // ร้านที่ถูกซ่อน = ผู้ใช้สั่งไม่ให้ระบบดึงข้อมูลอีก — ทั้งรอบอัตโนมัติและรอบดึงย้อน
+  // ส่วนการซิงก์ร้านเดียวแบบเจาะจง (จากหน้าตั้งค่า) ก็ต้องเปิดร้านก่อนเช่นกัน
+  const accounts = connected.filter(
+    (row) => (!onlyShopId || row.accountKey === onlyShopId) && !row.hidden,
   );
   if (accounts.length === 0) {
-    throw new SyncUnavailableError("ยังไม่มีร้านที่เชื่อมต่อ");
+    const hidden =
+      onlyShopId && connected.some((row) => row.accountKey === onlyShopId && row.hidden);
+    throw new SyncUnavailableError(
+      hidden ? "ร้านนี้ถูกซ่อนอยู่ — เปิดร้านก่อนจึงจะซิงก์ได้" : "ยังไม่มีร้านที่เชื่อมต่อ",
+    );
   }
 
   const contexts: Array<{ ctx: SyncContext; shopName: string }> = [];

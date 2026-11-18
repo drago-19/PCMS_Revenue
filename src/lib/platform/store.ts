@@ -23,13 +23,32 @@ const SETTINGS_KEY = "platform_api";
 export const TIKTOK_PLATFORM = "TikTok";
 export const SHOPEE_PLATFORM = "Shopee";
 
-/** ร้านที่เลือกใช้เป็นค่าเริ่มต้น (ร้านจริงหรือร้านทดสอบ) — เก็บใน app_settings เดียวกัน */
+/**
+ * เลือกร้านที่ใช้จริงจากรายการที่ยังแสดงอยู่
+ * ค่าที่ผู้ใช้เลือกไว้ใช้ได้เฉพาะเมื่อร้านนั้นยังไม่ถูกซ่อน — ไม่งั้นถอยไปร้านแรกที่เชื่อมต่ออยู่
+ * แยกเป็นฟังก์ชันบริสุทธิ์เพื่อให้เทสต์ได้โดยไม่ต้องเขียน app_settings จริง
+ */
+export function pickActiveShopId(
+  stored: string | null,
+  accounts: Array<{ accountKey: string; status: string }>,
+): string | null {
+  if (accounts.length === 0) return null;
+  if (stored && accounts.some((account) => account.accountKey === stored)) return stored;
+  const fallback = accounts.find((account) => account.status === "connected") ?? accounts[0];
+  return fallback.accountKey;
+}
+
+/**
+ * ร้านที่ใช้จริงของแพลตฟอร์ม — ร้านที่ถูกซ่อนหรือหลุดการเชื่อมต่อไปแล้วจะไม่ถูกเลือกใช้
+ * หน้าจอจึงไม่เปิดมาที่ข้อมูลของร้านที่ซ่อน และป้าย "ร้านที่ใช้อยู่" ตรงกับที่ระบบใช้จริง
+ */
 export async function getActiveShopId(platform: string): Promise<string | null> {
   const { raw } = await readRawSettingsRow();
   const active = raw.activeShop;
-  if (!active || typeof active !== "object") return null;
-  const value = (active as Record<string, unknown>)[platform];
-  return typeof value === "string" && value ? value : null;
+  const value =
+    active && typeof active === "object" ? (active as Record<string, unknown>)[platform] : null;
+  const accounts = await listPlatformAccounts(platform, "active");
+  return pickActiveShopId(typeof value === "string" && value ? value : null, accounts);
 }
 
 /** เวลาที่สมัคร webhook กับ TikTok สำเร็จครั้งล่าสุด (ไว้แสดงว่าสมัครแล้ว) */
@@ -330,7 +349,10 @@ export async function getShopCompany(shopId: string): Promise<CompanyId> {
   return rows[0]?.company_key === "seeheng" ? "seeheng" : "dragon19";
 }
 
-/** ซ่อน/แสดงร้านในรายการเลือก — ไม่ตัดการเชื่อมต่อ token ยังอยู่ครบ เปิดกลับได้ทุกเมื่อ */
+/**
+ * ซ่อน/แสดงร้าน — ซ่อนแล้วร้านหายจากรายการเลือก และระบบไม่ดึงข้อมูลของร้านนั้นอีก
+ * (token/การเชื่อมต่อยังอยู่ครบ เปิดกลับได้ทุกเมื่อจากหน้าตั้งค่า)
+ */
 export async function setShopHidden(platform: string, shopId: string, hidden: boolean): Promise<void> {
   await query(
     `UPDATE public.platform_accounts
@@ -338,6 +360,20 @@ export async function setShopHidden(platform: string, shopId: string, hidden: bo
       WHERE platform = $1::text AND account_key = $2::text`,
     [platform, shopId, hidden],
   );
+}
+
+/** ร้านนี้ถูกซ่อนอยู่หรือไม่ — จุดที่ดึงข้อมูลจากแพลตฟอร์มใช้ตัดสินว่าจะข้ามร้านนี้ */
+export async function isShopHidden(platform: string, shopId: string): Promise<boolean> {
+  try {
+    const row = await queryOne<{ hidden: boolean }>(
+      `SELECT hidden FROM public.platform_accounts WHERE platform = $1::text AND account_key = $2::text`,
+      [platform, shopId],
+    );
+    return row?.hidden === true;
+  } catch {
+    // อ่านไม่ได้ = ไม่ตัดสินใจแทนผู้ใช้ ให้คำสั่งถัดไปรายงาน error ของมันเอง
+    return false;
+  }
 }
 
 /** กำหนดบริษัทให้ร้าน — มีผลกับรอบซิงก์ครั้งถัดไป */

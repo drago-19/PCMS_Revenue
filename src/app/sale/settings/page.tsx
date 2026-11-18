@@ -51,9 +51,9 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
       getActiveShopId(SHOPEE_PLATFORM),
     ]);
 
-  // บริษัทของแต่ละร้าน (ใช้เลือกได้ว่าร้านนี้เป็นของบริษัทไหน)
+  // บริษัทของแต่ละร้าน (ใช้เลือกได้ว่าร้านนี้เป็นของบริษัทไหน) — ร้านที่ซ่อนแล้วยังแก้ได้จากบัตรเชื่อมต่อด้านล่าง
   const shopCompanies = await Promise.all(
-    tiktokAccounts.map(async (account) => ({
+    tiktokAccounts.filter((account) => !account.hidden).map(async (account) => ({
       shopId: account.accountKey,
       shopName: account.shopName ?? account.accountKey,
       company: await getShopCompany(account.accountKey),

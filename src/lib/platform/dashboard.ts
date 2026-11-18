@@ -65,7 +65,9 @@ function round2(value: number): number {
  * คืนค่า error แบบนุ่มนวลเพื่อให้หน้าเว็บยังแสดงได้ แม้ token หมดอายุหรือสิทธิ์ยังไม่พอ
  */
 export async function getTikTokDashboard(rangeDays = 30): Promise<TikTokDashboard | null> {
-  const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
+  const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM, "all")).filter(
+    (account) => !account.hidden,
+  );
   const target = accounts.find((account) => account.status === "connected" && account.shopCipher)
     ?? accounts.find((account) => account.shopCipher);
   if (!target) return null;

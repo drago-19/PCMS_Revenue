@@ -19,6 +19,7 @@ import {
 import {
   getPlatformAccountRow,
   getPlatformConfig,
+  isShopHidden,
   listPlatformAccounts,
   markAccountError,
   SHOPEE_PLATFORM,
@@ -349,11 +350,13 @@ export async function syncShopeeStock(targetShopId?: string): Promise<{ skus: nu
   let shopId = targetShopId;
   if (!shopId) {
     const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
-    const target = accounts.find((row) => row.status === "connected");
+    const target = accounts.find((row) => row.status === "connected" && !row.hidden);
     if (!target) {
       throw new SyncUnavailableError("ยังไม่มีร้าน Shopee ที่เชื่อมต่อ");
     }
     shopId = target.accountKey;
+  } else if (await isShopHidden(SHOPEE_PLATFORM, shopId)) {
+    throw new SyncUnavailableError("ร้านนี้ถูกซ่อนอยู่ — เปิดร้านก่อนจึงจะซิงก์ได้");
   }
 
   const ctx = await ensureValidShopeeToken(shopId);
@@ -455,11 +458,13 @@ export async function runShopeeSync(window: ShopeeSyncWindow): Promise<ShopeeSyn
   let targetShopId = window.shopId;
   if (!targetShopId) {
     const accounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
-    const target = accounts.find((row) => row.status === "connected");
+    const target = accounts.find((row) => row.status === "connected" && !row.hidden);
     if (!target) {
       throw new SyncUnavailableError("ยังไม่มีร้าน Shopee ที่เชื่อมต่อ");
     }
     targetShopId = target.accountKey;
+  } else if (await isShopHidden(SHOPEE_PLATFORM, targetShopId)) {
+    throw new SyncUnavailableError("ร้านนี้ถูกซ่อนอยู่ — เปิดร้านก่อนจึงจะซิงก์ได้");
   }
 
   const ctx = await ensureValidShopeeToken(targetShopId);

@@ -22,18 +22,40 @@ function read(params: Record<string, string | string[] | undefined>, key: string
 
 export default async function PlatformOpsPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  // ไม่ระบุร้าน = ใช้ร้านตามโหมดจริง/ทดสอบที่เลือกไว้
-  const selectedShop = read(params, "shop") || (await getActiveShopId("TikTok")) || undefined;
   const fromParam = read(params, "from");
   const toParam = read(params, "to");
   const platform = readPlatform(read(params, "platform"));
   const dbPlatform = platformDbName(platform);
+  // ร้านที่ระบุมาทาง URL ต้องเป็นร้านที่ยังแสดงอยู่ — ร้านที่ซ่อนแล้วห้ามเปิดดูข้อมูล
+  const accounts = await listPlatformAccounts(dbPlatform);
+  const requestedShop = read(params, "shop");
+  const selectedShop =
+    (requestedShop && accounts.some((account) => account.accountKey === requestedShop)
+      ? requestedShop
+      : null) ??
+    (await getActiveShopId(dbPlatform)) ??
+    accounts[0]?.accountKey ??
+    undefined;
 
-  const [accounts, connectedPlatforms, ops] = await Promise.all([
-    listPlatformAccounts(dbPlatform),
+  const [connectedPlatforms, ops] = await Promise.all([
     getConnectedPlatforms(),
     getTikTokOps({ from: fromParam, to: toParam, shopId: selectedShop, platform: dbPlatform }),
   ]);
+
+  if (accounts.length === 0) {
+    return (
+      <div className="workspace-page flex min-w-0 flex-col gap-4">
+        <SaleHeader
+          eyebrow={platformTab(platform).label}
+          title="งานที่ต้องทำ"
+          description="ยังไม่มีร้านที่แสดงอยู่"
+        />
+        <p className="text-[13px] text-muted-foreground">
+          ร้านที่เชื่อมต่อถูกซ่อนไว้ — เปิดกลับได้ที่หน้าตั้งค่า
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="workspace-page flex min-w-0 flex-col gap-4">
