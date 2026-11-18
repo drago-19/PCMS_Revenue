@@ -3,7 +3,9 @@ FROM node:24-alpine AS deps
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=corepack-cache,target=/root/.cache/node/corepack \
+    --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 # ---- build ----
 FROM node:24-alpine AS builder
@@ -12,7 +14,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NEXT_STANDALONE=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN node ./node_modules/next/dist/bin/next build
+RUN --mount=type=cache,id=nextjs-revenue,target=/app/.next/cache \
+    node ./node_modules/next/dist/bin/next build
 
 # ---- run ----
 FROM node:24-alpine AS runner
