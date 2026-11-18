@@ -3120,7 +3120,8 @@ test("buildOmsOrderUid prevents cross-month Shipnity order_code collisions (e.g.
     channel: "TikTok",
     orderCode: "Q99",
   });
-  assert.equal(customerPaidShipTiktokInvoice.receiptTotal, 2000);
+  // ค่าธรรมเนียมการจัดส่งของลูกค้าเป็นรายได้ที่ต้องยื่นภาษีเต็มจำนวน: 2,000 + 98 = 2,098 (เท่าเงินที่ลูกค้าจ่ายจริง)
+  assert.equal(customerPaidShipTiktokInvoice.receiptTotal, 2098);
   assert.deepEqual(
     getOrderedInvoiceBreakdownLines(customerPaidShipTiktokInvoice).map((l) => ({
       key: l.key,
@@ -3132,11 +3133,6 @@ test("buildOmsOrderUid prevents cross-month Shipnity order_code collisions (e.g.
         key: "shippingCustomerFee",
         label: "ค่าธรรมเนียมการจัดส่งของลูกค้า",
         amount: 98,
-      },
-      {
-        key: "shippingActual",
-        label: "การจัดส่ง (น้ำหนักที่เรียกเก็บเงิน: 6000 ก.)",
-        amount: -98,
       },
     ],
   );

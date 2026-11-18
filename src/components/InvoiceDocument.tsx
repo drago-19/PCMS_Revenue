@@ -333,17 +333,20 @@ export function getOrderedInvoiceBreakdownLines(
       (invoice.exchangeShipping ?? 0) > 0 ||
       (invoice.replacementShipping ?? 0) > 0 ||
       (invoice.shippingRefund ?? 0) > 0;
+    // คอลัมน์ U (ค่าธรรมเนียมการจัดส่งของลูกค้า) ถูกบวกเข้าใบกำกับเต็มจำนวนแล้ว
+    // จึงห้ามพิมพ์บรรทัดค่าส่งที่ติดลบมาหักล้าง ไม่งั้นยอดบรรทัดในกระดาษจะไม่เท่ายอดรวม
+    const hidesOffsettingShipping = invoice.shippingActual < 0 && custShippingFee > 0;
     if (
+      !hidesOffsettingShipping &&
       invoice.shippingActual !== 0 &&
       (invoice.shippingActual > 0 || hasPositiveShippingOffset)
     ) {
       let displayShippingActual = invoice.shippingActual;
-      // สำหรับ TikTok Shop:
-      // 1. กรณีเท่าทุน: รับมาเท่าไหร่ จ่ายไปเท่านั้น หักล้างกันเป็น 0
-      // 2. กรณีมีส่วนต่าง (เช่น รับ 98 จ่าย 101): ให้แสดงเท่าทุนมาคิด (-98) เพื่อหักล้างกับค่าส่งที่เก็บจากลูกค้า/คูปองส่งฟรีพอดี
+      // สำหรับ TikTok Shop (มาถึงตรงนี้เฉพาะกรณีลูกค้าไม่ได้จ่ายค่าส่ง — ถ้าจ่าย บรรทัดนี้ถูกซ่อนไปแล้วด้านบน):
+      // 1. กรณีมีส่วนต่าง (เช่น รับ 98 จ่าย 101): ให้แสดงเท่าทุนมาคิด (-98) เพื่อหักล้างกับคูปองส่งฟรีพอดี
       //    เพราะส่วนต่างค่าจัดส่งที่เกิน (3 บาท) ร้านค้าเป็นผู้จ่ายเอง และถูก TikTok นำไปหักใน "ค่าธรรมเนียมทั้งหมด" แล้ว
-      // 3. กรณี ตต ไม่ออกช่วย (และลูกค้าไม่ได้จ่ายค่าส่ง): ไม่แสดงบรรทัดการจัดส่งในใบกำกับภาษี
-      // 4. กรณีได้ค่าขนส่งบวกเพิ่ม: นำยอดบวกที่เหลือมารวมในใบกำกับภาษี
+      // 2. กรณี ตต ไม่ออกช่วย (และลูกค้าไม่ได้จ่ายค่าส่ง): ไม่แสดงบรรทัดการจัดส่งในใบกำกับภาษี
+      // 3. กรณีได้ค่าขนส่งบวกเพิ่ม: นำยอดบวกที่เหลือมารวมในใบกำกับภาษี
       if (
         invoice.channel !== "Shopee" &&
         invoice.channel !== "Facebook" &&
@@ -355,9 +358,8 @@ export function getOrderedInvoiceBreakdownLines(
           0,
           invoice.shippingPlatformDiscount ?? 0,
         );
-        const customerFee = Math.max(0, custShippingFee);
         const subsidy = Math.max(0, invoice.shippingSubsidy ?? 0);
-        const maxOffset = round2(platformDiscount + customerFee + subsidy);
+        const maxOffset = round2(platformDiscount + subsidy);
         if (maxOffset > 0 && Math.abs(invoice.shippingActual) > maxOffset) {
           displayShippingActual = -maxOffset;
         }
