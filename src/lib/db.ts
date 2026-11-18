@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-18-v77";
+const SCHEMA_VERSION = "2026-11-18-v78";
 
 /**
  * เทียบเวอร์ชัน schema รูปแบบ 2026-11-18-v77 — คืน > 0 เมื่อ a ใหม่กว่า b
@@ -2213,8 +2213,11 @@ CREATE TABLE IF NOT EXISTS central_stock (
   sku_code TEXT PRIMARY KEY,
   product_name TEXT,
   on_hand INTEGER NOT NULL DEFAULT 0,
+  archived_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- รหัสที่เลิกใช้ = ซ่อนจากรายการและหยุดเขียนยอด แต่ประวัติการเคลื่อนไหวยังอยู่ครบ (soft delete)
+ALTER TABLE central_stock ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
 
 -- บันทึกการเคลื่อนไหวทุกครั้ง: รับเข้า/ปรับมือ (source = manual) และการขาย (source = tiktok/shopee/facebook)
 -- แถวขายหนึ่งแถวต่อหนึ่งบรรทัดออเดอร์ (unique index) — ซิงก์ซ้ำจึงไม่หักเงินซ้ำ

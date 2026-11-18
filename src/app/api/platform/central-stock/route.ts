@@ -2,10 +2,13 @@ import { recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { getClientIp } from "@/lib/session-token";
 import {
   addCentralStock,
+  archiveCentralStock,
   autoLinkShop,
   linkListing,
   lookupSkuForCentral,
   reconcileCentralStock,
+  renameCentralStock,
+  restoreCentralStock,
   unlinkListing,
 } from "@/lib/stock/central";
 import { pushPoolToListings } from "@/lib/stock/push";
@@ -117,6 +120,48 @@ export async function POST(request: Request) {
         ipAddress,
         outcome: result.failed > 0 ? "failure" : "success",
         details: { pushed: result.pushed, failed: result.failed, skipped: result.skipped },
+        requestId: auth.requestId,
+      });
+      return Response.json({ ok: true, ...result, requestId: auth.requestId });
+    }
+
+    if (action === "rename") {
+      const skuCode = text(body.skuCode);
+      if (!skuCode) {
+        return Response.json(
+          { error: "ต้องระบุรหัสสินค้า", requestId: auth.requestId },
+          { status: 400, headers: { "x-request-id": auth.requestId } },
+        );
+      }
+      await renameCentralStock({ skuCode, productName: text(body.productName, 200) || null, actor: auth.session.sub });
+      await recordAuditLog({
+        actor: auth.session.sub,
+        action: "platform.central_stock.rename",
+        ipAddress,
+        outcome: "success",
+        details: { skuCode, productName: text(body.productName, 200) || null },
+        requestId: auth.requestId,
+      });
+      return Response.json({ ok: true, requestId: auth.requestId });
+    }
+
+    if (action === "archive" || action === "restore") {
+      const skuCode = text(body.skuCode);
+      if (!skuCode) {
+        return Response.json(
+          { error: "ต้องระบุรหัสสินค้า", requestId: auth.requestId },
+          { status: 400, headers: { "x-request-id": auth.requestId } },
+        );
+      }
+      const result = action === "archive"
+        ? await archiveCentralStock({ skuCode, actor: auth.session.sub })
+        : (await restoreCentralStock({ skuCode, actor: auth.session.sub }), { unlinked: 0 });
+      await recordAuditLog({
+        actor: auth.session.sub,
+        action: action === "archive" ? "platform.central_stock.archive" : "platform.central_stock.restore",
+        ipAddress,
+        outcome: "success",
+        details: { skuCode, ...result },
         requestId: auth.requestId,
       });
       return Response.json({ ok: true, ...result, requestId: auth.requestId });

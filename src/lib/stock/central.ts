@@ -296,7 +296,7 @@ export async function centralStockMap(skuCodes: string[]): Promise<Map<string, n
   const codes = [...new Set(skuCodes.map(normalizeSkuCode).filter(Boolean))];
   if (codes.length === 0) return new Map();
   const rows = await query<{ sku_code: string; on_hand: number }>(
-    `SELECT sku_code, on_hand FROM central_stock WHERE sku_code = ANY($1::text[])`,
+    `SELECT sku_code, on_hand FROM central_stock WHERE archived_at IS NULL AND sku_code = ANY($1::text[])`,
     [codes],
   );
   return new Map(rows.map((row) => [row.sku_code, Number(row.on_hand)]));
@@ -310,7 +310,7 @@ export async function centralStockForShop(
   const rows = await query<{ sku_id: string; sku_code: string; on_hand: number | null }>(
     `SELECT l.sku_id, l.sku_code, c.on_hand
        FROM central_stock_links l
-       LEFT JOIN central_stock c ON c.sku_code = l.sku_code
+       LEFT JOIN central_stock c ON c.sku_code = l.sku_code AND c.archived_at IS NULL
       WHERE l.platform = $1 AND l.shop_id = $2`,
     [platform, shopId],
   );
@@ -425,7 +425,8 @@ export async function listCentralStockRows(options: {
   const totalRows = await query<{ total: number }>(
     `SELECT count(*)::int AS total
        FROM central_stock c
-      WHERE ($1 = '' OR c.sku_code ILIKE '%' || $1 || '%' OR COALESCE(c.product_name, '') ILIKE '%' || $1 || '%')`,
+      WHERE c.archived_at IS NULL
+        AND ($1 = '' OR c.sku_code ILIKE '%' || $1 || '%' OR COALESCE(c.product_name, '') ILIKE '%' || $1 || '%')`,
     [q],
   );
   const total = Number(totalRows[0]?.total ?? 0);
@@ -451,7 +452,8 @@ export async function listCentralStockRows(options: {
             (SELECT count(DISTINCT l.shop_id)::int FROM central_stock_links l WHERE l.sku_code = c.sku_code) AS shop_count,
             c.updated_at
        FROM central_stock c
-      WHERE ($1 = '' OR c.sku_code ILIKE '%' || $1 || '%' OR COALESCE(c.product_name, '') ILIKE '%' || $1 || '%')
+      WHERE c.archived_at IS NULL
+        AND ($1 = '' OR c.sku_code ILIKE '%' || $1 || '%' OR COALESCE(c.product_name, '') ILIKE '%' || $1 || '%')
       ORDER BY c.on_hand ASC, c.sku_code
       LIMIT $2 OFFSET $3`,
     [q, pageSize, (current - 1) * pageSize],
@@ -480,7 +482,8 @@ export async function centralStockTotals(): Promise<{ skus: number; units: numbe
             COALESCE(sum(on_hand), 0)::int AS units,
             count(*) FILTER (WHERE on_hand <= 0)::int AS out,
             (SELECT count(*)::int FROM central_stock_links) AS links
-       FROM central_stock`,
+       FROM central_stock
+      WHERE archived_at IS NULL`,
   );
   return {
     skus: Number(rows[0]?.skus ?? 0),
@@ -624,7 +627,7 @@ export async function lookupSkuForCentral(code: string): Promise<CentralSkuLooku
   );
 
   const pool = await query<{ on_hand: number }>(
-    `SELECT on_hand FROM central_stock WHERE sku_code = $1`,
+    `SELECT on_hand FROM central_stock WHERE archived_at IS NULL AND sku_code = $1`,
     [skuCode],
   );
   const links = await query<{ n: number }>(
@@ -658,4 +661,65 @@ export async function lookupSkuForCentral(code: string): Promise<CentralSkuLooku
       quantity: Number(row.quantity),
     })),
   };
+}
+
+/** เปลี่ยนชื่อที่แสดงของรหัสกลาง — ไม่กระทบยอดและการผูก */
+export async function renameCentralStock(input: {
+  skuCode: string;
+  productName: string | null;
+  actor?: string | null;
+}): Promise<void> {
+  const skuCode = normalizeSkuCode(input.skuCode);
+  if (!skuCode) throw new Error("ต้องระบุรหัสสินค้าของสต็อกกลาง");
+  await query(
+    `UPDATE central_stock
+        SET product_name = $2, updated_at = now()
+      WHERE sku_code = $1 AND archived_at IS NULL`,
+    [skuCode, input.productName?.trim() || null],
+  );
+}
+
+/**
+ * เลิกใช้รหัสกลาง — ซ่อนจากรายการและตัดการผูกของทุกร้าน (หยุดหักและหยุดเขียนยอด)
+ * ไม่ลบแถวหรือประวัติ เพื่อให้ย้อนดูได้ว่าเคยมีของเท่าไร (soft delete)
+ */
+export async function archiveCentralStock(input: {
+  skuCode: string;
+  actor?: string | null;
+}): Promise<{ unlinked: number }> {
+  const skuCode = normalizeSkuCode(input.skuCode);
+  if (!skuCode) throw new Error("ต้องระบุรหัสสินค้าของสต็อกกลาง");
+
+  return withTransaction(async (db) => {
+    const removed = await query<{ n: number }>(
+      `WITH gone AS (DELETE FROM central_stock_links WHERE sku_code = $1 RETURNING 1)
+       SELECT count(*)::int AS n FROM gone`,
+      [skuCode],
+      db,
+    );
+    await query(
+      `UPDATE central_stock SET archived_at = now(), updated_at = now() WHERE sku_code = $1 AND archived_at IS NULL`,
+      [skuCode],
+      db,
+    );
+    await query(
+      `INSERT INTO central_stock_movements (sku_code, kind, quantity, source, note, actor)
+       VALUES ($1, 'archive', 0, 'manual', 'เลิกใช้รหัสกลาง', $2)`,
+      [skuCode, input.actor ?? null],
+      db,
+    );
+    return { unlinked: Number(removed[0]?.n ?? 0) };
+  });
+}
+
+/** นำรหัสที่เลิกใช้แล้วกลับมาใช้ */
+export async function restoreCentralStock(input: { skuCode: string; actor?: string | null }): Promise<void> {
+  const skuCode = normalizeSkuCode(input.skuCode);
+  if (!skuCode) throw new Error("ต้องระบุรหัสสินค้าของสต็อกกลาง");
+  await query(`UPDATE central_stock SET archived_at = NULL, updated_at = now() WHERE sku_code = $1`, [skuCode]);
+  await query(
+    `INSERT INTO central_stock_movements (sku_code, kind, quantity, source, note, actor)
+     VALUES ($1, 'restore', 0, 'manual', 'นำรหัสกลับมาใช้', $2)`,
+    [skuCode, input.actor ?? null],
+  );
 }

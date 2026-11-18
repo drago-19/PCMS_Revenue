@@ -56,7 +56,7 @@ export async function pushPoolToListings(options: { skuCodes?: string[] } = {}):
             c.on_hand::int AS target,
             s.quantity AS current
        FROM central_stock_links l
-       JOIN central_stock c ON c.sku_code = l.sku_code
+       JOIN central_stock c ON c.sku_code = l.sku_code AND c.archived_at IS NULL
        JOIN platform_stock s
          ON s.platform = l.platform AND s.shop_id = l.shop_id AND s.sku_id = l.sku_id
       WHERE ($1::text[] IS NULL OR l.sku_code = ANY($1::text[]))

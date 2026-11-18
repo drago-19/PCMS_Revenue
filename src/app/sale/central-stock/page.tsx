@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CentralLinkRow, CentralStockReceiveForm } from "@/components/sale/CentralStockTools";
+import { CentralStockRowActions } from "@/components/sale/CentralStockRowActions";
 import { LiveRefresh } from "@/components/sale/LiveRefresh";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { thaiDateTime } from "@/lib/platform/period";
@@ -157,7 +158,8 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือ</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">ร้านที่ผูก</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">ประกาศที่ผูก</th>
-                <th scope="col" className="py-1.5 text-right font-bold">อัปเดต</th>
+                <th scope="col" className="py-1.5 pr-2 text-right font-bold">อัปเดต</th>
+                <th scope="col" className="py-1.5 text-right font-bold">จัดการ</th>
               </tr>
             </thead>
             <tbody>
@@ -182,12 +184,19 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                   </td>
                   <td className="mono py-1.5 pr-2 text-right">{num(row.shopCount)}</td>
                   <td className="mono py-1.5 pr-2 text-right">{num(row.listingCount)}</td>
-                  <td className="py-1.5 text-right text-muted-foreground">{thaiDateTime(row.updatedAt)}</td>
+                  <td className="py-1.5 pr-2 text-right text-muted-foreground">{thaiDateTime(row.updatedAt)}</td>
+                  <td className="py-1.5 text-right">
+                    <CentralStockRowActions
+                      skuCode={row.skuCode}
+                      productName={row.productName}
+                      onHand={row.onHand}
+                    />
+                  </td>
                 </tr>
               ))}
               {list.rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={8} className="py-6 text-center text-muted-foreground">
                     {q
                       ? "ไม่พบรหัสที่ค้นหา"
                       : totals.links > 0
