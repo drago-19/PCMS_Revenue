@@ -1,6 +1,7 @@
 import { recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { isSandboxShopName } from "@/lib/platform/platforms";
 import { updateProductTitle } from "@/lib/platform/product-write";
+import { liveWriteAllowed } from "@/lib/platform/stock-write";
 import { getPlatformAccountRow, TIKTOK_PLATFORM } from "@/lib/platform/store";
 import { getClientIp } from "@/lib/session-token";
 
@@ -11,7 +12,7 @@ const MAX_TITLE = 255;
 
 /**
  * แก้ชื่อสินค้าบน TikTok
- * - เปิดเฉพาะร้านทดสอบ (ร้านจริงยังไม่เปิดเขียน จนกว่าจะทดสอบครบและสั่งเปิด)
+ * - ร้านทดสอบทำได้เสมอ · ร้านจริงต้องเปิด PLATFORM_STOCK_WRITE_LIVE=1 (ด่านเดียวกับปรับสต็อก)
  * - บันทึก audit ทุกครั้ง ทั้งสำเร็จและล้มเหลว
  */
 export async function POST(request: Request) {
@@ -37,7 +38,8 @@ export async function POST(request: Request) {
   if (!account) {
     return Response.json({ error: "ไม่พบร้านนี้ในระบบ", requestId: auth.requestId }, { status: 404 });
   }
-  if (!isSandboxShopName(account.shopName)) {
+  // ร้านทดสอบทำได้เสมอ ร้านจริงต้องเปิด PLATFORM_STOCK_WRITE_LIVE=1 (ด่านเดียวกับปรับสต็อก)
+  if (!isSandboxShopName(account.shopName) && !liveWriteAllowed()) {
     return Response.json(
       { error: "ร้านจริงยังไม่เปิดให้แก้สินค้า — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน", requestId: auth.requestId },
       { status: 403 },

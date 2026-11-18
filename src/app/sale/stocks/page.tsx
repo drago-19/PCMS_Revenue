@@ -672,7 +672,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               />
             ) : null}
 
-            {platform !== "shopee" && skuDetail.productId && isSandboxShopName(shopName) && action === "edit" ? (
+            {platform !== "shopee" && skuDetail.productId && (isSandboxShopName(shopName) || liveStockWrite) && action === "edit" ? (
               <ProductTitleForm
                 shopId={shopId}
                 productId={skuDetail.productId}
@@ -680,7 +680,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               />
             ) : null}
 
-            {platform !== "shopee" && skuDetail.productId && isSandboxShopName(shopName) && action === "edit" ? (
+            {platform !== "shopee" && skuDetail.productId && (isSandboxShopName(shopName) || liveStockWrite) && action === "edit" ? (
               <ProductImageForm
                 shopId={shopId}
                 productId={skuDetail.productId}
@@ -700,7 +700,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
             ) : null}
 
             <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3 min-[520px]:flex-row min-[520px]:items-start">
+              {/* แถวตัวตนสินค้า: รูป + สถานะ/หมวดหมู่/ปุ่มสลับตะกร้า ชิดกลางแนวตั้งกับรูป */}
+              <div className="flex items-center gap-3">
                 {skuDetail.imageUrl ? (
                   // กดแล้วเปิดป๊อปอัพในหน้านี้ ไม่เด้งออกไปหน้าอื่น
                   <ImagePreview
@@ -710,46 +711,61 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 ) : (
                   <span className="block size-20 shrink-0 rounded-xl border border-border bg-muted min-[720px]:size-28" />
                 )}
-                <dl className="grid min-w-0 flex-1 grid-cols-2 gap-2 min-[720px]:grid-cols-4">
-                  <div className="rounded-xl border border-border/70 bg-card p-3">
-                    <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">คงเหลือรวม</dt>
-                    <dd className="mono text-[26px] font-bold leading-tight">
-                      {/* ขยับทันทีเมื่อกดปรับสต็อก (ไม่ต้องรอรีเฟรช) */}
-                      <LiveStockQuantity skuId={skuDetail.skuId} initial={skuDetail.quantity} />
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-border/70 bg-card p-3">
-                    <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">ราคาขาย</dt>
-                    <dd className="mono text-[20px] font-bold leading-tight">
-                      {skuDetail.price === null ? "—" : `${skuDetail.currency === "THB" || !skuDetail.currency ? "฿" : `${skuDetail.currency} `}${num(skuDetail.price)}`}
-                    </dd>
-                  </div>
-                  <div className="rounded-xl border border-border/70 bg-card p-3">
-                    <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">จำนวนคลัง</dt>
-                    <dd className="mono text-[26px] font-bold leading-tight">{num(skuDetail.warehouses.length)}</dd>
-                  </div>
-                  <div className="rounded-xl border border-border/70 bg-card p-3">
-                    <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">กำลังตีกลับ</dt>
-                    <dd className="mono text-[26px] font-bold leading-tight">{num(skuDetail.inTransit)}</dd>
-                  </div>
-                </dl>
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
+                  <span
+                    className={cn(
+                      "rounded-md px-2 py-0.5 font-bold",
+                      // สีเดียวกับป้ายในตาราง: เปิดขาย = เขียวอ่อน · ซ่อน/อื่น ๆ = เทา
+                      skuDetail.productStatus === "ACTIVATE"
+                        ? "bg-[color:var(--ok-soft)] text-[color:var(--ok)]"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {productStatusLabel(skuDetail.productStatus)}
+                  </span>
+                  <span className="min-w-0 text-muted-foreground">
+                    {skuDetail.category ?? "ยังไม่มีข้อมูลหมวดหมู่"}
+                  </span>
+                  {platform !== "shopee" && skuDetail.productId ? (
+                    <span className="ml-auto">
+                      <SaleProductVisibilityButton
+                        shopId={shopId}
+                        productId={skuDetail.productId}
+                        productStatus={skuDetail.productStatus}
+                        canWrite={isSandboxShopName(shopName) || liveStockWrite}
+                        blockedReason="ร้านจริงยังไม่เปิดให้เปลี่ยนสถานะตะกร้า — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
+                      />
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-[12px]">
-                <span className="rounded-md bg-muted px-2 py-0.5 font-bold">
-                  {productStatusLabel(skuDetail.productStatus)}
-                </span>
-                <span className="text-muted-foreground">{skuDetail.category ?? "ยังไม่มีข้อมูลหมวดหมู่"}</span>
-                {platform !== "shopee" && skuDetail.productId ? (
-                  <SaleProductVisibilityButton
-                    shopId={shopId}
-                    productId={skuDetail.productId}
-                    productStatus={skuDetail.productStatus}
-                    canWrite={isSandboxShopName(shopName) || liveStockWrite}
-                    blockedReason="ร้านจริงยังไม่เปิดให้เปลี่ยนสถานะตะกร้า — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
-                  />
-                ) : null}
-              </div>
+              {/* แถบตัวเลข: การ์ดเดียว 4 ช่องคั่นเส้นบาง — ภาษาเดียวกับแถบสรุปหน้าออเดอร์ */}
+              <Card padding="none" className="overflow-hidden">
+                <div className="grid grid-cols-2 gap-px bg-border min-[560px]:grid-cols-4">
+                  <div className="bg-card px-3.5 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">คงเหลือรวม</p>
+                    {/* ขยับทันทีเมื่อกดปรับสต็อก (ไม่ต้องรอรีเฟรช) */}
+                    <p className="mono text-[24px] font-bold leading-8">
+                      <LiveStockQuantity skuId={skuDetail.skuId} initial={skuDetail.quantity} />
+                    </p>
+                  </div>
+                  <div className="bg-card px-3.5 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">ราคาขาย</p>
+                    <p className="mono text-[20px] font-bold leading-8">
+                      {skuDetail.price === null ? "—" : `${skuDetail.currency === "THB" || !skuDetail.currency ? "฿" : `${skuDetail.currency} `}${num(skuDetail.price)}`}
+                    </p>
+                  </div>
+                  <div className="bg-card px-3.5 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">จำนวนคลัง</p>
+                    <p className="mono text-[24px] font-bold leading-8">{num(skuDetail.warehouses.length)}</p>
+                  </div>
+                  <div className="bg-card px-3.5 py-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">กำลังตีกลับ</p>
+                    <p className="mono text-[24px] font-bold leading-8">{num(skuDetail.inTransit)}</p>
+                  </div>
+                </div>
+              </Card>
 
               {platform === "shopee" ? (
                 <ShopeeStockEditor
@@ -759,28 +775,20 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 />
               ) : null}
 
-              <div className="grid items-start gap-3 min-[720px]:grid-cols-2">
-              <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-3">
-              {skuDetail.warehouses.length > 0 ? (
-                <div>
-                  <h3 className="text-[13px] font-bold">แยกตามคลัง</h3>
-                  <ul className="grid list-none grid-cols-1 gap-1 p-0 text-[12.5px] min-[520px]:grid-cols-2">
-                    {skuDetail.warehouses.map((warehouse) => (
-                      <li key={warehouse.warehouseId} className="flex justify-between gap-2 rounded-md bg-muted/40 px-2 py-1">
-                        <span className="mono text-muted-foreground">{warehouse.warehouseId}</span>
-                        <span className="mono font-bold">{num(warehouse.quantity)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              <div>
-                <h3 className="text-[13px] font-bold">ออเดอร์ที่ตัดสต็อก (ล่าสุด)</h3>
-                {skuDetail.orders.length === 0 ? (
-                  <p className="text-[12.5px] text-muted-foreground">ยังไม่มีออเดอร์ของ SKU นี้ในระบบ</p>
-                ) : (
-                  <ul className="flex list-none flex-col p-0">
+              {/* ล่างซ้าย: ออเดอร์ที่ตัดสต็อก — รายการยาวที่สุด ได้คอลัมน์เต็มพร้อมพื้นที่เลื่อน */}
+              {/* ล่างขวา: คลัง + ประวัติ — ก้อนสั้นซ้อนกัน สองการ์ดสูงเท่ากันเสมอ */}
+              <div className="grid gap-3 min-[720px]:grid-cols-2">
+                <div className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <h3 className="text-[13px] font-bold">ออเดอร์ที่ตัดสต็อก (ล่าสุด)</h3>
+                    <span className="text-[11.5px] tabular-nums text-muted-foreground">
+                      {num(skuDetail.orders.length)} รายการ
+                    </span>
+                  </div>
+                  {skuDetail.orders.length === 0 ? (
+                    <p className="mt-1 text-[12.5px] text-muted-foreground">ยังไม่มีออเดอร์ของ SKU นี้ในระบบ</p>
+                  ) : (
+                    <ul className="mt-1 flex max-h-[300px] list-none flex-col overflow-y-auto p-0">
                     {skuDetail.orders.map((order) => (
                       <li
                         key={order.orderId}
@@ -800,24 +808,37 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                         <span className="ml-auto mono font-bold">−{num(order.quantity)}</span>
                       </li>
                     ))}
-                  </ul>
-                )}
-              </div>
-
-              </div>
-              <div className="min-w-0 rounded-xl border border-border bg-card p-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <h3 className="text-[13px] font-bold">ประวัติการเปลี่ยนแปลง</h3>
-                  <span className="text-[11.5px] text-muted-foreground tabular-nums">
-                    {num(skuDetail.movements.length)} รายการล่าสุด
-                  </span>
+                    </ul>
+                  )}
                 </div>
-                {skuDetail.movements.length === 0 ? (
-                  <p className="text-[12.5px] text-muted-foreground">
-                    ยังไม่มีการเปลี่ยนแปลงที่ตรวจพบ — จะเริ่มบันทึกเมื่อยอดจาก TikTok เปลี่ยน
-                  </p>
-                ) : (
-                  <ul className="mt-1 flex max-h-[240px] list-none flex-col overflow-y-auto p-0">
+
+                <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-3">
+                  {skuDetail.warehouses.length > 0 ? (
+                    <div>
+                      <h3 className="text-[13px] font-bold">แยกตามคลัง</h3>
+                      <ul className="mt-1 grid list-none grid-cols-1 gap-1 p-0 text-[12.5px]">
+                        {skuDetail.warehouses.map((warehouse) => (
+                          <li key={warehouse.warehouseId} className="flex justify-between gap-2 rounded-md bg-muted/40 px-2 py-1">
+                            <span className="mono text-muted-foreground">{warehouse.warehouseId}</span>
+                            <span className="mono font-bold">{num(warehouse.quantity)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <h3 className="text-[13px] font-bold">ประวัติการเปลี่ยนแปลง</h3>
+                      <span className="text-[11.5px] tabular-nums text-muted-foreground">
+                        {num(skuDetail.movements.length)} รายการล่าสุด
+                      </span>
+                    </div>
+                    {skuDetail.movements.length === 0 ? (
+                      <p className="mt-1 text-[12.5px] text-muted-foreground">
+                        ยังไม่มีการเปลี่ยนแปลงที่ตรวจพบ — จะเริ่มบันทึกเมื่อยอดจาก TikTok เปลี่ยน
+                      </p>
+                    ) : (
+                      <ul className="mt-1 flex max-h-[240px] list-none flex-col overflow-y-auto p-0">
                     {skuDetail.movements.map((movement, index) => (
                       <li
                         key={`${movement.changedAt}-${index}`}
@@ -834,10 +855,11 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                           {num(movement.delta)}
                         </Badge>
                       </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </DialogContent>
