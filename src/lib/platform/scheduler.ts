@@ -9,16 +9,16 @@ import { tikTokNowSeconds } from "./tiktok";
 import { reconcileCentralStock } from "@/lib/stock/central";
 import { pushPoolToListings } from "@/lib/stock/push";
 
-// รอบออเดอร์ทุก 10 วินาที — TikTok ต่อตรงและมีโควตากว้าง (3–10 คำขอ/วินาที/ร้าน)
-// วัดจริง 1 รอบ ≈ 1–2 วิ (ออเดอร์ 17–19 แถว) → เฉลี่ยไม่ถึง 1 คำขอ/วินาที ห่างลิมิตมาก
-// ตัวกันรอบซ้อน (running) จะข้ามรอบเองถ้ารอบก่อนยังไม่จบ — ความหน่วงสูงสุดจึงไม่ทบกัน
-const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 10 * 1000);
-// Shopee วิ่งทุก 3 รอบ (~30 วิ) — วันนี้มีแต่ร้านทดสอบ และกันไม่ให้กินโควตาตอนเชื่อมร้านจริง
-const SHOPEE_EVERY_TICKS = Math.max(1, Number(process.env.PLATFORM_SHOPEE_EVERY_TICKS ?? 3));
+// รอบออเดอร์ทุก 60 วินาที — ตั้งแต่ 18 พ.ย. 2026 webhook ของ TikTok ทำงานแล้ว
+// (log prod: [webhook] เข้ามา ORDER_STATUS_CHANGE) รอบนี้จึงเป็นตัวสำรองตอน event หาย
+// ลดจาก 10 วิ → 60 วิ ประหยัดคำขอค้นออเดอร์ ~6 เท่า โดยความสดจริงมาจาก webhook
+const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 60 * 1000);
+// Shopee ทุกรอบ (60 วิ) — ยังไม่มี webhook ที่ลงทะเบียน จึงใช้รอบเดียวกับออเดอร์
+const SHOPEE_EVERY_TICKS = Math.max(1, Number(process.env.PLATFORM_SHOPEE_EVERY_TICKS ?? 1));
 const FIRST_DELAY_MS = 15 * 1000;
-// ดึงย้อน 5 นาที = 30 รอบที่รอบ 10 วิ ก่อนหลุดหน้าต่าง — พอสำหรับสถานะที่เปลี่ยนช้า
-// ยิ่งถี่ขึ้น ยิ่งไม่ต้องย้อนไกล — ลดจำนวนแถวที่เขียนซ้ำต่อรอบ
-const LOOKBACK_MINUTES = Number(process.env.PLATFORM_SYNC_LOOKBACK_MINUTES ?? 5);
+// ดึงย้อน 10 นาที = 10 รอบที่รอบ 60 วิ ก่อนหลุดหน้าต่าง — ชดเชยรอบที่ห่างขึ้น
+// (webhook ยังเป็นตัวหลักที่แจ้งทันที; รอบนี้ไว้ตามสถานะที่ event อาจหลุด)
+const LOOKBACK_MINUTES = Number(process.env.PLATFORM_SYNC_LOOKBACK_MINUTES ?? 10);
 const LOOKBACK_HOURS = LOOKBACK_MINUTES / 60;
 // statement ออกวันละครั้ง และการดึง 7 วันใช้ ~14 วิ — จึงดึงทุก 10 นาที ไม่ใช่ทุกรอบ
 const STATEMENT_EVERY_TICKS = Math.max(1, Math.round((10 * 60 * 1000) / INTERVAL_MS));
