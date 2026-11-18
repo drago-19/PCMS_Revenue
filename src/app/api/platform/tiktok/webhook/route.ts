@@ -31,7 +31,14 @@ export async function POST(request: Request) {
   }
 
   const signature = request.headers.get("authorization");
-  if (!verifyWebhookSignature({ rawBody, signature, appSecret: config.tiktok.appSecret })) {
+  if (
+    !verifyWebhookSignature({
+      rawBody,
+      signature,
+      appSecret: config.tiktok.appSecret,
+      appKey: config.tiktok.appKey,
+    })
+  ) {
     // บันทึกไว้เสมอ — ไม่มีบรรทัดนี้จะแยกไม่ออกว่า "TikTok ไม่ส่งมา" กับ "ส่งมาแต่ลายเซ็นไม่ผ่าน"
     console.warn(`[webhook] ปฏิเสธลายเซ็น · body ${rawBody.length} ไบต์`);
     return Response.json({ ok: false, error: "bad signature" }, { status: 401 });

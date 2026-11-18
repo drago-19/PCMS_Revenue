@@ -866,20 +866,25 @@ export const TIKTOK_WEBHOOK_EVENTS = [
 ] as const;
 
 /**
- * ตรวจลายเซ็นของ webhook: TikTok ส่งค่า HMAC-SHA256 ของ body (คีย์ = app secret) มาใน header
- * Authorization — ต้องเทียบกับที่คำนวณเองก่อนเชื่อข้อมูล
+ * ตรวจลายเซ็นของ webhook: TikTok Shop เซ็น HMAC-SHA256(app_secret, app_key + rawBody)
+ * เป็น hex ตัวเล็ก ส่งมาใน header Authorization (ไม่มี Bearer)
+ *
+ * เคยเซ็นแค่ body — webhook ของจริงจึงถูกปฏิเสธ 401 ทุกครั้ง (พบ 18 พ.ย. 2026 จาก log prod)
+ * สเปก: Hookdeck tiktok-shop-webhooks · ไม่มี timestamp ในลายเซ็น
  */
 export function verifyWebhookSignature({
   rawBody,
   signature,
   appSecret,
+  appKey,
 }: {
   rawBody: string;
   signature: string | null;
   appSecret: string;
+  appKey: string;
 }): boolean {
   if (!signature) return false;
-  const expected = createHmac("sha256", appSecret).update(rawBody).digest("hex");
+  const expected = createHmac("sha256", appSecret).update(appKey + rawBody).digest("hex");
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(signature.trim().toLowerCase(), "utf8");
   if (a.length !== b.length) return false;
