@@ -3,6 +3,7 @@ import { refreshDailySummary } from "./daily-summary";
 import { runShopeeSync, syncShopeeStock } from "./shopee-sync";
 import { shopeeNowSeconds } from "./shopee";
 import { syncStock } from "./stock";
+import { syncStaleShipnityAccounts } from "@/lib/shipnity/sync";
 import { listPlatformAccounts, SHOPEE_PLATFORM, TIKTOK_PLATFORM } from "./store";
 import { tikTokNowSeconds } from "./tiktok";
 
@@ -23,12 +24,16 @@ const STOCK_INTERVAL_MS = Number(process.env.PLATFORM_STOCK_INTERVAL_MS ?? 60 * 
 const RETURNS_INTERVAL_MS = Number(process.env.PLATFORM_RETURNS_INTERVAL_MS ?? 10 * 60 * 1000);
 // สรุปรายวันเป็นข้อมูลสรุป — คํานวณทุก 15 นาทีก็พอ
 const SUMMARY_EVERY_TICKS = Math.max(1, Math.round((15 * 60 * 1000) / INTERVAL_MS));
+// ออเดอร์ Shipnity (หน้าแพ็ค /orders): ดึงกองเปิดทั้งหมดทุกรอบ (12+ หน้า/ร้าน) —
+// วัดจริงแล้วรอบ 2 นาทีทำให้ Shipnity จำกัดการเรียก (429) จึงตั้ง 5 นาที เท่ากับเกณฑ์ข้อมูลเก่าใน sync.ts
+const SHIPNITY_INTERVAL_MS = Number(process.env.SHIPNITY_SYNC_INTERVAL_MS ?? 5 * 60 * 1000);
 let tickCount = 0;
 
 let started = false;
 let running = false;
 let stockRunning = false;
 let returnsRunning = false;
+let shipnityRunning = false;
 
 /**
  * ตัวตั้งเวลาซิงก์ TikTok อยู่ใน process ของแอปเอง (ไม่ต้องพึ่ง Task Scheduler ของเครื่อง)
@@ -180,18 +185,37 @@ export function startScheduledSync(): void {
     }
   };
 
+  // ออเดอร์ Shipnity: ตัวเดิมเริ่มเฉพาะตอนเปิดหน้า /orders และหายทุกครั้งที่รีสตาร์ท
+  // ทำให้ข้อมูลค้างจนกว่าจะกด “ดึงใหม่เลย” — ตัวนี้ทำงานตลอดตั้งแต่สตาร์ทเซิร์ฟเวอร์
+  const shipnityTick = async () => {
+    if (shipnityRunning) return;
+    shipnityRunning = true;
+    try {
+      await syncStaleShipnityAccounts();
+    } catch (error) {
+      console.error(
+        "[shipnity-sync] ล้มเหลว",
+        error instanceof Error ? error.message : error,
+      );
+    } finally {
+      shipnityRunning = false;
+    }
+  };
+
   setTimeout(tick, FIRST_DELAY_MS).unref();
   setInterval(tick, INTERVAL_MS).unref();
   setTimeout(stockTick, FIRST_DELAY_MS + 5000).unref();
   setInterval(stockTick, STOCK_INTERVAL_MS).unref();
   setTimeout(returnsTick, FIRST_DELAY_MS + 10000).unref();
   setInterval(returnsTick, RETURNS_INTERVAL_MS).unref();
+  setTimeout(shipnityTick, FIRST_DELAY_MS + 15000).unref();
+  setInterval(shipnityTick, SHIPNITY_INTERVAL_MS).unref();
   console.log(
     `[scheduled-sync] ออเดอร์ทุก ${Math.round(INTERVAL_MS / 1000)} วิ (ดึงย้อน ${LOOKBACK_MINUTES} นาที) · statement ทุก ${
       STATEMENT_EVERY_TICKS * Math.round(INTERVAL_MS / 1000)
     } วิ · สต็อกทุก ${Math.round(STOCK_INTERVAL_MS / 1000)} วิ · คืนสินค้าทุก ${Math.round(
       RETURNS_INTERVAL_MS / 1000,
-    )} วิ · ยิงพร้อมกันไม่เกิน ${
+    )} วิ · shipnity ทุก ${Math.round(SHIPNITY_INTERVAL_MS / 1000)} วิ · ยิงพร้อมกันไม่เกิน ${
       process.env.TIKTOK_MAX_CONCURRENCY ?? 3
     } คำขอ`,
   );

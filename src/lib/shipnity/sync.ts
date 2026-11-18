@@ -3,7 +3,7 @@
 // กติกา:
 // - หน้าเว็บไม่ยิง Shipnity เอง — อ่านจากตาราง shipnity_orders (ดู store.ts)
 // - รอบแรกของแต่ละบัญชี: ดึงชุดที่ยังไม่ปิดรายการทั้งหมดแล้วบันทึก
-// - รอบถัดไป: ดึงชุดเดิมซ้ำทุก 2 นาที แต่เขียนเฉพาะแถวที่เปลี่ยน (content_hash)
+// - รอบถัดไป: ดึงชุดเดิมซ้ำทุก 5 นาที แต่เขียนเฉพาะแถวที่เปลี่ยน (content_hash)
 // - ดูย้อนหลัง: ดึงเฉพาะออเดอร์ที่ปิดแล้วของวันนั้นครั้งเดียว แล้วเก็บไว้
 // - ออเดอร์ที่ปิดแล้วและเก่ากว่า 7 วัน ถูกลบออกจากเซิร์ฟเวอร์ (Shipnity ยังมีข้อมูลอยู่)
 
@@ -17,7 +17,7 @@ import {
   type DayOrdersResult,
   type ShipnityOrder,
 } from "@/lib/shipnity/client";
-import type { ConnectedShipnityAccount } from "@/lib/shipnity/config";
+import { getStoredShipnityAccounts, type ConnectedShipnityAccount } from "@/lib/shipnity/config";
 import {
   countOpenStored,
   hasSyncedClosedDay,
@@ -165,7 +165,7 @@ export interface DayOrdersFromStore extends DayOrdersResult {
 /**
  * ออเดอร์ของวันหนึ่งจากฐานข้อมูล — ทางเดียวที่หน้าเว็บใช้
  * - ไม่มีข้อมูลในฐานข้อมูลเลย → ซิงก์รอเลย (ครั้งแรกของบัญชี)
- * - ข้อมูลเก่าเกิน 2 นาที → คืนข้อมูลเดิมทันที แล้วซิงก์ต่อในเบื้องหลัง
+ * - ข้อมูลเก่าเกิน 5 นาที → คืนข้อมูลเดิมทันที แล้วซิงก์ต่อในเบื้องหลัง
  */
 export async function loadDayOrdersFromStore(
   account: ConnectedShipnityAccount,
@@ -207,7 +207,8 @@ export async function loadDayOrdersFromStore(
 
 /**
  * เปิดงานซิงก์เบื้องหลังของทุกบัญชี — เรียกซ้ำได้ ไม่สร้างตัวใหม่
- * ทุก 2 นาที: บัญชีที่ข้อมูลเก่าเกินกำหนดจะถูกดึงใหม่ (เขียนเฉพาะแถวที่เปลี่ยน)
+ * ทุก 5 นาที: บัญชีที่ข้อมูลเก่าเกินกำหนดจะถูกดึงใหม่ (เขียนเฉพาะแถวที่เปลี่ยน)
+ * นอกจากนี้ตัวตั้งเวลากลาง (scheduler) เรียก syncStaleShipnityAccounts ตามรอบของตัวเองด้วย
  */
 export function startShipnityBackgroundSync(accounts: readonly ConnectedShipnityAccount[]): void {
   if (autoSyncDisabled() || runtime.timer || accounts.length === 0) return;
@@ -228,6 +229,44 @@ export function startShipnityBackgroundSync(accounts: readonly ConnectedShipnity
   // ไม่ให้ interval ค้างโปรเซสตอน build/ปิดเซิร์ฟเวอร์
   const handle = runtime.timer as unknown as { unref?: () => void };
   handle.unref?.();
+}
+
+/**
+ * รอบซิงก์ของตัวตั้งเวลากลาง (scheduler) — ดึงออเดอร์เปิดของทุกบัญชีที่ข้อมูลเก่าเกินกำหนด
+ * เดิมการซิงก์เริ่มเฉพาะตอนมีคนเปิดหน้า /orders และตัวจับเวลาหายทุกครั้งที่เซิร์ฟเวอร์รีสตาร์ท
+ * ทำให้ข้อมูลค้างจนกว่าจะกด “ดึงใหม่เลย” — รอบนี้ทำงานแม้ไม่มีใครเปิดหน้า
+ * (ครอบเฉพาะบัญชีที่กรอกในระบบ; ส่วน credential จาก .env ยังให้หน้าเว็บเป็นตัวกระตุ้นเหมือนเดิม)
+ */
+export async function syncStaleShipnityAccounts(): Promise<void> {
+  if (autoSyncDisabled()) return;
+  const stored = await getStoredShipnityAccounts();
+  for (const account of stored.accounts) {
+    // token ว่าง = ถอดรหัสไม่ได้ (คีย์เก่า/คีย์อื่น) — ใช้งานบัญชีนี้ไม่ได้จนกรอกใหม่
+    if (account.token === "") continue;
+    const state = await readSyncState(account.id).catch(() => null);
+    const stale =
+      !state?.lastSyncAt || Date.now() - new Date(state.lastSyncAt).getTime() > FRESH_MS;
+    if (!stale) continue;
+    try {
+      const written = await syncOpenOrders({
+        id: account.id,
+        label: account.label,
+        email: account.email,
+        token: account.token,
+        companyKey: account.companyKey ?? "dragon19",
+        source: "db",
+      });
+      if (written > 0) {
+        console.log(`[shipnity-sync] ${account.label} · เขียน ${written} แถว`);
+      }
+    } catch (error) {
+      console.error(
+        "[shipnity-sync] ล้มเหลว",
+        account.label,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
 }
 
 export interface ForceSyncResult {
