@@ -8,7 +8,22 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-18-v76";
+const SCHEMA_VERSION = "2026-11-18-v77";
+
+/**
+ * เทียบเวอร์ชัน schema รูปแบบ 2026-11-18-v77 — คืน > 0 เมื่อ a ใหม่กว่า b
+ * ใช้ตัดสินว่าโปรเซสที่ถือโค้ดเก่าควรแตะ schema หรือไม่
+ */
+function compareSchemaVersion(a: string, b: string): number {
+  const parse = (value: string) => {
+    const [date = "", tag = ""] = value.split("-v");
+    return { date, num: Number.parseInt(tag, 10) || 0 };
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (left.date !== right.date) return left.date > right.date ? 1 : -1;
+  return left.num - right.num;
+}
 
 export type { CompanyId };
 
@@ -36,6 +51,12 @@ export async function getActiveCompanyId(): Promise<CompanyId> {
     // Outside Next.js request context (e.g., CLI or unit tests)
   }
   return "dragon19";
+}
+
+/** ค่าที่อนุญาตให้ตั้งผ่าน env — กันการต่อสตริงเข้า SQL */
+function schemaLockTimeout(): string {
+  const raw = process.env.SCHEMA_LOCK_TIMEOUT ?? "";
+  return /^\d+(ms|s|min)$/.test(raw) ? raw : "3s";
 }
 
 function getSchemaSearchPathSql(companyId: CompanyId): string {
@@ -92,16 +113,24 @@ export function ensureSchema(): Promise<void> {
         // Fast-path ก่อนขอ lock: ถ้า version ตรงแล้ว ไม่ต้องต่อคิวรอ lock เลย
         // (เดิมตรวจหลังได้ lock ทำให้ทุกคำขอต้องรอคิว แม้จะไม่มีอะไรต้องอัปเกรด)
         const fastPath = await client
-          .query<{ ok: boolean }>(
-            `SELECT (
-               (SELECT version FROM app_schema_version WHERE schema_name = 'public') = $1
-               AND (SELECT version FROM app_schema_version WHERE schema_name = 'seeheng') = $1
-               AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chart_of_accounts')
-             ) AS ok`,
-            [SCHEMA_VERSION],
+          .query<{ public_ver: string | null; seeheng_ver: string | null; has_coa: boolean }>(
+            `SELECT
+               (SELECT version FROM app_schema_version WHERE schema_name = 'public') AS public_ver,
+               (SELECT version FROM app_schema_version WHERE schema_name = 'seeheng') AS seeheng_ver,
+               EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chart_of_accounts') AS has_coa`,
           )
-          .catch(() => ({ rows: [{ ok: false }] }));
-        if (fastPath.rows[0]?.ok) return;
+          .catch(() => ({ rows: [] as Array<{ public_ver: string | null; seeheng_ver: string | null; has_coa: boolean }> }));
+        const fastRow = fastPath.rows[0];
+        // ฐานข้อมูลใหม่กว่าหรือเท่ากับโค้ดนี้ = ไม่ต้องทำอะไร (เท่ากันคือปกติ, ใหม่กว่าคือมีโปรเซสอื่นอัปเกรดไปแล้ว)
+        if (
+          fastRow?.has_coa &&
+          fastRow.public_ver &&
+          fastRow.seeheng_ver &&
+          compareSchemaVersion(fastRow.public_ver, SCHEMA_VERSION) >= 0 &&
+          compareSchemaVersion(fastRow.seeheng_ver, SCHEMA_VERSION) >= 0
+        ) {
+          return;
+        }
 
         // ใช้ lock ระดับ transaction — ปลดอัตโนมัติเมื่อ COMMIT/ROLLBACK
         // (แบบ session-scoped เดิม ถ้าคำสั่ง unlock ล้มเหลว ล็อกจะค้างกับ connection ใน pool ตลอดไป)
@@ -124,6 +153,15 @@ export function ensureSchema(): Promise<void> {
           );
           const publicVer = rows.find((r) => r.schema_name === "public")?.version;
           const seehengVer = rows.find((r) => r.schema_name === "seeheng")?.version;
+          // โปรเซสที่ถือโค้ดเก่ากว่าต้องไม่รัน DDL ย้อนหลังและไม่เขียนทับเวอร์ชันที่ใหม่กว่า
+          // (ถ้าปล่อยไว้ สองโปรเซสคนละเวอร์ชันจะสลับกันรัน DDL 1,200 บรรทัดซ้ำทุกคำขอ)
+          const newerVersionApplied = [publicVer, seehengVer].some(
+            (version) => version && compareSchemaVersion(version, SCHEMA_VERSION) > 0,
+          );
+          if (newerVersionApplied) {
+            await client.query("COMMIT");
+            return;
+          }
           const { rows: tableCheck } = await client.query<{ has_coa: boolean }>(
             `SELECT (
                EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'chart_of_accounts')
@@ -142,7 +180,9 @@ export function ensureSchema(): Promise<void> {
         // DDL ต้องล็อกตารางแบบ exclusive — ถ้ามีหน้าจอเปิดค้างอ่านตารางอยู่ มันจะรอจนกว่าจะว่าง
         // ซึ่งเคยทำให้ทุกคำขอที่ตามมาค้างเป็นนาที. ให้รอไม่เกิน 3 วินาทีแล้วเลิกพยายาม
         // (throw → ตัว catch ด้านล่างล้าง cache ให้คำขอถัดไปลองใหม่ตอนตารางว่าง)
-        await client.query("SET LOCAL lock_timeout = '3s'");
+        // รอ lock ได้ไม่เกิน 3 วินาทีโดยปกติ — สคริปต์ migrate ตั้ง SCHEMA_LOCK_TIMEOUT ให้รอนานขึ้นได้
+        // (รันล่วงหน้านอกคำขอ หรือตอนตารางว่าง แล้วหน้าเว็บจะไม่ต้องรอ DDL)
+        await client.query(`SET LOCAL lock_timeout = '${schemaLockTimeout()}'`);
         try {
           await client.query(SCHEMA_SQL);
         } finally {
@@ -2166,6 +2206,51 @@ CREATE TABLE IF NOT EXISTS shipnity_closed_days (
   synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (account_key, iso_day)
 );
+
+-- สต็อกกลาง: หนึ่งยอดต่อรหัสสินค้า ใช้ร่วมทุกแพลตฟอร์มและทุกร้าน
+-- on_hand = ผลรวมของ central_stock_movements ทุกแถว (เก็บซ้ำไว้ให้หน้าจออ่านเร็ว)
+CREATE TABLE IF NOT EXISTS central_stock (
+  sku_code TEXT PRIMARY KEY,
+  product_name TEXT,
+  on_hand INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- บันทึกการเคลื่อนไหวทุกครั้ง: รับเข้า/ปรับมือ (source = manual) และการขาย (source = tiktok/shopee/facebook)
+-- แถวขายหนึ่งแถวต่อหนึ่งบรรทัดออเดอร์ (unique index) — ซิงก์ซ้ำจึงไม่หักเงินซ้ำ
+CREATE TABLE IF NOT EXISTS central_stock_movements (
+  id BIGSERIAL PRIMARY KEY,
+  sku_code TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  quantity INTEGER NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manual',
+  source_order_id TEXT,
+  source_line_id TEXT,
+  shop_id TEXT,
+  platform TEXT,
+  note TEXT,
+  actor TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS central_stock_movements_sku_idx
+  ON central_stock_movements (sku_code, created_at DESC);
+-- หนึ่งบรรทัดออเดอร์ = หนึ่งแถว (รวม shop_id เพราะเลขออเดอร์ Shopee ซ้ำกันข้ามร้านได้)
+CREATE UNIQUE INDEX IF NOT EXISTS central_stock_movements_order_line_idx
+  ON central_stock_movements (source, shop_id, source_order_id, source_line_id)
+  WHERE source_order_id IS NOT NULL AND source_line_id IS NOT NULL;
+
+-- ผูกสินค้าที่ขายบนแพลตฟอร์ม (ร้าน × SKU) เข้ากับรหัสสินค้าของสต็อกกลาง
+-- รหัสต่างกันข้ามร้านก็ผูกเข้าตัวเดียวกันได้ — นี่คือที่ทำให้ 3 รหัส 3 ร้าน ใช้ของ 50 ชุดเดียว
+CREATE TABLE IF NOT EXISTS central_stock_links (
+  platform TEXT NOT NULL,
+  shop_id TEXT NOT NULL,
+  sku_id TEXT NOT NULL,
+  sku_code TEXT NOT NULL,
+  linked_by TEXT,
+  linked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, shop_id, sku_id)
+);
+CREATE INDEX IF NOT EXISTS central_stock_links_code_idx ON central_stock_links (sku_code);
 
 ANALYZE transactions;
 `;
