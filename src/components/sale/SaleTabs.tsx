@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Boxes, ListChecks, PackageCheck, ShoppingCart, type LucideIcon } from "lucide-react";
+import { Boxes, ListChecks, PackageCheck, ShoppingCart, Warehouse, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SALE_THEME } from "@/lib/sale/theme";
 
 /**
- * เมนูหมวดฝ่ายขาย — อยู่ในแถบ header บนสุด (แถวเดียว ไม่มีแถบข้าง)
- * จอแคบเลื่อนแนวนอนได้ และเลื่อนให้แท็บที่เปิดอยู่เห็นเสมอ
+ * เมนูหมวดฝ่ายขาย — แถวเมนูของตัวเองใต้แถบหัว (เดิมยัดในแถบหัวแล้วล้นจอเล็ก)
+ * จอเล็กเรียง 2×2 ปุ่มใหญ่กดง่าย · จอ ≥560px เรียงแถวเดียวเต็มความกว้าง ไม่มีแถบเลื่อน
  */
 type SaleTab = {
   href: string;
@@ -19,6 +19,7 @@ type SaleTab = {
 const TABS: SaleTab[] = [
   { href: "/sale/ops", label: "งานที่ต้องทำ", icon: ListChecks },
   { href: "/sale/stocks", label: "สต็อก", icon: Boxes },
+  { href: "/sale/central-stock", label: "สต็อกกลาง", icon: Warehouse },
   { href: "/sale/orders", label: "ออเดอร์", icon: ShoppingCart },
   // หน้าแพ็คอยู่ที่ /orders (นอกหมวด) — ใส่ไว้ข้าง ๆ แท็บออเดอร์ให้กดถึงง่าย
   { href: "/orders", label: "ออเดอร์รอแพ็ค", icon: PackageCheck },
@@ -27,11 +28,6 @@ const TABS: SaleTab[] = [
 export function SaleTabs() {
   const pathname = usePathname();
   const params = useSearchParams();
-  const activeRef = useRef<HTMLAnchorElement | null>(null);
-
-  useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [pathname]);
 
   // คงร้าน/ช่วงเวลา/แพลตฟอร์มที่กำลังดูอยู่ไว้ทั้งชุด
   const hrefFor = (href: string) => {
@@ -45,29 +41,38 @@ export function SaleTabs() {
   };
 
   return (
-    <nav aria-label="เมนูฝ่ายขาย" className="flex min-w-0 items-center gap-1 overflow-x-auto">
-      {TABS.map((tab) => {
-        const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
-        const Icon = tab.icon;
-        return (
-          <Link
-            key={tab.href}
-            href={hrefFor(tab.href)}
-            ref={active ? activeRef : undefined}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-semibold whitespace-nowrap transition-colors",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
-              active
-                ? "bg-[color:var(--accent)] text-[color:var(--accent-foreground)]"
-                : "text-[color:var(--muted-foreground)] hover:bg-[color:var(--secondary)] hover:text-[color:var(--foreground)]",
-            )}
-          >
-            <Icon size={15} aria-hidden="true" />
-            <span>{tab.label}</span>
-          </Link>
-        );
-      })}
+    // วางใน root layout นอกตัวครอบธีมของ /sale จึงต้องส่งชุดสีเข้าไปเอง
+    <nav
+      aria-label="เมนูฝ่ายขาย"
+      style={SALE_THEME}
+      className="border-b border-border bg-card px-2 py-1.5 min-[560px]:px-4"
+      // หน้าต่าง (Radix Dialog) ใส่ aria-hidden ให้ทุกอย่างนอกหน้าต่างตอนเปิด — server เรนเดอร์ก่อน
+      // จึงไม่มี attribute นั้น แล้ว React เตือน hydration ทุกครั้ง เป็น noise จากไลบรารี ไม่ใช่ผังผิด
+      suppressHydrationWarning
+    >
+      <div className="grid grid-cols-2 gap-1 min-[560px]:grid-cols-5">
+        {TABS.map((tab) => {
+          const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+          const Icon = tab.icon;
+          return (
+            <Link
+              key={tab.href}
+              href={hrefFor(tab.href)}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg px-3 text-[12.5px] font-semibold whitespace-nowrap transition-colors",
+                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
+                active
+                  ? "bg-[color:var(--accent)] text-[color:var(--accent-foreground)]"
+                  : "text-[color:var(--muted-foreground)] hover:bg-[color:var(--secondary)] hover:text-[color:var(--foreground)]",
+              )}
+            >
+              <Icon size={15} aria-hidden="true" />
+              <span>{tab.label}</span>
+            </Link>
+          );
+        })}
+      </div>
     </nav>
   );
 }

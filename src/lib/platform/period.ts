@@ -115,8 +115,10 @@ export function activePresetKey(from?: string, to?: string): string | null {
  * Postgres คืน timestamptz เป็น "2026-11-13 05:59:05.947848+00" (ช่องว่าง ไม่มี T, ออฟเซต 2 หลัก, ทศนิยม 6 ตำแหน่ง)
  * ซึ่ง new Date() ตรง ๆ ตีความผิด — เวลาบนหน้าจอจึงเพี้ยนไป 7 ชั่วโมง
  */
-export function parseStamp(value: string | null | undefined): Date | null {
+export function parseStamp(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
+  // pg คืน timestamptz เป็น Date ไม่ใช่ข้อความ — รับมาตรง ๆ ได้เลย ไม่งั้น .trim() จะพัง
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   const cleaned = value
     .trim()
     .replace(" ", "T")

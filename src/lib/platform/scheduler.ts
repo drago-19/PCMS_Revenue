@@ -6,20 +6,27 @@ import { syncStock } from "./stock";
 import { syncStaleShipnityAccounts } from "@/lib/shipnity/sync";
 import { listPlatformAccounts, SHOPEE_PLATFORM, TIKTOK_PLATFORM } from "./store";
 import { tikTokNowSeconds } from "./tiktok";
+import { reconcileCentralStock } from "@/lib/stock/central";
+import { pushPoolToListings } from "@/lib/stock/push";
 
-// รอบออเดอร์ทุก 60 วินาที — วัดจริง: ดึงย้อน 30 นาทีใช้ ~1.3 วิ (ออเดอร์ 97 แถว) ราคาถูกมาก
-const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 60 * 1000);
+// รอบออเดอร์ทุก 10 วินาที — TikTok ต่อตรงและมีโควตากว้าง (3–10 คำขอ/วินาที/ร้าน)
+// วัดจริง 1 รอบ ≈ 1–2 วิ (ออเดอร์ 17–19 แถว) → เฉลี่ยไม่ถึง 1 คำขอ/วินาที ห่างลิมิตมาก
+// ตัวกันรอบซ้อน (running) จะข้ามรอบเองถ้ารอบก่อนยังไม่จบ — ความหน่วงสูงสุดจึงไม่ทบกัน
+const INTERVAL_MS = Number(process.env.PLATFORM_SYNC_INTERVAL_MS ?? 10 * 1000);
+// Shopee วิ่งทุก 3 รอบ (~30 วิ) — วันนี้มีแต่ร้านทดสอบ และกันไม่ให้กินโควตาตอนเชื่อมร้านจริง
+const SHOPEE_EVERY_TICKS = Math.max(1, Number(process.env.PLATFORM_SHOPEE_EVERY_TICKS ?? 3));
 const FIRST_DELAY_MS = 15 * 1000;
-// ดึงย้อน 30 นาที = ได้ลองซ้ำ ~30 รอบก่อนหลุดหน้าต่าง (กันสถานะที่เปลี่ยนช้า/รอบที่ล้ม)
-const LOOKBACK_MINUTES = Number(process.env.PLATFORM_SYNC_LOOKBACK_MINUTES ?? 30);
+// ดึงย้อน 5 นาที = 30 รอบที่รอบ 10 วิ ก่อนหลุดหน้าต่าง — พอสำหรับสถานะที่เปลี่ยนช้า
+// ยิ่งถี่ขึ้น ยิ่งไม่ต้องย้อนไกล — ลดจำนวนแถวที่เขียนซ้ำต่อรอบ
+const LOOKBACK_MINUTES = Number(process.env.PLATFORM_SYNC_LOOKBACK_MINUTES ?? 5);
 const LOOKBACK_HOURS = LOOKBACK_MINUTES / 60;
 // statement ออกวันละครั้ง และการดึง 7 วันใช้ ~14 วิ — จึงดึงทุก 10 นาที ไม่ใช่ทุกรอบ
 const STATEMENT_EVERY_TICKS = Math.max(1, Math.round((10 * 60 * 1000) / INTERVAL_MS));
 // สต็อก: ดึงทั้งแคตตาล็อกใช้แค่ 2 คำขอต่อร้าน จึงตั้งรอบสั้น (60 วินาที) แยกจากออเดอร์
 // รอบเต็มใช้เป็นตัวไล่เก็บ (reconcile) — ตั้งห่างไว้ เพราะเส้นทางหลักคือ webhook + หน้าจอ
-// ดึงไล่เก็บทุก 60 วินาที (2 คำขอต่อร้านต่อรอบ) — TikTok ไม่มี webhook แจ้งตอนสต็อกเปลี่ยน
-// การแก้ที่ฝั่ง TikTok จึงเห็นภายใน ~1 นาที + รอบรีเฟรชของหน้าจอ
-const STOCK_INTERVAL_MS = Number(process.env.PLATFORM_STOCK_INTERVAL_MS ?? 60 * 1000);
+// ดึงไล่เก็บทุก 15 วินาที (2 คำขอต่อร้านต่อรอบ) — TikTok ไม่มี webhook แจ้งตอนสต็อกเปลี่ยน
+// การแก้ที่ฝั่ง TikTok (หรือยอดที่ระบบเขียนไปแล้วมีคนแก้ต่อ) จึงเห็นภายใน ~15 วินาที
+const STOCK_INTERVAL_MS = Number(process.env.PLATFORM_STOCK_INTERVAL_MS ?? 15 * 1000);
 // คำขอคืนสินค้าเปลี่ยนไม่บ่อยแต่ต้องเห็นเร็ว (ของถูกเปิดขายทันทีที่ plataform ปิดออเดอร์)
 const RETURNS_INTERVAL_MS = Number(process.env.PLATFORM_RETURNS_INTERVAL_MS ?? 10 * 60 * 1000);
 // สรุปรายวันเป็นข้อมูลสรุป — คํานวณทุก 15 นาทีก็พอ
@@ -61,7 +68,8 @@ export function startScheduledSync(): void {
           : `[scheduled-sync] ออเดอร์ ${stats.orders} · เว้น statement รอบนี้`,
       );
 
-      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
+      // ร้านที่ถูกซ่อน = ผู้ใช้สั่งไม่ให้ดึงข้อมูลอีก (token ยังอยู่ เปิดกลับได้ที่หน้าตั้งค่า)
+      const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM, "all")).filter((a) => !a.hidden);
 
       // สรุปรายวัน: ทุก 15 นาที
       if (tickCount % SUMMARY_EVERY_TICKS === 0) {
@@ -84,8 +92,9 @@ export function startScheduledSync(): void {
     }
 
     try {
+      if (tickCount % SHOPEE_EVERY_TICKS !== 0) return void 0;
       const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
-      const connectedShopee = shopeeAccounts.filter((a) => a.status === "connected");
+      const connectedShopee = shopeeAccounts.filter((a) => a.status === "connected" && !a.hidden);
       const shopeeTo = shopeeNowSeconds();
       const shopeeFrom = shopeeTo - LOOKBACK_HOURS * 3600;
       for (const account of connectedShopee) {
@@ -119,7 +128,7 @@ export function startScheduledSync(): void {
     if (stockRunning) return;
     stockRunning = true;
     try {
-      const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
+      const accounts = (await listPlatformAccounts(TIKTOK_PLATFORM, "all")).filter((a) => !a.hidden);
       for (const account of accounts) {
         try {
           const result = await syncStock(account.accountKey);
@@ -139,7 +148,7 @@ export function startScheduledSync(): void {
       }
 
       const shopeeAccounts = await listPlatformAccounts(SHOPEE_PLATFORM, "all");
-      for (const account of shopeeAccounts.filter((a) => a.status === "connected")) {
+      for (const account of shopeeAccounts.filter((a) => a.status === "connected" && !a.hidden)) {
         try {
           const result = await syncShopeeStock(account.accountKey);
           if (result.changed > 0) {
@@ -155,6 +164,36 @@ export function startScheduledSync(): void {
           );
         }
       }
+      // หักยอดขายเข้าสต็อกกลางจากออเดอร์ที่เพิ่งดึงมา — เรียกซ้ำได้ทุกนาทีโดยไม่หักซ้ำ
+      try {
+        const central = await reconcileCentralStock({ hours: 72 });
+        const touched = central.tiktok + central.shopee + central.facebook;
+        if (touched > 0) {
+          console.log(
+            `[central-stock] ปรับยอดจากออเดอร์ · tiktok ${central.tiktok} · shopee ${central.shopee} · facebook ${central.facebook}`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          "[central-stock] หักยอดออเดอร์เข้าสต็อกกลางไม่สำเร็จ",
+          error instanceof Error ? error.message : error,
+        );
+      }
+
+      // เขียนยอดคงเหลือลงประกาศของทุกร้านที่ผูกไว้ — รหัสที่ไม่เคยเติมของและยอดที่ตรงแล้วจะไม่ถูกเขียน
+      try {
+        const push = await pushPoolToListings();
+        if (push.pushed > 0 || push.failed > 0) {
+          console.log(
+            `[central-stock] เขียนยอดลงประกาศ · สำเร็จ ${push.pushed} · ล้มเหลว ${push.failed}`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          "[central-stock] เขียนยอดลงประกาศไม่สำเร็จ",
+          error instanceof Error ? error.message : error,
+        );
+      }
     } finally {
       stockRunning = false;
     }
@@ -166,7 +205,7 @@ export function startScheduledSync(): void {
     returnsRunning = true;
     try {
       const accounts = await listPlatformAccounts(TIKTOK_PLATFORM, "all");
-      for (const account of accounts.filter((a) => a.status === "connected")) {
+      for (const account of accounts.filter((a) => a.status === "connected" && !a.hidden)) {
         try {
           const written = await runReturnsSync(account.accountKey);
           if (written > 0) {

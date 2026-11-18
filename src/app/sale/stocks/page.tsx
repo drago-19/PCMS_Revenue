@@ -8,6 +8,7 @@ import { LiveProductTitle } from "@/components/sale/LiveProductTitle";
 import { PlatformBody, PlatformSwitcher } from "@/components/platform/PlatformScope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
@@ -41,12 +42,17 @@ import { thaiDateTime } from "@/lib/platform/period";
 import { SaleAutoRefresh } from "@/components/sale/SaleAutoRefresh";
 import { SaleProductVisibilityButton } from "@/components/sale/SaleProductVisibilityButton";
 import { SaleStockAdjustForm } from "@/components/sale/SaleStockAdjustForm";
-import { ProductTitleForm } from "@/components/platform/ProductTitleForm";
-import { ProductImageForm } from "@/components/platform/ProductImageForm";
+// ฟอร์มชื่อ/รูปใช้สำเนาฝั่ง sale — ไฟล์ต้นใช้ร่วมกับหน้า /platform ของ Dragon19 ห้ามแก้ร่วม
+import { SaleProductTitleForm } from "@/components/sale/SaleProductTitleForm";
+import { SaleProductImageForm } from "@/components/sale/SaleProductImageForm";
 import { StockHoldActions } from "@/components/platform/StockHoldActions";
 import { listOpenHolds } from "@/lib/platform/stock-hold";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
 import { ShopeeAddProductButton } from "@/components/ShopeeAddProductButton";
+import { CentralStockPanel } from "@/components/sale/CentralStockPanel";
+import { CentralAutoLinkButton } from "@/components/sale/CentralAutoLinkButton";
+import { LiveRefresh } from "@/components/sale/LiveRefresh";
+import { centralStockForShop, reconcileCentralStock } from "@/lib/stock/central";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +135,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         />
         <p className="text-[13px] text-muted-foreground">
           เชื่อมร้าน {platformTab(platform).label} ก่อน แล้วจำนวนสต็อกจะดึงมาแสดงที่นี่
+          {" · "}ถ้าเชื่อมไว้แล้วแต่ไม่เห็นร้าน ร้านนั้นถูกซ่อนอยู่ — เปิดกลับได้ที่หน้าตั้งค่า
         </p>
       </div>
     );
@@ -147,6 +154,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     } else {
       result = await syncStock(shopId);
     }
+    // หักยอดขายเข้าสต็อกกลางทันทีหลังดึงสต็อก — ไม่ต้องรอรอบนาทีถัดไป
+    await reconcileCentralStock({ hours: 48 }).catch(() => undefined);
     const qs = new URLSearchParams({
       shop: shopId,
       synced: String(result.skus),
@@ -193,6 +202,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     getStockChangeStats({ shopId, platform: dbPlatform }),
     historyOpen ? listRecentStockChanges({ shopId, platform: dbPlatform, minutes: 30, limit: 100 }) : Promise.resolve([]),
   ]);
+  // สต็อกกลาง: ยอดเดียวกันนี้ใช้ร่วมทุกแพลตฟอร์มและทุกร้านที่ผูกไว้ (ไม่ใช่ยอดของร้านนี้)
+  const centralBySku = await centralStockForShop(dbPlatform, shopId);
   const pageCount = Math.max(Math.ceil(list.total / PAGE_SIZE), 1);
   const current = Math.min(pageNumber, pageCount);
   const rows =
@@ -230,8 +241,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     { key: "open", label: "เปิดตะกร้า", count: counts.open, tone: "open" },
     { key: "hidden", label: "ซ่อนตะกร้า", count: counts.hidden, tone: "hidden" },
     { key: "deleted", label: "ไม่พร้อมขาย", count: counts.deleted },
-    { key: "out", label: "ของหมด", count: counts.out },
-    { key: "low", label: `เหลือน้อย ≤${LOW_STOCK_THRESHOLD}`, count: counts.low },
+    { key: "out", label: "ของหมดบนร้าน", count: counts.out },
+    { key: "low", label: `เหลือน้อยบนร้าน ≤${LOW_STOCK_THRESHOLD}`, count: counts.low },
   ];
   const historyHref = (next: { after?: string; before?: string }) => {
     const qs = new URLSearchParams({ shop: shopId });
@@ -256,6 +267,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
           lastSync ? thaiDateTime(lastSync) : "ยังไม่เคยดึง"
         }`}
       />
+
+      {/* ออเดอร์/สต็อกขยับทุก ~15–30 วิ — หน้าจอตามให้เองโดยไม่ต้องกดรีเฟรช */}
+      <LiveRefresh />
 
       <PlatformSwitcher
         platform={platform}
@@ -319,7 +333,13 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
 
       <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 min-[900px]:grid-cols-4">
         <SaleStat label="SKU ทั้งหมด" value={counts.all} scopeKey={stockScope} hint={`นับเฉพาะที่มีใน ${platformTab(platform).label}`} />
-        <SaleStat label="ชิ้นคงเหลือรวม" value={totalQty} tone="positive" scopeKey={stockScope} hint="รวมทุก SKU ทุกคลัง" />
+        <SaleStat
+          label="ชิ้นคงเหลือบนร้าน"
+          value={totalQty}
+          tone="positive"
+          scopeKey={stockScope}
+          hint="เฉพาะร้านที่เลือก — ยอดที่ใช้ร่วมทุกช่องทางดูคอลัมน์ «สต็อกกลาง»"
+        />
         <SaleStat
           label="สินค้าหมด"
           value={outOfStock}
@@ -422,6 +442,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 ดึงสต็อกล่าสุด
               </Link>
             </Button>
+            <CentralAutoLinkButton platform={dbPlatform} shopId={shopId ?? ""} />
             <Button asChild size="sm" variant="outline" className="shrink-0">
               <Link
                 href={listHref({ history: "1" })}
@@ -452,6 +473,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัส SKU</th>
                 <th scope="col" className="py-1.5 pr-2 text-left font-bold">สินค้า</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือรวม</th>
+                <th scope="col" className="py-1.5 pr-2 text-right font-bold">สต็อกกลาง</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">กำลังตีกลับ</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">จำนวนคลัง</th>
                 <th scope="col" className="py-1.5 text-right font-bold">เปลี่ยนล่าสุด</th>
@@ -492,6 +514,22 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                   <td className={`mono py-1.5 pr-2 text-right font-bold ${row.quantity <= 0 ? "text-[#b42318]" : ""}`}>
                     {num(row.quantity)}
                   </td>
+                  <td
+                    className="mono py-1.5 pr-2 text-right"
+                    title={
+                      centralBySku.get(row.skuId)
+                        ? `รหัสกลาง ${centralBySku.get(row.skuId)?.skuCode}`
+                        : "ยังไม่ผูกกับสต็อกกลาง"
+                    }
+                  >
+                    {centralBySku.get(row.skuId) ? (
+                      <span className={(centralBySku.get(row.skuId)?.onHand ?? 0) <= 0 ? "font-bold text-[#b42318]" : "font-bold"}>
+                        {num(centralBySku.get(row.skuId)?.onHand ?? 0)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                   <td className={`mono py-1.5 pr-2 text-right ${row.inTransit > 0 ? "font-bold text-[#b54708]" : "text-muted-foreground"}`}>
                     {row.inTransit > 0 ? num(row.inTransit) : "—"}
                   </td>
@@ -501,7 +539,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
               ))}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
                     {search || filter !== "all"
                       ? "ไม่พบ SKU ที่ตรงกับเงื่อนไข — ลองเปลี่ยนคำค้นหรือตัวกรอง"
                       : "ยังไม่มีข้อมูล — กด “ดึงสต็อกล่าสุด” เพื่อดึงจาก TikTok"}
@@ -535,7 +573,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <h2 className="text-[14.5px] font-bold">ประวัติการเปลี่ยนแปลง</h2>
           <span className="text-[11.5px] text-muted-foreground">
-            {historyCursor ? "ย้อนดูรายการก่อนหน้า" : `${HISTORY_PAGE_SIZE} รายการล่าสุด`} · บันทึกเมื่อยอดจาก TikTok เปลี่ยนระหว่างการดึง
+            {historyCursor ? "ย้อนดูรายการก่อนหน้า" : `${HISTORY_PAGE_SIZE} รายการล่าสุด`} · บันทึกเมื่อยอดเปลี่ยนจากการดึงหรือจากการกดปรับในระบบ
           </span>
         </div>
         {movements.length === 0 ? (
@@ -593,9 +631,9 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       </Card>
 
       <p className="text-[12px] leading-5 text-muted-foreground">
-        หมายเหตุ: TikTok อ่านจำนวนอย่างเดียว — การเพิ่ม/ลดจากระบบเรายังต้องรอสิทธิ์ “เขียนสินค้า” (Product write)
-        จาก TikTok ก่อน ส่วน Shopee แก้จำนวน ซ่อน และลบสินค้าได้จากช่องรายละเอียดสินค้า แล้วดึงค่ากลับมายืนยัน
-        ประวัติจะบันทึกเฉพาะการเปลี่ยนแปลงที่ตรวจพบจากฝั่งแพลตฟอร์ม
+        หมายเหตุ: ปรับจำนวนสต็อกของ TikTok จากระบบได้แล้ว — ร้านทดสอบใช้ได้ทันที ส่วนร้านจริงยังปิดไว้จนกว่าจะทดสอบบนร้านทดสอบผ่าน
+        · Shopee แก้จำนวน ซ่อน และลบสินค้าได้จากช่องรายละเอียดสินค้า แล้วดึงค่ากลับมายืนยัน
+        · ประวัติบันทึกทั้งการเปลี่ยนที่ตรวจพบจากการดึงยอด และรายการที่กดปรับในระบบ
       </p>
 
       {historyOpen ? (
@@ -645,26 +683,69 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
       {skuDetail ? (
         <CloseableDialog closeHref={listHref({ page: current })}>
           <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-3xl" style={SALE_THEME}>
+            {/* ส่วนหัวฮีโร่: รูป + ชื่อ + สถานะ + ปุ่มตะกร้า + หมวดหมู่ อยู่ด้วยกันเป็นบล็อกเดียว */}
             <DialogHeader className="pr-11">
-              <DialogTitle className="text-[16px] leading-6">
-                {/* ชื่อเปลี่ยนทันทีเมื่อบันทึกชื่อใหม่ (ไม่ต้องรอรีเฟรช) */}
-                <LiveProductTitle
-                  productId={skuDetail.productId ?? skuDetail.skuId}
-                  initial={skuDetail.productName ?? skuDetail.sellerSku ?? "สินค้า"}
-                />
-              </DialogTitle>
-              <p className="text-[12px] leading-5 text-muted-foreground">
-                SKU {platform === "shopee" ? "Shopee" : "TikTok"} {skuDetail.sellerSku ?? "—"} · อัปเดต{" "}
-                {thaiDateTime(skuDetail.updatedAt)}
-              </p>
+              <div className="flex items-start gap-3">
+                {skuDetail.imageUrl ? (
+                  // กดแล้วเปิดป๊อปอัพในหน้านี้ ไม่เด้งออกไปหน้าอื่น
+                  <ImagePreview
+                    src={platformImageSrc(skuDetail.imageUrl) ?? skuDetail.imageUrl}
+                    alt={skuDetail.productName ?? "รูปสินค้า"}
+                    className="size-14 min-[720px]:size-16"
+                  />
+                ) : (
+                  <span className="block size-14 shrink-0 rounded-xl border border-border bg-muted min-[720px]:size-16" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <DialogTitle className="text-[16px] leading-6">
+                    {/* ชื่อเปลี่ยนทันทีเมื่อบันทึกชื่อใหม่ (ไม่ต้องรอรีเฟรช) */}
+                    <LiveProductTitle
+                      productId={skuDetail.productId ?? skuDetail.skuId}
+                      initial={skuDetail.productName ?? skuDetail.sellerSku ?? "สินค้า"}
+                    />
+                  </DialogTitle>
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted-foreground">
+                    <span
+                      className={cn(
+                        "rounded-md px-2 py-0.5 font-bold",
+                        // สีเดียวกับป้ายในตาราง: เปิดขาย = เขียวอ่อน · ซ่อน/อื่น ๆ = เทา
+                        skuDetail.productStatus === "ACTIVATE"
+                          ? "bg-[color:var(--ok-soft)] text-[color:var(--ok)]"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {productStatusLabel(skuDetail.productStatus)}
+                    </span>
+                    <span>
+                      SKU {platform === "shopee" ? "Shopee" : "TikTok"} {skuDetail.sellerSku ?? "—"}
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span>อัปเดต {thaiDateTime(skuDetail.updatedAt)}</span>
+                    {platform !== "shopee" && skuDetail.productId ? (
+                      <span className="ml-auto">
+                        <SaleProductVisibilityButton
+                          shopId={shopId}
+                          productId={skuDetail.productId}
+                          productStatus={skuDetail.productStatus}
+                          canWrite={isSandboxShopName(shopName) || liveStockWrite}
+                          blockedReason="ร้านจริงยังไม่เปิดให้เปลี่ยนสถานะตะกร้า — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
+                        />
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="mt-1 truncate text-[11.5px] text-muted-foreground">
+                    {skuDetail.category ?? "ยังไม่มีข้อมูลหมวดหมู่"}
+                  </p>
+                </div>
+              </div>
             </DialogHeader>
 
-            {/* ปุ่มสลับโหมด: สองช่วงกว้างเท่ากัน · ลิงก์ย้อนกลับอยู่นอกกรอบ ไม่ยัดรวมในก้อนเดียวกัน */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {/* แท็บสลับโหมด + ปุ่มกลับอยู่แถวเดียวกัน — ไม่มีปุ่มลอยเดี่ยวๆ กินแถว */}
+            <div className="flex items-center gap-2">
               <div
                 role="tablist"
                 aria-label="โหมดของป๊อปอัพสินค้า"
-                className="inline-grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/40 p-1"
+                className="grid min-w-0 flex-1 grid-cols-2 gap-1 rounded-lg border border-border bg-muted/40 p-1"
               >
                 {(
                   [
@@ -679,7 +760,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                     role="tab"
                     aria-selected={action === mode.key}
                     className={cn(
-                      "inline-flex min-h-[36px] min-w-[104px] items-center justify-center rounded-md px-3 text-[12.5px] font-bold transition-colors",
+                      "inline-flex min-h-[40px] items-center justify-center rounded-md px-3 text-[13px] font-bold transition-colors",
                       "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none",
                       action === mode.key
                         ? "bg-[color:var(--primary)] text-[color:var(--primary-foreground)] shadow-sm"
@@ -691,123 +772,125 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 ))}
               </div>
               {action !== "info" ? (
-                <Link
-                  href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}`}
-                  scroll={false}
-                  className="text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:underline"
+                <Button
+                  asChild
+                  variant="outline"
+                  size="sm"
+                  className="h-10 shrink-0 gap-1.5 px-3 text-[12.5px]"
+                  aria-label="กลับไปข้อมูลสินค้า"
                 >
-                  ← กลับไปข้อมูลสินค้า
-                </Link>
+                  <Link
+                    href={`${listHref({ page: current })}&sku=${encodeURIComponent(skuDetail.skuId)}`}
+                    scroll={false}
+                  >
+                    <ArrowLeft className="size-3.5" aria-hidden="true" />
+                    กลับ
+                  </Link>
+                </Button>
               ) : null}
             </div>
 
-            {platform !== "shopee" && skuDetail.productId && action === "stock" ? (
-              <StockHoldActions
-                shopId={shopId ?? ""}
-                productId={skuDetail.productId}
-                skuId={skuDetail.skuId}
-                quantity={skuDetail.quantity}
-                inTransit={skuDetail.inTransit}
-                held={heldBySku.get(skuDetail.skuId) ?? 0}
-                canWrite={isSandboxShopName(shopName) || liveStockWrite}
-                blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
-              />
-            ) : null}
-
-            {platform !== "shopee" && skuDetail.productId && (isSandboxShopName(shopName) || liveStockWrite) && action === "edit" ? (
-              <ProductTitleForm
-                shopId={shopId}
-                productId={skuDetail.productId}
-                title={skuDetail.productName ?? ""}
-              />
-            ) : null}
-
-            {platform !== "shopee" && skuDetail.productId && (isSandboxShopName(shopName) || liveStockWrite) && action === "edit" ? (
-              <ProductImageForm
-                shopId={shopId}
-                productId={skuDetail.productId}
-                currentImageUrl={skuDetail.imageUrl ? platformImageSrc(skuDetail.imageUrl) : null}
-              />
-            ) : null}
-
-            {platform !== "shopee" && skuDetail.productId && action === "stock" ? (
-              <SaleStockAdjustForm
-                shopId={shopId}
-                productId={skuDetail.productId}
-                skuId={skuDetail.skuId}
-                quantity={skuDetail.quantity}
-                canWrite={isSandboxShopName(shopName) || liveStockWrite}
-                blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
-              />
-            ) : null}
-
             <div className="flex flex-col gap-4">
-              {/* แถวตัวตนสินค้า: รูป + สถานะ/หมวดหมู่/ปุ่มสลับตะกร้า ชิดกลางแนวตั้งกับรูป */}
-              <div className="flex items-center gap-3">
-                {skuDetail.imageUrl ? (
-                  // กดแล้วเปิดป๊อปอัพในหน้านี้ ไม่เด้งออกไปหน้าอื่น
-                  <ImagePreview
-                    src={platformImageSrc(skuDetail.imageUrl) ?? skuDetail.imageUrl}
-                    alt={skuDetail.productName ?? "รูปสินค้า"}
-                  />
-                ) : (
-                  <span className="block size-20 shrink-0 rounded-xl border border-border bg-muted min-[720px]:size-28" />
-                )}
-                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-[12px]">
-                  <span
+              {/* แถวตัวเลข: เส้นบน-ล่างต่อเนื่องจากส่วนหัว ไม่มีกล่องลอย — ยอดกลางอยู่ด้วย */}
+              <dl className="grid grid-cols-2 gap-y-3 border-y border-border py-3 min-[560px]:grid-cols-5">
+                <div className="min-w-0">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">คงเหลือรวม</dt>
+                  {/* ขยับทันทีเมื่อกดปรับสต็อก (ไม่ต้องรอรีเฟรช) */}
+                  <dd className="mono text-[22px] font-bold leading-8">
+                    <LiveStockQuantity skuId={skuDetail.skuId} initial={skuDetail.quantity} />
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">สต็อกกลาง</dt>
+                  <dd
                     className={cn(
-                      "rounded-md px-2 py-0.5 font-bold",
-                      // สีเดียวกับป้ายในตาราง: เปิดขาย = เขียวอ่อน · ซ่อน/อื่น ๆ = เทา
-                      skuDetail.productStatus === "ACTIVATE"
-                        ? "bg-[color:var(--ok-soft)] text-[color:var(--ok)]"
-                        : "bg-muted text-muted-foreground",
+                      "mono text-[22px] font-bold leading-8",
+                      centralBySku.get(skuDetail.skuId) && (centralBySku.get(skuDetail.skuId)?.onHand ?? 0) <= 0
+                        ? "text-[#b42318]"
+                        : "",
                     )}
                   >
-                    {productStatusLabel(skuDetail.productStatus)}
-                  </span>
-                  <span className="min-w-0 text-muted-foreground">
-                    {skuDetail.category ?? "ยังไม่มีข้อมูลหมวดหมู่"}
-                  </span>
-                  {platform !== "shopee" && skuDetail.productId ? (
-                    <span className="ml-auto">
-                      <SaleProductVisibilityButton
-                        shopId={shopId}
-                        productId={skuDetail.productId}
-                        productStatus={skuDetail.productStatus}
-                        canWrite={isSandboxShopName(shopName) || liveStockWrite}
-                        blockedReason="ร้านจริงยังไม่เปิดให้เปลี่ยนสถานะตะกร้า — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
-                      />
-                    </span>
-                  ) : null}
+                    {centralBySku.get(skuDetail.skuId)
+                      ? (centralBySku.get(skuDetail.skuId)?.onHand ?? 0).toLocaleString("th-TH")
+                      : "—"}
+                  </dd>
+                  <dd className="truncate text-[10.5px] text-muted-foreground">
+                    {centralBySku.get(skuDetail.skuId)?.skuCode ?? "ยังไม่ผูก"}
+                  </dd>
                 </div>
-              </div>
+                <div className="min-w-0">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">ราคาขาย</dt>
+                  <dd className="mono text-[22px] font-bold leading-8">
+                    {skuDetail.price === null ? "—" : `${skuDetail.currency === "THB" || !skuDetail.currency ? "฿" : `${skuDetail.currency} `}${num(skuDetail.price)}`}
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">จำนวนคลัง</dt>
+                  <dd className="mono text-[22px] font-bold leading-8">{num(skuDetail.warehouses.length)}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">กำลังตีกลับ</dt>
+                  <dd className="mono text-[22px] font-bold leading-8">{num(skuDetail.inTransit)}</dd>
+                </div>
+              </dl>
 
-              {/* แถบตัวเลข: การ์ดเดียว 4 ช่องคั่นเส้นบาง — ภาษาเดียวกับแถบสรุปหน้าออเดอร์ */}
-              <Card padding="none" className="overflow-hidden">
-                <div className="grid grid-cols-2 gap-px bg-border min-[560px]:grid-cols-4">
-                  <div className="bg-card px-3.5 py-3">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">คงเหลือรวม</p>
-                    {/* ขยับทันทีเมื่อกดปรับสต็อก (ไม่ต้องรอรีเฟรช) */}
-                    <p className="mono text-[24px] font-bold leading-8">
-                      <LiveStockQuantity skuId={skuDetail.skuId} initial={skuDetail.quantity} />
+              {/* โซนทำงานของโหมด — พื้นเน้นให้การ์ดที่กำลังใช้เด่นขึ้น แยกจากส่วนอ้างอิงด้านล่าง */}
+              <div className="flex flex-col gap-3 rounded-xl bg-muted/40 p-3 ring-1 ring-inset ring-border">
+              {/* โหมดปรับสต็อก: สต็อกกลางคือยอดที่ตัดสินจริง (เขียนทับประกาศทุกร้าน) จึงเป็นการ์ดหลัก
+                  ส่วนยอดร้านเป็นกลุ่มรองมีหัวกำกับ — แทนกล่องเตือนลอยๆ เดิม */}
+              {platform !== "shopee" && skuDetail.productId && action === "stock" ? (
+                <>
+                  <CentralStockPanel
+                    platform={dbPlatform}
+                    shopId={shopId ?? ""}
+                    skuId={skuDetail.skuId}
+                    sellerSku={skuDetail.sellerSku}
+                    skuCode={centralBySku.get(skuDetail.skuId)?.skuCode ?? null}
+                    onHand={centralBySku.get(skuDetail.skuId)?.onHand ?? null}
+                    canWrite={isSandboxShopName(shopName) || liveStockWrite}
+                  />
+                  <div className="flex min-w-0 flex-col gap-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                      ยอดเฉพาะร้านนี้{centralBySku.get(skuDetail.skuId) ? " · ถูกเขียนทับด้วยยอดกลางทุกนาที" : ""}
                     </p>
+                    <StockHoldActions
+                      shopId={shopId ?? ""}
+                      productId={skuDetail.productId}
+                      skuId={skuDetail.skuId}
+                      quantity={skuDetail.quantity}
+                      inTransit={skuDetail.inTransit}
+                      held={heldBySku.get(skuDetail.skuId) ?? 0}
+                      canWrite={isSandboxShopName(shopName) || liveStockWrite}
+                      blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
+                    />
+                    <SaleStockAdjustForm
+                      shopId={shopId}
+                      productId={skuDetail.productId}
+                      skuId={skuDetail.skuId}
+                      quantity={skuDetail.quantity}
+                      canWrite={isSandboxShopName(shopName) || liveStockWrite}
+                      blockedReason="ร้านจริงยังไม่เปิดให้แก้สต็อก — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"
+                    />
                   </div>
-                  <div className="bg-card px-3.5 py-3">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">ราคาขาย</p>
-                    <p className="mono text-[20px] font-bold leading-8">
-                      {skuDetail.price === null ? "—" : `${skuDetail.currency === "THB" || !skuDetail.currency ? "฿" : `${skuDetail.currency} `}${num(skuDetail.price)}`}
-                    </p>
-                  </div>
-                  <div className="bg-card px-3.5 py-3">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">จำนวนคลัง</p>
-                    <p className="mono text-[24px] font-bold leading-8">{num(skuDetail.warehouses.length)}</p>
-                  </div>
-                  <div className="bg-card px-3.5 py-3">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">กำลังตีกลับ</p>
-                    <p className="mono text-[24px] font-bold leading-8">{num(skuDetail.inTransit)}</p>
-                  </div>
+                </>
+              ) : null}
+
+              {/* การ์ด editor เดียว: ชื่อ + รูป คั่นด้วยเส้น — แก้ทั้งสองอย่างในกรอบเดียว */}
+              {platform !== "shopee" && skuDetail.productId && (isSandboxShopName(shopName) || liveStockWrite) && action === "edit" ? (
+                <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3">
+                  <SaleProductTitleForm
+                    shopId={shopId}
+                    productId={skuDetail.productId}
+                    title={skuDetail.productName ?? ""}
+                  />
+                  <div className="h-px bg-border" aria-hidden="true" />
+                  <SaleProductImageForm
+                    shopId={shopId}
+                    productId={skuDetail.productId}
+                    currentImageUrl={skuDetail.imageUrl ? platformImageSrc(skuDetail.imageUrl) : null}
+                  />
                 </div>
-              </Card>
+              ) : null}
 
               {platform === "shopee" ? (
                 <ShopeeStockEditor
@@ -817,58 +900,86 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 />
               ) : null}
 
-              {/* ล่างซ้าย: ออเดอร์ที่ตัดสต็อก — รายการยาวที่สุด ได้คอลัมน์เต็มพร้อมพื้นที่เลื่อน */}
-              {/* ล่างขวา: คลัง + ประวัติ — ก้อนสั้นซ้อนกัน สองการ์ดสูงเท่ากันเสมอ */}
-              <div className="grid gap-3 min-[720px]:grid-cols-2">
-                <div className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-3">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <h3 className="text-[13px] font-bold">ออเดอร์ที่ตัดสต็อก (ล่าสุด)</h3>
-                    <span className="text-[11.5px] tabular-nums text-muted-foreground">
-                      {num(skuDetail.orders.length)} รายการ
-                    </span>
-                  </div>
-                  {skuDetail.orders.length === 0 ? (
-                    <p className="mt-1 text-[12.5px] text-muted-foreground">ยังไม่มีออเดอร์ของ SKU นี้ในระบบ</p>
-                  ) : (
-                    <ul className="mt-1 flex max-h-[300px] list-none flex-col overflow-y-auto p-0">
-                    {skuDetail.orders.map((order) => (
-                      <li
-                        key={order.orderId}
-                        className="flex flex-wrap items-baseline gap-x-2 border-b border-border/70 py-1.5 text-[12.5px] last:border-0"
-                      >
-                        <Link
-                          href={
-                            platform !== "tiktok"
-                              ? `/sale/orders?platform=${platform}&order=${encodeURIComponent(order.orderId)}`
-                              : `/sale/orders?order=${encodeURIComponent(order.orderId)}`
-                          }
-                          className="mono underline underline-offset-2"
-                        >
-                          {order.orderId}
-                        </Link>
-                        <span className="text-muted-foreground">{thaiDateTime(order.orderedAt)}</span>
-                        <span className="ml-auto mono font-bold">−{num(order.quantity)}</span>
+              {/* โหมดอื่น (ข้อมูล/แก้ไข/ช่องทาง Shopee): สต็อกกลางวางหลังเนื้อหาของโหมด */}
+              {action !== "stock" || platform === "shopee" ? (
+                <CentralStockPanel
+                  platform={dbPlatform}
+                  shopId={shopId ?? ""}
+                  skuId={skuDetail.skuId}
+                  sellerSku={skuDetail.sellerSku}
+                  skuCode={centralBySku.get(skuDetail.skuId)?.skuCode ?? null}
+                  onHand={centralBySku.get(skuDetail.skuId)?.onHand ?? null}
+                  canWrite={isSandboxShopName(shopName) || liveStockWrite}
+                />
+              ) : null}
+              </div>
+
+              {skuDetail.warehouses.length > 0 ? (
+                <div className="rounded-xl border border-border bg-card p-3">
+                  <h3 className="text-[13px] font-bold">แยกตามคลัง</h3>
+                  <ul className="mt-1 grid list-none grid-cols-1 gap-1 p-0 text-[12.5px]">
+                    {skuDetail.warehouses.map((warehouse) => (
+                      <li key={warehouse.warehouseId} className="flex justify-between gap-2 rounded-md bg-muted/40 px-2 py-1">
+                        <span className="mono text-muted-foreground">{warehouse.warehouseId}</span>
+                        <span className="mono font-bold">{num(warehouse.quantity)}</span>
                       </li>
                     ))}
-                    </ul>
-                  )}
+                  </ul>
                 </div>
+              ) : null}
 
-                <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-3">
-                  {skuDetail.warehouses.length > 0 ? (
-                    <div>
-                      <h3 className="text-[13px] font-bold">แยกตามคลัง</h3>
-                      <ul className="mt-1 grid list-none grid-cols-1 gap-1 p-0 text-[12.5px]">
-                        {skuDetail.warehouses.map((warehouse) => (
-                          <li key={warehouse.warehouseId} className="flex justify-between gap-2 rounded-md bg-muted/40 px-2 py-1">
-                            <span className="mono text-muted-foreground">{warehouse.warehouseId}</span>
-                            <span className="mono font-bold">{num(warehouse.quantity)}</span>
+              {/* ประวัติ/ออเดอร์ไม่ได้ดูบ่อย — กดปุ่มเปิดเมื่อต้องการ (details เปิดปิดได้โดยไม่ใช้ JS) */}
+              <details className="group rounded-xl border border-border bg-card">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                  <span className="text-[13px] font-bold">ประวัติและออเดอร์ของ SKU นี้</span>
+                  <span className="flex items-center gap-2 text-[11.5px] tabular-nums text-muted-foreground">
+                    <span>
+                      ออเดอร์ {num(skuDetail.orders.length)} · เปลี่ยนแปลง {num(skuDetail.movements.length)}
+                    </span>
+                    <ChevronDown
+                      className="size-4 shrink-0 transition-transform group-open:rotate-180"
+                      aria-hidden="true"
+                    />
+                  </span>
+                </summary>
+                <div className="flex flex-col gap-4 border-t border-border p-3">
+                  <div>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <h3 className="text-[13px] font-bold">ออเดอร์ที่ตัดสต็อก (ล่าสุด)</h3>
+                      <span className="text-[11.5px] tabular-nums text-muted-foreground">
+                        {num(skuDetail.orders.length)} รายการ
+                      </span>
+                    </div>
+                    {skuDetail.orders.length === 0 ? (
+                      <p className="mt-1 text-[12.5px] text-muted-foreground">ยังไม่มีออเดอร์ของ SKU นี้ในระบบ</p>
+                    ) : (
+                      <ul className="mt-1 flex max-h-[320px] list-none flex-col overflow-y-auto pr-2 p-0">
+                        {skuDetail.orders.map((order) => (
+                          <li
+                            key={order.orderId}
+                            className="flex flex-wrap items-baseline gap-x-2 border-b border-border/70 py-1.5 text-[12.5px] last:border-0"
+                          >
+                            <Link
+                              href={
+                                platform !== "tiktok"
+                                  ? `/sale/orders?platform=${platform}&order=${encodeURIComponent(order.orderId)}`
+                                  : `/sale/orders?order=${encodeURIComponent(order.orderId)}`
+                              }
+                              className="mono underline underline-offset-2"
+                            >
+                              {order.orderId}
+                            </Link>
+                            <span className="text-muted-foreground">{thaiDateTime(order.orderedAt)}</span>
+                            <span className="ml-auto mono font-bold">−{num(order.quantity)}</span>
                           </li>
                         ))}
                       </ul>
-                    </div>
-                  ) : null}
-                  <div className="flex min-h-0 flex-1 flex-col">
+                    )}
+                  </div>
+
+                  <div className="h-px bg-border" aria-hidden="true" />
+
+                  <div>
                     <div className="flex items-baseline justify-between gap-2">
                       <h3 className="text-[13px] font-bold">ประวัติการเปลี่ยนแปลง</h3>
                       <span className="text-[11.5px] tabular-nums text-muted-foreground">
@@ -877,32 +988,32 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                     </div>
                     {skuDetail.movements.length === 0 ? (
                       <p className="mt-1 text-[12.5px] text-muted-foreground">
-                        ยังไม่มีการเปลี่ยนแปลงที่ตรวจพบ — จะเริ่มบันทึกเมื่อยอดจาก TikTok เปลี่ยน
+                        ยังไม่มีการเปลี่ยนแปลง — จะเริ่มบันทึกเมื่อยอดเปลี่ยนจากการดึงหรือจากการกดปรับในระบบ
                       </p>
                     ) : (
-                      <ul className="mt-1 flex max-h-[240px] list-none flex-col overflow-y-auto p-0">
-                    {skuDetail.movements.map((movement, index) => (
-                      <li
-                        key={`${movement.changedAt}-${index}`}
-                        className="grid grid-cols-[1fr_auto_auto] items-center gap-x-2 border-b border-border/60 py-2 text-[12.5px] last:border-0"
-                      >
-                        <span className="text-[11.5px] text-muted-foreground tabular-nums">
-                          {thaiDateTime(movement.changedAt)}
-                        </span>
-                        <span className="mono tabular-nums">
-                          {num(movement.fromQty ?? 0)} → <b>{num(movement.toQty)}</b>
-                        </span>
-                        <Badge variant={movement.delta > 0 ? "success" : "danger"}>
-                          {movement.delta > 0 ? "+" : ""}
-                          {num(movement.delta)}
-                        </Badge>
-                      </li>
+                      <ul className="mt-1 flex max-h-[240px] list-none flex-col overflow-y-auto pr-2 p-0">
+                        {skuDetail.movements.map((movement, index) => (
+                          <li
+                            key={`${movement.changedAt}-${index}`}
+                            className="grid grid-cols-[1fr_auto_auto] items-center gap-x-2 border-b border-border/60 py-2 text-[12.5px] last:border-0"
+                          >
+                            <span className="text-[11.5px] text-muted-foreground tabular-nums">
+                              {thaiDateTime(movement.changedAt)}
+                            </span>
+                            <span className="mono tabular-nums">
+                              {num(movement.fromQty ?? 0)} → <b>{num(movement.toQty)}</b>
+                            </span>
+                            <Badge variant={movement.delta > 0 ? "success" : "danger"}>
+                              {movement.delta > 0 ? "+" : ""}
+                              {num(movement.delta)}
+                            </Badge>
+                          </li>
                         ))}
                       </ul>
                     )}
                   </div>
                 </div>
-              </div>
+              </details>
             </div>
           </DialogContent>
         </CloseableDialog>

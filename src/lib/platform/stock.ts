@@ -1,13 +1,14 @@
 // สต็อกจาก TikTok โดยตรง (ไม่ผ่าน Shipnity)
 // - ดึงจำนวนคงเหลือต่อ SKU ด้วยการค้นหาสินค้าครั้งเดียว (search ส่ง inventory มาด้วย)
 // - เก็บยอดล่าสุดไว้เทียบ และบันทึกประวัติเมื่อยอดเปลี่ยน
-// - ยังอ่านอย่างเดียว: การเขียนกลับต้องได้สิทธิ์ Product (write) จาก TikTok ก่อน
+// - การเขียนกลับอยู่ที่ stock-write.ts: ต้องมีสิทธิ์ Product (write) และร้านจริงต้องเปิด PLATFORM_STOCK_WRITE_LIVE
 
 import { query, runWithCompany } from "@/lib/db";
 import {
   getPlatformAccountRow,
   getPlatformConfig,
   getShopCompany,
+  isShopHidden,
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
 import { callTikTokApi } from "@/lib/platform/tiktok";
@@ -68,6 +69,10 @@ const PAGE_SIZE = 100;
  * ร้านอาจสังกัดบริษัทอื่น — ข้อมูลจึงถูกเขียนลง schema ของบริษัทที่ร้านอยู่
  */
 export async function syncStock(shopId: string): Promise<{ skus: number; changed: number; error?: string }> {
+  // ร้านที่ซ่อน = ผู้ใช้สั่งไม่ให้ดึงข้อมูลอีก
+  if (await isShopHidden(TIKTOK_PLATFORM, shopId)) {
+    return { skus: 0, changed: 0, error: "ร้านนี้ถูกซ่อนอยู่ — เปิดร้านก่อนจึงจะซิงก์ได้" };
+  }
   const company = await getShopCompany(shopId).catch(() => "dragon19" as const);
   return runWithCompany(company, () => syncStockInner(shopId));
 }
