@@ -170,7 +170,14 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                 <tr key={row.skuCode} className="border-b border-border/60">
                   <td className="py-1.5 pr-2">
                     <span className="flex size-9 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
-                      {row.imageUrl ? (
+                      {row.hasImage ? (
+                        <img
+                          src={`/api/platform/central-stock/image?code=${encodeURIComponent(row.skuCode)}`}
+                          alt={`รูป ${row.skuCode}`}
+                          className="size-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : row.imageUrl ? (
                         <img
                           src={platformImageSrc(row.imageUrl) ?? row.imageUrl}
                           alt={`รูป ${row.skuCode}`}

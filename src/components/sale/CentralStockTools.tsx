@@ -35,6 +35,7 @@ export function CentralStockReceiveForm() {
   // พิมพ์รหัสแล้วดึงรูป/ชื่อ/จำนวนบนร้านมาให้เห็นก่อนกดบันทึก — กันเติมผิดรหัส
   const [preview, setPreview] = useState<SkuPreview | null>(null);
   const [looking, setLooking] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   useEffect(() => {
     const code = skuCode.trim();
     if (code.length < 3) {
@@ -84,14 +85,33 @@ export function CentralStockReceiveForm() {
         setError(payload.error ?? "บันทึกไม่สำเร็จ");
         return;
       }
+      // แนบรูปไปกับรหัสกลางด้วย (ถ้าเลือกไว้) — สินค้าที่ไม่มีประกาศบนแพลตฟอร์มก็มีรูปได้
+      let imageNote = "";
+      if (imageFile) {
+        const dataUrl = await new Promise<string | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(imageFile);
+        });
+        if (dataUrl) {
+          const uploaded = await fetch("/api/platform/central-stock", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "image", skuCode: skuCode.trim(), dataUrl }),
+          });
+          if (uploaded.ok) imageNote = " · แนบรูปแล้ว";
+        }
+      }
       const pushed = payload.pushed ?? 0;
       setMessage(
         `${amount > 0 ? "รับเข้า" : "ตัดออก"} ${Math.abs(amount)} · ยอดกลางเหลือ ${payload.onHand ?? 0}${
           pushed > 0 ? ` · เขียนลงประกาศ ${pushed} ร้าน` : ""
-        }${(payload.pushFailed ?? 0) > 0 ? ` · พลาด ${payload.pushFailed} ร้าน` : ""}`,
+        }${(payload.pushFailed ?? 0) > 0 ? ` · พลาด ${payload.pushFailed} ร้าน` : ""}${imageNote}`,
       );
       setQuantity("");
       setNote("");
+      setImageFile(null);
       router.refresh();
     } catch {
       setError("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ");
@@ -142,6 +162,16 @@ export function CentralStockReceiveForm() {
             placeholder="เลขที่เอกสาร ฯลฯ"
             className="h-10 text-[13px]"
             aria-label="หมายเหตุ"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[12px] font-semibold min-[900px]:col-span-1">
+          รูปสินค้า (ไม่บังคับ)
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={(event) => setImageFile(event.target.files?.[0] ?? null)}
+            className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-2 text-[12px] file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-[12px]"
+            aria-label="แนบรูปสินค้า"
           />
         </label>
       </div>
@@ -222,6 +252,7 @@ export function CentralLinkRow({
   const [code, setCode] = useState(linkedCode ?? sellerSku ?? "");
   const [busy, setBusy] = useState<null | "link" | "unlink">(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function post(body: Record<string, unknown>): Promise<boolean> {
     const response = await fetch("/api/platform/central-stock", {
@@ -245,6 +276,7 @@ export function CentralLinkRow({
     setBusy(null);
     if (ok) {
       setCode(code.trim());
+      setNotice(`ผูกกับรหัสกลาง ${code.trim()} แล้ว`);
       router.refresh();
     }
   }
@@ -257,6 +289,7 @@ export function CentralLinkRow({
     if (ok) {
       // ต้องล้างช่องด้วย ไม่งั้นรหัสเดิมค้างอยู่และดูเหมือนยังผูกอยู่ (sku นี้เลิกผูกแล้วจริง)
       setCode("");
+      setNotice("เลิกผูกแล้ว");
       router.refresh();
     }
   }
@@ -281,6 +314,11 @@ export function CentralLinkRow({
       {error ? (
         <span className="text-[11.5px] font-semibold text-[#b42318]" role="alert">
           {error}
+        </span>
+      ) : null}
+      {notice ? (
+        <span className="text-[11.5px] font-semibold text-[color:var(--ok)]" role="status">
+          {notice}
         </span>
       ) : null}
     </span>

@@ -404,6 +404,7 @@ export type CentralListRow = {
   skuCode: string;
   productName: string | null;
   imageUrl: string | null;
+  hasImage: boolean;
   onHand: number;
   listingCount: number;
   shopCount: number;
@@ -437,6 +438,7 @@ export async function listCentralStockRows(options: {
     sku_code: string;
     product_name: string | null;
     image_url: string | null;
+    has_image: boolean;
     on_hand: number;
     listing_count: number;
     shop_count: number;
@@ -447,6 +449,7 @@ export async function listCentralStockRows(options: {
             (SELECT s.image_url FROM platform_stock s
               WHERE s.seller_sku = c.sku_code AND s.image_url IS NOT NULL AND s.image_url <> ''
               LIMIT 1) AS image_url,
+            EXISTS (SELECT 1 FROM central_stock_images i WHERE i.sku_code = c.sku_code) AS has_image,
             c.on_hand,
             (SELECT count(*)::int FROM central_stock_links l WHERE l.sku_code = c.sku_code) AS listing_count,
             (SELECT count(DISTINCT l.shop_id)::int FROM central_stock_links l WHERE l.sku_code = c.sku_code) AS shop_count,
@@ -464,6 +467,7 @@ export async function listCentralStockRows(options: {
       skuCode: row.sku_code,
       productName: row.product_name,
       imageUrl: row.image_url,
+      hasImage: Boolean(row.has_image),
       onHand: Number(row.on_hand),
       listingCount: Number(row.listing_count),
       shopCount: Number(row.shop_count),
@@ -752,4 +756,48 @@ export async function listArchivedCentralStock(limit = 50): Promise<ArchivedCent
     onHand: Number(row.on_hand),
     archivedAt: row.archived_at,
   }));
+}
+
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_IMAGE_BYTES = 1_200_000;
+
+/** เก็บรูปของรหัสกลาง (บีบอัดก่อนเก็บ) — ใช้เมื่อสินค้ายังไม่มีประกาศบนแพลตฟอร์มให้ดึงรูป */
+export async function setCentralStockImage(input: {
+  skuCode: string;
+  contentType: string;
+  buffer: Buffer;
+}): Promise<void> {
+  const skuCode = normalizeSkuCode(input.skuCode);
+  if (!skuCode) throw new Error("ต้องระบุรหัสสินค้าของสต็อกกลาง");
+  if (!ALLOWED_IMAGE_TYPES.has(input.contentType)) throw new Error("รับเฉพาะรูป JPG, PNG หรือ WEBP");
+  if (input.buffer.length === 0) throw new Error("ไฟล์รูปว่าง");
+  if (input.buffer.length > MAX_IMAGE_BYTES) {
+    throw new Error(`รูปใหญ่เกิน ${Math.round(MAX_IMAGE_BYTES / 1000)} KB`);
+  }
+  const { compressFileBlob } = await import("@/lib/file-blob");
+  await query(
+    `INSERT INTO central_stock_images (sku_code, content_type, data, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (sku_code) DO UPDATE
+       SET content_type = EXCLUDED.content_type, data = EXCLUDED.data, updated_at = now()`,
+    [skuCode, input.contentType, compressFileBlob(input.buffer)],
+  );
+}
+
+/** อ่านรูปของรหัสกลาง (คืน null ถ้าไม่มี) */
+export async function getCentralStockImage(
+  code: string,
+): Promise<{ contentType: string; data: Buffer } | null> {
+  const skuCode = normalizeSkuCode(code);
+  if (!skuCode) return null;
+  const rows = await query<{ content_type: string; data: Buffer }>(
+    `SELECT content_type, data FROM central_stock_images WHERE sku_code = $1`,
+    [skuCode],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const { decompressFileBlob } = await import("@/lib/file-blob");
+  const buffer = decompressFileBlob(row.data);
+  if (!buffer) return null;
+  return { contentType: row.content_type, data: buffer };
 }

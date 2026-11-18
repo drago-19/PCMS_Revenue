@@ -3,6 +3,7 @@ import { getClientIp } from "@/lib/session-token";
 import {
   addCentralStock,
   archiveCentralStock,
+  setCentralStockImage,
   autoLinkShop,
   linkListing,
   lookupSkuForCentral,
@@ -23,6 +24,7 @@ function text(value: unknown, max = 120): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+// หมายเหตุ: ทุก action ที่เขียนข้อมูลลงฐานข้อมูลต้องบันทึก audit log
 /** ค้นรหัสกลางหนึ่งตัวเพื่อโชว์รูปและจำนวนบนร้านก่อนกดรับเข้า */
 export async function GET(request: Request) {
   const auth = requireApiAuth(request);
@@ -50,7 +52,8 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try {
     const raw = await request.text();
-    if (raw.length > 8192) {
+    // รับรูปเป็น data URL ได้ (จำกัดขนาดที่ 1.8 MB) — คำขอยื่น ๆ ใช้ไม่ถึง
+    if (raw.length > 1_800_000) {
       return Response.json(
         { error: "ข้อมูลคำขอมีขนาดใหญ่เกินกำหนด", requestId: auth.requestId },
         { status: 413, headers: { "x-request-id": auth.requestId } },
@@ -123,6 +126,28 @@ export async function POST(request: Request) {
         requestId: auth.requestId,
       });
       return Response.json({ ok: true, ...result, requestId: auth.requestId });
+    }
+
+    if (action === "image") {
+      const skuCode = text(body.skuCode);
+      const dataUrl = typeof body.dataUrl === "string" ? body.dataUrl : "";
+      const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+      if (!skuCode || !match) {
+        return Response.json(
+          { error: "ต้องระบุรหัสสินค้าและไฟล์รูป JPG/PNG/WEBP", requestId: auth.requestId },
+          { status: 400, headers: { "x-request-id": auth.requestId } },
+        );
+      }
+      await setCentralStockImage({ skuCode, contentType: match[1], buffer: Buffer.from(match[2], "base64") });
+      await recordAuditLog({
+        actor: auth.session.sub,
+        action: "platform.central_stock.image",
+        ipAddress,
+        outcome: "success",
+        details: { skuCode, contentType: match[1] },
+        requestId: auth.requestId,
+      });
+      return Response.json({ ok: true, requestId: auth.requestId });
     }
 
     if (action === "rename") {

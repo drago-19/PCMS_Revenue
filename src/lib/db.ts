@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-18-v78";
+const SCHEMA_VERSION = "2026-11-18-v79";
 
 /**
  * เทียบเวอร์ชัน schema รูปแบบ 2026-11-18-v77 — คืน > 0 เมื่อ a ใหม่กว่า b
@@ -2254,6 +2254,14 @@ CREATE TABLE IF NOT EXISTS central_stock_links (
   PRIMARY KEY (platform, shop_id, sku_id)
 );
 CREATE INDEX IF NOT EXISTS central_stock_links_code_idx ON central_stock_links (sku_code);
+
+-- รูปของรหัสกลาง: สินค้าที่ไม่มีประกาศบนแพลตฟอร์มก็มีรูปได้
+CREATE TABLE IF NOT EXISTS central_stock_images (
+  sku_code TEXT PRIMARY KEY,
+  content_type TEXT NOT NULL,
+  data BYTEA NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 ANALYZE transactions;
 `;
