@@ -723,3 +723,33 @@ export async function restoreCentralStock(input: { skuCode: string; actor?: stri
     [skuCode, input.actor ?? null],
   );
 }
+
+export type ArchivedCentralRow = {
+  skuCode: string;
+  productName: string | null;
+  onHand: number;
+  archivedAt: string;
+};
+
+/** รหัสที่เลิกใช้แล้ว — ไว้ตรวจและนำกลับมาใช้ */
+export async function listArchivedCentralStock(limit = 50): Promise<ArchivedCentralRow[]> {
+  const rows = await query<{
+    sku_code: string;
+    product_name: string | null;
+    on_hand: number;
+    archived_at: string;
+  }>(
+    `SELECT sku_code, product_name, on_hand, archived_at
+       FROM central_stock
+      WHERE archived_at IS NOT NULL
+      ORDER BY archived_at DESC
+      LIMIT $1`,
+    [Math.min(200, Math.max(1, limit))],
+  );
+  return rows.map((row) => ({
+    skuCode: row.sku_code,
+    productName: row.product_name,
+    onHand: Number(row.on_hand),
+    archivedAt: row.archived_at,
+  }));
+}

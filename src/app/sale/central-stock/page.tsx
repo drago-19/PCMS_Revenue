@@ -6,11 +6,13 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CentralLinkRow, CentralStockReceiveForm } from "@/components/sale/CentralStockTools";
 import { CentralStockRowActions } from "@/components/sale/CentralStockRowActions";
+import { CentralStockRestoreButton } from "@/components/sale/CentralStockRestoreButton";
 import { LiveRefresh } from "@/components/sale/LiveRefresh";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { thaiDateTime } from "@/lib/platform/period";
 import {
   centralStockTotals,
+  listArchivedCentralStock,
   listCentralStockRows,
   listLinkedShops,
   listShopStocksForLinking,
@@ -43,10 +45,11 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
   const onlyUnlinked = params.unlinked === "1";
   const shopKey = params.shop ?? "";
 
-  const [totals, list, shops] = await Promise.all([
+  const [totals, list, shops, archived] = await Promise.all([
     centralStockTotals(),
     listCentralStockRows({ q, page }),
     listLinkedShops(),
+    listArchivedCentralStock(20),
   ]);
 
   const keyOf = (shop: { platform: string; shopId: string }) => `${shop.platform}:${shop.shopId}`;
@@ -351,6 +354,41 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
           </>
         )}
       </Card>
+
+      {archived.length > 0 ? (
+        <Card padding="padded" className="flex min-w-0 flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-[14.5px] font-bold">รหัสที่เลิกใช้แล้ว</h2>
+            <span className="text-[11.5px] text-muted-foreground">ซ่อนจากรายการหลัก — ประวัติยังอยู่ครบ นำกลับได้</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-[12.5px]" aria-label="รหัสที่เลิกใช้แล้ว">
+              <thead>
+                <tr className="border-b border-[color:var(--foreground)]/25 text-[11.5px] font-semibold text-muted-foreground">
+                  <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัสกลาง</th>
+                  <th scope="col" className="py-1.5 pr-2 text-left font-bold">ชื่อสินค้า</th>
+                  <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือตอนเลิกใช้</th>
+                  <th scope="col" className="py-1.5 pr-2 text-right font-bold">เลิกใช้เมื่อ</th>
+                  <th scope="col" className="py-1.5 text-right font-bold">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archived.map((row) => (
+                  <tr key={row.skuCode} className="border-b border-border/60">
+                    <td className="mono py-1.5 pr-2 font-bold">{row.skuCode}</td>
+                    <td className="max-w-[240px] truncate py-1.5 pr-2">{row.productName ?? "—"}</td>
+                    <td className="mono py-1.5 pr-2 text-right">{num(row.onHand)}</td>
+                    <td className="py-1.5 pr-2 text-right text-muted-foreground">{thaiDateTime(row.archivedAt)}</td>
+                    <td className="py-1.5 text-right">
+                      <CentralStockRestoreButton skuCode={row.skuCode} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
 
       <p className="text-[12px] leading-5 text-muted-foreground">
         หมายเหตุ: ยอดกลางหักจากออเดอร์ทุกช่องทางอัตโนมัติ (TikTok/Shopee จาก API · Facebook จาก Shipnity) และเขียนยอดคงเหลือกลับไปที่

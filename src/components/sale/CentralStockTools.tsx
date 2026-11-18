@@ -243,7 +243,10 @@ export function CentralLinkRow({
     setBusy("link");
     const ok = await post({ action: "link", platform, shopId, skuId, skuCode: code.trim() });
     setBusy(null);
-    if (ok) router.refresh();
+    if (ok) {
+      setCode(code.trim());
+      router.refresh();
+    }
   }
 
   async function unlink() {
@@ -251,7 +254,11 @@ export function CentralLinkRow({
     setBusy("unlink");
     const ok = await post({ action: "unlink", platform, shopId, skuId });
     setBusy(null);
-    if (ok) router.refresh();
+    if (ok) {
+      // ต้องล้างช่องด้วย ไม่งั้นรหัสเดิมค้างอยู่และดูเหมือนยังผูกอยู่ (sku นี้เลิกผูกแล้วจริง)
+      setCode("");
+      router.refresh();
+    }
   }
 
   return (
@@ -261,7 +268,7 @@ export function CentralLinkRow({
         onChange={(event) => setCode(event.target.value)}
         className="h-9 w-[160px] text-[12.5px]"
         aria-label="รหัสสินค้าของสต็อกกลาง"
-        placeholder="รหัสกลาง"
+        placeholder={sellerSku ?? "รหัสกลาง"}
       />
       <Button type="button" size="sm" variant="outline" onClick={link} disabled={busy !== null || !code.trim()}>
         {busy === "link" ? "…" : "ผูก"}
