@@ -87,12 +87,14 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
     productName: string | null;
     quantity: number;
     warehouses: Array<{ warehouseId: string; quantity: number }>;
+    /** สถานะวางขายจากผลค้นหา — ชุดเดียวกับที่ใช้แสดงผล ไม่ต้องยิงขอรายละเอียดเพิ่ม */
+    status: string | null;
   }> = [];
 
   try {
     for (let page = 0; page < 20; page += 1) {
       const response = await callTikTokApi<{
-        products?: ApiProduct[];
+        products?: Array<ApiProduct & { status?: string }>;
         next_page_token?: string;
       }>({
         config: config.tiktok,
@@ -121,6 +123,7 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
             productName: product.title ?? null,
             quantity: warehouses.reduce((sum, item) => sum + item.quantity, 0),
             warehouses,
+            status: product.status ?? null,
           });
         }
       }
@@ -160,14 +163,16 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
 
   // เขียนครั้งเดียวทั้งชุด (ไม่วนคิวรีต่อแถว)
   await query(
-    `INSERT INTO platform_stock (platform, shop_id, sku_id, product_id, seller_sku, product_name, quantity, warehouses, updated_at)
-     SELECT $1, $2, item.sku_id, item.product_id, item.seller_sku, item.product_name, item.quantity, item.warehouses::jsonb, now()
-       FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::int[], $8::text[])
-            AS item(sku_id, product_id, seller_sku, product_name, quantity, warehouses)
+    `INSERT INTO platform_stock (platform, shop_id, sku_id, product_id, seller_sku, product_name, quantity, warehouses, product_status, updated_at)
+     SELECT $1, $2, item.sku_id, item.product_id, item.seller_sku, item.product_name, item.quantity, item.warehouses::jsonb, item.status, now()
+       FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::int[], $8::text[], $9::text[])
+            AS item(sku_id, product_id, seller_sku, product_name, quantity, warehouses, status)
      ON CONFLICT (shop_id, sku_id) DO UPDATE
        SET platform = EXCLUDED.platform,
            product_id = EXCLUDED.product_id,
            seller_sku = EXCLUDED.seller_sku,
+           -- สถานะวางขายจากผลค้นหา: อัปเดตทุกครั้งที่ซิงก์ (เดิมขอเฉพาะสินค้าที่ยังไม่มีข้อมูล สถานะจึงค้าง)
+           product_status = COALESCE(EXCLUDED.product_status, platform_stock.product_status),
            -- ชื่อ/รูปที่ฝ่ายขายเพิ่งแก้: ห้ามซิงก์เขียนทับด้วยค่าจาก TikTok ที่ยังไม่ตาม (10 นาที)
            product_name = CASE WHEN platform_stock.name_locked_until > now()
                                THEN platform_stock.product_name ELSE EXCLUDED.product_name END,
@@ -183,11 +188,13 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
       collected.map((item) => item.productName),
       collected.map((item) => item.quantity),
       collected.map((item) => JSON.stringify(item.warehouses)),
+      collected.map((item) => item.status),
     ],
   );
 
-  // รายละเอียดสินค้า: ผลค้นหาไม่ส่งรูป/สถานะ/ราคามา ต้องขอทีละสินค้า
-  // (เฉพาะที่ยังไม่มีข้อมูล — ครั้งแรกของแต่ละสินค้าเท่านั้น ไม่ใช่ทุกรอบ)
+  // รายละเอียดสินค้า: ผลค้นหาไม่ส่งรูป/หมวดหมู่/ราคามา ต้องขอทีละสินค้า
+  // (สถานะวางขายได้จากผลค้นหาแล้ว จึงใช้ผลค้นหาเป็นแหล่งของสถานะทุกครั้ง)
+  // ขอเฉพาะสินค้าที่ยังไม่มีข้อมูล — ครั้งแรกของแต่ละสินค้าเท่านั้น ไม่ใช่ทุกรอบ
   const productIds = [...new Set(collected.map((item) => item.productId).filter((id): id is string => Boolean(id)))];
   const haveMeta = await query<{ product_id: string }>(
     `SELECT DISTINCT product_id FROM platform_stock
@@ -316,7 +323,7 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
 }
 
 /** ตัวกรองของหน้าสต็อก — ใช้เป็นคีย์สั้น ๆ ใน URL */
-export type StockListFilter = "all" | "out" | "low" | "open" | "hidden";
+export type StockListFilter = "all" | "out" | "low" | "open" | "hidden" | "deleted";
 
 /** เกณฑ์ "ใกล้หมด" — เหลือไม่เกิน 5 ชิ้น */
 export const LOW_STOCK_THRESHOLD = 5;
@@ -353,7 +360,10 @@ const STOCK_FILTER_SQL: Record<Exclude<StockListFilter, "all">, string> = {
   out: "s.quantity <= 0",
   low: `s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD}`,
   open: "s.product_status = 'ACTIVATE'",
-  hidden: "s.product_status IS DISTINCT FROM 'ACTIVATE'",
+  // ซ่อนตะกร้า = ผู้ขายปิดขายเอง (ไม่นับสินค้าที่ถูกลบ/รอตรวจ/ไม่ผ่านการตรวจ)
+  hidden: "s.product_status = 'SELLER_DEACTIVATED'",
+  // ไม่พร้อมขาย = สถานะอื่นทั้งหมดที่เหลือ (ลบแล้ว · รอตรวจ · ไม่ผ่านการตรวจ · ไม่ทราบสถานะ)
+  deleted: "s.product_status IS NULL OR s.product_status NOT IN ('ACTIVATE', 'SELLER_DEACTIVATED')",
 };
 
 /** กัน % _ และ backslash ไม่ให้คำค้นของผู้ใช้กลายเป็นไวลด์การ์ด */
@@ -393,8 +403,10 @@ export type StockCounts = {
   low: number;
   /** สินค้าที่ยังเปิดตะกร้าขายอยู่ */
   open: number;
-  /** สินค้าที่ถูกซ่อนตะกร้า (หรือถูกลบ/รอตรวจ) */
+  /** สินค้าที่ผู้ขายซ่อนตะกร้าเอง (SELLER_DEACTIVATED) */
   hidden: number;
+  /** สินค้าที่ไม่พร้อมขาย: ลบแล้ว · รอตรวจ · ไม่ผ่านการตรวจ · ไม่ทราบสถานะ */
+  deleted: number;
   quantity: number;
   /** ชิ้นที่กำลังเดินกลับร้าน — ยังไม่ควรนับเป็นของพร้อมขาย */
   inTransit: number;
@@ -412,6 +424,7 @@ export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM)
     low: number;
     open: number;
     hidden: number;
+    deleted: number;
     quantity: number;
     in_transit: number;
   }>(
@@ -419,7 +432,11 @@ export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM)
             count(*) FILTER (WHERE s.quantity <= 0)::int AS out,
             count(*) FILTER (WHERE s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD})::int AS low,
             count(*) FILTER (WHERE s.product_status = 'ACTIVATE')::int AS open,
-            count(*) FILTER (WHERE s.product_status IS DISTINCT FROM 'ACTIVATE')::int AS hidden,
+            count(*) FILTER (WHERE s.product_status = 'SELLER_DEACTIVATED')::int AS hidden,
+            count(*) FILTER (
+              WHERE s.product_status IS NULL
+                 OR s.product_status NOT IN ('ACTIVATE', 'SELLER_DEACTIVATED')
+            )::int AS deleted,
             COALESCE(sum(s.quantity), 0)::int AS quantity,
             COALESCE(sum(rt.in_transit), 0)::int AS in_transit
        ${STOCK_FROM}
@@ -434,6 +451,7 @@ export async function getStockCounts(shopId: string, platform = TIKTOK_PLATFORM)
     low: Number(row?.low ?? 0),
     open: Number(row?.open ?? 0),
     hidden: Number(row?.hidden ?? 0),
+    deleted: Number(row?.deleted ?? 0),
     quantity: Number(row?.quantity ?? 0),
     inTransit: Number(row?.in_transit ?? 0),
   };

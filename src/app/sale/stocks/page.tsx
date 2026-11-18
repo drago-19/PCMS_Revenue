@@ -174,7 +174,11 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   // ค้นหา/กรองในฐานข้อมูลตั้งแต่ต้น — ไม่ดึงทุกแถวขึ้นมากรองในหน้าเว็บ
   const search = (params.q ?? "").trim();
   const filter: StockListFilter =
-    params.filter === "out" || params.filter === "low" || params.filter === "open" || params.filter === "hidden"
+    params.filter === "out" ||
+    params.filter === "low" ||
+    params.filter === "open" ||
+    params.filter === "hidden" ||
+    params.filter === "deleted"
       ? params.filter
       : "all";
   // ป๊อปอัปแยกหน้าที่: ค่าเริ่มต้น = ข้อมูลสินค้า, "stock" = ปรับสต็อก, "edit" = แก้ไขสินค้า
@@ -225,6 +229,7 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
     { key: "all", label: "ทั้งหมด", count: counts.all },
     { key: "open", label: "เปิดตะกร้า", count: counts.open, tone: "open" },
     { key: "hidden", label: "ซ่อนตะกร้า", count: counts.hidden, tone: "hidden" },
+    { key: "deleted", label: "ไม่พร้อมขาย", count: counts.deleted },
     { key: "out", label: "ของหมด", count: counts.out },
     { key: "low", label: `เหลือน้อย ≤${LOW_STOCK_THRESHOLD}`, count: counts.low },
   ];
