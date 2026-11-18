@@ -17,6 +17,7 @@ export function SaleStat({
   hint,
   tone = "default",
   format = "int",
+  bare = false,
 }: {
   label: string;
   value: number;
@@ -25,6 +26,8 @@ export function SaleStat({
   hint?: ReactNode;
   tone?: "default" | "positive" | "negative";
   format?: "int" | "money";
+  /** วางในแถบสรุปการ์ดเดียว (เซลล์ไร้ขอบ) — ปกติเป็นการ์ดลอยของตัวเอง */
+  bare?: boolean;
 }) {
   const [delta, setDelta] = useState<number | null>(null);
   const previous = useRef(value);
@@ -54,7 +57,13 @@ export function SaleStat({
     delta === null ? null : `${delta > 0 ? "+" : "−"}${Math.abs(delta).toLocaleString("th-TH", digits)}`;
 
   return (
-    <div className="rounded-xl border border-border bg-card px-3.5 py-3">
+    <div
+      className={cn(
+        "px-3.5 py-3",
+        // โหมด bare = เซลล์ในแถบสรุป (การ์ดแม่วาดเส้นแบ่งให้แล้ว) · ปกติ = การ์ดลอยของตัวเอง
+        bare ? "bg-card" : "rounded-xl border border-border bg-card",
+      )}
+    >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <p className="text-[12px] font-semibold text-muted-foreground">{label}</p>
         {deltaText ? (

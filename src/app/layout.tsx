@@ -8,6 +8,7 @@ import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SaleChrome } from "@/components/sale/SaleChrome";
+import { SaleTabs } from "@/components/sale/SaleTabs";
 import { getActiveCompanyId } from "@/lib/db";
 import { getDocumentSettings } from "@/lib/settings";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session-token";
@@ -65,7 +66,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           </Suspense>
           {/* บัญชีฝ่ายขาย (platform) ใช้เปลือกสว่างของหมวด /sale — ไม่แตะเปลือกของ Dragon19 */}
           {role === "platform" ? (
-            <SaleChrome />
+            <>
+              <SaleChrome />
+              {/* เมนูหมวดฝ่ายขายเป็นแถวของตัวเองใต้แถบหัว — ไม่ยัดในแถบหัวอีก */}
+              <Suspense fallback={null}>
+                <SaleTabs />
+              </Suspense>
+            </>
           ) : (
             <WindowTitleBar companyId={companyId} companyName={settings.name} />
           )}

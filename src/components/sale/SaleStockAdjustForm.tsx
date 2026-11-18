@@ -123,28 +123,29 @@ export function SaleStockAdjustForm({
 
   if (!canWrite) {
     return (
-      <div className="mx-auto w-full max-w-md rounded-xl border border-dashed border-border p-3 text-center text-[12.5px] text-muted-foreground">
+      <div className="rounded-xl border border-dashed border-border bg-card p-3 text-[12.5px] text-muted-foreground">
         {blockedReason ?? "ยังไม่เปิดให้แก้สต็อกบนร้านนี้ — ต้องทดสอบบนร้านทดสอบให้ผ่านก่อน"}
       </div>
     );
   }
 
+  // การ์ดภาษาเดียวกับการ์ดอื่นในป๊อปอัพ: หัวเรื่องซ้าย คำอธิบายขวา ปุ่มเต็มความกว้าง
   return (
     <section
       aria-label="ปรับจำนวนสต็อก"
-      className="mx-auto flex w-full max-w-md flex-col items-stretch gap-3 rounded-2xl border border-border bg-card p-4"
+      className="flex w-full flex-col items-stretch gap-3 rounded-xl border border-border bg-card p-3"
     >
-      <div className="text-center">
-        <h3 className="text-[13.5px] font-bold">ปรับจำนวนสต็อก</h3>
-        <p className="text-[11.5px] leading-5 text-muted-foreground">
-          ระบบอ่านยอดสดจาก TikTok ก่อนทุกครั้ง — ถ้ามีคนซื้อระหว่างนั้นจะไม่เขียนทับ
-        </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[13px] font-bold">ปรับจำนวนสต็อก</h3>
+        <span className="text-[11.5px] text-muted-foreground">
+          อ่านยอดสดจาก TikTok ก่อนทุกครั้ง — มีคนซื้อระหว่างนั้นจะไม่เขียนทับ
+        </span>
       </div>
 
       <div
         role="group"
         aria-label="เลือกว่าจะเพิ่มหรือลด"
-        className="mx-auto grid w-full max-w-[240px] grid-cols-2 gap-1 rounded-xl bg-muted p-1"
+        className="grid w-full grid-cols-2 gap-1 rounded-xl bg-muted p-1"
       >
         <button
           type="button"
@@ -175,7 +176,8 @@ export function SaleStockAdjustForm({
         </button>
       </div>
 
-      <div className="mx-auto flex items-center gap-3">
+      {/* แถวปรับจำนวน: − ตัวเลขใหญ่ + เต็มความกว้าง ปุ่มใหญ่แตะง่าย */}
+      <div className="flex items-center justify-between gap-3">
         <Button
           type="button"
           variant="outline"
@@ -183,14 +185,14 @@ export function SaleStockAdjustForm({
           aria-label="จำนวนที่จะปรับลงหนึ่ง"
           onClick={() => setAmount((value) => clamp(value - 1))}
           disabled={saving || amount <= 0}
-          className="size-11"
+          className="size-12"
         >
           <MinusIcon className="size-5" aria-hidden="true" />
         </Button>
         <span
           aria-live="polite"
           aria-label={`จำนวนที่ต้องการ${mode === "add" ? "เพิ่ม" : "ลด"} ${effective}`}
-          className="min-w-[72px] text-center text-[28px] font-bold leading-none tabular-nums"
+          className="min-w-[72px] text-center text-[32px] font-bold leading-none tabular-nums"
         >
           {effective}
         </span>
@@ -201,14 +203,14 @@ export function SaleStockAdjustForm({
           aria-label="จำนวนที่จะปรับขึ้นหนึ่ง"
           onClick={() => setAmount((value) => clamp(value + 1))}
           disabled={saving || (mode === "remove" && effective >= base)}
-          className="size-11"
+          className="size-12"
         >
           <PlusIcon className="size-5" aria-hidden="true" />
         </Button>
       </div>
 
-      <div className="mx-auto flex flex-wrap items-center justify-center gap-2">
-        <span className="sr-only">จำนวนลัด</span>
+      {/* ปุ่มลัดเรียง 4 ช่องเท่ากันเต็มความกว้าง · ล้างอยู่แถวพรีวิว */}
+      <div className="grid grid-cols-4 gap-2">
         {PRESETS.map((preset) => (
           <Button
             key={preset}
@@ -218,11 +220,30 @@ export function SaleStockAdjustForm({
             onClick={() => setAmount((value) => clamp(value + preset))}
             disabled={saving}
             aria-label={`บวกเพิ่ม ${preset}`}
-            className="min-h-[40px] min-w-[56px] px-3 tabular-nums"
+            className="min-h-[40px] tabular-nums"
           >
             +{preset}
           </Button>
         ))}
+      </div>
+
+      {/* แถบพรีวิวยอด: ก่อน → หลัง เด่นเป็นพื้นหลังเทา กันกดผิดโดยไม่เห็นผล */}
+      <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-[13px]">
+        <span className="text-muted-foreground">
+          คงเหลือ <span className="font-bold tabular-nums text-foreground">{base}</span>
+        </span>
+        <span aria-hidden="true" className="text-muted-foreground">→</span>
+        <span className="text-muted-foreground">
+          จะเป็น{" "}
+          <span
+            className={cn(
+              "font-bold tabular-nums",
+              mode === "add" ? "text-[#0d6b3c]" : "text-[#b42318]",
+            )}
+          >
+            {nextQuantity}
+          </span>
+        </span>
         {amount > 0 ? (
           <Button
             type="button"
@@ -230,26 +251,12 @@ export function SaleStockAdjustForm({
             size="sm"
             onClick={() => setAmount(0)}
             disabled={saving}
-            className="min-h-[40px] px-3 text-[12px] text-muted-foreground"
+            className="min-h-[32px] px-2 text-[12px] text-muted-foreground"
           >
             ล้าง
           </Button>
         ) : null}
       </div>
-
-      <p className="text-center text-[13px]">
-        คงเหลือ <span className="font-bold tabular-nums">{base}</span>
-        <span aria-hidden="true"> → </span>
-        <span className="sr-only">จะเป็น</span>
-        <span
-          className={cn(
-            "font-bold tabular-nums",
-            mode === "add" ? "text-[#0d6b3c]" : "text-[#b42318]",
-          )}
-        >
-          {nextQuantity}
-        </span>
-      </p>
 
       <Button
         type="button"

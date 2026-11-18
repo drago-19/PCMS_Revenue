@@ -51,7 +51,7 @@ export function RefreshAllButton({ shopId }: { shopId?: string }) {
       onClick={run}
       disabled={busy}
       aria-busy={busy}
-      className="gap-1.5"
+      className="shrink-0 whitespace-nowrap gap-1.5"
     >
       <RefreshCw className={busy ? "size-3.5 animate-spin motion-reduce:animate-none" : "size-3.5"} aria-hidden="true" />
       {busy ? "กำลังดึง…" : "ดึงข้อมูลล่าสุด"}

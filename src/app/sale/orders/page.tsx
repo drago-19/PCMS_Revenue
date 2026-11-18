@@ -13,6 +13,7 @@ import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import {
   getActiveShopId,
@@ -113,8 +114,19 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   // ?pre=1 = เอาเฉพาะออเดอร์ที่มีสินค้าพรีออเดอร์
   const preorderOnly = read(params, "pre") === "1";
   const search = read(params, "q").trim();
-  // ไม่ระบุร้าน = ใช้ร้านตามโหมดจริง/ทดสอบที่เลือกไว้
-  const shop = read(params, "shop") || (await getActiveShopId("TikTok")) || undefined;
+  const platform = readPlatform(read(params, "platform"));
+  const dbPlatform = platformDbName(platform);
+  // ร้านที่ระบุมาทาง URL ต้องเป็นร้านที่ยังแสดงอยู่ — ร้านที่ซ่อนแล้วห้ามเปิดดูข้อมูล แม้พิมพ์รหัสมาเอง
+  const accounts = await listPlatformAccounts(dbPlatform);
+  const requestedShop = read(params, "shop");
+  // ไม่ระบุร้าน = ร้านที่ระบบใช้จริง (getActiveShopId ข้ามร้านที่ซ่อนให้แล้ว)
+  const shop =
+    (requestedShop && accounts.some((account) => account.accountKey === requestedShop)
+      ? requestedShop
+      : null) ??
+    (await getActiveShopId(dbPlatform)) ??
+    accounts[0]?.accountKey ??
+    undefined;
   const fromParam = read(params, "from") || undefined;
   const toParam = read(params, "to") || undefined;
   // keyset: ?after=<เวลา|เลขออเดอร์> เดินหน้า · ?before=... ถอยหลัง (ไม่มี OFFSET แล้ว)
@@ -123,9 +135,6 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
   const back = Boolean(beforeRaw);
   const [cursorTime, cursorId] = (beforeRaw || afterRaw).split("|");
   const cursor = cursorTime && cursorId ? { time: cursorTime, id: cursorId, back } : undefined;
-  const platform = readPlatform(read(params, "platform"));
-  const dbPlatform = platformDbName(platform);
-
   const detailId = read(params, "order");
   const filter = {
     platform: dbPlatform,
@@ -137,9 +146,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
     to: toParam,
   };
 
-  const [config, accounts, connectedPlatforms, result, summary, detail, ordersToday] = await Promise.all([
+  const [config, connectedPlatforms, result, summary, detail, ordersToday] = await Promise.all([
     getPlatformConfig(),
-    listPlatformAccounts(dbPlatform),
     getConnectedPlatforms(),
     listPlatformOrders({ ...filter, cursor, pageSize: 25 }),
     getOrderSummary(filter),
@@ -184,32 +192,44 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
 
   return (
     <div className="workspace-page">
+      {/* ปุ่มสลับแพลตฟอร์มอยู่ขวาบนหัวเรื่อง — จอแคบเด้งลงมาอยู่ใต้ชื่อเอง ไม่กินแถวของตัวเอง */}
       <SaleHeader
         eyebrow={platformTab(platform).label}
         title="ออเดอร์"
         description="กดที่ออเดอร์เพื่อดูสินค้า ยอดเงิน และสถานะทีละขั้น — ข้อมูลชุดเดียวกับหน้าภาพรวม"
-      />
-
-      <PlatformSwitcher
-        platform={platform}
-        basePath="/sale/orders"
-        from={fromParam}
-        to={toParam}
-        shop={shop}
-        connectedPlatforms={connectedPlatforms}
-        tones="platform"
+        actions={
+          <PlatformSwitcher
+            platform={platform}
+            basePath="/sale/orders"
+            from={fromParam}
+            to={toParam}
+            shop={shop}
+            connectedPlatforms={connectedPlatforms}
+            tones="platform"
+          />
+        }
       />
 
       <PlatformBody platform={platform} connected={connectedPlatforms.includes(platform)}>
-      {!isAppConfigured && accounts.length === 0 ? (
+      {accounts.length === 0 ? (
         <EmptyState
           icon={<IconReceipt size={22} aria-hidden="true" />}
-          title={`ยังไม่ได้เชื่อมต่อ ${platformTab(platform).label}`}
-          description="เชื่อมร้านก่อน แล้วออเดอร์จะเข้ามาที่นี่"
-          action={<Button asChild><Link href="/settings?tab=platforms">ไปที่หน้าตั้งค่า</Link></Button>}
+          title={
+            isAppConfigured
+              ? "ยังไม่มีร้านที่แสดงอยู่"
+              : `ยังไม่ได้เชื่อมต่อ ${platformTab(platform).label}`
+          }
+          description={
+            isAppConfigured
+              ? "ร้านที่เชื่อมต่อถูกซ่อนไว้ — เปิดกลับได้ที่หน้าตั้งค่า"
+              : "เชื่อมร้านก่อน แล้วออเดอร์จะเข้ามาที่นี่"
+          }
+          action={<Button asChild><Link href="/sale/settings">ไปที่หน้าตั้งค่า</Link></Button>}
         />
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
+          {/* ตัวกรองทั้งหมดรวมในการ์ดเดียว: ค้นหา → ช่วงเวลา → สถานะ อ่านบนลงล่างทีละชั้น */}
+          <Card padding="padded" className="flex min-w-0 flex-col gap-3">
           <form action="/sale/orders" className="flex flex-wrap items-center gap-2">
             {platform !== "tiktok" ? <input type="hidden" name="platform" value={platform} /> : null}
             {shop ? <input type="hidden" name="shop" value={shop} /> : null}
@@ -217,12 +237,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
             <label className="sr-only" htmlFor="order-search">
               ค้นหาออเดอร์หรือสินค้า
             </label>
-            <input
+            <Input
               id="order-search"
               name="q"
               defaultValue={search}
               placeholder="ค้นหาเลขคำสั่งซื้อ / ชื่อสินค้า / SKU"
-              className="h-10 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-[13px]"
+              className="h-10 min-w-0 flex-1 text-[13px]"
             />
             <Button type="submit" size="sm" variant="secondary">
               ค้นหา
@@ -283,21 +303,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               พรีออเดอร์
             </Link>
           </div>
+          </Card>
 
-          {/* สรุปตามเงื่อนไขที่กรองอยู่ */}
-          {/* สรุปช่วงที่กรองอยู่: ออเดอร์ · ชิ้นรวม · สินค้า (SKU ไม่ซ้ำ) · ยอดโอน */}
-          <div className="grid grid-cols-2 gap-2.5 min-[900px]:grid-cols-5">
-            <SaleStat label="ออเดอร์" value={summary.orders} scopeKey={summaryScope} />
-            <SaleStat label="ชิ้นรวม" value={summary.pieces} scopeKey={summaryScope} />
-            <SaleStat label="สินค้า (SKU)" value={summary.skus} scopeKey={summaryScope} />
-            <SaleStat label="ยอดโอนรวม" value={summary.settlement} format="money" tone="positive" scopeKey={summaryScope} />
-            <SaleStat
-              label="ยกเลิก"
-              value={summary.cancelled}
-              tone={summary.cancelled > 0 ? "negative" : "default"}
-              scopeKey={summaryScope}
-            />
-          </div>
+          {/* สรุปช่วงที่กรองอยู่: แถบการ์ดเดียว แบ่งเซลล์ด้วยเส้น 1px — ไม่มีการ์ดตกหล่นแถวล่าง */}
+          <Card padding="none" className="overflow-hidden">
+            <div className="grid grid-cols-2 gap-px bg-border min-[640px]:grid-cols-5 max-[639px]:[&>*:last-child]:col-span-2">
+              <SaleStat bare label="ออเดอร์" value={summary.orders} scopeKey={summaryScope} />
+              <SaleStat bare label="ชิ้นรวม" value={summary.pieces} scopeKey={summaryScope} />
+              <SaleStat bare label="สินค้า (SKU)" value={summary.skus} scopeKey={summaryScope} />
+              <SaleStat bare label="ยอดโอนรวม" value={summary.settlement} format="money" tone="positive" scopeKey={summaryScope} />
+              <SaleStat
+                bare
+                label="ยกเลิก"
+                value={summary.cancelled}
+                tone={summary.cancelled > 0 ? "negative" : "default"}
+                scopeKey={summaryScope}
+              />
+            </div>
+          </Card>
 
           <Card padding="padded" className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center justify-between gap-2 text-[12.5px] text-muted-foreground">
@@ -351,14 +374,20 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                         ) : null}
                       </div>
                     </div>
-                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
-                      <span>{dateTime(row.createTime)}</span>
-                      <span>{row.itemCount} รายการ</span>
-                      <span className="mono">ยอดสั่ง ฿{money(row.totalAmount)}</span>
-                      <span className="mono font-bold text-foreground">
-                        {row.settlement === null
-                          ? "รอ TikTok โอน"
-                          : `TikTok โอนแล้ว ฿${money(row.settlement)}`}
+                    {/* ซ้าย = เวลา/จำนวน · ขวา = เงินทั้งคู่ — กวาดตาหายอดได้จากขอบขวาแถวเดียว */}
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span>{dateTime(row.createTime)}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{row.itemCount} รายการ</span>
+                      </span>
+                      <span className="ml-auto flex min-w-0 items-center gap-3">
+                        <span className="mono">ยอดสั่ง ฿{money(row.totalAmount)}</span>
+                        <span className="mono font-bold text-foreground">
+                          {row.settlement === null
+                            ? "รอ TikTok โอน"
+                            : `TikTok โอนแล้ว ฿${money(row.settlement)}`}
+                        </span>
                       </span>
                     </div>
                     {row.cancelReason && row.status === "CANCELLED" ? (
@@ -412,9 +441,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 <CopyButton value={detail.orderId} label="คัดลอกเลขคำสั่งซื้อ" />
               </DialogTitle>
               <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
-                <span>
-                  {detail.items.length} รายการ · ยอดสั่งซื้อ ฿{money(detail.totalAmount)} ·{" "}
+                {/* สถานะเป็นป้ายสีเดียวกับตาราง — ตาอ่านเจอก่อนตัวเลข */}
+                <Badge
+                  variant="outline"
+                  className={STATUS_STYLE[detail.status] ?? "border-border bg-muted text-muted-foreground"}
+                >
                   {STATUS_LABEL[detail.status] ?? detail.status}
+                </Badge>
+                <span>
+                  {detail.items.length} รายการ · ยอดสั่งซื้อ ฿{money(detail.totalAmount)}
                 </span>
                 {detail.orderType === "PRE_ORDER" ? (
                   <Badge variant="outline" className="border-[#e7d9b6] bg-[#fdf8ea] text-[#7a5c14]">
@@ -459,20 +494,27 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 ))}
               </ul>
 
-              <div className="flex flex-col gap-1.5 rounded-xl border border-border p-3 text-[13px]">
+              {/* กล่องสรุปเงิน: พื้นหลังอ่อนต่างจากตัวหน้า · แถวสุดท้ายคือยอดที่ร้านได้จริง เลยใหญ่และเด่นกว่า */}
+              <div className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3 text-[13px]">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">ยอดขาย (revenue)</span>
-                  <span className="mono">฿{money(detail.money.revenue)}</span>
+                  <span className="mono tabular-nums">฿{money(detail.money.revenue)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">ค่าธรรมเนียม/ภาษี</span>
-                  <span className="mono text-[#b42318]">฿{money(detail.money.fee)}</span>
+                  <span className="mono tabular-nums text-[color:var(--danger)]">฿{money(detail.money.fee)}</span>
                 </div>
-                <div className="flex items-center justify-between gap-2 border-t border-border pt-1.5">
-                  <span className="font-bold">TikTok โอนให้ร้าน</span>
-                  <span className="mono font-bold text-[#0d8a47]">
-                    {detail.money.statementId ? `฿${money(detail.money.settlement)}` : "รอ TikTok โอน"}
-                  </span>
+                <div className="mt-1 flex min-w-0 items-center justify-between gap-2 border-t border-border pt-2">
+                  <span className="text-[13px] font-bold">TikTok โอนให้ร้าน</span>
+                  {detail.money.statementId ? (
+                    <span className="mono text-[18px] font-bold tabular-nums text-[color:var(--ok)]">
+                      ฿{money(detail.money.settlement)}
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-muted px-2.5 py-1 text-[12px] font-semibold text-muted-foreground">
+                      รอ TikTok โอน
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -546,7 +588,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
                 );
               })()}
 
-              <div className="flex flex-wrap gap-2">
+              {/* ปุ่มปิดชิดขวา — ปลายทางของการอ่าน ไม่ลอยซ้ายเหมือนงานที่ค้าง */}
+              <div className="flex justify-end">
                 <Button asChild variant="outline" size="sm">
                   <Link href={queryFor({})} scroll={false}>
                     ปิด
