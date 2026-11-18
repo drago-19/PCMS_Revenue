@@ -358,6 +358,24 @@ test("detects and parses OMS orders, OMS items, and CSV settlement with 15-digit
   assert.equal(parsedItems.items[1].channel, "Shopee");
   assert.equal(parsedItems.items[1].orderCode, "OF33");
 
+  // แถวที่ไม่มีรหัสสินค้า (SKU ว่าง) ต้องไม่ถูกข้าม — ใช้ชื่อสินค้าในคอลัมน์ B แทน (เคสออเดอร์ YV60)
+  const noSkuItemsCsv = [
+    "รหัสสินค้า,สินค้า,ราคา,จำนวน,เลขที่ออเดอร์,ยอดขายออเดอร์,ค่าส่งที่เก็บลูกค้า,ผู้ส่ง,ชื่อ,ที่อยู่,รหัสไปรษณีย์,เบอร์โทร,วันที่โอนเงิน,สร้างโดย,ขนส่ง,ช่องทางติดต่อ,ธนาคารที่โอนเงิน,หมายเหตุ,เลขพัสดุ,วันที่สร้าง",
+    ',*กางเกงขาสั้นเด็กผู้ชาย ผ้าสำลี (กางเกงช้างชินจัง 130),99.0,18,YV60,450.0,0.0,Kiddee Shop,ค***ง ส***รณ,เทศบาลนครเชียงราย,57000,,01/11/2026 00:00,P&C,J&T,TikTok,PromptPay,,JTTH208548649116,01/11/2026 00:00',
+  ].join("\n");
+
+  const parsedNoSku = await detectAndParseOmsInput(Buffer.from(noSkuItemsCsv, "utf8"));
+  assert.ok(parsedNoSku);
+  assert.equal(parsedNoSku.fileType, "oms_items");
+  assert.equal(parsedNoSku.items.length, 1);
+  assert.equal(parsedNoSku.items[0].orderCode, "YV60");
+  assert.equal(parsedNoSku.items[0].skuCode, "");
+  assert.equal(
+    parsedNoSku.items[0].productName,
+    "*กางเกงขาสั้นเด็กผู้ชาย ผ้าสำลี (กางเกงช้างชินจัง 130)",
+  );
+  assert.equal(parsedNoSku.items[0].quantity, 18);
+
   const invoice = buildInvoice({
     id: 1,
     importId: 1,

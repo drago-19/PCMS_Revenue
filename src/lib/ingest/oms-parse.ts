@@ -945,7 +945,10 @@ export async function detectAndParseOmsInput(
         };
         const skuCode = cleanText(get("skuCode"));
         const orderCode = cleanText(get("orderCode"));
-        if (!skuCode || !orderCode) continue;
+        // บางออเดอร์ขายสินค้าที่ไม่มีรหัส SKU ใน Shipnity — ใช้ชื่อสินค้าในคอลัมน์ B ได้
+        // ห้ามข้ามแถวเพราะจะทำให้บิลขึ้น "รอชื่อสินค้าจากไฟล์" ทั้งที่ไฟล์มีสินค้าอยู่ (เช่น YV60)
+        if (!orderCode) continue;
+        if (!skuCode && !cleanText(get("productName"))) continue;
 
         let channel = normalizeChannel(get("channel"));
         const itemNoteText = cleanText(get("note"));
@@ -993,8 +996,8 @@ export async function detectAndParseOmsInput(
           orderUid,
           orderCode,
           lineNo: nextLine,
-          skuCode,
-          productName: cleanText(get("productName")) ?? skuCode,
+          skuCode: skuCode ?? "",
+          productName: cleanText(get("productName")) ?? skuCode ?? "",
           unitPrice: round2(toNumber(get("unitPrice"))),
           quantity: Math.max(1, Math.round(toNumber(get("quantity")) || 1)),
           orderSalesAmount: round2(toNumber(get("orderSalesAmount") ?? get("salesAmount"))),

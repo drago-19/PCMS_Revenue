@@ -1809,7 +1809,7 @@ export default async function BillsPage({
                         ) : (
                           <div className="mx-auto flex w-full flex-col items-center justify-center gap-0.5 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-2.5 py-1.5 text-center text-xs font-medium text-[#92400e] text-balance">
                             <span className="font-semibold text-[#0f172a]">
-                              {row.productDetail}
+                              {row.productDetail.replace(/^\s*·\s*/, "")}
                             </span>
                             <span>รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity</span>
                           </div>

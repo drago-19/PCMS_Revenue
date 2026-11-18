@@ -102,13 +102,20 @@ export function parseProductItems(detail: string | null): InvoiceItem[] {
   for (const part of detail.split(";")) {
     const trimmed = part.trim();
     if (!trimmed) continue;
-    const omsMatch = /^([^\s·]+)\s*·\s*(.+?)\s*×\s*(\d+)$/.exec(trimmed);
+    // แถวสินค้าที่ไม่มี SKU ถูกเก็บเป็น "· ชื่อสินค้า × จำนวน" — ตัดจุดคั่นนำหน้าออกก่อนแยก
+    const normalized = trimmed.replace(/^·\s*/, "");
+    const omsMatch = /^([^\s·]+)\s*·\s*(.+?)\s*×\s*(\d+)$/.exec(normalized);
     if (omsMatch) {
       items.push({
         sku: omsMatch[1],
         name: omsMatch[2],
         qty: Number(omsMatch[3]),
       });
+      continue;
+    }
+    const nameOnly = /^(.+?)\s*×\s*(\d+)$/.exec(normalized);
+    if (nameOnly) {
+      items.push({ sku: "", name: nameOnly[1], qty: Number(nameOnly[2]) });
       continue;
     }
     const match = /^(\d+)\s*\*\s*(\d+)$/.exec(trimmed);
