@@ -21,19 +21,24 @@ export async function POST(request: Request) {
   }
 
   const shopId = typeof body.shopId === "string" ? body.shopId.trim().slice(0, 120) : "";
+  const requestedPlatform = typeof body.platform === "string" ? body.platform.trim() : "";
+  // แพลตฟอร์มที่รองรับ — ค่าเริ่มต้นคือ TikTok เพื่อไม่ให้ผู้เรียกเดิมพัง
+  const platform = ["TikTok", "Shopee", "Facebook"].includes(requestedPlatform)
+    ? requestedPlatform
+    : "TikTok";
   const { hidden } = body;
   if (!shopId || typeof hidden !== "boolean") {
     return Response.json({ error: "ข้อมูลไม่ครบ", requestId: auth.requestId }, { status: 400 });
   }
 
   try {
-    await setShopHidden(shopId, hidden);
+    await setShopHidden(platform, shopId, hidden);
     await recordAuditLog({
       actor: auth.session.sub,
       action: hidden ? "platform.shop.hide" : "platform.shop.show",
       ipAddress: getClientIp(request),
       outcome: "success",
-      details: { shopId, hidden },
+      details: { platform, shopId, hidden },
       requestId: auth.requestId,
     });
     return Response.json({ ok: true, shopId, hidden, requestId: auth.requestId });

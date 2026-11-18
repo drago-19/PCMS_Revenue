@@ -331,12 +331,12 @@ export async function getShopCompany(shopId: string): Promise<CompanyId> {
 }
 
 /** ซ่อน/แสดงร้านในรายการเลือก — ไม่ตัดการเชื่อมต่อ token ยังอยู่ครบ เปิดกลับได้ทุกเมื่อ */
-export async function setShopHidden(shopId: string, hidden: boolean): Promise<void> {
+export async function setShopHidden(platform: string, shopId: string, hidden: boolean): Promise<void> {
   await query(
     `UPDATE public.platform_accounts
-        SET hidden = $2::boolean, updated_at = now()
-      WHERE platform = $1::text AND account_key = $3::text`,
-    [TIKTOK_PLATFORM, hidden, shopId],
+        SET hidden = $3::boolean, updated_at = now()
+      WHERE platform = $1::text AND account_key = $2::text`,
+    [platform, shopId, hidden],
   );
 }
 

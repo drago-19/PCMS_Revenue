@@ -16,6 +16,8 @@ export interface ShopeeAccountView {
   shopCipher: string | null;
   region: string | null;
   status: string;
+  /** ซ่อนร้านออกจากรายการเลือก (token/การเชื่อมต่อยังอยู่) */
+  hidden?: boolean;
   lastError: string | null;
   accessTokenExpiresAt: string | null;
   connectedAt: string | null;
@@ -51,7 +53,32 @@ export function ShopeeConnectCard({
 }) {
   const router = useRouter();
   const [switchingKey, setSwitchingKey] = useState<string | null>(null);
+  const [hidingKey, setHidingKey] = useState<string | null>(null);
   const accounts = config.accounts;
+
+  /** ซ่อน/แสดงร้าน Shopee — ไม่ตัดการเชื่อมต่อ token จึงเปิดกลับได้ทุกเมื่อ */
+  async function handleSetHidden(shopId: string, hidden: boolean) {
+    if (hidingKey) return;
+    setHidingKey(shopId);
+    try {
+      const res = await fetch("/api/platform/accounts/hidden", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "Shopee", shopId, hidden }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "ทำรายการไม่สำเร็จ");
+        return;
+      }
+      toast.success(hidden ? "ซ่อนร้านแล้ว — token ยังอยู่ เปิดกลับได้ทุกเมื่อ" : "แสดงร้านนี้กลับมาแล้ว");
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
+    } finally {
+      setHidingKey(null);
+    }
+  }
 
   async function handleUseShop(shopId: string) {
     setSwitchingKey(shopId);
@@ -401,6 +428,7 @@ export function ShopeeConnectCard({
                       {activeShopId === account.accountKey ? (
                         <Badge variant="info">ใช้อยู่</Badge>
                       ) : null}
+                      {account.hidden ? <Badge variant="warning">ซ่อนอยู่</Badge> : null}
                     </div>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       Shop ID: {account.accountKey} · Token หมดอายุ{" "}
@@ -409,6 +437,20 @@ export function ShopeeConnectCard({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-[40px]"
+                      onClick={() => handleSetHidden(account.accountKey, !account.hidden)}
+                      disabled={hidingKey !== null}
+                    >
+                      {hidingKey === account.accountKey
+                        ? "กำลังบันทึก…"
+                        : account.hidden
+                          ? "แสดงร้านนี้"
+                          : "ซ่อนร้านนี้"}
+                    </Button>
                     {activeShopId === account.accountKey ? null : (
                       <Button
                         type="button"

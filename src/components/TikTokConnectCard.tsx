@@ -72,7 +72,7 @@ export function TikTokConnectCard({
       const res = await fetch("/api/platform/accounts/hidden", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, hidden }),
+        body: JSON.stringify({ platform: "TikTok", shopId, hidden }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {

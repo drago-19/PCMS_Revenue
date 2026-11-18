@@ -175,6 +175,7 @@ export default async function SaleSettingsPage({ searchParams }: { searchParams:
               shopCipher: account.shopCipher,
               region: account.region,
               status: account.status,
+              hidden: account.hidden,
               lastError: account.lastError,
               accessTokenExpiresAt: account.accessTokenExpiresAt,
               connectedAt: account.connectedAt,
