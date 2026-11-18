@@ -213,8 +213,8 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
   const heldBySku = platform === "tiktok" && shopId ? await listOpenHolds(shopId) : new Map<string, number>();
 
   // ลิงก์ที่คงคำค้นและตัวกรองไว้ขณะเปลี่ยนหน้า/ปิดป๊อปอัป
-  const listHref = (next: { page?: number; filter?: StockListFilter; q?: string; history?: string }) => {
-    const qs = new URLSearchParams({ shop: shopId });
+  const listHref = (next: { page?: number; filter?: StockListFilter; q?: string; history?: string; shop?: string }) => {
+    const qs = new URLSearchParams({ shop: next.shop ?? shopId });
     if (platform !== "tiktok") qs.set("platform", platform);
     const nextSearch = next.q ?? search;
     const nextFilter = next.filter ?? filter;
@@ -264,6 +264,43 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
         connectedPlatforms={connectedPlatforms}
         tones="platform"
       />
+
+      {/* ตัวเลือกร้าน: หน้านี้เดิมแสดงเฉพาะร้านที่ตั้งเป็นค่าใช้งาน ต้องไปสลับที่หน้าตั้งค่า */}
+      {accounts.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="เลือกร้าน">
+          <span className="text-[12px] font-bold text-muted-foreground">ร้าน:</span>
+          {accounts.map((account) => {
+            const active = account.accountKey === shopId;
+            const sandbox = isSandboxShopName(account.shopName);
+            return (
+              <Link
+                key={account.accountKey}
+                href={listHref({ shop: account.accountKey, page: 1 })}
+                scroll={false}
+                aria-current={active ? "true" : undefined}
+                className={cn(
+                  "inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-bold transition-colors",
+                  active
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-border text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {account.shopName}
+                {sandbox ? (
+                  <span
+                    className={cn(
+                      "rounded px-1 text-[10px]",
+                      active ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700",
+                    )}
+                  >
+                    ทดสอบ
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
 
       <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">
         <span>จำนวนคงเหลือดึงจาก {platformTab(platform).label} เข้า DB เราอัตโนมัติ — หน้านี้รีเฟรชตัวเองให้เห็นค่าล่าสุด</span>
