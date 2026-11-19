@@ -33,11 +33,24 @@ const MAX_CONFLICT_RETRIES = 2;
 /** เขียนยอดพร้อมกันได้กี่ประกาศ — ลดเวลารวมเมื่อผูกหลายร้านโดยไม่ชนเพดานคำขอของแพลตฟอร์ม */
 const PUSH_CONCURRENCY = 4;
 
+// เขียนยอดทีละรอบ: ถ้าออเดอร์ทะลักพร้อมกัน (flash sale) ตัวเรียกจะต่อคิวกัน
+// รอบถัดไปจะเห็นยอดตรงแล้วและข้าม — จึงไม่ยิงคำขอซ้ำจนชนเพดานของแพลตฟอร์ม
+let pushQueue: Promise<unknown> = Promise.resolve();
+
 /**
  * เทียบยอดกลางกับยอดบนประกาศของแต่ละร้าน แล้วเขียนเฉพาะที่ยังไม่ตรง
  * เรียกซ้ำได้บ่อยเท่าที่ต้องการ — ยอดตรงแล้วจะเป็น no-op
  */
-export async function pushPoolToListings(options: { skuCodes?: string[] } = {}): Promise<PushResult> {
+export function pushPoolToListings(options: { skuCodes?: string[] } = {}): Promise<PushResult> {
+  const next = pushQueue.then(
+    () => runPush(options),
+    () => runPush(options),
+  );
+  pushQueue = next.catch(() => undefined);
+  return next;
+}
+
+async function runPush(options: { skuCodes?: string[] } = {}): Promise<PushResult> {
   const result: PushResult = { pushed: 0, skipped: 0, failed: 0, errors: [] };
   const codes = options.skuCodes?.length ? options.skuCodes : null;
 
