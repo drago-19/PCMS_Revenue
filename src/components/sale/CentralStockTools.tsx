@@ -146,8 +146,6 @@ export function CentralStockReceiveForm() {
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
         onHand?: number;
-        pushed?: number;
-        pushFailed?: number;
         restored?: boolean;
       };
       if (!response.ok) {
@@ -173,11 +171,8 @@ export function CentralStockReceiveForm() {
         }
       }
 
-      const pushed = payload.pushed ?? 0;
       setMessage(
         `${mode === "add" ? "รับเข้า" : "ตัดออก"} ${effective} · ยอดกลางเหลือ ${payload.onHand ?? 0}${
-          pushed > 0 ? ` · เขียนลงประกาศ ${pushed} ร้าน` : ""
-        }${(payload.pushFailed ?? 0) > 0 ? ` · พลาด ${payload.pushFailed} ร้าน` : ""}${
           payload.restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""
         }${imageNote}`,
       );

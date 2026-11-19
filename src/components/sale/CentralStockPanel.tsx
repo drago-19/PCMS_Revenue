@@ -39,7 +39,7 @@ export function CentralStockPanel({
 
   async function post(
     body: Record<string, unknown>,
-  ): Promise<{ pushed?: number; pushFailed?: number } | null> {
+  ): Promise<{ onHand?: number; restored?: boolean } | null> {
     const response = await fetch("/api/platform/central-stock", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -49,8 +49,7 @@ export function CentralStockPanel({
       error?: string;
       onHand?: number;
       linked?: number;
-      pushed?: number;
-      pushFailed?: number;
+      restored?: boolean;
     };
     if (!response.ok) {
       setError(payload.error ?? "ทำรายการไม่สำเร็จ");
@@ -68,15 +67,11 @@ export function CentralStockPanel({
     setBusy(null);
     if (!result) return;
     setAmount("");
-    // ต้องบอกด้วยว่าเขียนยอดลงประกาศร้านที่ผูกไว้กี่ร้าน ไม่ใช่เงียบ
-    const pushed = result.pushed ?? 0;
-    const note = pushed > 0
-      ? ` · เขียนลงประกาศ ${pushed} ร้าน${(result.pushFailed ?? 0) > 0 ? ` (พลาด ${result.pushFailed})` : ""}`
-      : "";
+    // ยอดบนแพลตฟอร์มไม่ถูกเขียนทับจากระบบ — บอกเฉพาะยอดกลางที่เปลี่ยน
     setMessage(
       sign > 0
-        ? `เติม ${Math.abs(quantity)} เข้าสต็อกกลางแล้ว${note}`
-        : `ตัด ${Math.abs(quantity)} ออกจากสต็อกกลางแล้ว${note}`,
+        ? `เติม ${Math.abs(quantity)} เข้าสต็อกกลางแล้ว`
+        : `ตัด ${Math.abs(quantity)} ออกจากสต็อกกลางแล้ว`,
     );
     router.refresh();
   }

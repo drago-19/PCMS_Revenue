@@ -9,7 +9,6 @@ import {
   reconcileCentralStock,
   unlinkListing,
 } from "@/lib/stock/central";
-import { pushPoolToListings } from "@/lib/stock/push";
 
 // ข้อมูลทดสอบใช้ชื่อเฉพาะของไฟล์นี้ แล้วลบทิ้งท้ายทุกเคส — ไม่แตะของจริง
 const SKU = "TEST-CENTRAL-K-01";
@@ -170,11 +169,6 @@ test("central-stock: ผูกแล้วได้รหัสกลางท�
     assert.equal(again.summary?.onHand, 5, "ผูกซ้ำแล้วยอดต้องเท่าเดิม");
     assert.equal(again.movements.length, 1, "ต้องไม่เกิดประวัติซ้ำ");
 
-    // ยอดตรงกับประกาศอยู่แล้ว → ต้องข้าม ไม่ยิง API
-    const same = await pushPoolToListings({ skuCodes: [SKU_PUSH] });
-    assert.equal(same.pushed, 0);
-    assert.equal(same.skipped, 1, "ยอดตรงกันแล้วต้องข้าม ไม่เขียนซ้ำ");
-
     const untouched = await pool.query<{ quantity: number }>(
       `SELECT quantity FROM platform_stock WHERE platform = 'TikTok' AND shop_id = $1 AND sku_id = $2`,
       [SHOP, SKU_ID],
@@ -215,18 +209,11 @@ test("central-stock: ขายรหัสที่ยังไม่เคย�
     const created = await pool.query(`SELECT on_hand FROM central_stock WHERE sku_code = $1`, [SKU_PUSH]);
     assert.equal(created.rowCount, 0, "การขายต้องไม่สร้างแถวในคลังกลางเอง");
 
-    const noWrite = await pushPoolToListings({ skuCodes: [SKU_PUSH] });
-    assert.equal(noWrite.pushed + noWrite.skipped + noWrite.failed, 0, "รหัสที่ยังไม่เคยเติมของต้องไม่ถูกเลือกเป็นเป้าหมายเลย");
     const listing = await pool.query<{ quantity: number }>(
       `SELECT quantity FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
       [SHOP, SKU_ID],
     );
     assert.equal(Number(listing.rows[0]?.quantity), 40, "ยอดบนประกาศต้องไม่ถูกแตะ");
-
-    // เติมของเข้าคลังกลางจริงแล้วจึงถูกเลือกเป็นเป้าหมายให้เขียน (ร้านทดสอบไม่มีการเชื่อมต่อ TikTok จริง จึงนับเป็น failed ไม่ใช่ pushed)
-    await addCentralStock({ skuCode: SKU_PUSH, quantity: 12, actor: "test" });
-    const wrote = await pushPoolToListings({ skuCodes: [SKU_PUSH] });
-    assert.ok(wrote.pushed + wrote.skipped + wrote.failed >= 1, "เติมของแล้วต้องถูกเลือกเป็นเป้าหมาย");
   } finally {
     await cleanup();
   }

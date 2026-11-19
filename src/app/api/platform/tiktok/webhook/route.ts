@@ -10,7 +10,6 @@ import {
 } from "@/lib/platform/store";
 import { syncOrders, syncReturns, syncStatements, type SyncContext } from "@/lib/platform/sync";
 import { reconcileCentralStock } from "@/lib/stock/central";
-import { pushPoolToListings } from "@/lib/stock/push";
 import { refreshStockForRecentOrders } from "@/lib/platform/stock";
 
 export const runtime = "nodejs";
@@ -96,12 +95,10 @@ export async function POST(request: Request) {
       const money = await syncStatements(ctx, from, to);
       // อัปเดตสต็อกเฉพาะสินค้าที่อยู่ในออเดอร์ที่เพิ่งเปลี่ยน (ไม่ดึงทั้งแคตตาล็อก)
       const stockChanged = await refreshStockForRecentOrders(ctx.shopId, 120);
-      // หักยอดกลางทันทีที่ออเดอร์เข้ามา แล้วเขียนยอดใหม่ลงประกาศของทุกร้าน
-      // เดิมขั้นนี้อยู่ในรอบสต็อก (15 วิ) ทำให้ร้านอื่นยังโชว์ยอดเดิมและขายทับได้ในช่วงนั้น
+      // หักยอดกลางทันทีที่ออเดอร์เข้ามา — ไม่เขียนกลับลงประกาศแล้ว (ยอดบนแพลตฟอร์มเป็นความจริง)
       const central = await reconcileCentralStock({ hours: 2 });
-      const pushed = await pushPoolToListings();
       console.log(
-        `[central-stock] ทันทีหลัง webhook · tiktok ${central.tiktok} · shopee ${central.shopee} · facebook ${central.facebook} · เขียนลงประกาศ ${pushed.pushed} (พลาด ${pushed.failed})`,
+        `[central-stock] ทันทีหลัง webhook · tiktok ${central.tiktok} · shopee ${central.shopee} · facebook ${central.facebook}`,
       );
       console.log(
         `[webhook] ${eventType} · ${account.shopName ?? account.accountKey}: ออเดอร์ ${orders} · คืนสินค้า ${returns} · statement ${money.statements} · สต็อกเปลี่ยน ${stockChanged}`,

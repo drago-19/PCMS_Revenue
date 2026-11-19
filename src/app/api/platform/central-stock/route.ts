@@ -12,7 +12,6 @@ import {
   restoreCentralStock,
   unlinkListing,
 } from "@/lib/stock/central";
-import { pushPoolToListings } from "@/lib/stock/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,8 +92,6 @@ export async function POST(request: Request) {
         note: text(body.note, 200) || null,
         actor: auth.session.sub,
       });
-      // เขียนยอดใหม่ลงประกาศของทุกร้านที่ผูกไว้ทันที (ยอดตรงแล้วจะไม่เขียน)
-      const pushed = await pushPoolToListings({ skuCodes: [result.skuCode] }).catch(() => null);
       await recordAuditLog({
         actor: auth.session.sub,
         action: "platform.central_stock.receive",
@@ -106,26 +103,8 @@ export async function POST(request: Request) {
       return Response.json({
         ok: true,
         ...result,
-        pushed: pushed?.pushed ?? 0,
-        pushFailed: pushed?.failed ?? 0,
         requestId: auth.requestId,
       });
-    }
-
-    if (action === "push") {
-      const skuCodes = Array.isArray(body.skuCodes)
-        ? body.skuCodes.map((item) => text(item)).filter(Boolean)
-        : undefined;
-      const result = await pushPoolToListings({ skuCodes });
-      await recordAuditLog({
-        actor: auth.session.sub,
-        action: "platform.central_stock.push",
-        ipAddress,
-        outcome: result.failed > 0 ? "failure" : "success",
-        details: { pushed: result.pushed, failed: result.failed, skipped: result.skipped },
-        requestId: auth.requestId,
-      });
-      return Response.json({ ok: true, ...result, requestId: auth.requestId });
     }
 
     if (action === "rename-code") {
