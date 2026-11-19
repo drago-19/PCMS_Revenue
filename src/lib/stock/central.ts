@@ -557,14 +557,35 @@ export async function listShopStocksForLinking(options: {
   platform: string;
   shopId: string;
   q?: string;
-  onlyUnlinked?: boolean;
+  linkFilter?: "all" | "linked" | "unlinked";
   page?: number;
   pageSize?: number;
-}): Promise<{ rows: ShopStockRow[]; total: number; page: number; pageCount: number }> {
+}): Promise<{
+  rows: ShopStockRow[];
+  total: number;
+  page: number;
+  pageCount: number;
+  linkedCount: number;
+  unlinkedCount: number;
+}> {
   const q = (options.q ?? "").trim().slice(0, 120);
-  const onlyUnlinked = options.onlyUnlinked === true;
+  const linkFilter =
+    options.linkFilter === "linked" || options.linkFilter === "unlinked" ? options.linkFilter : "all";
   const pageSize = Math.min(100, Math.max(5, options.pageSize ?? CENTRAL_PAGE_SIZE));
   const page = Math.max(1, options.page ?? 1);
+
+  // จำนวนผูกแล้ว/ยังไม่ผูกนับทั้งร้าน (ไม่คูณคำค้น) — ใช้เป็นตัวเลขบนแท็บให้นิ่งระหว่างพิมพ์ค้นหา
+  const countRows = await query<{ linked: number; unlinked: number }>(
+    `SELECT count(*) FILTER (WHERE l.sku_code IS NOT NULL)::int AS linked,
+            count(*) FILTER (WHERE l.sku_code IS NULL)::int AS unlinked
+       FROM platform_stock s
+       LEFT JOIN central_stock_links l
+         ON l.platform = s.platform AND l.shop_id = s.shop_id AND l.sku_id = s.sku_id
+      WHERE s.platform = $1 AND s.shop_id = $2`,
+    [options.platform, options.shopId],
+  );
+  const linkedCount = Number(countRows[0]?.linked ?? 0);
+  const unlinkedCount = Number(countRows[0]?.unlinked ?? 0);
 
   const totalRows = await query<{ total: number }>(
     `SELECT count(*)::int AS total
@@ -573,8 +594,8 @@ export async function listShopStocksForLinking(options: {
          ON l.platform = s.platform AND l.shop_id = s.shop_id AND l.sku_id = s.sku_id
       WHERE s.platform = $1 AND s.shop_id = $2
         AND ($3 = '' OR COALESCE(s.seller_sku, '') ILIKE '%' || $3 || '%' OR COALESCE(s.product_name, '') ILIKE '%' || $3 || '%')
-        AND ($4 = false OR l.sku_code IS NULL)`,
-    [options.platform, options.shopId, q, onlyUnlinked],
+        AND ($4 = 'all' OR ($4 = 'unlinked' AND l.sku_code IS NULL) OR ($4 = 'linked' AND l.sku_code IS NOT NULL))`,
+    [options.platform, options.shopId, q, linkFilter],
   );
   const total = Number(totalRows[0]?.total ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -596,10 +617,10 @@ export async function listShopStocksForLinking(options: {
        LEFT JOIN central_stock c ON c.sku_code = l.sku_code
       WHERE s.platform = $1 AND s.shop_id = $2
         AND ($3 = '' OR COALESCE(s.seller_sku, '') ILIKE '%' || $3 || '%' OR COALESCE(s.product_name, '') ILIKE '%' || $3 || '%')
-        AND ($4 = false OR l.sku_code IS NULL)
+        AND ($4 = 'all' OR ($4 = 'unlinked' AND l.sku_code IS NULL) OR ($4 = 'linked' AND l.sku_code IS NOT NULL))
       ORDER BY (l.sku_code IS NULL) DESC, s.quantity DESC, s.seller_sku NULLS LAST
       LIMIT $5 OFFSET $6`,
-    [options.platform, options.shopId, q, onlyUnlinked, pageSize, (current - 1) * pageSize],
+    [options.platform, options.shopId, q, linkFilter, pageSize, (current - 1) * pageSize],
   );
 
   return {
@@ -614,6 +635,8 @@ export async function listShopStocksForLinking(options: {
     total,
     page: current,
     pageCount,
+    linkedCount,
+    unlinkedCount,
   };
 }
 

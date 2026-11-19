@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { CentralShopPicker } from "@/components/sale/CentralShopPicker";
 import { CentralLinkRow, CentralStockReceiveForm } from "@/components/sale/CentralStockTools";
 import { CentralStockRowActions } from "@/components/sale/CentralStockRowActions";
 import { CentralStockRestoreButton } from "@/components/sale/CentralStockRestoreButton";
@@ -29,6 +30,7 @@ type SearchParams = Promise<{
   shop?: string;
   sq?: string;
   spage?: string;
+  filter?: string;
   unlinked?: string;
 }>;
 
@@ -42,7 +44,13 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
   const page = Math.max(1, Number(params.page ?? "1") || 1);
   const sq = (params.sq ?? "").trim();
   const spage = Math.max(1, Number(params.spage ?? "1") || 1);
-  const onlyUnlinked = params.unlinked === "1";
+  // แท็บสถานะการผูก — รับ filter ใหม่เป็นหลัก และยังเข้าใจ unlinked=1 ของลิงก์เก่า
+  const filter: "all" | "linked" | "unlinked" =
+    params.filter === "linked" || params.filter === "unlinked"
+      ? params.filter
+      : params.unlinked === "1"
+        ? "unlinked"
+        : "all";
   const shopKey = params.shop ?? "";
 
   const [totals, list, shops, archived] = await Promise.all([
@@ -59,26 +67,26 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
         platform: selected.platform,
         shopId: selected.shopId,
         q: sq,
-        onlyUnlinked,
+        linkFilter: filter,
         page: spage,
       })
     : null;
 
   // ลิงก์คงคำค้น/หน้าระหว่างสลับแท็บ — ใช้ตัวช่วยเดียวกันทั้งหน้า
-  const href = (next: Partial<{ q: string; page: number; shop: string; sq: string; spage: number; unlinked: boolean }>) => {
+  const href = (next: Partial<{ q: string; page: number; shop: string; sq: string; spage: number; filter: string }>) => {
     const qs = new URLSearchParams();
     const nextQ = next.q ?? q;
     const nextPage = next.page ?? page;
     const nextShop = next.shop ?? (selected ? keyOf(selected) : "");
     const nextSq = next.sq ?? sq;
     const nextSpage = next.spage ?? spage;
-    const nextUnlinked = next.unlinked ?? onlyUnlinked;
+    const nextFilter = next.filter ?? filter;
     if (nextQ) qs.set("q", nextQ);
     if (nextPage > 1) qs.set("page", String(nextPage));
     if (nextShop) qs.set("shop", nextShop);
     if (nextSq) qs.set("sq", nextSq);
     if (nextSpage > 1) qs.set("spage", String(nextSpage));
-    if (nextUnlinked) qs.set("unlinked", "1");
+    if (nextFilter !== "all") qs.set("filter", nextFilter);
     const text = qs.toString();
     return text ? `/sale/central-stock?${text}` : "/sale/central-stock";
   };
@@ -95,31 +103,35 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
         <LiveRefresh />
       </div>
 
+      {/* การ์ดตัวเลขแยกสีตามความหมาย: น้ำเงิน=จำนวนรหัส · เขียว=ของในคลัง · แดง=ของหมด · เขียวอ่อน=การเชื่อมโยง */}
       <div className="grid grid-cols-2 gap-2.5 min-[900px]:grid-cols-4">
-        <Card padding="padded">
-          <p className="text-[12px] font-semibold text-muted-foreground">รหัสในคลังกลาง</p>
-          <p className="mono text-[24px] font-bold tabular-nums">{num(totals.skus)}</p>
+        <Card padding="padded" className="bg-[color:var(--accent)] ring-1 ring-inset ring-[color:var(--accent-foreground)]/10">
+          <p className="text-[12px] font-semibold text-[color:var(--accent-foreground)]">รหัสในคลังกลาง</p>
+          <p className="mono text-[24px] font-bold tabular-nums text-[color:var(--accent-foreground)]">{num(totals.skus)}</p>
+        </Card>
+        <Card padding="padded" className="bg-[color:var(--ok-soft)] ring-1 ring-inset ring-[color:var(--ok)]/15">
+          <p className="text-[12px] font-semibold text-[color:var(--ok)]">ชิ้นคงเหลือรวม</p>
+          <p className="mono text-[24px] font-bold tabular-nums text-[color:var(--ok)]">{num(totals.units)}</p>
         </Card>
         <Card padding="padded">
-          <p className="text-[12px] font-semibold text-muted-foreground">ชิ้นคงเหลือรวม</p>
-          <p className="mono text-[24px] font-bold tabular-nums">{num(totals.units)}</p>
-        </Card>
-        <Card padding="padded">
-          <p className="text-[12px] font-semibold text-muted-foreground">รหัสที่ของหมด</p>
-          <p className={cn("mono text-[24px] font-bold tabular-nums", totals.out > 0 ? "text-[#b42318]" : "")}>
+          <p className="text-[12px] font-semibold text-[color:var(--danger)]">รหัสที่ของหมด</p>
+          <p className={cn("mono text-[24px] font-bold tabular-nums", totals.out > 0 ? "text-[color:var(--danger)]" : "text-[color:var(--danger)]/60")}>
             {num(totals.out)}
           </p>
         </Card>
-        <Card padding="padded">
-          <p className="text-[12px] font-semibold text-muted-foreground">ประกาศที่ผูกไว้</p>
-          <p className="mono text-[24px] font-bold tabular-nums">{num(totals.links)}</p>
+        <Card padding="padded" className="bg-[color:var(--ok-soft)] ring-1 ring-inset ring-[color:var(--ok)]/15">
+          <p className="text-[12px] font-semibold text-[color:var(--ok)]">ประกาศที่ผูกไว้</p>
+          <p className="mono text-[24px] font-bold tabular-nums text-[color:var(--ok)]">{num(totals.links)}</p>
         </Card>
       </div>
 
+      {/* โซนรับเข้าของ — พื้นฟ้าอ่อนบอกว่านี่คือโซนกรอกข้อมูล แยกจากตารางด้านล่าง */}
+      <div className="rounded-xl bg-[color:var(--accent)] p-3 ring-1 ring-inset ring-[color:var(--accent-foreground)]/15">
       <Card padding="padded" className="flex min-w-0 flex-col gap-3">
         <h2 className="text-[14.5px] font-bold">รับเข้าสต็อกกลาง</h2>
         <CentralStockReceiveForm />
       </Card>
+      </div>
 
       <Card padding="padded" className="flex min-w-0 flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -223,30 +235,22 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
           <p className="text-[13px] text-muted-foreground">ยังไม่มีร้านที่เชื่อมต่อ</p>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="เลือกร้าน">
-              {shops.map((shop) => {
-                const active = selected && keyOf(shop) === keyOf(selected);
-                return (
-                  <Link
-                    key={keyOf(shop)}
-                    href={href({ shop: keyOf(shop), spage: 1 })}
-                    scroll={false}
-                    aria-current={active ? "true" : undefined}
-                    className={cn(
-                      "inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-bold transition-colors",
-                      active ? "border-slate-900 bg-slate-900 text-white" : "border-border text-muted-foreground hover:bg-muted",
-                    )}
-                  >
-                    <span className="text-[10.5px] uppercase opacity-70">{shop.platform}</span>
-                    {shop.shopName ?? shop.shopId}
-                  </Link>
-                );
-              })}
-            </div>
+            {/* dropdown เลือกร้าน + แท็บผูกแล้ว/ยังไม่ผูก — ร้านเยอะไม่ล้นแถวอีกต่อไป */}
+            <CentralShopPicker
+              shops={shops}
+              selectedKey={selected ? keyOf(selected) : ""}
+              filter={filter}
+              counts={{
+                all: shopStocks ? shopStocks.linkedCount + shopStocks.unlinkedCount : 0,
+                linked: shopStocks?.linkedCount ?? 0,
+                unlinkedCount: shopStocks?.unlinkedCount ?? 0,
+              }}
+              keep={{ q, sq, page }}
+            />
 
             <form action="/sale/central-stock" className="flex min-w-0 flex-wrap items-center gap-2">
               {selected ? <input type="hidden" name="shop" value={keyOf(selected)} /> : null}
-              {onlyUnlinked ? <input type="hidden" name="unlinked" value="1" /> : null}
+              {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
               <label className="sr-only" htmlFor="shop-search">
                 ค้นหา SKU ในร้านนี้
               </label>
@@ -259,11 +263,6 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
               />
               <Button type="submit" size="sm" variant="secondary">
                 ค้นหา
-              </Button>
-              <Button asChild size="sm" variant={onlyUnlinked ? "default" : "outline"}>
-                <Link href={href({ unlinked: !onlyUnlinked, spage: 1 })} scroll={false}>
-                  {onlyUnlinked ? "กำลังดู: ยังไม่ผูก" : "เอาเฉพาะที่ยังไม่ผูก"}
-                </Link>
               </Button>
             </form>
 
@@ -305,7 +304,7 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                       {shopStocks.rows.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="py-6 text-center text-muted-foreground">
-                            {sq || onlyUnlinked ? "ไม่พบ SKU ตามเงื่อนไขนี้" : "ร้านนี้ยังไม่มี SKU ที่ดึงมา"}
+                            {sq || filter !== "all" ? "ไม่พบ SKU ตามเงื่อนไขนี้" : "ร้านนี้ยังไม่มี SKU ที่ดึงมา"}
                           </td>
                         </tr>
                       ) : null}
