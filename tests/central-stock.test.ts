@@ -209,3 +209,50 @@ test("central-stock: ผูกแล้วได้รหัสกลางท�
     await cleanup();
   }
 });
+
+test("central-stock: ขายรหัสที่ยังไม่เคยเติมของ ต้องไม่สร้างยอดกลางและไม่เขียนทับประกาศ (เคส 19 พ.ย. 69)", async () => {
+  await cleanup();
+  const pool = getPool();
+  try {
+    // สภาพเดียวกับตอนกดผูกอัตโนมัติ: มีประกาศบนร้าน + มีลิงก์ แต่คลังกลางยังไม่มีของ
+    await pool.query(
+      `INSERT INTO platform_stock (platform, shop_id, sku_id, seller_sku, quantity)
+       VALUES ('TikTok', $1, $2, $3, 40)`,
+      [SHOP, SKU_ID, SKU_PUSH],
+    );
+    await pool.query(
+      `INSERT INTO central_stock_links (platform, shop_id, sku_id, sku_code, linked_by)
+       VALUES ('TikTok', $1, $2, $3, 'auto')`,
+      [SHOP, SKU_ID, SKU_PUSH],
+    );
+    await pool.query(
+      `INSERT INTO platform_orders (platform, shop_id, order_id, order_status, create_time)
+       VALUES ('TikTok', $1, $2, 'AWAITING_SHIPMENT', now())`,
+      [SHOP, ORDER],
+    );
+    await pool.query(
+      `INSERT INTO platform_order_items (platform, shop_id, order_id, line_item_id, sku_id, quantity)
+       VALUES ('TikTok', $1, $2, $3, $4, 3)`,
+      [SHOP, ORDER, LINE, SKU_ID],
+    );
+
+    await reconcileCentralStock({ hours: 1 });
+    const created = await pool.query(`SELECT on_hand FROM central_stock WHERE sku_code = $1`, [SKU_PUSH]);
+    assert.equal(created.rowCount, 0, "การขายต้องไม่สร้างแถวในคลังกลางเอง");
+
+    const noWrite = await pushPoolToListings({ skuCodes: [SKU_PUSH] });
+    assert.equal(noWrite.pushed + noWrite.skipped + noWrite.failed, 0, "รหัสที่ยังไม่เคยเติมของต้องไม่ถูกเลือกเป็นเป้าหมายเลย");
+    const listing = await pool.query<{ quantity: number }>(
+      `SELECT quantity FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
+      [SHOP, SKU_ID],
+    );
+    assert.equal(Number(listing.rows[0]?.quantity), 40, "ยอดบนประกาศต้องไม่ถูกแตะ");
+
+    // เติมของเข้าคลังกลางจริงแล้วจึงถูกเลือกเป็นเป้าหมายให้เขียน (ร้านทดสอบไม่มีการเชื่อมต่อ TikTok จริง จึงนับเป็น failed ไม่ใช่ pushed)
+    await addCentralStock({ skuCode: SKU_PUSH, quantity: 12, actor: "test" });
+    const wrote = await pushPoolToListings({ skuCodes: [SKU_PUSH] });
+    assert.ok(wrote.pushed + wrote.skipped + wrote.failed >= 1, "เติมของแล้วต้องถูกเลือกเป็นเป้าหมาย");
+  } finally {
+    await cleanup();
+  }
+});

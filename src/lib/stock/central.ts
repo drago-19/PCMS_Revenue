@@ -299,10 +299,13 @@ async function applyDeductions(target: DeductionTarget): Promise<number> {
         GROUP BY ins.sku_code
      ),
      bump AS (
-       INSERT INTO central_stock (sku_code, on_hand, updated_at)
-       SELECT sku_code, d, now() FROM delta WHERE d <> 0
-       ON CONFLICT (sku_code) DO UPDATE
-         SET on_hand = central_stock.on_hand + EXCLUDED.on_hand, updated_at = now()
+       -- ต้องเป็นการ UPDATE เท่านั้น — การขายห้ามสร้างแถวในคลังกลางเอง
+       -- ถ้าสร้างได้ ยอดจะติดลบจากยอดขายอย่างเดียว แล้วตัวเขียนยอดเอา 0 ไปทับประกาศของร้านจริง
+       UPDATE central_stock c
+          SET on_hand = c.on_hand + delta.d, updated_at = now()
+         FROM delta
+        WHERE c.sku_code = delta.sku_code
+          AND delta.d <> 0
        RETURNING 1 AS done
      )
      SELECT count(*)::int AS n FROM bump`,

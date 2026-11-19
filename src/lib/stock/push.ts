@@ -59,7 +59,13 @@ export async function pushPoolToListings(options: { skuCodes?: string[] } = {}):
        JOIN central_stock c ON c.sku_code = l.sku_code AND c.archived_at IS NULL
        JOIN platform_stock s
          ON s.platform = l.platform AND s.shop_id = l.shop_id AND s.sku_id = l.sku_id
+      -- ต้องเคยมีของเข้าคลังกลางจริง (รับเข้าหรือตั้งต้นตอนผูก/คืนยอด) เท่านั้น
+      -- รหัสที่มียอดเพราะถูกหักจากการขายอย่างเดียวจะไม่ถูกเขียนลงประกาศ — กันกรณีประกาศถูกล้างเป็น 0 ยกชุด
       WHERE ($1::text[] IS NULL OR l.sku_code = ANY($1::text[]))
+        AND EXISTS (
+          SELECT 1 FROM central_stock_movements m
+           WHERE m.sku_code = c.sku_code AND m.kind IN ('receive', 'open')
+        )
       ORDER BY l.platform, l.shop_id, l.sku_id`,
     [codes],
   );
