@@ -18,6 +18,7 @@ export function SaleStat({
   tone = "default",
   format = "int",
   bare = false,
+  tint = "neutral",
 }: {
   label: string;
   value: number;
@@ -28,6 +29,8 @@ export function SaleStat({
   format?: "int" | "money";
   /** วางในแถบสรุปการ์ดเดียว (เซลล์ไร้ขอบ) — ปกติเป็นการ์ดลอยของตัวเอง */
   bare?: boolean;
+  /** สีประจำช่อง: น้ำเงิน=จำนวน · เขียว=เงินเข้า · แดง=ยกเลิก — แยกความหมายด้วยสี */
+  tint?: "neutral" | "accent" | "ok" | "danger";
 }) {
   const [delta, setDelta] = useState<number | null>(null);
   const previous = useRef(value);
@@ -62,10 +65,23 @@ export function SaleStat({
         "px-3.5 py-3",
         // โหมด bare = เซลล์ในแถบสรุป (การ์ดแม่วาดเส้นแบ่งให้แล้ว) · ปกติ = การ์ดลอยของตัวเอง
         bare ? "bg-card" : "rounded-xl border border-border bg-card",
+        tint === "accent" && "bg-[color:var(--accent)]",
+        tint === "ok" && "bg-[color:var(--ok-soft)]",
+        tint === "danger" && "bg-[color:var(--danger-soft)]",
       )}
     >
       <div className="flex min-w-0 items-start justify-between gap-2">
-        <p className="text-[12px] font-semibold text-muted-foreground">{label}</p>
+        <p
+          className={cn(
+            "text-[12px] font-semibold",
+            tint === "accent" && "text-[color:var(--accent-foreground)]",
+            tint === "ok" && "text-[color:var(--ok)]",
+            tint === "danger" && "text-[color:var(--danger)]",
+            tint === "neutral" && "text-muted-foreground",
+          )}
+        >
+          {label}
+        </p>
         {deltaText ? (
           <span
             key={deltaText}
@@ -87,6 +103,9 @@ export function SaleStat({
           "mt-1 text-[22px] leading-8 font-bold tabular-nums",
           tone === "positive" && "text-[color:var(--ok)]",
           tone === "negative" && "text-[color:var(--danger)]",
+          tone === "default" && tint === "accent" && "text-[color:var(--accent-foreground)]",
+          tone === "default" && tint === "ok" && "text-[color:var(--ok)]",
+          tone === "default" && tint === "danger" && "text-[color:var(--danger)]",
         )}
       >
         {/* ตัวเลขยาว ๆ ย่อแบบหน้า /bills — กดที่ตัวเลขเพื่อสลับย่อ/เต็ม */}

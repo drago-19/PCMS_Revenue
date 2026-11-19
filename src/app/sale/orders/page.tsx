@@ -13,6 +13,7 @@ import { IconReceipt } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { platformDbName, platformTab, readPlatform } from "@/lib/platform/platforms";
 import {
@@ -228,8 +229,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
         />
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
-          {/* ตัวกรองทั้งหมดรวมในการ์ดเดียว: ค้นหา → ช่วงเวลา → สถานะ อ่านบนลงล่างทีละชั้น */}
-          <Card padding="padded" className="flex min-w-0 flex-col gap-3">
+          {/* โซนค้นหาและกรอง — พื้นฟ้าอ่อนบอกหน้าที่ของโซนนี้ แยกจากรายการด้านล่าง */}
+          <div className="flex min-w-0 flex-col gap-3 rounded-xl bg-[color:var(--accent)] p-3 ring-1 ring-inset ring-[color:var(--accent-foreground)]/15">
+            <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[color:var(--accent-foreground)]">
+              <Search className="size-3.5" aria-hidden="true" />
+              ค้นหาและกรอง
+            </p>
           <form action="/sale/orders" className="flex flex-wrap items-center gap-2">
             {platform !== "tiktok" ? <input type="hidden" name="platform" value={platform} /> : null}
             {shop ? <input type="hidden" name="shop" value={shop} /> : null}
@@ -303,20 +308,20 @@ export default async function OrdersPage({ searchParams }: { searchParams: Searc
               พรีออเดอร์
             </Link>
           </div>
-          </Card>
+          </div>
 
-          {/* สรุปช่วงที่กรองอยู่: แถบการ์ดเดียว แบ่งเซลล์ด้วยเส้น 1px — ไม่มีการ์ดตกหล่นแถวล่าง */}
+          {/* แถบตัวเลขแยกสีตามความหมาย: น้ำเงิน=จำนวน · เขียว=เงินเข้า · แดง=ยกเลิก */}
           <Card padding="none" className="overflow-hidden">
             <div className="grid grid-cols-2 gap-px bg-border min-[640px]:grid-cols-5 max-[639px]:[&>*:last-child]:col-span-2">
-              <SaleStat bare label="ออเดอร์" value={summary.orders} scopeKey={summaryScope} />
+              <SaleStat bare tint="accent" label="ออเดอร์" value={summary.orders} scopeKey={summaryScope} />
               <SaleStat bare label="ชิ้นรวม" value={summary.pieces} scopeKey={summaryScope} />
               <SaleStat bare label="สินค้า (SKU)" value={summary.skus} scopeKey={summaryScope} />
-              <SaleStat bare label="ยอดโอนรวม" value={summary.settlement} format="money" tone="positive" scopeKey={summaryScope} />
+              <SaleStat bare tint="ok" label="ยอดโอนรวม" value={summary.settlement} format="money" scopeKey={summaryScope} />
               <SaleStat
                 bare
+                tint="danger"
                 label="ยกเลิก"
                 value={summary.cancelled}
-                tone={summary.cancelled > 0 ? "negative" : "default"}
                 scopeKey={summaryScope}
               />
             </div>
