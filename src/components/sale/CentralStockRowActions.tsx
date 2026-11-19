@@ -56,6 +56,34 @@ export function CentralStockRowActions({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [links, setLinks] = useState<Array<{
+    platform: string;
+    shopId: string;
+    shopName: string | null;
+    skuId: string;
+    sellerSku: string | null;
+    quantity: number | null;
+  }> | null>(null);
+
+  // เปิดป๊อปอัพแล้วดึงรายการร้านที่ผูกอยู่ — เห็นทันทีว่าไปเขียนยอดที่ร้านไหนได้บ้าง
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/platform/central-stock/detail?code=${encodeURIComponent(skuCode)}`);
+        const payload = (await response.json().catch(() => ({}))) as {
+          detail?: { links?: Array<{ platform: string; shopId: string; shopName: string | null; skuId: string; sellerSku: string | null; quantity: number | null }> };
+        };
+        if (alive) setLinks(payload.detail?.links ?? []);
+      } catch {
+        if (alive) setLinks([]);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [open, skuCode]);
 
   useEffect(() => {
     setBase(onHand);
@@ -214,6 +242,37 @@ export function CentralStockRowActions({
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
+          <section aria-label="ร้านที่ผูกอยู่" className="flex flex-col gap-1.5 rounded-xl border border-border bg-card p-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-[13px] font-bold">ผูกกับร้านไหนบ้าง</h3>
+              <span className="text-[11.5px] text-muted-foreground">
+                {links === null ? "กำลังโหลด…" : `${links.length} ประกาศ`}
+              </span>
+            </div>
+            {links !== null && links.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground">ยังไม่ผูกกับร้านไหน — ผูกได้ที่ตารางด้านล่างของหน้า</p>
+            ) : null}
+            {links !== null && links.length > 0 ? (
+              <ul className="flex flex-col gap-1">
+                {links.map((link) => (
+                  <li
+                    key={`${link.platform}-${link.shopId}-${link.skuId}`}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[12px]"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className="text-[10.5px] uppercase text-muted-foreground">{link.platform}</span>{" "}
+                      {link.shopName ?? link.shopId}
+                    </span>
+                    <span className="mono shrink-0 text-[11.5px] text-muted-foreground">{link.sellerSku ?? link.skuId}</span>
+                    <span className="mono shrink-0 tabular-nums">
+                      {link.quantity === null ? "—" : link.quantity.toLocaleString("th-TH")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+
           <section aria-label="ปรับจำนวนสต็อกกลาง" className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-[13px] font-bold">ปรับจำนวนสต็อกกลาง</h3>

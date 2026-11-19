@@ -25,9 +25,12 @@ export type CentralStockMovement = {
 export type CentralStockLinkRow = {
   platform: string;
   shopId: string;
+  shopName: string | null;
   skuId: string;
   sellerSku: string | null;
   productName: string | null;
+  quantity: number | null;
+  linkedAt: string | null;
 };
 
 type DeductionTarget = {
@@ -364,16 +367,22 @@ export async function getCentralStockDetail(skuCode: string): Promise<{
   const links = await query<{
     platform: string;
     shop_id: string;
+    shop_name: string | null;
     sku_id: string;
     seller_sku: string | null;
     product_name: string | null;
+    quantity: number | null;
+    linked_at: string | null;
   }>(
-    `SELECT l.platform, l.shop_id, l.sku_id, s.seller_sku, s.product_name
+    `SELECT l.platform, l.shop_id, a.shop_name, l.sku_id, s.seller_sku, s.product_name,
+            s.quantity, l.linked_at
        FROM central_stock_links l
        LEFT JOIN platform_stock s
          ON s.platform = l.platform AND s.shop_id = l.shop_id AND s.sku_id = l.sku_id
+       LEFT JOIN platform_accounts a
+         ON a.platform = l.platform AND a.account_key = l.shop_id
       WHERE l.sku_code = $1
-      ORDER BY l.platform, l.shop_id`,
+      ORDER BY l.platform, a.shop_name NULLS LAST, l.shop_id`,
     [code],
   );
   return {
@@ -395,9 +404,12 @@ export async function getCentralStockDetail(skuCode: string): Promise<{
     links: links.map((row) => ({
       platform: row.platform,
       shopId: row.shop_id,
+      shopName: row.shop_name,
       skuId: row.sku_id,
       sellerSku: row.seller_sku,
       productName: row.product_name,
+      quantity: row.quantity === null ? null : Number(row.quantity),
+      linkedAt: row.linked_at,
     })),
   };
 }
