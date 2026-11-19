@@ -161,52 +161,27 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือ</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">ร้านที่ผูก</th>
                 <th scope="col" className="py-1.5 pr-2 text-right font-bold">ประกาศที่ผูก</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">อัปเดต</th>
-                <th scope="col" className="py-1.5 text-right font-bold">จัดการ</th>
+                <th scope="col" className="py-1.5 text-right font-bold">อัปเดต</th>
               </tr>
             </thead>
             <tbody>
+              {/* แถวทั้งแถวกดได้ — คอมโพเนนต์เรนเดอร์ <tr> เองและเปิดป๊อปอัพเมื่อกด */}
               {list.rows.map((row) => (
-                <tr key={row.skuCode} className="border-b border-border/60">
-                  <td className="py-1.5 pr-2">
-                    <span className="flex size-9 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
-                      {row.hasImage ? (
-                        <img
-                          src={`/api/platform/central-stock/image?code=${encodeURIComponent(row.skuCode)}`}
-                          alt={`รูป ${row.skuCode}`}
-                          className="size-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : row.imageUrl ? (
-                        <img
-                          src={platformImageSrc(row.imageUrl) ?? row.imageUrl}
-                          alt={`รูป ${row.skuCode}`}
-                          className="size-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : null}
-                    </span>
-                  </td>
-                  <td className="mono py-1.5 pr-2 font-bold">{row.skuCode}</td>
-                  <td className="max-w-[260px] truncate py-1.5 pr-2">{row.productName ?? "—"}</td>
-                  <td className={cn("mono py-1.5 pr-2 text-right font-bold", row.onHand <= 0 ? "text-[#b42318]" : "")}>
-                    {num(row.onHand)}
-                  </td>
-                  <td className="mono py-1.5 pr-2 text-right">{num(row.shopCount)}</td>
-                  <td className="mono py-1.5 pr-2 text-right">{num(row.listingCount)}</td>
-                  <td className="py-1.5 pr-2 text-right text-muted-foreground">{thaiDateTime(row.updatedAt)}</td>
-                  <td className="py-1.5 text-right">
-                    <CentralStockRowActions
-                      skuCode={row.skuCode}
-                      productName={row.productName}
-                      onHand={row.onHand}
-                    />
-                  </td>
-                </tr>
+                <CentralStockRowActions
+                  key={row.skuCode}
+                  skuCode={row.skuCode}
+                  productName={row.productName}
+                  onHand={row.onHand}
+                  hasImage={row.hasImage}
+                  imageUrl={row.imageUrl}
+                  shopCount={row.shopCount}
+                  listingCount={row.listingCount}
+                  updatedAtText={thaiDateTime(row.updatedAt)}
+                />
               ))}
               {list.rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
                     {q
                       ? "ไม่พบรหัสที่ค้นหา"
                       : totals.links > 0
