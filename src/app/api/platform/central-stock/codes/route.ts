@@ -22,6 +22,8 @@ export async function GET(request: Request) {
       onHand: row.onHand,
       shopCount: row.shopCount,
       listingCount: row.listingCount,
+      hasImage: row.hasImage,
+      imageUrl: row.imageUrl,
     })),
   });
 }

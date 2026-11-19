@@ -467,6 +467,8 @@ type CentralCodeRow = {
   onHand: number;
   shopCount: number;
   listingCount: number;
+  hasImage: boolean;
+  imageUrl: string | null;
 };
 
 /**
@@ -605,6 +607,25 @@ export function CentralLinkRow({
                       disabled={busy !== null}
                       className="flex w-full min-h-[44px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                     >
+                      <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                        {row.hasImage ? (
+                          <img
+                            src={`/api/platform/central-stock/image?code=${encodeURIComponent(row.skuCode)}`}
+                            alt={`รูป ${row.skuCode}`}
+                            className="size-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : row.imageUrl ? (
+                          <img
+                            src={platformImageSrc(row.imageUrl) ?? row.imageUrl}
+                            alt={`รูป ${row.skuCode}`}
+                            className="size-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <PackageOpen className="size-4 text-muted-foreground/50" aria-hidden="true" />
+                        )}
+                      </span>
                       <span className="mono w-[132px] shrink-0 truncate text-[12.5px] font-bold">{row.skuCode}</span>
                       <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
                         {row.productName ?? "—"}
