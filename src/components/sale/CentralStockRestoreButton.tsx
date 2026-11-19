@@ -15,7 +15,7 @@ export function CentralStockRestoreButton({ skuCode }: { skuCode: string }) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/platform/central-stock", {
+      const response = await fetch("/api/platform/central-stock/actions", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "restore", skuCode }),

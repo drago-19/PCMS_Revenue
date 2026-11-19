@@ -132,9 +132,19 @@ export function CentralStockRowActions({
     if (!next || next === skuCode) return;
     setBusy("code");
     setNotice(null);
-    const result = await post({ action: "rename-code", skuCode, newSkuCode: next });
+    // เรียก endpoint เฉพาะของงานนี้ (ไฟล์แยก) — ไม่ผ่าน route รวมที่อาจถูกแคชไว้
+    const response = await fetch("/api/platform/central-stock/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "rename-code", skuCode, newSkuCode: next }),
+    });
     setBusy(null);
-    if (!result) return;
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error ?? "เปลี่ยนรหัสไม่สำเร็จ");
+      return;
+    }
+    setError(null);
     setOpen(false);
     router.refresh();
   }
@@ -169,9 +179,17 @@ export function CentralStockRowActions({
     }
     setBusy("archive");
     setNotice(null);
-    const result = await post({ action: "archive", skuCode });
+    const response = await fetch("/api/platform/central-stock/actions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "archive", skuCode }),
+    });
     setBusy(null);
-    if (!result) return;
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error ?? "ลบรหัสไม่สำเร็จ");
+      return;
+    }
     setOpen(false);
     router.refresh();
   }

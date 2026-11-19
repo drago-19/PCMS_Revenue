@@ -730,6 +730,13 @@ export async function archiveCentralStock(input: {
   if (!skuCode) throw new Error("ต้องระบุรหัสสินค้าของสต็อกกลาง");
 
   return withTransaction(async (db) => {
+    const exists = await query<{ sku_code: string }>(
+      `SELECT sku_code FROM central_stock WHERE sku_code = $1 AND archived_at IS NULL`,
+      [skuCode],
+      db,
+    );
+    if (exists.length === 0) throw new Error(`ไม่พบรหัส ${skuCode} ในคลังกลาง`);
+
     const removed = await query<{ n: number }>(
       `WITH gone AS (DELETE FROM central_stock_links WHERE sku_code = $1 RETURNING 1)
        SELECT count(*)::int AS n FROM gone`,
@@ -755,7 +762,13 @@ export async function archiveCentralStock(input: {
 export async function restoreCentralStock(input: { skuCode: string; actor?: string | null }): Promise<void> {
   const skuCode = normalizeSkuCode(input.skuCode);
   if (!skuCode) throw new Error("ต้องระบุรหัสสินค้าของสต็อกกลาง");
-  await query(`UPDATE central_stock SET archived_at = NULL, updated_at = now() WHERE sku_code = $1`, [skuCode]);
+  const rows = await query<{ sku_code: string }>(
+    `UPDATE central_stock SET archived_at = NULL, updated_at = now()
+      WHERE sku_code = $1 AND archived_at IS NOT NULL
+      RETURNING sku_code`,
+    [skuCode],
+  );
+  if (rows.length === 0) throw new Error(`ไม่พบรหัส ${skuCode} ที่ถูกเลิกใช้`);
   await query(
     `INSERT INTO central_stock_movements (sku_code, kind, quantity, source, note, actor)
      VALUES ($1, 'restore', 0, 'manual', 'นำรหัสกลับมาใช้', $2)`,
@@ -809,6 +822,11 @@ export async function setCentralStockImage(input: {
   if (input.buffer.length > MAX_IMAGE_BYTES) {
     throw new Error(`รูปใหญ่เกิน ${Math.round(MAX_IMAGE_BYTES / 1000)} KB`);
   }
+  const existing = await query<{ sku_code: string }>(
+    `SELECT sku_code FROM central_stock WHERE sku_code = $1`,
+    [skuCode],
+  );
+  if (existing.length === 0) throw new Error(`ไม่พบรหัส ${skuCode} ในคลังกลาง`);
   const { compressFileBlob } = await import("@/lib/file-blob");
   await query(
     `INSERT INTO central_stock_images (sku_code, content_type, data, updated_at)

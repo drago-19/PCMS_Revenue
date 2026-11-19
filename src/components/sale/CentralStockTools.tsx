@@ -158,7 +158,7 @@ export function CentralStockReceiveForm() {
       if (imageFile) {
         const dataUrl = await readImageAsDataUrl(imageFile);
         if (dataUrl) {
-          const uploaded = await fetch("/api/platform/central-stock", {
+          const uploaded = await fetch("/api/platform/central-stock/actions", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ action: "image", skuCode: code, dataUrl }),
