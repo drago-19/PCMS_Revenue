@@ -36,7 +36,7 @@ export function CentralStockLinkDialog({
       {/* จำกัดสูง + เลื่อนในตัว — ตารางผูกยาวได้แต่ไม่ล้นจอ
           กว้าง 4xl เพื่อให้ตาราง min-w-[760px] อยู่ได้โดยไม่ต้องสกอลแนวนอนในป๊อปอัพ */}
       {/* sm:max-w-4xl แทนที่ sm:max-w-lg ตั้งต้นของ DialogContent ผ่าน tailwind-merge — ใส่แค่ max-w-4xl ไม่พอเพราะโดน sm:max-w-lg ชนะ */}
-      <DialogContent className="max-h-[85dvh] max-w-4xl sm:max-w-4xl overflow-y-auto" style={SALE_THEME}>
+      <DialogContent className="@container max-h-[85dvh] max-w-4xl sm:max-w-4xl overflow-y-auto" style={SALE_THEME}>
         <DialogHeader className="pr-11">
           <DialogTitle>ผูก SKU ของแต่ละร้าน</DialogTitle>
           <DialogDescription>

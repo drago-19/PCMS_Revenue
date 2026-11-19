@@ -181,64 +181,52 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
 
                     {shopStocks ? (
                       <>
-                        <div className="overflow-x-auto">
-                          <table className="w-full min-w-[760px] text-[12.5px]">
-                            <thead>
-                              <tr className="border-b border-[color:var(--foreground)]/25 text-[11.5px] font-semibold text-muted-foreground">
-                                <th scope="col" className="py-1.5 pr-2 text-left font-bold">
-                                  SKU บนร้าน
-                                </th>
-                                <th scope="col" className="py-1.5 pr-2 text-left font-bold">
-                                  สินค้า
-                                </th>
-                                <th scope="col" className="py-1.5 pr-2 text-right font-bold">
-                                  คงเหลือบนร้าน
-                                </th>
-                                <th scope="col" className="py-1.5 pr-2 text-left font-bold">
-                                  รหัสกลางที่ผูก
-                                </th>
-                                <th scope="col" className="py-1.5 text-right font-bold">
-                                  คงเหลือกลาง
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {shopStocks.rows.map((row) => (
-                                <tr key={row.skuId} className="border-b border-border/60">
-                                  <td className="mono py-1.5 pr-2 font-bold">{row.sellerSku ?? row.skuId}</td>
-                                  <td className="max-w-[240px] truncate py-1.5 pr-2">{row.productName ?? "—"}</td>
-                                  <td className="mono py-1.5 pr-2 text-right">{num(row.quantity)}</td>
-                                  <td className="py-1.5 pr-2">
-                                    {selected ? (
-                                      <CentralLinkRow
-                                        platform={selected.platform}
-                                        shopId={selected.shopId}
-                                        skuId={row.skuId}
-                                        sellerSku={row.sellerSku}
-                                        linkedCode={row.linkedCode}
-                                      />
-                                    ) : null}
-                                  </td>
-                                  <td
+                        {/* การ์ดต่อ SKU แทนตาราง — ตาราง min-w-[760px] ทำให้ป๊อปอัพต้องเลื่อนแนวนอนเมื่อจอ/ป๊อปอัพแคบ
+                            @min- คือ container query ตามความกว้างป๊อปอัพ (DialogContent เป็น @container) ไม่ใช่ตามจอ */}
+                        <ul className="grid gap-2 @min-[640px]:grid-cols-2" aria-label="รายการ SKU ในร้านนี้">
+                          {shopStocks.rows.map((row) => (
+                            <li
+                              key={row.skuId}
+                              className="flex min-w-0 flex-col gap-1.5 rounded-xl border border-border bg-card p-3"
+                            >
+                              <div className="flex min-w-0 items-baseline justify-between gap-2">
+                                <span className="mono truncate text-[13px] font-bold">{row.sellerSku ?? row.skuId}</span>
+                                <span className="shrink-0 text-[11.5px] text-muted-foreground">
+                                  บนร้าน{" "}
+                                  <b className="mono tabular-nums text-foreground">{num(row.quantity)}</b>
+                                </span>
+                              </div>
+                              <p className="truncate text-[12px] text-muted-foreground">{row.productName ?? "—"}</p>
+                              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2">
+                                {selected ? (
+                                  <CentralLinkRow
+                                    platform={selected.platform}
+                                    shopId={selected.shopId}
+                                    skuId={row.skuId}
+                                    sellerSku={row.sellerSku}
+                                    linkedCode={row.linkedCode}
+                                  />
+                                ) : null}
+                                <span className="ml-auto shrink-0 text-[11.5px] text-muted-foreground">
+                                  คงเหลือกลาง{" "}
+                                  <b
                                     className={cn(
-                                      "mono py-1.5 text-right",
-                                      row.linkedOnHand !== null && row.linkedOnHand <= 0 ? "font-bold text-[#b42318]" : "",
+                                      "mono text-[13px] tabular-nums",
+                                      row.linkedOnHand !== null && row.linkedOnHand <= 0 ? "text-[#b42318]" : "text-foreground",
                                     )}
                                   >
                                     {row.linkedOnHand === null ? "—" : num(row.linkedOnHand)}
-                                  </td>
-                                </tr>
-                              ))}
-                              {shopStocks.rows.length === 0 ? (
-                                <tr>
-                                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
-                                    {sq || filter !== "all" ? "ไม่พบ SKU ตามเงื่อนไขนี้" : "ร้านนี้ยังไม่มี SKU ที่ดึงมา"}
-                                  </td>
-                                </tr>
-                              ) : null}
-                            </tbody>
-                          </table>
-                        </div>
+                                  </b>
+                                </span>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                        {shopStocks.rows.length === 0 ? (
+                          <p className="py-6 text-center text-[12.5px] text-muted-foreground">
+                            {sq || filter !== "all" ? "ไม่พบ SKU ตามเงื่อนไขนี้" : "ร้านนี้ยังไม่มี SKU ที่ดึงมา"}
+                          </p>
+                        ) : null}
 
                         <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
                           <span>
