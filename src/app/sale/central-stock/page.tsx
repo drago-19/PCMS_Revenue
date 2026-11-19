@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PackageOpen } from "lucide-react";
 import { SaleHeader } from "@/components/sale/SaleHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { CentralStockRowActions } from "@/components/sale/CentralStockRowActions
 import { CentralStockRestoreButton } from "@/components/sale/CentralStockRestoreButton";
 import { LiveRefresh } from "@/components/sale/LiveRefresh";
 import { thaiDateTime } from "@/lib/platform/period";
+import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { SALE_THEME } from "@/lib/sale/theme";
 import {
   centralStockTotals,
@@ -184,19 +186,42 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                         {/* การ์ดต่อ SKU แทนตาราง — ตาราง min-w-[760px] ทำให้ป๊อปอัพต้องเลื่อนแนวนอนเมื่อจอ/ป๊อปอัพแคบ
                             @min- คือ container query ตามความกว้างป๊อปอัพ (DialogContent เป็น @container) ไม่ใช่ตามจอ */}
                         <ul className="grid gap-2 @min-[640px]:grid-cols-2" aria-label="รายการ SKU ในร้านนี้">
-                          {shopStocks.rows.map((row) => (
+                          {shopStocks.rows.map((row) => {
+                            // รูปของประกาศร้านก่อน — ไม่มีและผูกกับรหัสกลางที่มีรูปแนบ จึงใช้รูปกลาง
+                            const cardImage = row.imageUrl
+                              ? platformImageSrc(row.imageUrl) ?? row.imageUrl
+                              : row.linkedCode && row.centralHasImage
+                                ? `/api/platform/central-stock/image?code=${encodeURIComponent(row.linkedCode)}`
+                                : null;
+                            return (
                             <li
                               key={row.skuId}
                               className="flex min-w-0 flex-col gap-1.5 rounded-xl border border-border bg-card p-3"
                             >
-                              <div className="flex min-w-0 items-baseline justify-between gap-2">
-                                <span className="mono truncate text-[13px] font-bold">{row.sellerSku ?? row.skuId}</span>
-                                <span className="shrink-0 text-[11.5px] text-muted-foreground">
-                                  บนร้าน{" "}
-                                  <b className="mono tabular-nums text-foreground">{num(row.quantity)}</b>
+                              <div className="flex min-w-0 items-start gap-2.5">
+                                <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
+                                  {cardImage ? (
+                                    <img
+                                      src={cardImage}
+                                      alt={`รูป ${row.sellerSku ?? row.skuId}`}
+                                      className="size-full object-cover"
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <PackageOpen className="size-5 text-muted-foreground/50" aria-hidden="true" />
+                                  )}
                                 </span>
+                                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                  <div className="flex min-w-0 items-baseline justify-between gap-2">
+                                    <span className="mono truncate text-[13px] font-bold">{row.sellerSku ?? row.skuId}</span>
+                                    <span className="shrink-0 text-[11.5px] text-muted-foreground">
+                                      บนร้าน{" "}
+                                      <b className="mono tabular-nums text-foreground">{num(row.quantity)}</b>
+                                    </span>
+                                  </div>
+                                  <p className="truncate text-[12px] text-muted-foreground">{row.productName ?? "—"}</p>
+                                </div>
                               </div>
-                              <p className="truncate text-[12px] text-muted-foreground">{row.productName ?? "—"}</p>
                               <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2">
                                 {selected ? (
                                   <CentralLinkRow
@@ -220,7 +245,8 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                                 </span>
                               </div>
                             </li>
-                          ))}
+                            );
+                          })}
                         </ul>
                         {shopStocks.rows.length === 0 ? (
                           <p className="py-6 text-center text-[12.5px] text-muted-foreground">

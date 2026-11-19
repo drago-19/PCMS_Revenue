@@ -550,6 +550,9 @@ export type ShopStockRow = {
   quantity: number;
   linkedCode: string | null;
   linkedOnHand: number | null;
+  /** รูปจากประกาศร้านนี้เอง — ไม่มีและผูกอยู่จะใช้รูปที่แนบกับรหัสกลางแทน */
+  imageUrl: string | null;
+  centralHasImage: boolean;
 };
 
 /** สินค้าของร้านหนึ่ง พร้อมสถานะการผูกกับสต็อกกลาง — ของที่ยังไม่ผูกขึ้นก่อน */
@@ -608,9 +611,13 @@ export async function listShopStocksForLinking(options: {
     quantity: number;
     linked_code: string | null;
     linked_on_hand: number | null;
+    image_url: string | null;
+    central_has_image: boolean;
   }>(
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity,
-            l.sku_code AS linked_code, c.on_hand AS linked_on_hand
+            l.sku_code AS linked_code, c.on_hand AS linked_on_hand,
+            s.image_url,
+            EXISTS (SELECT 1 FROM central_stock_images i WHERE i.sku_code = l.sku_code) AS central_has_image
        FROM platform_stock s
        LEFT JOIN central_stock_links l
          ON l.platform = s.platform AND l.shop_id = s.shop_id AND l.sku_id = s.sku_id
@@ -631,6 +638,8 @@ export async function listShopStocksForLinking(options: {
       quantity: Number(row.quantity),
       linkedCode: row.linked_code,
       linkedOnHand: row.linked_on_hand === null ? null : Number(row.linked_on_hand),
+      imageUrl: row.image_url,
+      centralHasImage: Boolean(row.central_has_image),
     })),
     total,
     page: current,
