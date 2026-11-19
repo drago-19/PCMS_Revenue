@@ -1,13 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export type PickerShop = { platform: string; shopId: string; shopName: string | null };
@@ -26,6 +20,7 @@ const th = (n: number) => n.toLocaleString("th-TH");
 
 export function CentralShopPicker({ shops, selectedKey, filter, counts, keep }: Props) {
   const router = useRouter();
+  const selectedShop = shops.find((shop) => keyOf(shop) === selectedKey) ?? null;
 
   // สลับร้าน/แท็บ = เปลี่ยน URL ให้ server render ใหม่ — รีเซ็ตหน้ารายการ (spage) กลับ 1 ทุกครั้ง
   const go = (next: { shop?: string; filter?: string }) => {
@@ -44,8 +39,18 @@ export function CentralShopPicker({ shops, selectedKey, filter, counts, keep }: 
   return (
     <div className="flex min-w-0 flex-col gap-2 min-[720px]:flex-row min-[720px]:items-center min-[720px]:justify-between">
       <Select value={selectedKey} onValueChange={(value) => go({ shop: value })}>
+        {/* เขียนชื่อร้านเองแทน SelectValue — SelectValue ฝั่ง server ยังไม่รู้จักไอเท็มจึงเรนเดอร์เป็น placeholder แล้ว client เปลี่ยนเป็นชื่อร้าน เกิด hydration mismatch */}
         <SelectTrigger aria-label="เลือกร้าน" className="h-10 w-full min-[560px]:w-[360px]">
-          <SelectValue placeholder="เลือกร้าน" />
+          {selectedShop ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="text-[10.5px] font-bold uppercase text-muted-foreground">
+                {selectedShop.platform}
+              </span>
+              <span className="truncate">{selectedShop.shopName ?? selectedShop.shopId}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">เลือกร้าน</span>
+          )}
         </SelectTrigger>
         <SelectContent>
           {shops.map((shop) => (
