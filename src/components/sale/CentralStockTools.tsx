@@ -44,6 +44,8 @@ export function CentralStockReceiveForm() {
   const [amount, setAmount] = useState(0);
   const [preview, setPreview] = useState<SkuPreview | null>(null);
   const [looking, setLooking] = useState(false);
+  // แยกรหัสที่ค้นแล้วไม่พบออกจาก "ยังไม่ได้พิมพ์" — ไม่ให้ช่องว่างดูเหมือนระบบไม่ตอบสนอง
+  const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [codeError, setCodeError] = useState<string | null>(null);
@@ -63,6 +65,7 @@ export function CentralStockReceiveForm() {
     if (code.length < 3) {
       setPreview(null);
       setLooking(false);
+      setNotFound(false);
       return;
     }
     const timer = setTimeout(async () => {
@@ -71,8 +74,11 @@ export function CentralStockReceiveForm() {
         const response = await fetch(`/api/platform/central-stock?code=${encodeURIComponent(code)}`);
         const payload = (await response.json().catch(() => ({}))) as { item?: SkuPreview | null };
         setPreview(payload.item ?? null);
+        // "ไม่พบ" หมายถึงเซิร์ฟเวอร์ตอบปกติแล้วไม่มีรหัสนี้เท่านั้น — คำขอที่ล้มเหลวไม่ควรถูกกล่าวหาว่ารหัสผิด
+        setNotFound(response.ok && !payload.item);
       } catch {
         setPreview(null);
+        setNotFound(false);
       } finally {
         setLooking(false);
       }
@@ -190,9 +196,9 @@ export function CentralStockReceiveForm() {
   const previewImage = imageUrl ?? (preview?.imageUrl ? platformImageSrc(preview.imageUrl) ?? preview.imageUrl : null);
 
   return (
-    <div className="grid gap-4 min-[900px]:grid-cols-[minmax(0,1fr)_248px]">
+    <div className="grid gap-4 @min-[620px]:grid-cols-[minmax(0,1fr)_248px]">
       <div className="flex min-w-0 flex-col gap-3">
-        <div className="grid gap-3 min-[560px]:grid-cols-2">
+        <div className="grid gap-3 @min-[420px]:grid-cols-2">
           <div className="flex flex-col gap-1">
             <label htmlFor="central-code" className="text-[12px] font-semibold">
               รหัสสินค้า (ของกลาง) <span aria-hidden="true" className="text-[#b42318]">*</span>
@@ -341,7 +347,7 @@ export function CentralStockReceiveForm() {
           </div>
         </section>
 
-        <div className="grid gap-3 min-[560px]:grid-cols-2">
+        <div className="grid gap-3 @min-[420px]:grid-cols-2">
           <div className="flex flex-col gap-1">
             <label htmlFor="central-note" className="text-[12px] font-semibold">
               หมายเหตุ
@@ -452,7 +458,9 @@ export function CentralStockReceiveForm() {
           </>
         ) : (
           <p className="text-[12px] leading-5 text-muted-foreground">
-            พิมพ์รหัสสินค้าเพื่อดูรูป ชื่อ และจำนวนบนร้านก่อนบันทึก
+            {notFound
+              ? "ไม่พบรหัสนี้ในคลังกลางและในประกาศของร้าน — ตรวจรหัสอีกครั้ง หรือบันทึกเพื่อสร้างรหัสใหม่"
+              : "พิมพ์รหัสสินค้าเพื่อดูรูป ชื่อ และจำนวนบนร้านก่อนบันทึก"}
           </p>
         )}
       </aside>

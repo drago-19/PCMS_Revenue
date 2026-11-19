@@ -144,7 +144,7 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-1.5">รับเข้าสต็อกกลาง</Button>
               </DialogTrigger>
-              <DialogContent className="max-h-[85dvh] max-w-[520px] overflow-y-auto" style={SALE_THEME}>
+              <DialogContent className="@container max-h-[85dvh] max-w-[520px] overflow-y-auto" style={SALE_THEME}>
                 <DialogHeader className="pr-11">
                   <DialogTitle>รับเข้าสต็อกกลาง</DialogTitle>
                   <DialogDescription>รับของเข้ารหัสกลาง — ยอดอัปเดตทันทีหลังบันทึก</DialogDescription>
