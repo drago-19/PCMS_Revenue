@@ -289,39 +289,34 @@ export function CentralStockRowActions({
                   type="button"
                   variant={effective === preset ? "secondary" : "outline"}
                   size="sm"
-                  onClick={() =>
-                    setAmount((value) =>
-                      mode === "add" ? clamp(value + preset) : clamp(value - preset),
-                    )
-                  }
-                  disabled={busy !== null || (mode === "remove" && effective < preset)}
-                  aria-label={`${mode === "add" ? "บวกเพิ่ม" : "ลดลง"} ${preset}`}
+                  onClick={() => setAmount((value) => clamp(value + preset))}
+                  disabled={busy !== null || amount >= maxAmount}
+                  aria-label={`บวกเพิ่ม ${preset}`}
                   className="min-h-[40px] tabular-nums"
                 >
-                  {mode === "add" ? `+${preset}` : `−${preset}`}
+                  +{preset}
                 </Button>
               ))}
+              {/* ปุ่มลดโชว์เมื่อมีจำนวนค้างให้ลด — จำนวน 0 จะไม่มีปุ่มลดเลย */}
+              {PRESETS.map((preset) =>
+                amount >= preset ? (
+                  <Button
+                    key={`minus-${preset}`}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAmount((value) => clamp(value - preset))}
+                    disabled={busy !== null}
+                    aria-label={`ลดลง ${preset}`}
+                    className="min-h-[40px] tabular-nums"
+                  >
+                    −{preset}
+                  </Button>
+                ) : null,
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <label htmlFor={`row-amount-${skuCode}`} className="text-[12px] font-semibold whitespace-nowrap">
-                พิมพ์จำนวน
-              </label>
-              <Input
-                id={`row-amount-${skuCode}`}
-                value={amount === 0 ? "" : String(amount)}
-                onChange={(event) => {
-                  const digits = event.target.value.replace(/[^\d]/g, "");
-                  setAmount(digits ? clamp(Number(digits)) : 0);
-                }}
-                inputMode="numeric"
-                placeholder="เช่น 100"
-                className="h-10 w-[110px] text-[13px] tabular-nums"
-              />
-              <span className="text-[11.5px] text-muted-foreground">
-                จำกัดไม่เกิน {maxAmount.toLocaleString("th-TH")} ตามโหมดที่เลือก
-              </span>
-            </div>
+
 
             <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-[13px]">
               <span className="text-muted-foreground">

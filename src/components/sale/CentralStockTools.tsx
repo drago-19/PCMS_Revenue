@@ -141,6 +141,11 @@ export function CentralStockReceiveForm() {
         return;
       }
 
+      // รีเฟรชการ์ดสินค้าให้ตรงยอดใหม่ — ไม่งั้นแถบ 'คงเหลือ X' จะค้างค่าเก่าหลังบันทึก
+      const fresh = await fetch(`/api/platform/central-stock?code=${encodeURIComponent(code)}`);
+      const freshPayload = (await fresh.json().catch(() => ({}))) as { item?: SkuPreview | null };
+      if (freshPayload.item) setPreview(freshPayload.item);
+
       let imageNote = "";
       if (imageFile) {
         const dataUrl = await readImageAsDataUrl(imageFile);
@@ -281,40 +286,34 @@ export function CentralStockReceiveForm() {
                 type="button"
                 variant={effective === preset ? "secondary" : "outline"}
                 size="sm"
-                onClick={() =>
-                  setAmount((value) =>
-                    mode === "add" ? Math.min(maxAmount, value + preset) : Math.max(0, value - preset),
-                  )
-                }
-                disabled={busy || (mode === "remove" && effective < preset)}
-                aria-label={`${mode === "add" ? "บวกเพิ่ม" : "ลดลง"} ${preset}`}
+                onClick={() => setAmount((value) => Math.min(maxAmount, value + preset))}
+                disabled={busy || amount >= maxAmount}
+                aria-label={`บวกเพิ่ม ${preset}`}
                 className="min-h-[40px] tabular-nums"
               >
-                {mode === "add" ? `+${preset}` : `−${preset}`}
+                +{preset}
               </Button>
             ))}
+            {/* ปุ่มลดโชว์เมื่อมีจำนวนค้างให้ลด — จำนวน 0 จะไม่มีปุ่มลดเลย */}
+            {PRESETS.map((preset) =>
+              amount >= preset ? (
+                <Button
+                  key={`minus-${preset}`}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAmount((value) => Math.max(0, value - preset))}
+                  disabled={busy}
+                  aria-label={`ลดลง ${preset}`}
+                  className="min-h-[40px] tabular-nums"
+                >
+                  −{preset}
+                </Button>
+              ) : null,
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <label htmlFor="central-amount-exact" className="text-[12px] font-semibold whitespace-nowrap">
-              พิมพ์จำนวน
-            </label>
-            <Input
-              id="central-amount-exact"
-              value={amount === 0 ? "" : String(amount)}
-              onChange={(event) => {
-                const digits = event.target.value.replace(/[^\d]/g, "");
-                setAmount(digits ? Math.min(maxAmount, Number(digits)) : 0);
-              }}
-              inputMode="numeric"
-              placeholder="เช่น 100"
-              className="h-10 w-[110px] text-[13px] tabular-nums"
-              aria-describedby="central-amount-preview"
-            />
-            <span id="central-amount-preview" className="text-[11.5px] text-muted-foreground">
-              จำกัดไม่เกิน {maxAmount.toLocaleString("th-TH")} ตามโหมดที่เลือก
-            </span>
-          </div>
+
 
           <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-[13px]">
             <span className="text-muted-foreground">
@@ -412,11 +411,11 @@ export function CentralStockReceiveForm() {
         className="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-muted/30 p-3"
       >
         <h3 className="text-[12.5px] font-bold">สินค้าที่จะรับเข้า</h3>
-        <span className="flex size-24 items-center justify-center overflow-hidden rounded-lg border border-border bg-card">
+        <span className="mx-auto flex size-28 items-center justify-center overflow-hidden rounded-xl border border-border bg-card shadow-sm">
           {previewImage ? (
             <img src={previewImage} alt={`รูป ${code || "สินค้า"}`} className="size-full object-cover" />
           ) : (
-            <PackageOpen className="size-8 text-muted-foreground/60" aria-hidden="true" />
+            <PackageOpen className="size-9 text-muted-foreground/50" aria-hidden="true" />
           )}
         </span>
         {looking ? (
