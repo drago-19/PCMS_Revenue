@@ -50,7 +50,6 @@ import { listOpenHolds } from "@/lib/platform/stock-hold";
 import { ShopeeStockEditor } from "@/components/ShopeeStockEditor";
 import { ShopeeAddProductButton } from "@/components/ShopeeAddProductButton";
 import { CentralStockPanel } from "@/components/sale/CentralStockPanel";
-import { CentralAutoLinkButton } from "@/components/sale/CentralAutoLinkButton";
 import { LiveRefresh } from "@/components/sale/LiveRefresh";
 import { centralStockForShop, reconcileCentralStock } from "@/lib/stock/central";
 
@@ -442,7 +441,6 @@ export default async function PlatformStockPage({ searchParams }: { searchParams
                 ดึงสต็อกล่าสุด
               </Link>
             </Button>
-            <CentralAutoLinkButton platform={dbPlatform} shopId={shopId ?? ""} />
             <Button asChild size="sm" variant="outline" className="shrink-0">
               <Link
                 href={listHref({ history: "1" })}

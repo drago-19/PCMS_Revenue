@@ -168,30 +168,6 @@ export async function unlinkListing(input: {
 }
 
 /**
- * ผูกอัตโนมัติเมื่อรหัสบนประกาศตรงกับรหัสในรายการสินค้ากลาง (ชื่อเดียวกันเป๊ะ)
- * รหัสที่ต่างกันยังต้องผูกมือ — คืนจำนวนแถวที่ผูกใหม่
- */
-export async function autoLinkShop(platform: string, shopId: string): Promise<number> {
-  const rows = await query<{ n: number }>(
-    `WITH linked AS (
-       INSERT INTO central_stock_links (platform, shop_id, sku_id, sku_code, linked_by)
-       SELECT s.platform, s.shop_id, s.sku_id, s.seller_sku, 'auto'
-         FROM platform_stock s
-        WHERE s.platform = $1
-          AND s.shop_id = $2
-          AND s.seller_sku IS NOT NULL
-          AND s.seller_sku <> ''
-          AND EXISTS (SELECT 1 FROM products p WHERE p.sku_code = s.seller_sku)
-       ON CONFLICT (platform, shop_id, sku_id) DO NOTHING
-       RETURNING 1 AS done
-     )
-     SELECT count(*)::int AS n FROM linked`,
-    [platform, shopId],
-  );
-  return rows[0]?.n ?? 0;
-}
-
-/**
  * หักยอดขายเข้าสต็อกกลางจากทุกช่องทางที่เรามีข้อมูล
  * - TikTok / Shopee: บรรทัดออเดอร์ที่ผูกไว้ (central_stock_links) ของออเดอร์ในหน้าต่างเวลา
  * - Facebook: บรรทัดในออเดอร์ Shipnity ที่ contact_method = facebook และรหัสมีในสต็อกกลาง

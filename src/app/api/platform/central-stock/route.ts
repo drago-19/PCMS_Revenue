@@ -4,7 +4,6 @@ import {
   addCentralStock,
   archiveCentralStock,
   setCentralStockImage,
-  autoLinkShop,
   linkListing,
   lookupSkuForCentral,
   reconcileCentralStock,
@@ -252,27 +251,6 @@ export async function POST(request: Request) {
         requestId: auth.requestId,
       });
       return Response.json({ ok: true, requestId: auth.requestId });
-    }
-
-    if (action === "auto-link") {
-      const platform = text(body.platform, 20);
-      const shopId = text(body.shopId);
-      if (!LISTING_PLATFORMS.has(platform) || !shopId) {
-        return Response.json(
-          { error: "ต้องระบุแพลตฟอร์มและร้าน", requestId: auth.requestId },
-          { status: 400, headers: { "x-request-id": auth.requestId } },
-        );
-      }
-      const linked = await autoLinkShop(platform, shopId);
-      await recordAuditLog({
-        actor: auth.session.sub,
-        action: "platform.central_stock.auto_link",
-        ipAddress,
-        outcome: "success",
-        details: { platform, shopId, linked },
-        requestId: auth.requestId,
-      });
-      return Response.json({ ok: true, linked, requestId: auth.requestId });
     }
 
     if (action === "reconcile") {

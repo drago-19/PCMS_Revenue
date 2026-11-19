@@ -3,7 +3,6 @@ import test from "node:test";
 import { ensureSchema, getPool } from "@/lib/db";
 import {
   addCentralStock,
-  autoLinkShop,
   centralStockForShop,
   getCentralStockDetail,
   linkListing,
@@ -143,30 +142,6 @@ test("central-stock: ออเดอร์ Facebook จาก Shipnity หัก
     await reconcileCentralStock({ hours: 1 });
     detail = await getCentralStockDetail(SKU_FB);
     assert.equal(detail.summary?.onHand, 10, "ยกเลิกแล้วคืนเต็มจำนวน");
-  } finally {
-    await cleanup();
-  }
-});
-
-test("central-stock: ผูกรหัสอัตโนมัติเมื่อรหัสบนประกาศตรงกับรายการสินค้า และอ่านยอดตามร้านได้", async () => {
-  await cleanup();
-  const pool = getPool();
-  try {
-    // รหัสกลางที่มีอยู่จริงในรายการสินค้า (ไม่ต้องมีสินค้าจริงก็ผูกได้)
-    const existing = await pool.query<{ sku_code: string }>(`SELECT sku_code FROM products LIMIT 1`);
-    const code = existing.rows[0]?.sku_code;
-    assert.ok(code, "ต้องมีรายการสินค้าในฐานข้อมูลอย่างน้อย 1 รายการ");
-
-    await pool.query(
-      `INSERT INTO platform_stock (platform, shop_id, sku_id, seller_sku, quantity)
-       VALUES ('TikTok', $1, $2, $3, 4)`,
-      [SHOP, SKU_ID, code],
-    );
-    const linked = await autoLinkShop("TikTok", SHOP);
-    assert.equal(linked, 1);
-
-    const perShop = await centralStockForShop("TikTok", SHOP);
-    assert.equal(perShop.get(SKU_ID)?.skuCode, code);
   } finally {
     await cleanup();
   }
