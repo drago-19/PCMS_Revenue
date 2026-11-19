@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { TableLoadingBoundary } from "@/components/TableLoadingBoundary";
 import { UploadCompletenessCalendar } from "@/components/UploadCompletenessCalendar";
+import KeepScrollOnNavigate from "@/components/KeepScrollOnNavigate";
 import { UploadForm } from "@/components/UploadForm";
 import { IconHistory, IconReceipt } from "@/components/icons";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,18 @@ export default async function ImportPage({
     mode,
     shop,
   });
+
+  // ไฟล์รายได้เป็นรอบชำระ ส่วนออเดอร์มีวันที่สร้างของตัวเอง — ต้องสลับมุมมองได้
+  // ไม่งั้นไฟล์ที่จ่ายวันที่ 19 แต่ออเดอร์สร้างวันที่ 14-17 จะไม่โผล่ในวันที่ 19
+  const modeHref = (nextMode: UploadDateMode) => {
+    const params = new URLSearchParams();
+    if (sp.year) params.set("year", sp.year);
+    if (sp.month) params.set("month", sp.month);
+    if (shop && shop !== "all") params.set("shop", shop);
+    if (nextMode === "paid") params.set("mode", "paid");
+    const qs = params.toString();
+    return qs ? `/import?${qs}` : "/import";
+  };
 
   return (
     <div className="workspace-page">
@@ -72,6 +85,29 @@ export default async function ImportPage({
         </Card>
       </div>
 
+      <KeepScrollOnNavigate signature={`${mode}|${report.year}|${report.month}|${shop}`}>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-[13px] font-semibold text-[#64748b]">นับตาม</span>
+        <Button asChild size="sm" variant={mode === "created" ? "default" : "outline"}>
+          <Link
+            href={modeHref("created")}
+            scroll={false}
+            aria-current={mode === "created" ? "page" : undefined}
+          >
+            วันที่สร้างออเดอร์
+          </Link>
+        </Button>
+        <Button asChild size="sm" variant={mode === "paid" ? "default" : "outline"}>
+          <Link
+            href={modeHref("paid")}
+            scroll={false}
+            aria-current={mode === "paid" ? "page" : undefined}
+          >
+            วันชำระเงิน
+          </Link>
+        </Button>
+      </div>
+
       <TableLoadingBoundary
         rows={8}
         columns={4}
@@ -79,6 +115,7 @@ export default async function ImportPage({
       >
         <UploadCompletenessCalendar report={report} />
       </TableLoadingBoundary>
+      </KeepScrollOnNavigate>
     </div>
   );
 }
