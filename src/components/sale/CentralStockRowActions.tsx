@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, MinusIcon, PlusIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, MinusIcon, PlusIcon } from "lucide-react";
 import { SALE_THEME } from "@/lib/sale/theme";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { Button } from "@/components/ui/button";
@@ -253,7 +253,8 @@ export function CentralStockRowActions({
       >
       {/* SALE_THEME ต้องส่งเข้ามาเอง — dialog เรนเดอร์ใน portal หลุดจากตัวครอบธีมของหน้า
           ไม่งั้นสีเขียว/แดง (var --ok/--danger) จะไม่มีค่า ปุ่มกลายเป็นกล่องโปร่ง */}
-      <DialogContent className="max-w-[460px]" style={SALE_THEME}>
+      {/* จำกัดสูง + เลื่อนในตัว — กันป๊อปอัพยาวล้นจอ */}
+      <DialogContent className="max-h-[85dvh] max-w-[460px] overflow-y-auto" style={SALE_THEME}>
         <DialogHeader className="pr-11">
           <DialogTitle className="mono text-[15px]">{skuCode}</DialogTitle>
           <DialogDescription>คงเหลือกลางตอนนี้ {base.toLocaleString("th-TH")} ชิ้น</DialogDescription>
@@ -440,7 +441,20 @@ export function CentralStockRowActions({
             </p>
           </section>
 
-          <div className="flex flex-col gap-1 border-t border-border pt-3">
+          {/* ส่วนจัดการที่ใช้นานๆ ครั้ง — ยุบไว้หลังปุ่มเปิด ป๊อปอัพจะได้สั้น ไม่ล้นจอ */}
+          <details className="group rounded-xl border border-border bg-card">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+              <span className="text-[13px] font-bold">ตั้งค่าเพิ่มเติม</span>
+              <span className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
+                <span>ชื่อสินค้า · เปลี่ยนรหัส · เลิกใช้</span>
+                <ChevronDown
+                  className="size-4 shrink-0 transition-transform group-open:rotate-180"
+                  aria-hidden="true"
+                />
+              </span>
+            </summary>
+            <div className="flex flex-col gap-3 border-t border-border p-3">
+            <div className="flex flex-col gap-1">
             <label htmlFor={`name-${skuCode}`} className="text-[12px] font-semibold">
               ชื่อสินค้า
             </label>
@@ -458,7 +472,8 @@ export function CentralStockRowActions({
             </div>
           </div>
 
-          <div className="flex flex-col gap-1 border-t border-border pt-3">
+            <div className="h-px bg-border" aria-hidden="true" />
+            <div className="flex flex-col gap-1">
             <label htmlFor={`code-${skuCode}`} className="text-[12px] font-semibold">
               แก้รหัสกลาง (กรณีพิมพ์ผิด)
             </label>
@@ -484,7 +499,8 @@ export function CentralStockRowActions({
             </p>
           </div>
 
-          <div className="flex flex-col gap-1 border-t border-border pt-3">
+            <div className="h-px bg-border" aria-hidden="true" />
+            <div className="flex flex-col gap-1">
             <p className="text-[12px] font-semibold">ลบรหัสกลาง (เลิกใช้)</p>
             <p className="text-[11.5px] text-muted-foreground">
               ซ่อนจากรายการและตัดการผูกทุกร้าน (หยุดหัก/หยุดเขียนยอด) — ประวัติยังอยู่ครบ นำกลับได้ที่การ์ด “รหัสที่เลิกใช้แล้ว”
@@ -498,7 +514,9 @@ export function CentralStockRowActions({
             >
               {busy === "archive" ? "กำลังบันทึก…" : confirmArchive ? "ยืนยันลบรหัสนี้" : "ลบ / เลิกใช้รหัส"}
             </Button>
-          </div>
+            </div>
+            </div>
+          </details>
 
           {error ? (
             <p className="text-[12.5px] font-semibold text-[#b42318]" role="alert">
