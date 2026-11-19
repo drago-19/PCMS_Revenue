@@ -52,7 +52,9 @@ export function CentralShopPicker({ shops, selectedKey, filter, counts, keep }: 
             <span className="text-muted-foreground">เลือกร้าน</span>
           )}
         </SelectTrigger>
-        <SelectContent>
+        {/* position="popper" — โหมด item-aligned คิดพิกัดเป็นตำแหน่งเอกสารแต่เรนเดอร์แบบ fixed
+            ทำให้รายการไปโผล่ท้ายหน้าแทนที่จะอยู่ใต้ปุ่ม (เจอบน prod 19 พ.ย. 2026) */}
+        <SelectContent position="popper" sideOffset={4} className="max-h-[280px] w-[var(--radix-select-trigger-width)]">
           {shops.map((shop) => (
             <SelectItem key={keyOf(shop)} value={keyOf(shop)}>
               <span className="text-[10.5px] font-bold uppercase text-muted-foreground">
@@ -64,11 +66,18 @@ export function CentralShopPicker({ shops, selectedKey, filter, counts, keep }: 
         </SelectContent>
       </Select>
 
-      <Tabs value={filter} onValueChange={(value) => go({ filter: value })}>
-        <TabsList aria-label="กรองตามสถานะการผูก">
-          <TabsTrigger value="all">ทั้งหมด {th(counts.all)}</TabsTrigger>
-          <TabsTrigger value="linked">ผูกแล้ว {th(counts.linked)}</TabsTrigger>
-          <TabsTrigger value="unlinked">ยังไม่ผูก {th(counts.unlinkedCount)}</TabsTrigger>
+      {/* จอ 360px แท็บ 3 ใบพร้อมตัวเลขไม่พอดี — ลดระยะขอบในแท็บที่จอแคบ และกันล้นออกนอกการ์ด */}
+      <Tabs value={filter} onValueChange={(value) => go({ filter: value })} className="min-w-0 max-w-full overflow-x-auto">
+        <TabsList aria-label="กรองตามสถานะการผูก" className="min-[560px]:gap-1">
+          <TabsTrigger value="all" className="px-2.5 text-[12.5px] min-[560px]:px-4 min-[560px]:text-[13.5px]">
+            ทั้งหมด {th(counts.all)}
+          </TabsTrigger>
+          <TabsTrigger value="linked" className="px-2.5 text-[12.5px] min-[560px]:px-4 min-[560px]:text-[13.5px]">
+            ผูกแล้ว {th(counts.linked)}
+          </TabsTrigger>
+          <TabsTrigger value="unlinked" className="px-2.5 text-[12.5px] min-[560px]:px-4 min-[560px]:text-[13.5px]">
+            ยังไม่ผูก {th(counts.unlinkedCount)}
+          </TabsTrigger>
         </TabsList>
       </Tabs>
     </div>
