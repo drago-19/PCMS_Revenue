@@ -137,9 +137,135 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
       <Card padding="padded" className="flex min-w-0 flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <h2 className="text-[14.5px] font-bold">รายการในคลังกลาง</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge variant="neutral">เรียงจากของน้อยไปมาก</Badge>
-            {/* สองปุ่มเปิดป๊อปอัพ — หน้าเหลือแค่ตารางหลัก ไม่ต้องเลื่อนหา */}
+            {/* ปุ่มผูก SKU กับรับเข้าสต็อกกลางอยู่ด้วยกันที่หัวการ์ด — ไม่ต้องเลื่อนลงท้ายหน้า */}
+            <CentralStockLinkDialog defaultOpen={Boolean(sq) || filter !== "all" || spage > 1}>
+              <div className="flex min-w-0 flex-col gap-3">
+                {shops.length === 0 ? (
+                  <p className="text-[13px] text-muted-foreground">ยังไม่มีร้านที่เชื่อมต่อ</p>
+                ) : (
+                  <>
+                    {/* dropdown เลือกร้าน + แท็บผูกแล้ว/ยังไม่ผูก — ร้านเยอะไม่ล้นแถวอีกต่อไป */}
+                    <CentralShopPicker
+                      shops={shops}
+                      selectedKey={selected ? keyOf(selected) : ""}
+                      filter={filter}
+                      counts={{
+                        all: shopStocks ? shopStocks.linkedCount + shopStocks.unlinkedCount : 0,
+                        linked: shopStocks?.linkedCount ?? 0,
+                        unlinkedCount: shopStocks?.unlinkedCount ?? 0,
+                      }}
+                      keep={{ q, sq, page }}
+                    />
+
+                    <form action="/sale/central-stock" className="flex min-w-0 flex-wrap items-center gap-2">
+                      {selected ? <input type="hidden" name="shop" value={keyOf(selected)} /> : null}
+                      {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
+                      <label className="sr-only" htmlFor="shop-search">
+                        ค้นหา SKU ในร้านนี้
+                      </label>
+                      <Input
+                        id="shop-search"
+                        name="sq"
+                        defaultValue={sq}
+                        placeholder="ค้นหารหัส SKU หรือชื่อสินค้าในร้านนี้"
+                        className="h-10 min-w-0 flex-1 text-[13px]"
+                      />
+                      <Button type="submit" size="sm" variant="secondary">
+                        ค้นหา
+                      </Button>
+                    </form>
+
+                    {shopStocks ? (
+                      <>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[760px] text-[12.5px]">
+                            <thead>
+                              <tr className="border-b border-[color:var(--foreground)]/25 text-[11.5px] font-semibold text-muted-foreground">
+                                <th scope="col" className="py-1.5 pr-2 text-left font-bold">
+                                  SKU บนร้าน
+                                </th>
+                                <th scope="col" className="py-1.5 pr-2 text-left font-bold">
+                                  สินค้า
+                                </th>
+                                <th scope="col" className="py-1.5 pr-2 text-right font-bold">
+                                  คงเหลือบนร้าน
+                                </th>
+                                <th scope="col" className="py-1.5 pr-2 text-left font-bold">
+                                  รหัสกลางที่ผูก
+                                </th>
+                                <th scope="col" className="py-1.5 text-right font-bold">
+                                  คงเหลือกลาง
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {shopStocks.rows.map((row) => (
+                                <tr key={row.skuId} className="border-b border-border/60">
+                                  <td className="mono py-1.5 pr-2 font-bold">{row.sellerSku ?? row.skuId}</td>
+                                  <td className="max-w-[240px] truncate py-1.5 pr-2">{row.productName ?? "—"}</td>
+                                  <td className="mono py-1.5 pr-2 text-right">{num(row.quantity)}</td>
+                                  <td className="py-1.5 pr-2">
+                                    {selected ? (
+                                      <CentralLinkRow
+                                        platform={selected.platform}
+                                        shopId={selected.shopId}
+                                        skuId={row.skuId}
+                                        sellerSku={row.sellerSku}
+                                        linkedCode={row.linkedCode}
+                                      />
+                                    ) : null}
+                                  </td>
+                                  <td
+                                    className={cn(
+                                      "mono py-1.5 text-right",
+                                      row.linkedOnHand !== null && row.linkedOnHand <= 0 ? "font-bold text-[#b42318]" : "",
+                                    )}
+                                  >
+                                    {row.linkedOnHand === null ? "—" : num(row.linkedOnHand)}
+                                  </td>
+                                </tr>
+                              ))}
+                              {shopStocks.rows.length === 0 ? (
+                                <tr>
+                                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                                    {sq || filter !== "all" ? "ไม่พบ SKU ตามเงื่อนไขนี้" : "ร้านนี้ยังไม่มี SKU ที่ดึงมา"}
+                                  </td>
+                                </tr>
+                              ) : null}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+                          <span>
+                            แสดง {num(shopStocks.rows.length)} จาก {num(shopStocks.total)} SKU · หน้า{" "}
+                            {num(shopStocks.page)} / {num(shopStocks.pageCount)}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            {shopStocks.page > 1 ? (
+                              <Button asChild size="sm" variant="outline">
+                                <Link href={href({ spage: shopStocks.page - 1 })} scroll={false}>
+                                  ก่อนหน้า
+                                </Link>
+                              </Button>
+                            ) : null}
+                            {shopStocks.page < shopStocks.pageCount ? (
+                              <Button asChild size="sm" variant="outline">
+                                <Link href={href({ spage: shopStocks.page + 1 })} scroll={false}>
+                                  ถัดไป
+                                </Link>
+                              </Button>
+                            ) : null}
+                          </span>
+                        </div>
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </CentralStockLinkDialog>
             <Dialog>
               <DialogTrigger asChild>
                 <Button size="sm" className="gap-1.5">รับเข้าสต็อกกลาง</Button>
@@ -240,114 +366,6 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
           </span>
         </div>
       </Card>
-
-      <CentralStockLinkDialog defaultOpen={Boolean(sq) || filter !== "all" || spage > 1}>
-              <div className="flex min-w-0 flex-col gap-3">
-              {shops.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">ยังไม่มีร้านที่เชื่อมต่อ</p>
-        ) : (
-          <>
-            {/* dropdown เลือกร้าน + แท็บผูกแล้ว/ยังไม่ผูก — ร้านเยอะไม่ล้นแถวอีกต่อไป */}
-            <CentralShopPicker
-              shops={shops}
-              selectedKey={selected ? keyOf(selected) : ""}
-              filter={filter}
-              counts={{
-                all: shopStocks ? shopStocks.linkedCount + shopStocks.unlinkedCount : 0,
-                linked: shopStocks?.linkedCount ?? 0,
-                unlinkedCount: shopStocks?.unlinkedCount ?? 0,
-              }}
-              keep={{ q, sq, page }}
-            />
-
-            <form action="/sale/central-stock" className="flex min-w-0 flex-wrap items-center gap-2">
-              {selected ? <input type="hidden" name="shop" value={keyOf(selected)} /> : null}
-              {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
-              <label className="sr-only" htmlFor="shop-search">
-                ค้นหา SKU ในร้านนี้
-              </label>
-              <Input
-                id="shop-search"
-                name="sq"
-                defaultValue={sq}
-                placeholder="ค้นหารหัส SKU หรือชื่อสินค้าในร้านนี้"
-                className="h-10 min-w-0 flex-1 text-[13px]"
-              />
-              <Button type="submit" size="sm" variant="secondary">
-                ค้นหา
-              </Button>
-            </form>
-
-            {shopStocks ? (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-[12.5px]">
-                    <thead>
-                      <tr className="border-b border-[color:var(--foreground)]/25 text-[11.5px] font-semibold text-muted-foreground">
-                        <th scope="col" className="py-1.5 pr-2 text-left font-bold">SKU บนร้าน</th>
-                        <th scope="col" className="py-1.5 pr-2 text-left font-bold">สินค้า</th>
-                        <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือบนร้าน</th>
-                        <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัสกลางที่ผูก</th>
-                        <th scope="col" className="py-1.5 text-right font-bold">คงเหลือกลาง</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shopStocks.rows.map((row) => (
-                        <tr key={row.skuId} className="border-b border-border/60">
-                          <td className="mono py-1.5 pr-2 font-bold">{row.sellerSku ?? row.skuId}</td>
-                          <td className="max-w-[240px] truncate py-1.5 pr-2">{row.productName ?? "—"}</td>
-                          <td className="mono py-1.5 pr-2 text-right">{num(row.quantity)}</td>
-                          <td className="py-1.5 pr-2">
-                            {selected ? (
-                              <CentralLinkRow
-                                platform={selected.platform}
-                                shopId={selected.shopId}
-                                skuId={row.skuId}
-                                sellerSku={row.sellerSku}
-                                linkedCode={row.linkedCode}
-                              />
-                            ) : null}
-                          </td>
-                          <td className={cn("mono py-1.5 text-right", row.linkedOnHand !== null && row.linkedOnHand <= 0 ? "font-bold text-[#b42318]" : "")}>
-                            {row.linkedOnHand === null ? "—" : num(row.linkedOnHand)}
-                          </td>
-                        </tr>
-                      ))}
-                      {shopStocks.rows.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="py-6 text-center text-muted-foreground">
-                            {sq || filter !== "all" ? "ไม่พบ SKU ตามเงื่อนไขนี้" : "ร้านนี้ยังไม่มี SKU ที่ดึงมา"}
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
-                  <span>
-                    แสดง {num(shopStocks.rows.length)} จาก {num(shopStocks.total)} SKU · หน้า {num(shopStocks.page)} /{" "}
-                    {num(shopStocks.pageCount)}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    {shopStocks.page > 1 ? (
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={href({ spage: shopStocks.page - 1 })} scroll={false}>ก่อนหน้า</Link>
-                      </Button>
-                    ) : null}
-                    {shopStocks.page < shopStocks.pageCount ? (
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={href({ spage: shopStocks.page + 1 })} scroll={false}>ถัดไป</Link>
-                      </Button>
-                    ) : null}
-                  </span>
-                </div>
-              </>
-            ) : null}
-          </>
-        )}
-              </div>
-            </CentralStockLinkDialog>
 
       {archived.length > 0 ? (
         <Card padding="padded" className="flex min-w-0 flex-col gap-2">
