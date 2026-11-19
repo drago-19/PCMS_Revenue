@@ -63,19 +63,28 @@ export async function addCentralStock(input: {
   quantity: number;
   note?: string | null;
   actor?: string | null;
-}): Promise<{ skuCode: string; onHand: number }> {
+}): Promise<{ skuCode: string; onHand: number; restored: boolean }> {
   const skuCode = normalizeSkuCode(input.skuCode);
   const quantity = Math.trunc(Number(input.quantity));
   if (!skuCode) throw new Error("ต้องระบุรหัสสินค้าของสต็อกกลาง");
   if (!Number.isFinite(quantity) || quantity === 0) throw new Error("จำนวนต้องเป็นตัวเลขและไม่เป็นศูนย์");
 
   return withTransaction(async (db) => {
+    // รหัสที่เคยถูกเลิกใช้: รับเข้าของแล้วต้องกลับมาโชว์ในรายการเอง ไม่งั้นผู้ใช้จะหาที่เพิ่มไม่เจอ
+    const before = await query<{ archived_at: string | null }>(
+      `SELECT archived_at FROM central_stock WHERE sku_code = $1`,
+      [skuCode],
+      db,
+    );
+    const wasArchived = Boolean(before[0]?.archived_at);
+
     const rows = await query<{ on_hand: number }>(
       `INSERT INTO central_stock (sku_code, product_name, on_hand, updated_at)
        VALUES ($1, $2, $3, now())
        ON CONFLICT (sku_code) DO UPDATE
          SET on_hand = central_stock.on_hand + EXCLUDED.on_hand,
              product_name = COALESCE(EXCLUDED.product_name, central_stock.product_name),
+             archived_at = NULL,
              updated_at = now()
        RETURNING on_hand`,
       [skuCode, input.productName?.trim() || null, quantity],
@@ -87,7 +96,15 @@ export async function addCentralStock(input: {
       [skuCode, quantity > 0 ? "receive" : "adjust", quantity, input.note?.trim() || null, input.actor ?? null],
       db,
     );
-    return { skuCode, onHand: Number(rows[0]?.on_hand ?? 0) };
+    if (wasArchived) {
+      await query(
+        `INSERT INTO central_stock_movements (sku_code, kind, quantity, source, note, actor)
+         VALUES ($1, 'restore', 0, 'manual', 'เปิดใช้รหัสกลับมาเมื่อรับเข้า', $2)`,
+        [skuCode, input.actor ?? null],
+        db,
+      );
+    }
+    return { skuCode, onHand: Number(rows[0]?.on_hand ?? 0), restored: wasArchived };
   });
 }
 

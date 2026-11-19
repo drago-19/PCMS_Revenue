@@ -135,6 +135,7 @@ export function CentralStockReceiveForm() {
         onHand?: number;
         pushed?: number;
         pushFailed?: number;
+        restored?: boolean;
       };
       if (!response.ok) {
         setError(payload.error ?? "บันทึกไม่สำเร็จ");
@@ -163,7 +164,9 @@ export function CentralStockReceiveForm() {
       setMessage(
         `${mode === "add" ? "รับเข้า" : "ตัดออก"} ${effective} · ยอดกลางเหลือ ${payload.onHand ?? 0}${
           pushed > 0 ? ` · เขียนลงประกาศ ${pushed} ร้าน` : ""
-        }${(payload.pushFailed ?? 0) > 0 ? ` · พลาด ${payload.pushFailed} ร้าน` : ""}${imageNote}`,
+        }${(payload.pushFailed ?? 0) > 0 ? ` · พลาด ${payload.pushFailed} ร้าน` : ""}${
+          payload.restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""
+        }${imageNote}`,
       );
       setAmount(0);
       setNote("");
