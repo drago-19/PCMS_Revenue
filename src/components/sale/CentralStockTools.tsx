@@ -281,14 +281,39 @@ export function CentralStockReceiveForm() {
                 type="button"
                 variant={effective === preset ? "secondary" : "outline"}
                 size="sm"
-                onClick={() => setAmount((value) => Math.min(maxAmount, value + preset))}
-                disabled={busy}
-                aria-label={`บวกเพิ่ม ${preset}`}
+                onClick={() =>
+                  setAmount((value) =>
+                    mode === "add" ? Math.min(maxAmount, value + preset) : Math.max(0, value - preset),
+                  )
+                }
+                disabled={busy || (mode === "remove" && effective < preset)}
+                aria-label={`${mode === "add" ? "บวกเพิ่ม" : "ลดลง"} ${preset}`}
                 className="min-h-[40px] tabular-nums"
               >
-                +{preset}
+                {mode === "add" ? `+${preset}` : `−${preset}`}
               </Button>
             ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor="central-amount-exact" className="text-[12px] font-semibold whitespace-nowrap">
+              พิมพ์จำนวน
+            </label>
+            <Input
+              id="central-amount-exact"
+              value={amount === 0 ? "" : String(amount)}
+              onChange={(event) => {
+                const digits = event.target.value.replace(/[^\d]/g, "");
+                setAmount(digits ? Math.min(maxAmount, Number(digits)) : 0);
+              }}
+              inputMode="numeric"
+              placeholder="เช่น 100"
+              className="h-10 w-[110px] text-[13px] tabular-nums"
+              aria-describedby="central-amount-preview"
+            />
+            <span id="central-amount-preview" className="text-[11.5px] text-muted-foreground">
+              จำกัดไม่เกิน {maxAmount.toLocaleString("th-TH")} ตามโหมดที่เลือก
+            </span>
           </div>
 
           <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2 text-[13px]">
