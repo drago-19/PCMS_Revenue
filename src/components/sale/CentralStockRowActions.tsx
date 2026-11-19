@@ -157,14 +157,16 @@ export function CentralStockRowActions({
     const result = await post({ action: "receive", skuCode, quantity: delta });
     setBusy(null);
     if (!result) return;
+    const pushed = Number(result.pushed ?? 0);
+    const failed = Number(result.pushFailed ?? 0);
     const restored = result.restored === true;
     const nextOnHand = Number(result.onHand ?? 0);
     setBase(nextOnHand);
     setAmount(0);
     setNotice(
       `${mode === "add" ? "เติม" : "ตัด"} ${effective} แล้ว · คงเหลือกลางตอนนี้ ${nextOnHand}${
-        restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""
-      }`,
+        pushed > 0 ? ` · เขียนลงประกาศ ${pushed} ร้าน` : ""
+      }${failed > 0 ? ` · พลาด ${failed} ร้าน` : ""}${restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""}`,
     );
     router.refresh();
   }

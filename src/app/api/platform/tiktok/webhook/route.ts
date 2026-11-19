@@ -10,6 +10,7 @@ import {
 } from "@/lib/platform/store";
 import { syncOrders, syncReturns, syncStatements, type SyncContext } from "@/lib/platform/sync";
 import { reconcileCentralStock } from "@/lib/stock/central";
+import { pushPoolToListings } from "@/lib/stock/push";
 import { refreshStockForRecentOrders } from "@/lib/platform/stock";
 
 export const runtime = "nodejs";
@@ -90,16 +91,19 @@ export async function POST(request: Request) {
   void (async () => {
     try {
       const orders = await syncOrders(ctx, from, to);
+      // หักยอดกลาง + เขียนยอดใหม่ลงประกาศทุกร้านทันที ก่อนงานหนัก (statement/สต็อกทั้งแคตตาล็อก)
+      // ลำดับนี้คือสิ่งที่ทำให้ร้านอื่นเห็นยอดใหม่ภายใน 1-2 วินาที และลดโอกาสขายทับ
+      const started = Date.now();
+      const central = await reconcileCentralStock({ hours: 2 });
+      const pushed = await pushPoolToListings();
+      console.log(
+        `[central-stock] ${Date.now() - started}ms · หัก tiktok ${central.tiktok} shopee ${central.shopee} facebook ${central.facebook} · เขียนประกาศ ${pushed.pushed} (ข้าม ${pushed.skipped} พลาด ${pushed.failed})`,
+      );
       // คำขอคืนสินค้าคือเหตุที่ทำให้สต็อกถูกเติมคืนก่อนของถึงร้าน — ดึงทุกครั้งที่มีเหตุการณ์
       const returns = await syncReturns(ctx, from, to);
       const money = await syncStatements(ctx, from, to);
       // อัปเดตสต็อกเฉพาะสินค้าที่อยู่ในออเดอร์ที่เพิ่งเปลี่ยน (ไม่ดึงทั้งแคตตาล็อก)
       const stockChanged = await refreshStockForRecentOrders(ctx.shopId, 120);
-      // หักยอดกลางทันทีที่ออเดอร์เข้ามา — ไม่เขียนกลับลงประกาศแล้ว (ยอดบนแพลตฟอร์มเป็นความจริง)
-      const central = await reconcileCentralStock({ hours: 2 });
-      console.log(
-        `[central-stock] ทันทีหลัง webhook · tiktok ${central.tiktok} · shopee ${central.shopee} · facebook ${central.facebook}`,
-      );
       console.log(
         `[webhook] ${eventType} · ${account.shopName ?? account.accountKey}: ออเดอร์ ${orders} · คืนสินค้า ${returns} · statement ${money.statements} · สต็อกเปลี่ยน ${stockChanged}`,
       );

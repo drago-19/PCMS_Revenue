@@ -7,6 +7,7 @@ import { syncStaleShipnityAccounts } from "@/lib/shipnity/sync";
 import { listPlatformAccounts, SHOPEE_PLATFORM, TIKTOK_PLATFORM } from "./store";
 import { tikTokNowSeconds } from "./tiktok";
 import { reconcileCentralStock } from "@/lib/stock/central";
+import { pushPoolToListings } from "@/lib/stock/push";
 
 // รอบออเดอร์ทุก 60 วินาที — ตั้งแต่ 18 พ.ย. 2026 webhook ของ TikTok ทำงานแล้ว
 // (log prod: [webhook] เข้ามา ORDER_STATUS_CHANGE) รอบนี้จึงเป็นตัวสำรองตอน event หาย
@@ -171,6 +172,13 @@ export function startScheduledSync(): void {
           console.log(
             `[central-stock] ปรับยอดจากออเดอร์ · tiktok ${central.tiktok} · shopee ${central.shopee} · facebook ${central.facebook}`,
           );
+          // ยอดกลางเปลี่ยน → เขียนยอดใหม่ลงประกาศทุกร้านที่ผูก (ยอดตรงแล้วจะข้าม)
+          const pushed = await pushPoolToListings();
+          if (pushed.pushed > 0 || pushed.failed > 0) {
+            console.log(
+              `[central-stock] เขียนยอดลงประกาศ · สำเร็จ ${pushed.pushed} · ข้าม ${pushed.skipped} · ล้มเหลว ${pushed.failed}`,
+            );
+          }
         }
       } catch (error) {
         console.error(

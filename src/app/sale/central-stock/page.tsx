@@ -106,7 +106,7 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
       <SaleHeader
         eyebrow="สต็อกกลาง"
         title="สต็อกกลาง · ทุกแพลตฟอร์มใช้ยอดเดียวกัน"
-        description="เติมของที่เดียวแล้วผูก SKU ของแต่ละร้านเข้าที่รหัสกลาง — ยอดกลางหักอัตโนมัติเมื่อขาย และไม่เขียนทับยอดบนแพลตฟอร์ม"
+        description="เติมของที่เดียวแล้วผูก SKU ของแต่ละร้านเข้าที่รหัสกลาง — ทุกร้านเห็นยอดเดียวกัน และลดพร้อมกันเมื่อขาย"
       />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -318,8 +318,8 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
       ) : null}
 
       <p className="text-[12px] leading-5 text-muted-foreground">
-        หมายเหตุ: ยอดกลางหักจากออเดอร์ทุกช่องทางอัตโนมัติ (TikTok/Shopee จาก API · Facebook จาก Shipnity) แต่
-        <b className="font-semibold"> ระบบไม่เขียนยอดกลับลงประกาศของร้าน</b> — ยอดบนแพลตฟอร์มเป็นความจริง ปรับที่ Seller Center เท่านั้น
+        หมายเหตุ: เติมของที่คลังกลางแล้วระบบจะตั้งจำนวนบนประกาศของทุกร้านที่ผูกให้เท่ายอดกลาง — เมื่อขายที่ร้านไหน
+        ยอดกลางจะลดลงแล้วเขียนกลับไปทุกร้านภายในไม่กี่วินาที (TikTok/Shopee) ส่วน Facebook คิดจาก Shipnity ตามรอบ
       </p>
     </div>
   );

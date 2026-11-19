@@ -135,21 +135,35 @@ export async function linkListing(input: {
       db,
     );
 
-    // ผูกแล้วต้องมีรหัสกลางให้เห็นทันที — ตั้งต้นด้วยยอดที่ประกาศมีอยู่จริง
-    // (ถ้าตั้ง 0 ระบบจะไปเขียนทับประกาศให้เป็นศูนย์ในรอบถัดไป)
+    // ผูกแล้วต้องมีรหัสกลางให้เห็นทันที — ตั้งต้นด้วยยอดที่ประกาศมีอยู่จริง ไม่ใช่ 0
+    // ผูกร้านที่สองเข้าจำนวนเดียวกันให้ยึด "ยอดน้อยสุด" ไว้ เพราะรับปากลูกค้าได้เท่าที่มีของจริง
     await query(
-      `WITH created AS (
-         INSERT INTO central_stock (sku_code, product_name, on_hand, updated_at)
-         SELECT $1, s.product_name, GREATEST(COALESCE(s.quantity, 0), 0), now()
+      `WITH src AS (
+         SELECT GREATEST(COALESCE(s.quantity, 0), 0) AS qty, s.product_name
            FROM platform_stock s
           WHERE s.platform = $2 AND s.shop_id = $3 AND s.sku_id = $4
-         ON CONFLICT (sku_code) DO NOTHING
+       ), before AS (
+         SELECT c.on_hand FROM central_stock c WHERE c.sku_code = $1
+       ), upsert AS (
+         INSERT INTO central_stock (sku_code, product_name, on_hand, updated_at)
+         SELECT $1, src.product_name, src.qty, now() FROM src
+         ON CONFLICT (sku_code) DO UPDATE
+           SET on_hand = LEAST(central_stock.on_hand, EXCLUDED.on_hand),
+               product_name = COALESCE(central_stock.product_name, EXCLUDED.product_name),
+               updated_at = now()
          RETURNING on_hand
        )
        INSERT INTO central_stock_movements (sku_code, kind, quantity, source, note, actor)
-       SELECT $1, 'open', on_hand, 'link', 'ตั้งต้นจากยอดบนประกาศตอนผูก', $5
-         FROM created
-        WHERE on_hand <> 0`,
+       SELECT $1,
+              CASE WHEN (SELECT on_hand FROM before) IS NULL THEN 'open' ELSE 'adjust' END,
+              u.on_hand - COALESCE((SELECT on_hand FROM before), 0),
+              'link',
+              CASE WHEN (SELECT on_hand FROM before) IS NULL
+                   THEN 'ตั้งต้นจากยอดบนประกาศตอนผูก'
+                   ELSE 'ผูกเพิ่มโดยยึดยอดน้อยสุดระหว่างคลังกลางกับประกาศ' END,
+              $5
+         FROM upsert u
+        WHERE u.on_hand <> COALESCE((SELECT on_hand FROM before), 0)`,
       [skuCode, input.platform, shopId, skuId, input.actor ?? null],
       db,
     );

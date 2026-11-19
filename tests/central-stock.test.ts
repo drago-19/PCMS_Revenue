@@ -9,6 +9,7 @@ import {
   reconcileCentralStock,
   unlinkListing,
 } from "@/lib/stock/central";
+import { pushPoolToListings } from "@/lib/stock/push";
 
 // ข้อมูลทดสอบใช้ชื่อเฉพาะของไฟล์นี้ แล้วลบทิ้งท้ายทุกเคส — ไม่แตะของจริง
 const SKU = "TEST-CENTRAL-K-01";
@@ -209,11 +210,50 @@ test("central-stock: ขายรหัสที่ยังไม่เคย�
     const created = await pool.query(`SELECT on_hand FROM central_stock WHERE sku_code = $1`, [SKU_PUSH]);
     assert.equal(created.rowCount, 0, "การขายต้องไม่สร้างแถวในคลังกลางเอง");
 
+    const noWrite = await pushPoolToListings({ skuCodes: [SKU_PUSH] });
+    assert.equal(
+      noWrite.pushed + noWrite.skipped + noWrite.failed,
+      0,
+      "รหัสที่ยังไม่เคยมีของเข้าต้องไม่ถูกเลือกเป็นเป้าหมายเลย",
+    );
     const listing = await pool.query<{ quantity: number }>(
       `SELECT quantity FROM platform_stock WHERE shop_id = $1 AND sku_id = $2`,
       [SHOP, SKU_ID],
     );
     assert.equal(Number(listing.rows[0]?.quantity), 40, "ยอดบนประกาศต้องไม่ถูกแตะ");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("central-stock: ผูกร้านที่สองเข้าจำนวนเดียวกัน ยึดยอดน้อยสุดของประกาศ ไม่ดันยอดขึ้น", async () => {
+  await cleanup();
+  const pool = getPool();
+  const skuIdSecond = "test-sku-central-2";
+  try {
+    await pool.query(
+      `INSERT INTO platform_stock (platform, shop_id, sku_id, seller_sku, quantity)
+       VALUES ('TikTok', $1, $2, $3, 5)`,
+      [SHOP, SKU_ID, SKU_PUSH],
+    );
+    await linkListing({ platform: "TikTok", shopId: SHOP, skuId: SKU_ID, skuCode: SKU_PUSH, actor: "test" });
+    let detail = await getCentralStockDetail(SKU_PUSH);
+    assert.equal(detail.summary?.onHand, 5, "ตั้งต้นจากยอดบนประกาศ");
+
+    await pool.query(
+      `INSERT INTO platform_stock (platform, shop_id, sku_id, seller_sku, quantity)
+       VALUES ('TikTok', $1, $2, $3, 3)`,
+      [SHOP, skuIdSecond, SKU_PUSH],
+    );
+    await linkListing({ platform: "TikTok", shopId: SHOP, skuId: skuIdSecond, skuCode: SKU_PUSH, actor: "test" });
+    detail = await getCentralStockDetail(SKU_PUSH);
+    assert.equal(detail.summary?.onHand, 3, "ยึดยอดน้อยสุดระหว่างคลังกลางกับประกาศ");
+    assert.equal(detail.movements[0]?.quantity, -2, "บันทึกส่วนต่างที่ลดลง");
+
+    await pool.query(`UPDATE platform_stock SET quantity = 50 WHERE shop_id = $1 AND sku_id = $2`, [SHOP, skuIdSecond]);
+    await linkListing({ platform: "TikTok", shopId: SHOP, skuId: skuIdSecond, skuCode: SKU_PUSH, actor: "test" });
+    detail = await getCentralStockDetail(SKU_PUSH);
+    assert.equal(detail.summary?.onHand, 3, "ผูกซ้ำด้วยยอดมากกว่าต้องไม่ดันยอดขึ้น");
   } finally {
     await cleanup();
   }

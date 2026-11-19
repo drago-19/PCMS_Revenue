@@ -12,6 +12,7 @@ import {
   restoreCentralStock,
   unlinkListing,
 } from "@/lib/stock/central";
+import { pushPoolToListings } from "@/lib/stock/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,6 +93,8 @@ export async function POST(request: Request) {
         note: text(body.note, 200) || null,
         actor: auth.session.sub,
       });
+      // เติม/ตัดแล้วเขียนยอดลงประกาศทุกร้านที่ผูกทันที — ยอดตรงแล้วจะข้าม ไม่ยิง API
+      const pushed = await pushPoolToListings({ skuCodes: [result.skuCode] }).catch(() => null);
       await recordAuditLog({
         actor: auth.session.sub,
         action: "platform.central_stock.receive",
@@ -103,6 +106,8 @@ export async function POST(request: Request) {
       return Response.json({
         ok: true,
         ...result,
+        pushed: pushed?.pushed ?? 0,
+        pushFailed: pushed?.failed ?? 0,
         requestId: auth.requestId,
       });
     }
