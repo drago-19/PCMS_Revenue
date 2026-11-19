@@ -489,12 +489,15 @@ export function CentralLinkRow({
   skuId,
   sellerSku,
   linkedCode,
+  onChanged,
 }: {
   platform: string;
   shopId: string;
   skuId: string;
   sellerSku: string | null;
   linkedCode: string | null;
+  /** เรียกหลังผูก/เลิกผูกสำเร็จ — รายการที่ค้นสดต้องดึงข้อมูลใหม่เอง (router.refresh ไม่พอ) */
+  onChanged?: () => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -541,6 +544,7 @@ export function CentralLinkRow({
     setOpen(false);
     setQuery("");
     setNotice(`ผูกกับรหัสกลาง ${code} แล้ว`);
+    onChanged?.();
     router.refresh();
   }
 
@@ -559,6 +563,7 @@ export function CentralLinkRow({
       return;
     }
     setNotice("เลิกผูกแล้ว");
+    onChanged?.();
     router.refresh();
   }
 
