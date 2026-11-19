@@ -1,10 +1,17 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus, MinusIcon, PackageOpen, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { cn } from "@/lib/utils";
 
@@ -453,7 +460,19 @@ export function CentralStockReceiveForm() {
   );
 }
 
-/** แถวผูก SKU ของร้านเข้ากับรหัสกลาง — ใช้ในตารางผูกของหน้าสต็อกกลาง */
+
+type CentralCodeRow = {
+  skuCode: string;
+  productName: string | null;
+  onHand: number;
+  shopCount: number;
+  listingCount: number;
+};
+
+/**
+ * ผูก SKU ของร้านเข้ากับรหัสกลางด้วยการเลือกจากรายการ (ไม่ต้องพิมพ์รหัสเอง)
+ * เปิดป๊อปอัพ → ค้นหาทันทีที่พิมพ์ → กดแถวเพื่อผูก
+ */
 export function CentralLinkRow({
   platform,
   shopId,
@@ -468,68 +487,143 @@ export function CentralLinkRow({
   linkedCode: string | null;
 }) {
   const router = useRouter();
-  const [code, setCode] = useState(linkedCode ?? sellerSku ?? "");
-  const [busy, setBusy] = useState<null | "link" | "unlink">(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [rows, setRows] = useState<CentralCodeRow[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function post(body: Record<string, unknown>): Promise<boolean> {
+  // ค้นหาอัตโนมัติเมื่อพิมพ์ (หน่วง 250ms) — เปิดป๊อปอัพแล้วได้รายการทันที
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/platform/central-stock/codes?q=${encodeURIComponent(query)}`);
+        const payload = (await response.json().catch(() => ({}))) as { rows?: CentralCodeRow[] };
+        if (alive) setRows(payload.rows ?? []);
+      } catch {
+        if (alive) setRows([]);
+      }
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [query, open]);
+
+  async function linkCode(code: string) {
+    if (busy) return;
+    setBusy(code);
+    setError(null);
     const response = await fetch("/api/platform/central-stock", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ action: "link", platform, shopId, skuId, skuCode: code }),
     });
+    setBusy(null);
     if (!response.ok) {
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(payload.error ?? "ทำรายการไม่สำเร็จ");
-      return false;
+      setError(payload.error ?? "ผูกไม่สำเร็จ");
+      return;
     }
-    setError(null);
-    return true;
-  }
-
-  async function link() {
-    if (!code.trim() || busy) return;
-    setBusy("link");
-    const ok = await post({ action: "link", platform, shopId, skuId, skuCode: code.trim() });
-    setBusy(null);
-    if (ok) {
-      setCode(code.trim());
-      setNotice(`ผูกกับรหัสกลาง ${code.trim()} แล้ว`);
-      router.refresh();
-    }
+    setOpen(false);
+    setQuery("");
+    setNotice(`ผูกกับรหัสกลาง ${code} แล้ว`);
+    router.refresh();
   }
 
   async function unlink() {
     if (busy) return;
     setBusy("unlink");
-    const ok = await post({ action: "unlink", platform, shopId, skuId });
+    const response = await fetch("/api/platform/central-stock", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "unlink", platform, shopId, skuId }),
+    });
     setBusy(null);
-    if (ok) {
-      // ต้องล้างช่องด้วย ไม่งั้นรหัสเดิมค้างอยู่และดูเหมือนยังผูกอยู่ (sku นี้เลิกผูกแล้วจริง)
-      setCode("");
-      setNotice("เลิกผูกแล้ว");
-      router.refresh();
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(payload.error ?? "เลิกผูกไม่สำเร็จ");
+      return;
     }
+    setNotice("เลิกผูกแล้ว");
+    router.refresh();
   }
 
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-      <Input
-        value={code}
-        onChange={(event) => setCode(event.target.value)}
-        className="h-9 w-[160px] text-[12.5px]"
-        aria-label="รหัสสินค้าของสต็อกกลาง"
-        placeholder={sellerSku ?? "รหัสกลาง"}
-      />
-      <Button type="button" size="sm" variant="outline" onClick={link} disabled={busy !== null || !code.trim()}>
-        {busy === "link" ? "…" : "ผูก"}
+      <Button
+        type="button"
+        size="sm"
+        variant={linkedCode ? "outline" : "default"}
+        onClick={() => setOpen(true)}
+        className="max-w-[220px] truncate"
+        aria-label={linkedCode ? `เปลี่ยนรหัสกลางที่ผูกอยู่ (${linkedCode})` : "เลือกจากคลังกลาง"}
+      >
+        {linkedCode ? `ผูก: ${linkedCode}` : "เลือกจากคลังกลาง"}
       </Button>
       {linkedCode ? (
         <Button type="button" size="sm" variant="ghost" onClick={unlink} disabled={busy !== null}>
           {busy === "unlink" ? "…" : "เลิกผูก"}
         </Button>
       ) : null}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-[520px]">
+          <DialogHeader className="pr-11">
+            <DialogTitle>ผูก SKU กับรหัสกลาง</DialogTitle>
+            <DialogDescription>
+              SKU บนร้าน: <span className="mono font-bold">{sellerSku ?? skuId}</span> — พิมพ์เพื่อค้นหาแล้วกดที่รหัสเพื่อผูก
+            </DialogDescription>
+          </DialogHeader>
+
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="ค้นหารหัสหรือชื่อสินค้าในคลังกลาง"
+            className="h-10 text-[13px]"
+            aria-label="ค้นหารหัสกลาง"
+            autoFocus
+          />
+
+          <div className="max-h-[320px] min-h-[80px] overflow-y-auto rounded-lg border border-border">
+            {rows === null ? (
+              <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">กำลังค้นหา…</p>
+            ) : rows.length === 0 ? (
+              <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">
+                ไม่พบรหัสที่ค้นหา — เพิ่มรหัสใหม่ได้ที่ช่อง “รับเข้าสต็อกกลาง”
+              </p>
+            ) : (
+              <ul>
+                {rows.map((row) => (
+                  <li key={row.skuCode} className="border-b border-border/60 last:border-b-0">
+                    <button
+                      type="button"
+                      onClick={() => linkCode(row.skuCode)}
+                      disabled={busy !== null}
+                      className="flex w-full min-h-[44px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                    >
+                      <span className="mono w-[132px] shrink-0 truncate text-[12.5px] font-bold">{row.skuCode}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
+                        {row.productName ?? "—"}
+                      </span>
+                      <span className="shrink-0 text-[11.5px] tabular-nums text-muted-foreground">
+                        {row.onHand.toLocaleString("th-TH")} ชิ้น · {row.shopCount} ร้าน
+                      </span>
+                      {busy === row.skuCode ? (
+                        <span className="shrink-0 text-[11.5px] text-muted-foreground">กำลังผูก…</span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {error ? (
         <span className="text-[11.5px] font-semibold text-[#b42318]" role="alert">
           {error}
