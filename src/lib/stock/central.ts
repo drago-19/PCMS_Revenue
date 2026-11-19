@@ -592,6 +592,7 @@ export type CentralSkuLookup = {
   skuCode: string;
   productName: string | null;
   imageUrl: string | null;
+  hasImage: boolean;
   onHand: number | null;
   linkedListings: number;
   listings: Array<{
@@ -638,6 +639,10 @@ export async function lookupSkuForCentral(code: string): Promise<CentralSkuLooku
     `SELECT count(*)::int AS n FROM central_stock_links WHERE sku_code = $1`,
     [skuCode],
   );
+  const storedImage = await query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM central_stock_images WHERE sku_code = $1`,
+    [skuCode],
+  );
 
   const imageUrl = listings.find((row) => row.image_url)?.image_url ?? null;
   let productName = listings.find((row) => row.product_name)?.product_name ?? null;
@@ -655,6 +660,7 @@ export async function lookupSkuForCentral(code: string): Promise<CentralSkuLooku
     skuCode,
     productName,
     imageUrl,
+    hasImage: Number(storedImage[0]?.n ?? 0) > 0,
     onHand: pool[0] ? Number(pool[0].on_hand) : null,
     linkedListings: Number(links[0]?.n ?? 0),
     listings: listings.map((row) => ({
@@ -800,4 +806,46 @@ export async function getCentralStockImage(
   const buffer = decompressFileBlob(row.data);
   if (!buffer) return null;
   return { contentType: row.content_type, data: buffer };
+}
+
+/**
+ * เปลี่ยนรหัสกลาง (แก้รหัสที่พิมพ์ผิด) — ย้ายทั้งยอด การผูก ประวัติ และรูปไปรหัสใหม่ในทรานแซกชันเดียว
+ * ต้องไม่ชนกับรหัสที่มีอยู่แล้ว
+ */
+export async function renameCentralStockCode(input: {
+  from: string;
+  to: string;
+  actor?: string | null;
+}): Promise<{ from: string; to: string }> {
+  const from = normalizeSkuCode(input.from);
+  const to = normalizeSkuCode(input.to);
+  if (!from || !to) throw new Error("ต้องระบุรหัสเดิมและรหัสใหม่");
+  if (from === to) return { from, to };
+
+  return withTransaction(async (db) => {
+    const exists = await query<{ sku_code: string }>(
+      `SELECT sku_code FROM central_stock WHERE sku_code = $1`,
+      [to],
+      db,
+    );
+    if (exists.length > 0) throw new Error(`รหัส ${to} มีอยู่แล้ว — ใช้รหัสอื่นหรือรวมเข้าด้วยกันแทน`);
+
+    const updated = await query<{ sku_code: string }>(
+      `UPDATE central_stock SET sku_code = $2, updated_at = now() WHERE sku_code = $1 RETURNING sku_code`,
+      [from, to],
+      db,
+    );
+    if (updated.length === 0) throw new Error("ไม่พบรหัสเดิมในคลังกลาง");
+
+    await query(`UPDATE central_stock_links SET sku_code = $2 WHERE sku_code = $1`, [from, to], db);
+    await query(`UPDATE central_stock_movements SET sku_code = $2 WHERE sku_code = $1`, [from, to], db);
+    await query(`UPDATE central_stock_images SET sku_code = $2 WHERE sku_code = $1`, [from, to], db);
+    await query(
+      `INSERT INTO central_stock_movements (sku_code, kind, quantity, source, note, actor)
+       VALUES ($1, 'rename', 0, 'manual', $2, $3)`,
+      [to, `เปลี่ยนรหัสจาก ${from}`, input.actor ?? null],
+      db,
+    );
+    return { from, to };
+  });
 }

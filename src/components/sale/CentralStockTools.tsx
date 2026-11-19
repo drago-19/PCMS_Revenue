@@ -10,6 +10,7 @@ type SkuPreview = {
   skuCode: string;
   productName: string | null;
   imageUrl: string | null;
+  hasImage?: boolean;
   onHand: number | null;
   linkedListings: number;
   listings: Array<{ platform: string; shopId: string; shopName: string | null; quantity: number }>;
@@ -60,6 +61,11 @@ export function CentralStockReceiveForm() {
 
   async function submit() {
     if (!valid || busy) return;
+    // แพลตฟอร์มต้องมีรูปสินค้า — ถ้ารหัสนี้ยังไม่มีรูปจากประกาศหรือรูปที่แนบไว้ ต้องแนบก่อน
+    if (!imageFile && !preview?.imageUrl && !preview?.hasImage) {
+      setError("ต้องแนบรูปสินค้าก่อนบันทึก — รหัสนี้ยังไม่มีรูปจากประกาศร้าน");
+      return;
+    }
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -165,7 +171,7 @@ export function CentralStockReceiveForm() {
           />
         </label>
         <label className="flex flex-col gap-1 text-[12px] font-semibold min-[900px]:col-span-1">
-          รูปสินค้า (ไม่บังคับ)
+          รูปสินค้า (ต้องมีถ้ารหัสนี้ยังไม่มีรูป)
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"

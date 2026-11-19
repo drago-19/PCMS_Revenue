@@ -9,6 +9,7 @@ import {
   lookupSkuForCentral,
   reconcileCentralStock,
   renameCentralStock,
+  renameCentralStockCode,
   restoreCentralStock,
   unlinkListing,
 } from "@/lib/stock/central";
@@ -126,6 +127,27 @@ export async function POST(request: Request) {
         requestId: auth.requestId,
       });
       return Response.json({ ok: true, ...result, requestId: auth.requestId });
+    }
+
+    if (action === "rename-code") {
+      const from = text(body.skuCode);
+      const to = text(body.newSkuCode);
+      if (!from || !to) {
+        return Response.json(
+          { error: "ต้องระบุรหัสเดิมและรหัสใหม่", requestId: auth.requestId },
+          { status: 400, headers: { "x-request-id": auth.requestId } },
+        );
+      }
+      const renamed = await renameCentralStockCode({ from, to, actor: auth.session.sub });
+      await recordAuditLog({
+        actor: auth.session.sub,
+        action: "platform.central_stock.rename_code",
+        ipAddress,
+        outcome: "success",
+        details: renamed,
+        requestId: auth.requestId,
+      });
+      return Response.json({ ok: true, ...renamed, requestId: auth.requestId });
     }
 
     if (action === "image") {

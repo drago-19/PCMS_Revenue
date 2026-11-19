@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MinusIcon, PlusIcon } from "lucide-react";
+import { ChevronRight, MinusIcon, PlusIcon } from "lucide-react";
+import { SALE_THEME } from "@/lib/sale/theme";
+import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -27,14 +29,26 @@ export function CentralStockRowActions({
   skuCode,
   productName,
   onHand,
+  hasImage,
+  imageUrl,
+  shopCount,
+  listingCount,
+  updatedAtText,
 }: {
   skuCode: string;
   productName: string | null;
   onHand: number;
+  hasImage: boolean;
+  imageUrl: string | null;
+  shopCount: number;
+  listingCount: number;
+  /** หน้าเว็บจัดรูปวันที่มาให้แล้ว (thaiDateTime) — คอมโพเนนต์นี้เป็น client จึงรับสตริง */
+  updatedAtText: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(productName ?? "");
+  const [newCode, setNewCode] = useState(skuCode);
   const [mode, setMode] = useState<"add" | "remove">("add");
   const [amount, setAmount] = useState(0);
   const [base, setBase] = useState(onHand);
@@ -84,6 +98,19 @@ export function CentralStockRowActions({
     router.refresh();
   }
 
+  async function changeCode() {
+    if (busy) return;
+    const next = newCode.trim();
+    if (!next || next === skuCode) return;
+    setBusy("code");
+    setNotice(null);
+    const result = await post({ action: "rename-code", skuCode, newSkuCode: next });
+    setBusy(null);
+    if (!result) return;
+    setOpen(false);
+    router.refresh();
+  }
+
   async function adjust() {
     if (busy || effective < 1) return;
     setBusy("adjust");
@@ -121,22 +148,65 @@ export function CentralStockRowActions({
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        setConfirmArchive(false);
-        setError(null);
-        setNotice(null);
-        setAmount(0);
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button type="button" size="sm" variant="outline">
-          จัดการ
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-[460px]">
+    <>
+      {/* แถวทั้งแถวกดได้ — เปิดป๊อปอัพจัดการโดยไม่ต้องมีปุ่ม จัดการ */}
+      <tr
+        className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40"
+        onClick={() => setOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+        tabIndex={0}
+        aria-haspopup="dialog"
+      >
+        <td className="py-1.5 pr-2">
+          <span className="flex size-9 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+            {hasImage ? (
+              <img
+                src={`/api/platform/central-stock/image?code=${encodeURIComponent(skuCode)}`}
+                alt={`รูป ${skuCode}`}
+                className="size-full object-cover"
+                loading="lazy"
+              />
+            ) : imageUrl ? (
+              <img
+                src={platformImageSrc(imageUrl) ?? imageUrl}
+                alt={`รูป ${skuCode}`}
+                className="size-full object-cover"
+                loading="lazy"
+              />
+            ) : null}
+          </span>
+        </td>
+        <td className="mono py-1.5 pr-2 font-bold">{skuCode}</td>
+        <td className="max-w-[260px] truncate py-1.5 pr-2">{productName ?? "—"}</td>
+        <td className={cn("mono py-1.5 pr-2 text-right font-bold", onHand <= 0 ? "text-[#b42318]" : "")}>
+          {onHand.toLocaleString("th-TH")}
+        </td>
+        <td className="mono py-1.5 pr-2 text-right">{shopCount.toLocaleString("th-TH")}</td>
+        <td className="mono py-1.5 pr-2 text-right">{listingCount.toLocaleString("th-TH")}</td>
+        <td className="py-1.5 pr-2 text-right text-muted-foreground">{updatedAtText}</td>
+        <td className="py-1.5 text-right text-muted-foreground">
+          <ChevronRight className="ml-auto size-4" aria-hidden="true" />
+        </td>
+      </tr>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          setConfirmArchive(false);
+          setError(null);
+          setNotice(null);
+          setAmount(0);
+        }}
+      >
+      {/* SALE_THEME ต้องส่งเข้ามาเอง — dialog เรนเดอร์ใน portal หลุดจากตัวครอบธีมของหน้า
+          ไม่งั้นสีเขียว/แดง (var --ok/--danger) จะไม่มีค่า ปุ่มกลายเป็นกล่องโปร่ง */}
+      <DialogContent className="max-w-[460px]" style={SALE_THEME}>
         <DialogHeader className="pr-11">
           <DialogTitle className="mono text-[15px]">{skuCode}</DialogTitle>
           <DialogDescription>คงเหลือกลางตอนนี้ {base.toLocaleString("th-TH")} ชิ้น</DialogDescription>
@@ -156,8 +226,9 @@ export function CentralStockRowActions({
                 aria-pressed={mode === "add"}
                 className={cn(
                   "min-h-[40px] rounded-lg border text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  // สีทึบชัดเจน: เติมเข้า = เขียว · ตัดออก = แดง แยกกันตาเห็นทันที
                   mode === "add"
-                    ? "border-[color:var(--ok)] bg-[color:var(--ok-soft)] text-[color:var(--ok)]"
+                    ? "border-transparent bg-[color:var(--ok)] text-white hover:bg-[color:var(--ok)]/90"
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -171,7 +242,7 @@ export function CentralStockRowActions({
                 className={cn(
                   "min-h-[40px] rounded-lg border text-[13px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
                   mode === "remove"
-                    ? "border-[color:var(--danger)] bg-[color:var(--danger-soft)] text-[color:var(--danger)]"
+                    ? "border-transparent bg-[color:var(--danger)] text-white hover:bg-[color:var(--danger)]/90"
                     : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -291,7 +362,33 @@ export function CentralStockRowActions({
           </div>
 
           <div className="flex flex-col gap-1 border-t border-border pt-3">
-            <p className="text-[12px] font-semibold">เลิกใช้รหัสนี้</p>
+            <label htmlFor={`code-${skuCode}`} className="text-[12px] font-semibold">
+              แก้รหัสกลาง (กรณีพิมพ์ผิด)
+            </label>
+            <div className="flex items-center gap-2">
+              <Input
+                id={`code-${skuCode}`}
+                value={newCode}
+                onChange={(event) => setNewCode(event.target.value)}
+                className="mono h-10 text-[13px]"
+                aria-label="รหัสกลางใหม่"
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={changeCode}
+                disabled={busy !== null || !newCode.trim() || newCode.trim() === skuCode}
+              >
+                {busy === "code" ? "…" : "เปลี่ยนรหัส"}
+              </Button>
+            </div>
+            <p className="text-[11.5px] text-muted-foreground">
+              ย้ายยอด การผูก ประวัติ และรูปไปรหัสใหม่ทั้งหมด — ต้องไม่ซ้ำกับรหัสที่มีอยู่
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1 border-t border-border pt-3">
+            <p className="text-[12px] font-semibold">ลบรหัสกลาง (เลิกใช้)</p>
             <p className="text-[11.5px] text-muted-foreground">
               ซ่อนจากรายการและตัดการผูกทุกร้าน (หยุดหัก/หยุดเขียนยอด) — ประวัติยังอยู่ครบ นำกลับได้ที่การ์ด “รหัสที่เลิกใช้แล้ว”
             </p>
@@ -302,7 +399,7 @@ export function CentralStockRowActions({
               onClick={archive}
               disabled={busy !== null}
             >
-              {busy === "archive" ? "กำลังบันทึก…" : confirmArchive ? "ยืนยันเลิกใช้รหัส" : "เลิกใช้รหัส"}
+              {busy === "archive" ? "กำลังบันทึก…" : confirmArchive ? "ยืนยันลบรหัสนี้" : "ลบ / เลิกใช้รหัส"}
             </Button>
           </div>
 
@@ -319,5 +416,6 @@ export function CentralStockRowActions({
         </div>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
