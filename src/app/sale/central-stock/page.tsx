@@ -146,36 +146,38 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                   <p className="text-[13px] text-muted-foreground">ยังไม่มีร้านที่เชื่อมต่อ</p>
                 ) : (
                   <>
-                    {/* dropdown เลือกร้าน + แท็บผูกแล้ว/ยังไม่ผูก — ร้านเยอะไม่ล้นแถวอีกต่อไป */}
-                    <CentralShopPicker
-                      shops={shops}
-                      selectedKey={selected ? keyOf(selected) : ""}
-                      filter={filter}
-                      counts={{
-                        all: shopStocks ? shopStocks.linkedCount + shopStocks.unlinkedCount : 0,
-                        linked: shopStocks?.linkedCount ?? 0,
-                        unlinkedCount: shopStocks?.unlinkedCount ?? 0,
-                      }}
-                      keep={{ q, sq, page }}
-                    />
-
-                    <form action="/sale/central-stock" className="flex min-w-0 flex-wrap items-center gap-2">
-                      {selected ? <input type="hidden" name="shop" value={keyOf(selected)} /> : null}
-                      {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
-                      <label className="sr-only" htmlFor="shop-search">
-                        ค้นหา SKU ในร้านนี้
-                      </label>
-                      <Input
-                        id="shop-search"
-                        name="sq"
-                        defaultValue={sq}
-                        placeholder="ค้นหารหัส SKU หรือชื่อสินค้าในร้านนี้"
-                        className="h-10 min-w-0 flex-1 text-[13px]"
+                    {/* แผงตัวกรองของตัวเอง — เลือกร้าน/แท็บ/ช่องค้นหาอยู่กลุ่มเดียวกัน แยกชัดจากตารางด้านล่าง */}
+                    <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-muted/30 p-3">
+                      <CentralShopPicker
+                        shops={shops}
+                        selectedKey={selected ? keyOf(selected) : ""}
+                        filter={filter}
+                        counts={{
+                          all: shopStocks ? shopStocks.linkedCount + shopStocks.unlinkedCount : 0,
+                          linked: shopStocks?.linkedCount ?? 0,
+                          unlinkedCount: shopStocks?.unlinkedCount ?? 0,
+                        }}
+                        keep={{ q, sq, page }}
                       />
-                      <Button type="submit" size="sm" variant="secondary">
-                        ค้นหา
-                      </Button>
-                    </form>
+
+                      <form action="/sale/central-stock" className="flex min-w-0 flex-wrap items-center gap-2">
+                        {selected ? <input type="hidden" name="shop" value={keyOf(selected)} /> : null}
+                        {filter !== "all" ? <input type="hidden" name="filter" value={filter} /> : null}
+                        <label className="sr-only" htmlFor="shop-search">
+                          ค้นหา SKU ในร้านนี้
+                        </label>
+                        <Input
+                          id="shop-search"
+                          name="sq"
+                          defaultValue={sq}
+                          placeholder="ค้นหารหัส SKU หรือชื่อสินค้าในร้านนี้"
+                          className="h-10 min-w-0 flex-1 bg-background text-[13px]"
+                        />
+                        <Button type="submit" size="sm" variant="secondary" className="min-h-[40px]">
+                          ค้นหา
+                        </Button>
+                      </form>
+                    </div>
 
                     {shopStocks ? (
                       <>

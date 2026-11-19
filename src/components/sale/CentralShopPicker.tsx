@@ -37,10 +37,11 @@ export function CentralShopPicker({ shops, selectedKey, filter, counts, keep }: 
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-2 min-[720px]:flex-row min-[720px]:items-center min-[720px]:justify-between">
+    <div className="flex min-w-0 flex-col gap-2.5">
+      {/* เลือกร้านเต็มแถวของตัวเอง — เดิมบีบให้แบ่งแถวกับแท็บ ร้านชื่อยาวกับแท็บเลขเป็นพันเลยเบียดกันจนล้น */}
       <Select value={selectedKey} onValueChange={(value) => go({ shop: value })}>
         {/* เขียนชื่อร้านเองแทน SelectValue — SelectValue ฝั่ง server ยังไม่รู้จักไอเท็มจึงเรนเดอร์เป็น placeholder แล้ว client เปลี่ยนเป็นชื่อร้าน เกิด hydration mismatch */}
-        <SelectTrigger aria-label="เลือกร้าน" className="h-10 w-full min-[560px]:w-[360px]">
+        <SelectTrigger aria-label="เลือกร้าน" className="h-10 w-full">
           {selectedShop ? (
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="text-[10.5px] font-bold uppercase text-muted-foreground">
@@ -66,17 +67,29 @@ export function CentralShopPicker({ shops, selectedKey, filter, counts, keep }: 
         </SelectContent>
       </Select>
 
-      {/* จอ 360px แท็บ 3 ใบพร้อมตัวเลขไม่พอดี — ลดระยะขอบในแท็บที่จอแคบ และกันล้นออกนอกการ์ด */}
-      <Tabs value={filter} onValueChange={(value) => go({ filter: value })} className="min-w-0 max-w-full overflow-x-auto">
-        <TabsList aria-label="กรองตามสถานะการผูก" className="min-[560px]:gap-1">
-          <TabsTrigger value="all" className="px-2.5 text-[12.5px] min-[560px]:px-4 min-[560px]:text-[13.5px]">
-            ทั้งหมด {th(counts.all)}
+      {/* แท็บ 3 ช่องเท่ากันเต็มแถว ชื่อสถานะบน เลขล่าง — เลขเป็นพันก็ไม่ล้นจนเกิดสกอลบาร์แถวเดียว */}
+      <Tabs value={filter} onValueChange={(value) => go({ filter: value })} className="w-full">
+        <TabsList aria-label="กรองตามสถานะการผูก" className="grid h-auto w-full grid-cols-3 gap-1 p-1">
+          <TabsTrigger
+            value="all"
+            className="flex h-auto min-h-[44px] flex-col gap-0 px-2 py-1.5"
+          >
+            <span className="text-[11px] font-semibold leading-tight">ทั้งหมด</span>
+            <span className="text-[15px] font-bold leading-tight tabular-nums">{th(counts.all)}</span>
           </TabsTrigger>
-          <TabsTrigger value="linked" className="px-2.5 text-[12.5px] min-[560px]:px-4 min-[560px]:text-[13.5px]">
-            ผูกแล้ว {th(counts.linked)}
+          <TabsTrigger
+            value="linked"
+            className="flex h-auto min-h-[44px] flex-col gap-0 px-2 py-1.5"
+          >
+            <span className="text-[11px] font-semibold leading-tight">ผูกแล้ว</span>
+            <span className="text-[15px] font-bold leading-tight tabular-nums">{th(counts.linked)}</span>
           </TabsTrigger>
-          <TabsTrigger value="unlinked" className="px-2.5 text-[12.5px] min-[560px]:px-4 min-[560px]:text-[13.5px]">
-            ยังไม่ผูก {th(counts.unlinkedCount)}
+          <TabsTrigger
+            value="unlinked"
+            className="flex h-auto min-h-[44px] flex-col gap-0 px-2 py-1.5"
+          >
+            <span className="text-[11px] font-semibold leading-tight">ยังไม่ผูก</span>
+            <span className="text-[15px] font-bold leading-tight tabular-nums">{th(counts.unlinkedCount)}</span>
           </TabsTrigger>
         </TabsList>
       </Tabs>
