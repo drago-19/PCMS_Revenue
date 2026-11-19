@@ -3,14 +3,23 @@ import { SaleHeader } from "@/components/sale/SaleHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { CentralShopPicker } from "@/components/sale/CentralShopPicker";
+import { CentralStockLinkDialog } from "@/components/sale/CentralStockLinkDialog";
 import { CentralLinkRow, CentralStockReceiveForm } from "@/components/sale/CentralStockTools";
 import { CentralStockRowActions } from "@/components/sale/CentralStockRowActions";
 import { CentralStockRestoreButton } from "@/components/sale/CentralStockRestoreButton";
 import { LiveRefresh } from "@/components/sale/LiveRefresh";
-import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { thaiDateTime } from "@/lib/platform/period";
+import { SALE_THEME } from "@/lib/sale/theme";
 import {
   centralStockTotals,
   listArchivedCentralStock,
@@ -125,18 +134,25 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
         </Card>
       </div>
 
-      {/* โซนรับเข้าของ — พื้นฟ้าอ่อนบอกว่านี่คือโซนกรอกข้อมูล แยกจากตารางด้านล่าง */}
-      <div className="rounded-xl bg-[color:var(--accent)] p-3 ring-1 ring-inset ring-[color:var(--accent-foreground)]/15">
-      <Card padding="padded" className="flex min-w-0 flex-col gap-3">
-        <h2 className="text-[14.5px] font-bold">รับเข้าสต็อกกลาง</h2>
-        <CentralStockReceiveForm />
-      </Card>
-      </div>
-
       <Card padding="padded" className="flex min-w-0 flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <h2 className="text-[14.5px] font-bold">รายการในคลังกลาง</h2>
-          <Badge variant="neutral">เรียงจากของน้อยไปมาก</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="neutral">เรียงจากของน้อยไปมาก</Badge>
+            {/* สองปุ่มเปิดป๊อปอัพ — หน้าเหลือแค่ตารางหลัก ไม่ต้องเลื่อนหา */}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button size="sm" className="gap-1.5">รับเข้าสต็อกกลาง</Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[85dvh] max-w-[520px] overflow-y-auto" style={SALE_THEME}>
+                <DialogHeader className="pr-11">
+                  <DialogTitle>รับเข้าสต็อกกลาง</DialogTitle>
+                  <DialogDescription>รับของเข้ารหัสกลาง — ยอดอัปเดตทันทีหลังบันทึก</DialogDescription>
+                </DialogHeader>
+                <CentralStockReceiveForm />
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
         <form action="/sale/central-stock" className="flex min-w-0 flex-wrap items-center gap-2">
@@ -225,13 +241,9 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
         </div>
       </Card>
 
-      <Card padding="padded" className="flex min-w-0 flex-col gap-2">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <h2 className="text-[14.5px] font-bold">ผูก SKU ของแต่ละร้าน</h2>
-          <span className="text-[11.5px] text-muted-foreground">รหัสบนประกาศอาจต่างกันได้ — ผูกเข้าตัวกลางเดียวกัน</span>
-        </div>
-
-        {shops.length === 0 ? (
+      <CentralStockLinkDialog defaultOpen={Boolean(sq) || filter !== "all" || spage > 1}>
+              <div className="flex min-w-0 flex-col gap-3">
+              {shops.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">ยังไม่มีร้านที่เชื่อมต่อ</p>
         ) : (
           <>
@@ -334,7 +346,8 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
             ) : null}
           </>
         )}
-      </Card>
+              </div>
+            </CentralStockLinkDialog>
 
       {archived.length > 0 ? (
         <Card padding="padded" className="flex min-w-0 flex-col gap-2">
