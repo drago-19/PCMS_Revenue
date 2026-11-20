@@ -4,6 +4,9 @@
 // - การเขียนกลับอยู่ที่ stock-write.ts: ต้องมีสิทธิ์ Product (write) และร้านจริงต้องเปิด PLATFORM_STOCK_WRITE_LIVE
 
 import { query, runWithCompany } from "@/lib/db";
+// ชุดสถานะ "ยังไม่ส่ง" ใช้ร่วมกับหน้าปฏิบัติการ (ops.ts) — มีที่เดียว ห้ามเขียนรายการที่สอง
+import { UNSHIPPED } from "@/lib/platform/ops";
+import { variantNameFromSalesAttributes } from "@/lib/platform/stock-list";
 import {
   getPlatformAccountRow,
   getPlatformConfig,
@@ -38,6 +41,15 @@ export type StockRow = {
   inTransit: number;
   /** สถานะวางขายบน TikTok — ACTIVATE = เปดตะกร้า, SELLER_DEACTIVATED = ซ่อนตะกร้า */
   productStatus: string | null;
+  /** รหัสสินค้าหลักบนแพลตฟอร์ม — ใช้จัดกลุ่มรหัสย่อย (ไซส์) ใต้แถวหลักของสินค้า */
+  productId: string | null;
+  /** ชื่อตัวเลือก/ไซส์จากแพลตฟอร์ม — ว่างเมื่อสินค้าไม่มีตัวเลือก (ห้ามเดาจากรหัส SKU) */
+  variantName: string | null;
+  /** ราคาขายที่เก็บไว้จากรายละเอียดสินค้า — null เมื่อยังไม่เคยดึง */
+  price: number | null;
+  currency: string | null;
+  /** ชิ้นที่อยู่ในออเดอร์ที่ร้านยังไม่ส่ง ("จอง") */
+  reserved: number;
 };
 
 /** ป้ายสถานะวางขายที่ใช้ร่วมกันทั้งตารางรายการและป๊อปอัป */
@@ -204,7 +216,9 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
   const haveMeta = await query<{ product_id: string }>(
     `SELECT DISTINCT product_id FROM platform_stock
       WHERE platform = $1 AND shop_id = $2
-        AND coalesce(image_url, '') <> '' AND product_status IS NOT NULL AND category_id IS NOT NULL`,
+        AND coalesce(image_url, '') <> '' AND product_status IS NOT NULL AND category_id IS NOT NULL
+        -- เคยขอรายละเอียดสินค้าแล้วหรือยัง: ค่าว่าง = ขอแล้วแต่สินค้าไม่มีตัวเลือก (ไม่ต้องขอซ้ำ)
+        AND variant_name IS NOT NULL`,
     [TIKTOK_PLATFORM, shopId],
   );
   const withMeta = new Set(haveMeta.map((row) => row.product_id));
@@ -216,6 +230,8 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
     main_images?: Array<{ thumb_urls?: string[]; uri?: string }>;
     skus?: Array<{
       id?: string;
+      /** ชื่อตัวเลือกของ SKU (เช่น ไซส์/สี) — สินค้าที่ไม่มีตัวเลือกจะไม่มีฟิลด์นี้ */
+      sales_attributes?: Array<{ id?: string; name?: string; value_name?: string }>;
       price?: {
         tax_exclusive?: { currency?: string; sale_price?: string };
         sale_price?: string;
@@ -232,7 +248,14 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
       status: string | null;
       category: string | null;
       categoryId: string | null;
-      prices: Array<{ skuId: string; price: string | null; currency: string | null; preSaleType: string | null }>;
+      prices: Array<{
+        skuId: string;
+        price: string | null;
+        currency: string | null;
+        preSaleType: string | null;
+        /** ชื่อไซส์/ตัวเลือกจาก sales_attributes — ค่าว่าง = สินค้านี้ไม่มีตัวเลือก */
+        variantName: string;
+      }>;
     }> = [];
 
     for (let index = 0; index < needMeta.length; index += 3) {
@@ -258,7 +281,15 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
               if (!sku.id) return [];
               const price = sku.price?.tax_exclusive?.sale_price ?? sku.price?.sale_price ?? null;
               const currency = sku.price?.tax_exclusive?.currency ?? sku.price?.currency ?? null;
-              return [{ skuId: String(sku.id), price, currency, preSaleType: sku.price?.pre_sale?.type ?? null }];
+              return [
+                {
+                  skuId: String(sku.id),
+                  price,
+                  currency,
+                  preSaleType: sku.price?.pre_sale?.type ?? null,
+                  variantName: variantNameFromSalesAttributes(sku.sales_attributes),
+                },
+              ];
             });
             return { productId, imageUrl: image, status: detail.status ?? null, category, categoryId, prices };
           } catch {
@@ -295,6 +326,26 @@ async function syncStockInner(shopId: string): Promise<{ skus: number; changed: 
           .filter((row) => row.price !== null || row.currency !== null)
           .map((row) => ({ ...row })),
       );
+      // ชื่อตัวเลือก/ไซส์ของแต่ละรหัสย่อย: มาจากคำขอรายละเอียดเดียวกันกับราคา
+      // ค่าว่างที่เขียนลงไปคือ "ตรวจแล้วสินค้านี้ไม่มีตัวเลือก" — ไม่เดาค่าจากรหัส SKU
+      const variants = found.flatMap((item) =>
+        item.prices.map((row) => ({ skuId: row.skuId, variantName: row.variantName })),
+      );
+      if (variants.length > 0) {
+        await query(
+          `UPDATE platform_stock s
+              SET variant_name = item.variant_name
+             FROM unnest($3::text[], $4::text[]) AS item(sku_id, variant_name)
+            WHERE s.platform = $1 AND s.shop_id = $2 AND s.sku_id = item.sku_id`,
+          [
+            TIKTOK_PLATFORM,
+            shopId,
+            variants.map((row) => row.skuId),
+            variants.map((row) => row.variantName),
+          ],
+        );
+      }
+
       if (priced.length > 0) {
         await query(
           `UPDATE platform_stock s
@@ -361,6 +412,25 @@ function inTransitJoin(statusParam: string): string {
     ON rt.platform = s.platform AND rt.shop_id = s.shop_id AND rt.sku_id = s.sku_id`;
 }
 
+/**
+ * "จอง" ของ SKU = จำนวนชิ้นในออเดอร์ที่ร้านยังไม่ได้ส่ง
+ * - นับเฉพาะสถานะชุดเดียวกับ UNSHIPPED ที่หน้าปฏิบัติการใช้ (ops.ts) ไม่นับออเดอร์ที่ส่งแล้ว/ยกเลิก
+ * - รวมต่อ (shop_id, sku_id) แล้วค่อย join เข้ามาที่แถวสต็อก ไม่ต้องคิวรีทีละแถว
+ * - ชุดสถานะนี้เป็นของ TikTok: ออเดอร์ Shopee ที่ใช้ชื่อสถานะคนละชุดจะยังไม่ถูกนับเป็นจอง
+ */
+function reservedJoin(): string {
+  return `LEFT JOIN (
+    SELECT i.platform, i.shop_id, i.sku_id, sum(i.quantity)::int AS reserved
+      FROM platform_order_items i
+      JOIN platform_orders o
+        ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
+     WHERE i.platform = $1 AND i.shop_id = $2
+       AND o.order_status IN ${UNSHIPPED}
+     GROUP BY i.platform, i.shop_id, i.sku_id
+  ) rv
+    ON rv.platform = s.platform AND rv.shop_id = s.shop_id AND rv.sku_id = s.sku_id`;
+}
+
 const STOCK_FILTER_SQL: Record<Exclude<StockListFilter, "all">, string> = {
   out: "s.quantity <= 0",
   low: `s.quantity > 0 AND s.quantity <= ${LOW_STOCK_THRESHOLD}`,
@@ -386,6 +456,11 @@ type StockRowDb = {
   stock_image: string | null;
   in_transit: number;
   product_status: string | null;
+  product_id: string | null;
+  variant_name: string | null;
+  price: string | null;
+  currency: string | null;
+  reserved: number;
 };
 
 function toStockRow(row: StockRowDb): StockRow {
@@ -399,6 +474,11 @@ function toStockRow(row: StockRowDb): StockRow {
     updatedAt: row.updated_at,
     imageUrl: row.stock_image,
     productStatus: row.product_status,
+    productId: row.product_id ?? null,
+    variantName: row.variant_name ?? null,
+    price: row.price === null || row.price === undefined ? null : Number(row.price),
+    currency: row.currency ?? null,
+    reserved: Number(row.reserved ?? 0),
   };
 }
 
@@ -497,9 +577,12 @@ export async function getStockPage(
 
   const rows = await query<StockRowDb>(
     `SELECT s.sku_id, s.seller_sku, s.product_name, s.quantity, s.warehouses, s.updated_at::text AS updated_at,
-            s.image_url AS stock_image, s.product_status, COALESCE(rt.in_transit, 0)::int AS in_transit
+            s.image_url AS stock_image, s.product_status, s.product_id, s.variant_name,
+            s.price::text AS price, s.currency, COALESCE(rv.reserved, 0)::int AS reserved,
+            COALESCE(rt.in_transit, 0)::int AS in_transit
        ${STOCK_FROM}
        ${join}
+       ${reservedJoin()}
       WHERE ${clause}
       -- ของที่ยังเปิดตะกร้าขึ้นก่อน แล้วค่อยเรียงตามจำนวนคงเหลือ
       ORDER BY (s.product_status = 'ACTIVATE') DESC NULLS LAST, s.quantity DESC, s.seller_sku ASC, s.sku_id ASC
@@ -508,6 +591,62 @@ export async function getStockPage(
   );
 
   return { rows: rows.map(toStockRow), total: Number(totals[0]?.total ?? 0) };
+}
+
+/** ยอดรวมของสินค้าหนึ่งตัว — ทุกไซส์ในร้าน ไม่ใช่เฉพาะไซส์ที่อยู่ในหน้าปัจจุบัน */
+export type ProductStockTotal = {
+  stock: number;
+  reserved: number;
+  skus: number;
+  price: { min: number; max: number } | null;
+};
+
+/**
+ * ยอดรวมของ "ทั้งสินค้า" (ทุกไซส์ของสินค้านั้น) สำหรับแถวหลักของหน้า /sale/stocks
+ * นับ "จอง" ด้วยนิยามเดียวกับ reservedJoin (สถานะชุด UNSHIPPED) และบอกจำนวนไซส์ทั้งหมด
+ * เรียกครั้งเดียวต่อหน้า ไม่ใช่ต่อแถว
+ */
+export async function getProductStockTotals(
+  shopId: string,
+  productIds: string[],
+  platform = TIKTOK_PLATFORM,
+): Promise<Record<string, ProductStockTotal>> {
+  const ids = productIds.filter((id) => id.length > 0);
+  if (ids.length === 0) return {};
+  const rows = await query<{
+    product_id: string;
+    stock: number;
+    reserved: number;
+    skus: number;
+    price_min: string | null;
+    price_max: string | null;
+  }>(
+    `SELECT s.product_id,
+            COALESCE(sum(s.quantity), 0)::int AS stock,
+            COALESCE(sum(COALESCE(rv.reserved, 0)), 0)::int AS reserved,
+            count(*)::int AS skus,
+            min(s.price)::text AS price_min,
+            max(s.price)::text AS price_max
+       FROM platform_stock s
+       ${reservedJoin()}
+      WHERE s.platform = $1 AND s.shop_id = $2 AND s.product_id = ANY($3::text[])
+      GROUP BY s.product_id`,
+    [platform, shopId, ids],
+  );
+  return Object.fromEntries(
+    rows.map((row) => [
+      row.product_id,
+      {
+        stock: Number(row.stock ?? 0),
+        reserved: Number(row.reserved ?? 0),
+        skus: Number(row.skus ?? 0),
+        price:
+          row.price_min === null
+            ? null
+            : { min: Number(row.price_min), max: Number(row.price_max ?? row.price_min) },
+      },
+    ]),
+  );
 }
 
 /** แถวประวัติ + id ของแถว (ใช้เป็นตัวต่อหน้าแบบ keyset) */
@@ -822,12 +961,17 @@ export async function getSkuDetail(
     }
   }
 
+  // หนึ่งแถวต่อหนึ่งออเดอร์: SKU เดียวอาจอยู่ในออเดอร์เดียวกันหลายบรรทัด (หลายรายการ/หลายกล่อง)
+  // ถ้าปล่อยเป็นแถวต่อบรรทัด หน้ารายละเอียดจะได้เลขออเดอร์ซ้ำ แล้ว React ฟ้อง "two children with the same key"
+  // (platform_orders มี PK (platform, shop_id, order_id) แล้ว การ JOIN จึงไม่ทำให้ยอดบวกซ้ำ)
   const orders = await query<{ order_id: string; quantity: number; ordered_at: string; status: string }>(
-    `SELECT i.order_id, i.quantity, o.create_time::text AS ordered_at, o.order_status AS status
+    `SELECT i.order_id, SUM(i.quantity)::int AS quantity,
+            max(o.create_time)::text AS ordered_at, max(o.order_status) AS status
        FROM platform_order_items i
        JOIN platform_orders o ON o.platform = i.platform AND o.shop_id = i.shop_id AND o.order_id = i.order_id
       WHERE i.platform = $1 AND i.shop_id = $2 AND i.sku_id = $3
-      ORDER BY o.create_time DESC
+      GROUP BY i.order_id
+      ORDER BY max(o.create_time) DESC
       LIMIT 10`,
     [platform, shopId, skuId],
   );
