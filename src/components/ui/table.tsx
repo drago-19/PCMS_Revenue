@@ -24,11 +24,17 @@ function Table({
   VariantProps<typeof tableVariants> & {
     containerClassName?: string
   }) {
+  // กรอบที่เลื่อนแนวนอนเอง (overflow-x-auto/scroll) กลายเป็น scroll container
+  // sticky ของหัวตารางจึงผูกกับกรอบแทนหน้าจอ และถูก top offset ดันลงไปทับแถวข้อมูลแถวแรก
+  // (วัดได้ 61px ที่ความกว้าง 768–1099px) — บังคับ static เมื่อกรอบเลื่อนเอง
+  // ส่วนตารางที่กรอบไม่เลื่อน (เช่น /bills, /import) sticky ยังเกาะใต้แถบบนตามเดิม
+  const scrollable = /overflow(-[xy])?-(auto|scroll)/.test(containerClassName ?? "")
   return (
     <div
       data-slot="table-container"
       className={cn(
         "table-wrap relative w-full bg-white",
+        scrollable && "[&_[data-slot=table-header]]:static [&_[data-slot=table-head]]:static",
         containerClassName
       )}
     >

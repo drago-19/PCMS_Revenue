@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-18-v79";
+const SCHEMA_VERSION = "2026-11-20-v80";
 
 /**
  * เทียบเวอร์ชัน schema รูปแบบ 2026-11-18-v77 — คืน > 0 เมื่อ a ใหม่กว่า b
@@ -1169,6 +1169,9 @@ ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS category_id TEXT;
 ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS is_preorder BOOLEAN NOT NULL DEFAULT false;
 -- ประเภทพรีเซลจาก TikTok (pre_sale.type) — ว่าง = สินค้าปกติ
 ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS pre_sale_type TEXT;
+-- ชื่อตัวเลือก/ไซส์จากแพลตฟอร์ม (TikTok: skus[].sales_attributes)
+-- NULL = ยังไม่เคยขอรายละเอียดสินค้า · ค่าว่าง = ขอแล้วแต่สินค้านี้ไม่มีตัวเลือก
+ALTER TABLE platform_stock ADD COLUMN IF NOT EXISTS variant_name TEXT;
 -- ต้องสร้างหลังตาราง platform_stock เท่านั้น (ก่อนหน้านี้อยู่ก่อน CREATE TABLE ทำให้สร้างฐานข้อมูลใหม่ไม่ผ่าน)
 CREATE INDEX IF NOT EXISTS platform_stock_shop_idx ON platform_stock (shop_id, quantity DESC);
 CREATE INDEX IF NOT EXISTS platform_stock_platform_shop_idx ON platform_stock (platform, shop_id, quantity DESC);

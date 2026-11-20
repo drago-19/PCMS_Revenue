@@ -39,7 +39,16 @@ export function CentralStockPanel({
 
   async function post(
     body: Record<string, unknown>,
-  ): Promise<{ onHand?: number; restored?: boolean; pushed?: number; pushFailed?: number } | null> {
+  ): Promise<{
+    onHand?: number;
+    restored?: boolean;
+    pushed?: number;
+    pushFailed?: number;
+    pushShops?: number;
+    pushBlocked?: number;
+    pushMs?: number;
+    pushDisabled?: boolean;
+  } | null> {
     const response = await fetch("/api/platform/central-stock", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -52,6 +61,10 @@ export function CentralStockPanel({
       restored?: boolean;
       pushed?: number;
       pushFailed?: number;
+      pushShops?: number;
+      pushBlocked?: number;
+      pushMs?: number;
+      pushDisabled?: boolean;
     };
     if (!response.ok) {
       setError(payload.error ?? "ทำรายการไม่สำเร็จ");
@@ -69,15 +82,23 @@ export function CentralStockPanel({
     setBusy(null);
     if (!result) return;
     setAmount("");
-    // ต้องบอกด้วยว่าเขียนยอดลงประกาศกี่ร้าน ไม่ใช่เงียบ
+    // สต็อกกลางเป็นเจ้าของยอด — เติมแล้วต้องบอกว่าได้ดันขึ้นประกาศไปแล้วกี่ประกาศและใช้เวลาเท่าไร
+    // ถ้าร้านจริงยังไม่เปิด STOCK_PUSH_LIVE หรือดันไม่สำเร็จ ต้องบอกตรง ๆ ไม่ใช่เงียบ
     const pushed = result.pushed ?? 0;
+    const blocked = result.pushBlocked ?? 0;
+    const failed = result.pushFailed ?? 0;
     const note = pushed > 0
-      ? ` · เขียนลงประกาศ ${pushed} ร้าน${(result.pushFailed ?? 0) > 0 ? ` (พลาด ${result.pushFailed})` : ""}`
-      : "";
+      ? ` · อัปเดตขึ้นประกาศ ${pushed} ประกาศ (${result.pushShops ?? 0} ร้าน) · ${result.pushMs ?? 0} ms`
+      : result.pushDisabled
+        ? " · การดันยอดขึ้นประกาศปิดอยู่ (STOCK_PUSH_ENABLED=0)"
+        : blocked > 0
+          ? ` · ร้านจริงรอเปิด STOCK_PUSH_LIVE (${blocked} ประกาศ)`
+          : "";
+    const failedNote = failed > 0 ? ` · ประกาศที่พลาด ${failed}` : "";
     setMessage(
       sign > 0
-        ? `เติม ${Math.abs(quantity)} เข้าสต็อกกลางแล้ว${note}`
-        : `ตัด ${Math.abs(quantity)} ออกจากสต็อกกลางแล้ว${note}`,
+        ? `เติม ${Math.abs(quantity)} เข้าสต็อกกลางแล้ว${note}${failedNote}`
+        : `ตัด ${Math.abs(quantity)} ออกจากสต็อกกลางแล้ว${note}${failedNote}`,
     );
     router.refresh();
   }

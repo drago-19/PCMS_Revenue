@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { cn } from "@/lib/utils";
 
@@ -149,6 +150,10 @@ export function CentralStockReceiveForm() {
         restored?: boolean;
         pushed?: number;
         pushFailed?: number;
+        pushShops?: number;
+        pushBlocked?: number;
+        pushMs?: number;
+        pushDisabled?: boolean;
       };
       if (!response.ok) {
         setError(payload.error ?? "บันทึกไม่สำเร็จ");
@@ -173,13 +178,22 @@ export function CentralStockReceiveForm() {
         }
       }
 
+      // สต็อกกลางเป็นเจ้าของยอด — เติมแล้วต้องบอกผลการดันขึ้นประกาศ (กี่ประกาศ กี่ร้าน เวลาเท่าไร)
       const pushed = payload.pushed ?? 0;
+      const blocked = payload.pushBlocked ?? 0;
+      const failed = payload.pushFailed ?? 0;
+      const pushNote =
+        pushed > 0
+          ? ` · อัปเดตขึ้นประกาศ ${pushed} ประกาศ (${payload.pushShops ?? 0} ร้าน) · ${payload.pushMs ?? 0} ms`
+          : payload.pushDisabled
+            ? " · การดันยอดขึ้นประกาศปิดอยู่ (STOCK_PUSH_ENABLED=0)"
+            : blocked > 0
+              ? ` · ร้านจริงรอเปิด STOCK_PUSH_LIVE (${blocked} ประกาศ)`
+              : "";
       setMessage(
-        `${mode === "add" ? "รับเข้า" : "ตัดออก"} ${effective} · ยอดกลางเหลือ ${payload.onHand ?? 0}${
-          pushed > 0 ? ` · เขียนลงประกาศ ${pushed} ร้าน` : ""
-        }${(payload.pushFailed ?? 0) > 0 ? ` · พลาด ${payload.pushFailed} ร้าน` : ""}${
-          payload.restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""
-        }${imageNote}`,
+        `${mode === "add" ? "รับเข้า" : "ตัดออก"} ${effective} · ยอดกลางเหลือ ${payload.onHand ?? 0}${pushNote}${
+          failed > 0 ? ` · ประกาศที่พลาด ${failed}` : ""
+        }${payload.restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""}${imageNote}`,
       );
       setAmount(0);
       setNote("");
@@ -479,6 +493,13 @@ type CentralCodeRow = {
   imageUrl: string | null;
 };
 
+/** ข้อมูลบนประกาศของ SKU นี้ — ใช้เป็นตัวอย่างก่อนสร้างรหัสกลางใหม่ */
+type ListingPreview = {
+  sellerSku: string | null;
+  productName: string | null;
+  quantity: number;
+};
+
 /**
  * ผูก SKU ของร้านเข้ากับรหัสกลางด้วยการเลือกจากรายการ (ไม่ต้องพิมพ์รหัสเอง)
  * เปิดป๊อปอัพ → ค้นหาทันทีที่พิมพ์ → กดแถวเพื่อผูก
@@ -506,6 +527,69 @@ export function CentralLinkRow({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // สองทางเลือกในป๊อปอัพ: ผูกกับรหัสที่มีอยู่ หรือสร้างรหัสกลางใหม่จากประกาศนี้
+  const [tab, setTab] = useState<"link" | "create">("link");
+  const [createCode, setCreateCode] = useState(sellerSku ?? "");
+  const [codeTaken, setCodeTaken] = useState(false);
+  const [listing, setListing] = useState<ListingPreview | null>(null);
+  const [listingState, setListingState] = useState<"idle" | "loading" | "missing">("idle");
+
+  // เปิดใหม่ทุกครั้งเริ่มที่โหมดผูกของเดิม และเติมรหัสตั้งต้นจาก SKU บนร้าน
+  function changeOpen(next: boolean) {
+    setOpen(next);
+    if (!next) return;
+    setTab("link");
+    setCreateCode(sellerSku ?? "");
+    setCodeTaken(false);
+    setError(null);
+  }
+
+  // ตัวอย่างข้อมูลที่จะใช้สร้างรหัสใหม่: ชื่อและยอดบนประกาศ (อ่านอย่างเดียว)
+  useEffect(() => {
+    if (!open || tab !== "create") return;
+    let alive = true;
+    setListingState("loading");
+    const params = new URLSearchParams({ platform, shopId, skuId });
+    fetch(`/api/platform/central-stock?${params.toString()}`)
+      .then((response) => (response.ok ? response.json() : { listing: null }))
+      .then((payload: { listing?: ListingPreview | null }) => {
+        if (!alive) return;
+        setListing(payload.listing ?? null);
+        setListingState(payload.listing ? "idle" : "missing");
+      })
+      .catch(() => {
+        if (!alive) return;
+        setListing(null);
+        setListingState("missing");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, tab, platform, shopId, skuId]);
+
+  // รหัสที่มีอยู่แล้วต้องเตือนก่อนกด (เซิร์ฟเวอร์กันซ้ำอีกชั้นด้วย 409)
+  useEffect(() => {
+    if (!open || tab !== "create") return;
+    const code = createCode.trim();
+    if (!code) {
+      setCodeTaken(false);
+      return;
+    }
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/platform/central-stock/codes?q=${encodeURIComponent(code)}`);
+        const payload = (await response.json().catch(() => ({}))) as { rows?: CentralCodeRow[] };
+        if (alive) setCodeTaken((payload.rows ?? []).some((row) => row.skuCode === code));
+      } catch {
+        if (alive) setCodeTaken(false);
+      }
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [createCode, open, tab]);
 
   // ค้นหาอัตโนมัติเมื่อพิมพ์ (หน่วง 250ms) — เปิดป๊อปอัพแล้วได้รายการทันที
   useEffect(() => {
@@ -548,6 +632,40 @@ export function CentralLinkRow({
     router.refresh();
   }
 
+  async function createFromListing() {
+    const code = createCode.trim();
+    if (busy || !code || codeTaken) return;
+    setBusy("create");
+    setError(null);
+    const response = await fetch("/api/platform/central-stock", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "link", create: true, platform, shopId, skuId, skuCode: code }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      created?: boolean;
+      skuCode?: string;
+      onHand?: number | null;
+    };
+    setBusy(null);
+    if (!response.ok) {
+      setError(payload.error ?? "สร้างรหัสกลางใหม่ไม่สำเร็จ");
+      if (response.status === 409) setCodeTaken(true);
+      return;
+    }
+    setOpen(false);
+    setQuery("");
+    // บอกให้ชัดว่ารอบนี้สร้างรหัสใหม่หรือผูกของเดิม และยอดเริ่มต้นเท่าไร
+    setNotice(
+      payload.created
+        ? `สร้างรหัสกลาง ${payload.skuCode ?? code} และผูกให้ประกาศนี้แล้ว · เริ่มต้น ${(payload.onHand ?? 0).toLocaleString("th-TH")} ชิ้น`
+        : `ผูกกับรหัสกลาง ${code} แล้ว`,
+    );
+    onChanged?.();
+    router.refresh();
+  }
+
   async function unlink() {
     if (busy) return;
     setBusy("unlink");
@@ -573,7 +691,7 @@ export function CentralLinkRow({
         type="button"
         size="sm"
         variant={linkedCode ? "outline" : "default"}
-        onClick={() => setOpen(true)}
+        onClick={() => changeOpen(true)}
         className="max-w-[220px] truncate"
         aria-label={linkedCode ? `เปลี่ยนรหัสกลางที่ผูกอยู่ (${linkedCode})` : "เลือกจากคลังกลาง"}
       >
@@ -585,80 +703,170 @@ export function CentralLinkRow({
         </Button>
       ) : null}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={changeOpen}>
         <DialogContent className="max-w-[520px]">
           <DialogHeader className="pr-11">
             <DialogTitle>ผูก SKU กับรหัสกลาง</DialogTitle>
             <DialogDescription>
-              SKU บนร้าน: <span className="mono font-bold">{sellerSku ?? skuId}</span> — พิมพ์เพื่อค้นหาแล้วกดที่รหัสเพื่อผูก
+              SKU บนร้าน: <span className="mono font-bold">{sellerSku ?? skuId}</span> — เลือกผูกกับรหัสกลางที่มีอยู่
+              หรือสร้างรหัสกลางใหม่จากประกาศนี้
             </DialogDescription>
           </DialogHeader>
 
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="ค้นหารหัสหรือชื่อสินค้าในคลังกลาง"
-            className="h-10 text-[13px]"
-            aria-label="ค้นหารหัสกลาง"
-            autoFocus
-          />
+          <Tabs value={tab} onValueChange={(next) => setTab(next === "create" ? "create" : "link")} className="min-w-0">
+            <TabsList className="w-full">
+              <TabsTrigger value="link" className="min-h-[40px] px-2 text-[13px] sm:px-4 sm:text-[13.5px]">
+                ผูกกับรหัสเดิม
+              </TabsTrigger>
+              <TabsTrigger value="create" className="min-h-[40px] px-2 text-[13px] sm:px-4 sm:text-[13.5px]">
+                สร้างรหัสใหม่
+              </TabsTrigger>
+            </TabsList>
 
-          <div className="max-h-[320px] min-h-[80px] overflow-y-auto rounded-lg border border-border">
-            {rows === null ? (
-              <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">กำลังค้นหา…</p>
-            ) : rows.length === 0 ? (
-              <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">
-                ไม่พบรหัสที่ค้นหา — เพิ่มรหัสใหม่ได้ที่ช่อง “รับเข้าสต็อกกลาง”
-              </p>
-            ) : (
-              <ul>
-                {rows.map((row) => (
-                  <li key={row.skuCode} className="border-b border-border/60 last:border-b-0">
-                    <button
-                      type="button"
-                      onClick={() => linkCode(row.skuCode)}
-                      disabled={busy !== null}
-                      className="flex w-full min-h-[44px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                    >
-                      <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
-                        {row.hasImage ? (
-                          <img
-                            src={`/api/platform/central-stock/image?code=${encodeURIComponent(row.skuCode)}`}
-                            alt={`รูป ${row.skuCode}`}
-                            className="size-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : row.imageUrl ? (
-                          <img
-                            src={platformImageSrc(row.imageUrl) ?? row.imageUrl}
-                            alt={`รูป ${row.skuCode}`}
-                            className="size-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <PackageOpen className="size-4 text-muted-foreground/50" aria-hidden="true" />
-                        )}
+            <TabsContent value="link" className="flex min-w-0 flex-col gap-2">
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="ค้นหารหัสหรือชื่อสินค้าในคลังกลาง"
+                className="h-10 text-[13px]"
+                aria-label="ค้นหารหัสกลาง"
+                autoFocus
+              />
+
+              <div className="max-h-[320px] min-h-[80px] overflow-y-auto rounded-lg border border-border">
+                {rows === null ? (
+                  <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">กำลังค้นหา…</p>
+                ) : rows.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">
+                    ไม่พบรหัสที่ค้นหา — เพิ่มรหัสใหม่ได้ที่ช่อง “รับเข้าสต็อกกลาง”
+                  </p>
+                ) : (
+                  <ul>
+                    {rows.map((row) => (
+                      <li key={row.skuCode} className="border-b border-border/60 last:border-b-0">
+                        <button
+                          type="button"
+                          onClick={() => linkCode(row.skuCode)}
+                          disabled={busy !== null}
+                          className="flex w-full min-h-[44px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                        >
+                          <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                            {row.hasImage ? (
+                              <img
+                                src={`/api/platform/central-stock/image?code=${encodeURIComponent(row.skuCode)}`}
+                                alt={`รูป ${row.skuCode}`}
+                                className="size-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : row.imageUrl ? (
+                              <img
+                                src={platformImageSrc(row.imageUrl) ?? row.imageUrl}
+                                alt={`รูป ${row.skuCode}`}
+                                className="size-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <PackageOpen className="size-4 text-muted-foreground/50" aria-hidden="true" />
+                            )}
+                          </span>
+                          <span className="mono w-[92px] min-w-0 shrink truncate text-[12.5px] font-bold sm:w-[132px]">
+                            {row.skuCode}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
+                            {row.productName ?? "—"}
+                          </span>
+                          <span className="shrink-0 text-[11.5px] tabular-nums text-muted-foreground">
+                            {row.onHand.toLocaleString("th-TH")} ชิ้น · {row.shopCount} ร้าน
+                          </span>
+                          {busy === row.skuCode ? (
+                            <span className="shrink-0 text-[11.5px] text-muted-foreground">กำลังผูก…</span>
+                          ) : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="create" className="flex min-w-0 flex-col gap-2">
+              <label className="flex min-w-0 flex-col gap-1 text-[12px] font-semibold">
+                รหัสกลางที่จะสร้าง
+                <Input
+                  value={createCode}
+                  onChange={(event) => setCreateCode(event.target.value)}
+                  disabled={busy !== null}
+                  placeholder="ตั้งต้นจากรหัสบนร้าน"
+                  className="mono h-10 text-[13px]"
+                  aria-label="รหัสกลางที่จะสร้างใหม่"
+                />
+              </label>
+
+              <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-muted/40 p-2.5 text-[12px]">
+                <span className="font-semibold">ข้อมูลที่จะใช้จากประกาศนี้</span>
+                {listingState === "loading" ? (
+                  <span className="text-muted-foreground">กำลังอ่านข้อมูลประกาศ…</span>
+                ) : !listing ? (
+                  <span className="text-muted-foreground">
+                    ยังอ่านข้อมูลประกาศนี้ไม่ได้ — รหัสใหม่จะเริ่มที่ 0 ชิ้น แล้วค่อยเติมทีหลัง
+                  </span>
+                ) : (
+                  <>
+                    <span className="flex min-w-0 gap-1.5">
+                      <span className="shrink-0 text-muted-foreground">ชื่อสินค้า</span>
+                      <span className="min-w-0 flex-1 truncate font-semibold">{listing.productName ?? "—"}</span>
+                    </span>
+                    <span className="flex min-w-0 gap-1.5">
+                      <span className="shrink-0 text-muted-foreground">ยอดเริ่มต้นจากประกาศ</span>
+                      <span className="mono font-bold tabular-nums">
+                        {listing.quantity.toLocaleString("th-TH")} ชิ้น
                       </span>
-                      <span className="mono w-[132px] shrink-0 truncate text-[12.5px] font-bold">{row.skuCode}</span>
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
-                        {row.productName ?? "—"}
-                      </span>
-                      <span className="shrink-0 text-[11.5px] tabular-nums text-muted-foreground">
-                        {row.onHand.toLocaleString("th-TH")} ชิ้น · {row.shopCount} ร้าน
-                      </span>
-                      {busy === row.skuCode ? (
-                        <span className="shrink-0 text-[11.5px] text-muted-foreground">กำลังผูก…</span>
-                      ) : null}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {codeTaken ? (
+                <p className="text-[12px] font-semibold text-[#b42318]" role="alert">
+                  รหัสนี้มีอยู่แล้ว — ใช้ “ผูกกับรหัสเดิม” แทน
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={createFromListing}
+                  disabled={busy !== null || codeTaken || !createCode.trim()}
+                >
+                  {busy === "create" ? "กำลังสร้าง…" : "สร้างและผูก"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setQuery(createCode.trim());
+                    setTab("link");
+                  }}
+                  disabled={busy !== null}
+                >
+                  ไปผูกกับรหัสเดิม
+                </Button>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          {/* error ของป๊อปอัพต้องเห็นในป๊อปอัพ (เช่น รหัสซ้ำจากเซิร์ฟเวอร์) */}
+          {error ? (
+            <p className="text-[12px] font-semibold text-[#b42318]" role="alert">
+              {error}
+            </p>
+          ) : null}
         </DialogContent>
       </Dialog>
 
-      {error ? (
+      {error && !open ? (
         <span className="text-[11.5px] font-semibold text-[#b42318]" role="alert">
           {error}
         </span>

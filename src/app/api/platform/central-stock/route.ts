@@ -4,15 +4,16 @@ import {
   addCentralStock,
   archiveCentralStock,
   setCentralStockImage,
+  createCentralStockFromListing,
   linkListing,
   lookupSkuForCentral,
+  readListingForCentralLink,
   reconcileCentralStock,
   renameCentralStock,
   renameCentralStockCode,
   restoreCentralStock,
   unlinkListing,
 } from "@/lib/stock/central";
-import { pushPoolToListings } from "@/lib/stock/push";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,27 @@ export async function GET(request: Request) {
   const auth = requireApiAuth(request);
   if (!auth.ok) return auth.response;
 
-  const code = text(new URL(request.url).searchParams.get("code"), 120);
+  const params = new URL(request.url).searchParams;
+  // โหมดอ่านประกาศ: ใช้เป็นตัวอย่างก่อนสร้างรหัสกลางใหม่จากประกาศ (platform + shopId + skuId)
+  const listingShopId = text(params.get("shopId"));
+  const listingSkuId = text(params.get("skuId"), 60);
+  const listingPlatform = text(params.get("platform"), 20);
+  if (!params.get("code") && listingShopId && listingSkuId) {
+    if (!LISTING_PLATFORMS.has(listingPlatform)) {
+      return Response.json(
+        { error: "แพลตฟอร์มไม่ถูกต้อง", requestId: auth.requestId },
+        { status: 400, headers: { "x-request-id": auth.requestId } },
+      );
+    }
+    const listing = await readListingForCentralLink({
+      platform: listingPlatform,
+      shopId: listingShopId,
+      skuId: listingSkuId,
+    });
+    return Response.json({ ok: true, listing, requestId: auth.requestId });
+  }
+
+  const code = text(params.get("code"), 120);
   if (!code) {
     return Response.json(
       { error: "ต้องระบุรหัสสินค้า", requestId: auth.requestId },
@@ -93,21 +114,38 @@ export async function POST(request: Request) {
         note: text(body.note, 200) || null,
         actor: auth.session.sub,
       });
-      // เติม/ตัดแล้วเขียนยอดลงประกาศทุกร้านที่ผูกทันที — ยอดตรงแล้วจะข้าม ไม่ยิง API
-      const pushed = await pushPoolToListings({ skuCodes: [result.skuCode] }).catch(() => null);
+      // addCentralStock ดันยอดขึ้นประกาศทุกร้านที่ผูกให้แล้ว (สต็อกกลางเป็นเจ้าของยอด)
+      // ทางนี้ไม่ดันซ้ำ — ส่งผลที่ได้กลับไปให้หน้าเว็บบอกผู้ใช้ว่าเขียนกี่ประกาศ กี่ร้าน พลาดอะไร และใช้เวลาเท่าไร
+      const pushed = result.push;
       await recordAuditLog({
         actor: auth.session.sub,
         action: "platform.central_stock.receive",
         ipAddress,
         outcome: "success",
-        details: { skuCode: result.skuCode, quantity, onHand: result.onHand },
+        details: {
+          skuCode: result.skuCode,
+          quantity,
+          onHand: result.onHand,
+          pushed: pushed.pushed,
+          pushShops: pushed.shops,
+          pushBlocked: pushed.blocked,
+          pushFailed: pushed.failed,
+          pushMs: pushed.ms,
+        },
         requestId: auth.requestId,
       });
       return Response.json({
         ok: true,
-        ...result,
-        pushed: pushed?.pushed ?? 0,
-        pushFailed: pushed?.failed ?? 0,
+        skuCode: result.skuCode,
+        onHand: result.onHand,
+        restored: result.restored,
+        pushed: pushed.pushed,
+        pushFailed: pushed.failed,
+        pushShops: pushed.shops,
+        pushBlocked: pushed.blocked,
+        pushMs: pushed.ms,
+        pushDisabled: pushed.disabled,
+        pushErrors: pushed.errors.map((item) => item.error).slice(0, 3),
         requestId: auth.requestId,
       });
     }
@@ -224,6 +262,49 @@ export async function POST(request: Request) {
             { status: 400, headers: { "x-request-id": auth.requestId } },
           );
         }
+        // create = true คือ "สร้างรหัสกลางใหม่จากประกาศนี้แล้วผูกให้เลย" (ยอดเริ่มต้นจากประกาศ)
+        // รหัสที่มีอยู่แล้วต้องไม่ถูกเขียนทับ — ตอบ 409 ให้หน้าจอส่งผู้ใช้ไปโหมดผูกของเดิม
+        if (body.create === true) {
+          const made = await createCentralStockFromListing({
+            platform,
+            shopId,
+            skuId,
+            skuCode,
+            actor: auth.session.sub,
+          });
+          if (!made.created) {
+            return Response.json(
+              {
+                error: `รหัสนี้มีอยู่แล้ว — ใช้ 'ผูกกับรหัสเดิม' แทน`,
+                skuCode: made.skuCode,
+                requestId: auth.requestId,
+              },
+              { status: 409, headers: { "x-request-id": auth.requestId } },
+            );
+          }
+          await recordAuditLog({
+            actor: auth.session.sub,
+            action: "platform.central_stock.link",
+            ipAddress,
+            outcome: "success",
+            details: {
+              platform,
+              shopId,
+              skuId,
+              skuCode: made.skuCode,
+              created: true,
+              onHand: made.onHand,
+            },
+            requestId: auth.requestId,
+          });
+          return Response.json({
+            ok: true,
+            created: true,
+            skuCode: made.skuCode,
+            onHand: made.onHand,
+            requestId: auth.requestId,
+          });
+        }
         await linkListing({ platform, shopId, skuId, skuCode, actor: auth.session.sub });
       }
       await recordAuditLog({
@@ -234,7 +315,7 @@ export async function POST(request: Request) {
         details: { platform, shopId, skuId, skuCode: text(body.skuCode) || null },
         requestId: auth.requestId,
       });
-      return Response.json({ ok: true, requestId: auth.requestId });
+      return Response.json({ ok: true, created: false, requestId: auth.requestId });
     }
 
     if (action === "reconcile") {

@@ -41,6 +41,8 @@ let running = false;
 let stockRunning = false;
 let returnsRunning = false;
 let shipnityRunning = false;
+// บันทึกครั้งเดียวว่าเขียนยอดลงประกาศถูกปิดอยู่ — ไม่ให้ log ท่วมทุกรอบ 15 วินาที
+let pushDisabledLogged = false;
 
 /**
  * ตัวตั้งเวลาซิงก์ TikTok อยู่ใน process ของแอปเอง (ไม่ต้องพึ่ง Task Scheduler ของเครื่อง)
@@ -172,11 +174,17 @@ export function startScheduledSync(): void {
           console.log(
             `[central-stock] ปรับยอดจากออเดอร์ · tiktok ${central.tiktok} · shopee ${central.shopee} · facebook ${central.facebook}`,
           );
-          // ยอดกลางเปลี่ยน → เขียนยอดใหม่ลงประกาศทุกร้านที่ผูก (ยอดตรงแล้วจะข้าม)
+          // ยอดกลางเปลี่ยน → ดันยอดใหม่ขึ้นประกาศทุกร้านที่ผูก (ยอดตรงแล้วจะข้าม)
+          // สต็อกกลางเป็นเจ้าของยอด: ออเดอร์ที่ขายบน TikTok หักยอดกลางแล้วต้องปรับประกาศของร้านที่ผูกอยู่ให้ตามกัน
           const pushed = await pushPoolToListings();
-          if (pushed.pushed > 0 || pushed.failed > 0) {
+          if (pushed.disabled) {
+            if (!pushDisabledLogged) {
+              pushDisabledLogged = true;
+              console.log("[central-stock] ไม่ดันยอดขึ้นประกาศ — ปิดด้วย STOCK_PUSH_ENABLED=0");
+            }
+          } else if (pushed.pushed > 0 || pushed.failed > 0 || pushed.blocked > 0) {
             console.log(
-              `[central-stock] เขียนยอดลงประกาศ · สำเร็จ ${pushed.pushed} · ข้าม ${pushed.skipped} · ล้มเหลว ${pushed.failed}`,
+              `[central-stock] ดันยอดขึ้นประกาศ · สำเร็จ ${pushed.pushed} (${pushed.shops} ร้าน) · ข้าม ${pushed.skipped} · รอธงร้านจริง ${pushed.blocked} · ล้มเหลว ${pushed.failed}`,
             );
           }
         }

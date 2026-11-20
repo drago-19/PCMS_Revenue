@@ -91,13 +91,18 @@ export async function POST(request: Request) {
   void (async () => {
     try {
       const orders = await syncOrders(ctx, from, to);
-      // หักยอดกลาง + เขียนยอดใหม่ลงประกาศทุกร้านทันที ก่อนงานหนัก (statement/สต็อกทั้งแคตตาล็อก)
+      // หักยอดกลาง + ดันยอดใหม่ขึ้นประกาศทุกร้านทันที ก่อนงานหนัก (statement/สต็อกทั้งแคตตาล็อก)
       // ลำดับนี้คือสิ่งที่ทำให้ร้านอื่นเห็นยอดใหม่ภายใน 1-2 วินาที และลดโอกาสขายทับ
+      // สต็อกกลางเป็นเจ้าของยอด: ขายบน TikTok → ยอดกลางลด → ดันกลับขึ้นประกาศของทุกร้านที่ผูก
       const started = Date.now();
       const central = await reconcileCentralStock({ hours: 2 });
       const pushed = await pushPoolToListings();
       console.log(
-        `[central-stock] ${Date.now() - started}ms · หัก tiktok ${central.tiktok} shopee ${central.shopee} facebook ${central.facebook} · เขียนประกาศ ${pushed.pushed} (ข้าม ${pushed.skipped} พลาด ${pushed.failed})`,
+        `[central-stock] ${Date.now() - started}ms · หัก tiktok ${central.tiktok} shopee ${central.shopee} facebook ${central.facebook} · ${
+          pushed.disabled
+            ? "ไม่ดันยอดขึ้นประกาศ (ปิดด้วย STOCK_PUSH_ENABLED=0)"
+            : `ดันยอดขึ้นประกาศ ${pushed.pushed} (ข้าม ${pushed.skipped} รอธงร้านจริง ${pushed.blocked} พลาด ${pushed.failed})`
+        }`,
       );
       // คำขอคืนสินค้าคือเหตุที่ทำให้สต็อกถูกเติมคืนก่อนของถึงร้าน — ดึงทุกครั้งที่มีเหตุการณ์
       const returns = await syncReturns(ctx, from, to);

@@ -99,7 +99,8 @@ const DUE_UNIX = `COALESCE(
   EXTRACT(EPOCH FROM COALESCE(o.paid_time, o.create_time))::bigint + 172800
 )`;
 
-const UNSHIPPED = "('AWAITING_SHIPMENT','ON_HOLD','PARTIALLY_SHIPPING','AWAITING_COLLECTION')";
+// "ยังไม่จัดส่ง" — หน้าสต็อกใช้ชุดเดียวกันนี้คำนวณยอดจอง (ห้ามเขียนรายการที่สองที่ต่างกัน)
+export const UNSHIPPED = "('AWAITING_SHIPMENT','ON_HOLD','PARTIALLY_SHIPPING','AWAITING_COLLECTION')";
 
 export async function getTikTokOps(params: OpsParams): Promise<TikTokOps> {
   const platform = params.platform ?? "TikTok";

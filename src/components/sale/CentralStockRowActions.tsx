@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, MinusIcon, PlusIcon } from "lucide-react";
+import { ChevronDown, MinusIcon, PlusIcon } from "lucide-react";
 import { SALE_THEME } from "@/lib/sale/theme";
-import { platformImageSrc } from "@/lib/platform/image-proxy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,29 +20,27 @@ const PRESETS = [1, 5, 10, 50] as const;
 const MAX_AMOUNT = 9999;
 
 /**
- * จัดการรหัสกลางต่อแถว: ปรับจำนวน (แบบเดียวกับหน้าปรับสต็อกของร้าน — ปุ่มลัด ไม่มีช่องพิมพ์อิสระ)
- * · เปลี่ยนชื่อ · เลิกใช้รหัส
+ * ป๊อปอัพจัดการรหัสกลางหนึ่งตัว: ปรับจำนวน (แบบเดียวกับหน้าปรับสต็อกของร้าน — ปุ่มลัด ไม่มีช่องพิมพ์อิสระ)
+ * · ดูประกาศที่ผูก · เปลี่ยนชื่อ · เลิกใช้รหัส
  * เลิกใช้ = ซ่อนจากรายการและตัดการผูก แต่ประวัติการเคลื่อนไหวอยู่ครบ
+ *
+ * children = ปุ่มที่ใช้เปิดป๊อปอัพ (แถวในตารางหรือการ์ดบนมือถือเป็นคนส่งเข้ามา)
  */
-export function CentralStockRowActions({
+export function CentralStockManageDialog({
   skuCode,
   productName,
   onHand,
-  hasImage,
-  imageUrl,
-  shopCount,
   listingCount,
   updatedAtText,
+  children,
 }: {
   skuCode: string;
   productName: string | null;
   onHand: number;
-  hasImage: boolean;
-  imageUrl: string | null;
-  shopCount: number;
   listingCount: number;
   /** หน้าเว็บจัดรูปวันที่มาให้แล้ว (thaiDateTime) — คอมโพเนนต์นี้เป็น client จึงรับสตริง */
   updatedAtText: string;
+  children: ReactNode;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -159,14 +156,24 @@ export function CentralStockRowActions({
     if (!result) return;
     const pushed = Number(result.pushed ?? 0);
     const failed = Number(result.pushFailed ?? 0);
+    const blocked = Number(result.pushBlocked ?? 0);
+    const shops = Number(result.pushShops ?? 0);
+    const ms = Number(result.pushMs ?? 0);
     const restored = result.restored === true;
     const nextOnHand = Number(result.onHand ?? 0);
     setBase(nextOnHand);
     setAmount(0);
+    // สต็อกกลางเป็นเจ้าของยอด — ต้องบอกผลการดันยอดขึ้นประกาศทุกครั้ง ไม่ใช่เฉพาะตอนสำเร็จ
+    const pushNote =
+      pushed > 0
+        ? ` · อัปเดตขึ้นประกาศ ${pushed} ประกาศ (${shops} ร้าน) · ${ms} ms`
+        : blocked > 0
+          ? ` · ร้านจริงรอเปิด STOCK_PUSH_LIVE (${blocked} ประกาศ)`
+          : "";
     setNotice(
-      `${mode === "add" ? "เติม" : "ตัด"} ${effective} แล้ว · คงเหลือกลางตอนนี้ ${nextOnHand}${
-        pushed > 0 ? ` · เขียนลงประกาศ ${pushed} ร้าน` : ""
-      }${failed > 0 ? ` · พลาด ${failed} ร้าน` : ""}${restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""}`,
+      `${mode === "add" ? "เติม" : "ตัด"} ${effective} แล้ว · คงเหลือกลางตอนนี้ ${nextOnHand}${pushNote}${
+        failed > 0 ? ` · ประกาศที่พลาด ${failed}` : ""
+      }${restored ? " · เปิดใช้รหัสกลับมาแล้ว" : ""}`,
     );
     router.refresh();
   }
@@ -195,69 +202,27 @@ export function CentralStockRowActions({
   }
 
   return (
-    <>
-      {/* แถวทั้งแถวกดได้ — เปิดป๊อปอัพจัดการโดยไม่ต้องมีปุ่ม จัดการ */}
-      <tr
-        className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40"
-        onClick={() => setOpen(true)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setOpen(true);
-          }
-        }}
-        tabIndex={0}
-        aria-haspopup="dialog"
-      >
-        <td className="py-1.5 pr-2">
-          <span className="flex size-9 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
-            {hasImage ? (
-              <img
-                src={`/api/platform/central-stock/image?code=${encodeURIComponent(skuCode)}`}
-                alt={`รูป ${skuCode}`}
-                className="size-full object-cover"
-                loading="lazy"
-              />
-            ) : imageUrl ? (
-              <img
-                src={platformImageSrc(imageUrl) ?? imageUrl}
-                alt={`รูป ${skuCode}`}
-                className="size-full object-cover"
-                loading="lazy"
-              />
-            ) : null}
-          </span>
-        </td>
-        <td className="mono py-1.5 pr-2 font-bold">{skuCode}</td>
-        <td className="max-w-[260px] truncate py-1.5 pr-2">{productName ?? "—"}</td>
-        <td className={cn("mono py-1.5 pr-2 text-right font-bold", onHand <= 0 ? "text-[#b42318]" : "")}>
-          {onHand.toLocaleString("th-TH")}
-        </td>
-        <td className="mono py-1.5 pr-2 text-right">{shopCount.toLocaleString("th-TH")}</td>
-        <td className="mono py-1.5 pr-2 text-right">{listingCount.toLocaleString("th-TH")}</td>
-        <td className="py-1.5 pr-2 text-right text-muted-foreground">{updatedAtText}</td>
-        <td className="py-1.5 text-right text-muted-foreground">
-          <ChevronRight className="ml-auto size-4" aria-hidden="true" />
-        </td>
-      </tr>
-
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          setConfirmArchive(false);
-          setError(null);
-          setNotice(null);
-          setAmount(0);
-        }}
-      >
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        setConfirmArchive(false);
+        setError(null);
+        setNotice(null);
+        setAmount(0);
+      }}
+    >
+      <DialogTrigger asChild>{children}</DialogTrigger>
       {/* SALE_THEME ต้องส่งเข้ามาเอง — dialog เรนเดอร์ใน portal หลุดจากตัวครอบธีมของหน้า
           ไม่งั้นสีเขียว/แดง (var --ok/--danger) จะไม่มีค่า ปุ่มกลายเป็นกล่องโปร่ง */}
       {/* จำกัดสูง + เลื่อนในตัว — กันป๊อปอัพยาวล้นจอ */}
       <DialogContent className="max-h-[85dvh] max-w-[460px] overflow-y-auto" style={SALE_THEME}>
         <DialogHeader className="pr-11">
           <DialogTitle className="mono text-[15px]">{skuCode}</DialogTitle>
-          <DialogDescription>คงเหลือกลางตอนนี้ {base.toLocaleString("th-TH")} ชิ้น</DialogDescription>
+          <DialogDescription>
+            คงเหลือกลางตอนนี้ {base.toLocaleString("th-TH")} ชิ้น · ผูกไว้ {listingCount.toLocaleString("th-TH")} ประกาศ ·
+            อัปเดต {updatedAtText}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
@@ -437,7 +402,8 @@ export function CentralStockRowActions({
               {busy === "adjust" ? "กำลังบันทึก…" : `ยืนยัน${mode === "add" ? "เติม" : "ตัด"} ${effective} ชิ้น`}
             </Button>
             <p className="text-[11.5px] text-muted-foreground">
-              ยอดใหม่จะถูกเขียนลงประกาศของทุกร้านที่ผูกไว้ในรอบถัดไป
+              ยอดนี้เป็นยอดกลางที่ทุกประกาศใช้ร่วมกัน — ยืนยันแล้วระบบจะดันขึ้นประกาศของทุกร้านที่ผูกทันที
+              (ร้านจริงจะรอจนเปิด STOCK_PUSH_LIVE)
             </p>
           </section>
 
@@ -503,7 +469,7 @@ export function CentralStockRowActions({
             <div className="flex flex-col gap-1">
             <p className="text-[12px] font-semibold">ลบรหัสกลาง (เลิกใช้)</p>
             <p className="text-[11.5px] text-muted-foreground">
-              ซ่อนจากรายการและตัดการผูกทุกร้าน (หยุดหัก/หยุดเขียนยอด) — ประวัติยังอยู่ครบ นำกลับได้ที่การ์ด “รหัสที่เลิกใช้แล้ว”
+              ซ่อนจากรายการและตัดการผูกทุกร้าน (หยุดหักยอดกลาง) — ประวัติยังอยู่ครบ นำกลับได้ที่การ์ด “รหัสที่เลิกใช้แล้ว”
             </p>
             <Button
               type="button"
@@ -531,6 +497,5 @@ export function CentralStockRowActions({
         </div>
       </DialogContent>
     </Dialog>
-    </>
   );
 }

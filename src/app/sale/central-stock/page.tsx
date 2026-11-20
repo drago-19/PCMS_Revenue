@@ -1,8 +1,6 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { SaleHeader } from "@/components/sale/SaleHeader";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -16,19 +14,19 @@ import { CentralShopPicker } from "@/components/sale/CentralShopPicker";
 import { CentralStockLinkDialog } from "@/components/sale/CentralStockLinkDialog";
 import { CentralStockReceiveForm } from "@/components/sale/CentralStockTools";
 import { CentralShopStockBrowser } from "@/components/sale/CentralShopStockBrowser";
-import { CentralStockRowActions } from "@/components/sale/CentralStockRowActions";
-import { CentralStockRestoreButton } from "@/components/sale/CentralStockRestoreButton";
+import { CentralStockCreateProductDialog } from "@/components/sale/CentralStockCreateProductDialog";
+import { CentralStockProductTable } from "@/components/sale/CentralStockProductTable";
 import { LiveRefresh } from "@/components/sale/LiveRefresh";
-import { thaiDateTime } from "@/lib/platform/period";
+import { isSandboxShopName } from "@/lib/platform/platforms";
 import { SALE_THEME } from "@/lib/sale/theme";
 import {
   centralStockTotals,
-  listArchivedCentralStock,
   listCentralStockRows,
   listLinkedShops,
   listShopStocksForLinking,
+  type CentralStatusFilter,
 } from "@/lib/stock/central";
-import { cn } from "@/lib/utils";
+import { groupCentralStockRows } from "@/lib/stock/central-list";
 
 export const dynamic = "force-dynamic";
 
@@ -42,11 +40,19 @@ type SearchParams = Promise<{
   spage?: string;
   filter?: string;
   unlinked?: string;
+  status?: string;
 }>;
 
 function num(value: number): string {
   return value.toLocaleString("th-TH");
 }
+
+/** ตัวกรองสถานะของรายการสินค้า (คนละตัวกับแท็บผูก/ยังไม่ผูกในไดอะล็อกผูก SKU) */
+const STATUS_OPTIONS: Array<{ key: CentralStatusFilter; label: string }> = [
+  { key: "all", label: "ทั้งหมด" },
+  { key: "out", label: "ของหมด" },
+  { key: "unlinked", label: "ยังไม่ผูกประกาศ" },
+];
 
 export default async function CentralStockPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
@@ -61,17 +67,24 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
       : params.unlinked === "1"
         ? "unlinked"
         : "all";
+  const status: CentralStatusFilter =
+    params.status === "out" || params.status === "unlinked" ? params.status : "all";
   const shopKey = params.shop ?? "";
 
-  const [totals, list, shops, archived] = await Promise.all([
+  const [totals, list, shops] = await Promise.all([
     centralStockTotals(),
-    listCentralStockRows({ q, page }),
+    listCentralStockRows({ q, page, status }),
     listLinkedShops(),
-    listArchivedCentralStock(20),
   ]);
+
+  // รหัสในหน้านี้จัดกลุ่มตาม product_id ของประกาศที่ผูก — รหัสที่ยังไม่ผูกเป็นกลุ่มของตัวเอง
+  const groups = groupCentralStockRows(list.rows);
 
   const keyOf = (shop: { platform: string; shopId: string }) => `${shop.platform}:${shop.shopId}`;
   const selected = shops.find((shop) => keyOf(shop) === shopKey) ?? shops[0] ?? null;
+  // ปุ่มสร้างสินค้าสร้างได้เฉพาะร้านทดสอบ — เลือกร้านทดสอบจากรายการที่เชื่อมต่อไว้
+  const sandboxShop =
+    shops.find((shop) => shop.platform === "TikTok" && isSandboxShopName(shop.shopName)) ?? null;
   const shopStocks = selected
     ? await listShopStocksForLinking({
         platform: selected.platform,
@@ -83,7 +96,17 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
     : null;
 
   // ลิงก์คงคำค้น/หน้าระหว่างสลับแท็บ — ใช้ตัวช่วยเดียวกันทั้งหน้า
-  const href = (next: Partial<{ q: string; page: number; shop: string; sq: string; spage: number; filter: string }>) => {
+  const href = (
+    next: Partial<{
+      q: string;
+      page: number;
+      shop: string;
+      sq: string;
+      spage: number;
+      filter: string;
+      status: CentralStatusFilter;
+    }>,
+  ) => {
     const qs = new URLSearchParams();
     const nextQ = next.q ?? q;
     const nextPage = next.page ?? page;
@@ -91,12 +114,14 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
     const nextSq = next.sq ?? sq;
     const nextSpage = next.spage ?? spage;
     const nextFilter = next.filter ?? filter;
+    const nextStatus = next.status ?? status;
     if (nextQ) qs.set("q", nextQ);
     if (nextPage > 1) qs.set("page", String(nextPage));
     if (nextShop) qs.set("shop", nextShop);
     if (nextSq) qs.set("sq", nextSq);
     if (nextSpage > 1) qs.set("spage", String(nextSpage));
     if (nextFilter !== "all") qs.set("filter", nextFilter);
+    if (nextStatus !== "all") qs.set("status", nextStatus);
     const text = qs.toString();
     return text ? `/sale/central-stock?${text}` : "/sale/central-stock";
   };
@@ -105,42 +130,77 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
     <div className="workspace-page flex min-w-0 flex-col gap-4">
       <SaleHeader
         eyebrow="สต็อกกลาง"
-        title="สต็อกกลาง · ทุกแพลตฟอร์มใช้ยอดเดียวกัน"
-        description="เติมของที่เดียวแล้วผูก SKU ของแต่ละร้านเข้าที่รหัสกลาง — ทุกร้านเห็นยอดเดียวกัน และลดพร้อมกันเมื่อขาย"
+        title="สินค้า · สต็อกกลาง"
+        description="สินค้า 1 แถวหลัก ไซส์เป็นแถวลูก — สร้างสินค้าใหม่ได้จากหน้านี้ เติมของที่เดียวแล้วทุกร้านที่ผูกเห็นยอดเดียวกัน"
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <LiveRefresh />
-      </div>
+      {/* แถวเครื่องมือเดียว: ค้นหา · ตัวกรอง · ปุ่มงานหลัก — การ์ดสรุป 4 ใบเดิมยุบเป็นข้อความบรรทัดเดียว */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <form action="/sale/central-stock" className="flex min-w-[200px] flex-1 items-center gap-2">
+            {selected ? <input type="hidden" name="shop" value={keyOf(selected)} /> : null}
+            {status !== "all" ? <input type="hidden" name="status" value={status} /> : null}
+            <label className="sr-only" htmlFor="central-search">
+              ค้นหารหัสหรือชื่อสินค้า
+            </label>
+            <Input
+              id="central-search"
+              name="q"
+              defaultValue={q}
+              placeholder="ค้นหารหัสหรือชื่อสินค้า"
+              className="h-10 min-w-0 flex-1 text-[13px]"
+            />
+            <Button type="submit" size="sm" variant="secondary" className="min-h-[40px]">
+              ค้นหา
+            </Button>
+            {q ? (
+              <Button asChild size="sm" variant="ghost" className="min-h-[40px]">
+                <Link href={href({ q: "", page: 1 })} scroll={false}>
+                  ล้างคำค้น
+                </Link>
+              </Button>
+            ) : null}
+          </form>
 
-      {/* การ์ดตัวเลขแยกสีตามความหมาย: น้ำเงิน=จำนวนรหัส · เขียว=ของในคลัง · แดง=ของหมด · เขียวอ่อน=การเชื่อมโยง */}
-      <div className="grid grid-cols-2 gap-2.5 min-[900px]:grid-cols-4">
-        <Card padding="padded" className="bg-[color:var(--accent)] ring-1 ring-inset ring-[color:var(--accent-foreground)]/10">
-          <p className="text-[12px] font-semibold text-[color:var(--accent-foreground)]">รหัสในคลังกลาง</p>
-          <p className="mono text-[24px] font-bold tabular-nums text-[color:var(--accent-foreground)]">{num(totals.skus)}</p>
-        </Card>
-        <Card padding="padded" className="bg-[color:var(--ok-soft)] ring-1 ring-inset ring-[color:var(--ok)]/15">
-          <p className="text-[12px] font-semibold text-[color:var(--ok)]">ชิ้นคงเหลือรวม</p>
-          <p className="mono text-[24px] font-bold tabular-nums text-[color:var(--ok)]">{num(totals.units)}</p>
-        </Card>
-        <Card padding="padded">
-          <p className="text-[12px] font-semibold text-[color:var(--danger)]">รหัสที่ของหมด</p>
-          <p className={cn("mono text-[24px] font-bold tabular-nums", totals.out > 0 ? "text-[color:var(--danger)]" : "text-[color:var(--danger)]/60")}>
-            {num(totals.out)}
-          </p>
-        </Card>
-        <Card padding="padded" className="bg-[color:var(--ok-soft)] ring-1 ring-inset ring-[color:var(--ok)]/15">
-          <p className="text-[12px] font-semibold text-[color:var(--ok)]">ประกาศที่ผูกไว้</p>
-          <p className="mono text-[24px] font-bold tabular-nums text-[color:var(--ok)]">{num(totals.links)}</p>
-        </Card>
-      </div>
+          <div role="group" aria-label="ตัวกรองสถานะ" className="flex flex-wrap items-center gap-1.5">
+            {STATUS_OPTIONS.map((option) => (
+              <Button
+                key={option.key}
+                asChild
+                size="sm"
+                variant={status === option.key ? "secondary" : "outline"}
+                className="min-h-[40px]"
+              >
+                <Link
+                  href={href({ status: option.key, page: 1 })}
+                  scroll={false}
+                  aria-current={status === option.key ? "true" : undefined}
+                >
+                  {option.label}
+                </Link>
+              </Button>
+            ))}
+          </div>
 
-      <Card padding="padded" className="flex min-w-0 flex-col gap-2">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-          <h2 className="text-[14.5px] font-bold">รายการในคลังกลาง</h2>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="neutral">เรียงจากของน้อยไปมาก</Badge>
-            {/* ปุ่มผูก SKU กับรับเข้าสต็อกกลางอยู่ด้วยกันที่หัวการ์ด — ไม่ต้องเลื่อนลงท้ายหน้า */}
+            <CentralStockCreateProductDialog
+              shopId={sandboxShop?.shopId ?? ""}
+              shopName={sandboxShop?.shopName ?? null}
+            />
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline" className="min-h-[40px]">
+                  รับเข้าสต็อกกลาง
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="@container max-h-[85dvh] max-w-[520px] overflow-y-auto" style={SALE_THEME}>
+                <DialogHeader className="pr-11">
+                  <DialogTitle>รับเข้าสต็อกกลาง</DialogTitle>
+                  <DialogDescription>รับของเข้ารหัสกลาง — ยอดอัปเดตทันทีหลังบันทึก</DialogDescription>
+                </DialogHeader>
+                <CentralStockReceiveForm />
+              </DialogContent>
+            </Dialog>
             <CentralStockLinkDialog defaultOpen={Boolean(sq) || filter !== "all" || spage > 1}>
               <div className="flex min-w-0 flex-col gap-3">
                 {shops.length === 0 ? (
@@ -181,146 +241,64 @@ export default async function CentralStockPage({ searchParams }: { searchParams:
                 )}
               </div>
             </CentralStockLinkDialog>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button size="sm" className="gap-1.5">รับเข้าสต็อกกลาง</Button>
-              </DialogTrigger>
-              <DialogContent className="@container max-h-[85dvh] max-w-[520px] overflow-y-auto" style={SALE_THEME}>
-                <DialogHeader className="pr-11">
-                  <DialogTitle>รับเข้าสต็อกกลาง</DialogTitle>
-                  <DialogDescription>รับของเข้ารหัสกลาง — ยอดอัปเดตทันทีหลังบันทึก</DialogDescription>
-                </DialogHeader>
-                <CentralStockReceiveForm />
-              </DialogContent>
-            </Dialog>
           </div>
         </div>
 
-        <form action="/sale/central-stock" className="flex min-w-0 flex-wrap items-center gap-2">
-          {selected ? <input type="hidden" name="shop" value={keyOf(selected)} /> : null}
-          <label className="sr-only" htmlFor="central-search">
-            ค้นหารหัสหรือชื่อสินค้า
-          </label>
-          <Input
-            id="central-search"
-            name="q"
-            defaultValue={q}
-            placeholder="ค้นหารหัสหรือชื่อสินค้า"
-            className="h-10 min-w-0 flex-1 text-[13px]"
-          />
-          <Button type="submit" size="sm" variant="secondary">
-            ค้นหา
-          </Button>
-          {q ? (
-            <Button asChild size="sm" variant="ghost">
-              <Link href={href({ q: "", page: 1 })} scroll={false}>
-                ล้างคำค้น
+        {/* สรุปบรรทัดเดียว แทนการ์ดตัวเลข 4 ใบที่เคยกินพื้นที่หัวหน้า */}
+        <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
+          <span>
+            รหัสในคลังกลาง <b className="mono tabular-nums text-foreground">{num(totals.skus)}</b>
+          </span>
+          <span>
+            ชิ้นคงเหลือรวม <b className="mono tabular-nums text-foreground">{num(totals.units)}</b>
+          </span>
+          <span>
+            ของหมด{" "}
+            <b className="mono tabular-nums text-[color:var(--danger)]">{num(totals.out)}</b>
+          </span>
+          <span>
+            ประกาศที่ผูก <b className="mono tabular-nums text-foreground">{num(totals.links)}</b>
+          </span>
+          <LiveRefresh />
+        </p>
+      </div>
+
+      {/* ตารางแบบหน้า Shipnity เต็มความกว้างใต้หัวหน้า: แถวหลัก = สินค้า · แถวลูก = รหัสกลาง (กาง/ย่อได้) */}
+      <CentralStockProductTable
+        groups={groups}
+        emptyText={
+          q
+            ? "ไม่พบรหัสที่ค้นหา"
+            : status !== "all"
+              ? "ไม่มีรหัสในสถานะที่กรองไว้ — กด “ทั้งหมด” เพื่อดูทุกรหัส"
+              : totals.links > 0
+                ? `ผูกไว้ ${num(totals.links)} ประกาศแล้ว แต่ยังไม่มีของในคลังกลาง — กรอกจำนวนในช่อง “รับเข้าสต็อกกลาง” ด้านบนแล้วกดบันทึก`
+                : "ยังไม่มีของในคลังกลาง — ใช้ช่อง “รับเข้าสต็อกกลาง” ด้านบน หรือผูก SKU ของร้านด้านล่างก่อน"
+        }
+      />
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
+        <span>
+          แสดง {num(list.rows.length)} จาก {num(list.total)} รหัส · หน้า {num(list.page)} / {num(list.pageCount)}
+        </span>
+        <span className="flex items-center gap-2">
+          {list.page > 1 ? (
+            <Button asChild size="sm" variant="outline" className="min-h-[40px]">
+              <Link href={href({ page: list.page - 1 })} scroll={false}>
+                ก่อนหน้า
               </Link>
             </Button>
           ) : null}
-        </form>
+          {list.page < list.pageCount ? (
+            <Button asChild size="sm" variant="outline" className="min-h-[40px]">
+              <Link href={href({ page: list.page + 1 })} scroll={false}>
+                ถัดไป
+              </Link>
+            </Button>
+          ) : null}
+        </span>
+      </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[800px] text-[12.5px]">
-            <thead>
-              <tr className="border-b border-[color:var(--foreground)]/25 text-[11.5px] font-semibold text-muted-foreground">
-                <th scope="col" className="py-1.5 pr-2 text-left font-bold">รูป</th>
-                <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัสกลาง</th>
-                <th scope="col" className="py-1.5 pr-2 text-left font-bold">ชื่อสินค้า</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือ</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">ร้านที่ผูก</th>
-                <th scope="col" className="py-1.5 pr-2 text-right font-bold">ประกาศที่ผูก</th>
-                <th scope="col" className="py-1.5 text-right font-bold">อัปเดต</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* แถวทั้งแถวกดได้ — คอมโพเนนต์เรนเดอร์ <tr> เองและเปิดป๊อปอัพเมื่อกด */}
-              {list.rows.map((row) => (
-                <CentralStockRowActions
-                  key={row.skuCode}
-                  skuCode={row.skuCode}
-                  productName={row.productName}
-                  onHand={row.onHand}
-                  hasImage={row.hasImage}
-                  imageUrl={row.imageUrl}
-                  shopCount={row.shopCount}
-                  listingCount={row.listingCount}
-                  updatedAtText={thaiDateTime(row.updatedAt)}
-                />
-              ))}
-              {list.rows.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
-                    {q
-                      ? "ไม่พบรหัสที่ค้นหา"
-                      : totals.links > 0
-                        ? `ผูกไว้ ${num(totals.links)} ประกาศแล้ว แต่ยังไม่มีของในคลังกลาง — กรอกจำนวนในช่อง “รับเข้าสต็อกกลาง” ด้านบนแล้วกดบันทึก`
-                        : "ยังไม่มีของในคลังกลาง — ใช้ช่อง “รับเข้าสต็อกกลาง” ด้านบน หรือผูก SKU ของร้านด้านล่างก่อน"}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted-foreground">
-          <span>
-            แสดง {num(list.rows.length)} จาก {num(list.total)} รหัส · หน้า {num(list.page)} / {num(list.pageCount)}
-          </span>
-          <span className="flex items-center gap-2">
-            {list.page > 1 ? (
-              <Button asChild size="sm" variant="outline">
-                <Link href={href({ page: list.page - 1 })} scroll={false}>ก่อนหน้า</Link>
-              </Button>
-            ) : null}
-            {list.page < list.pageCount ? (
-              <Button asChild size="sm" variant="outline">
-                <Link href={href({ page: list.page + 1 })} scroll={false}>ถัดไป</Link>
-              </Button>
-            ) : null}
-          </span>
-        </div>
-      </Card>
-
-      {archived.length > 0 ? (
-        <Card padding="padded" className="flex min-w-0 flex-col gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-[14.5px] font-bold">รหัสที่เลิกใช้แล้ว</h2>
-            <span className="text-[11.5px] text-muted-foreground">ซ่อนจากรายการหลัก — ประวัติยังอยู่ครบ นำกลับได้</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-[12.5px]" aria-label="รหัสที่เลิกใช้แล้ว">
-              <thead>
-                <tr className="border-b border-[color:var(--foreground)]/25 text-[11.5px] font-semibold text-muted-foreground">
-                  <th scope="col" className="py-1.5 pr-2 text-left font-bold">รหัสกลาง</th>
-                  <th scope="col" className="py-1.5 pr-2 text-left font-bold">ชื่อสินค้า</th>
-                  <th scope="col" className="py-1.5 pr-2 text-right font-bold">คงเหลือตอนเลิกใช้</th>
-                  <th scope="col" className="py-1.5 pr-2 text-right font-bold">เลิกใช้เมื่อ</th>
-                  <th scope="col" className="py-1.5 text-right font-bold">จัดการ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {archived.map((row) => (
-                  <tr key={row.skuCode} className="border-b border-border/60">
-                    <td className="mono py-1.5 pr-2 font-bold">{row.skuCode}</td>
-                    <td className="max-w-[240px] truncate py-1.5 pr-2">{row.productName ?? "—"}</td>
-                    <td className="mono py-1.5 pr-2 text-right">{num(row.onHand)}</td>
-                    <td className="py-1.5 pr-2 text-right text-muted-foreground">{thaiDateTime(row.archivedAt)}</td>
-                    <td className="py-1.5 text-right">
-                      <CentralStockRestoreButton skuCode={row.skuCode} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      ) : null}
-
-      <p className="text-[12px] leading-5 text-muted-foreground">
-        หมายเหตุ: เติมของที่คลังกลางแล้วระบบจะตั้งจำนวนบนประกาศของทุกร้านที่ผูกให้เท่ายอดกลาง — เมื่อขายที่ร้านไหน
-        ยอดกลางจะลดลงแล้วเขียนกลับไปทุกร้านภายในไม่กี่วินาที (TikTok/Shopee) ส่วน Facebook คิดจาก Shipnity ตามรอบ
-      </p>
     </div>
   );
 }

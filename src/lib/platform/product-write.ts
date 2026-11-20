@@ -1,4 +1,9 @@
 import { query } from "@/lib/db";
+import { variantNameFromSalesAttributes } from "@/lib/platform/stock-list";
+import {
+  buildCreateProductPayload,
+  type CreateProductSkuInput,
+} from "./product-payload";
 import { callTikTokApi, callTikTokMultipart } from "./tiktok";
 import { getPlatformAccountRow, getPlatformConfig, TIKTOK_PLATFORM } from "./store";
 
@@ -156,6 +161,7 @@ export async function updateProductImages({
 /**
  * สร้างสินค้าใหม่บน TikTok (สถานะเริ่มต้นเป็นแบบร่าง)
  * ต้องมี uri ของรูปที่อัปโหลดด้วย use_case=MAIN_IMAGE แล้ว และหมวดปลายทางที่มีอยู่จริง
+ * ส่งได้หลายรหัสย่อย (ไซส์) ในครั้งเดียว — payload ประกอบที่ buildCreateProductPayload
  */
 export async function createProduct({
   shopId,
@@ -163,24 +169,33 @@ export async function createProduct({
   description,
   categoryId,
   imageUri,
-  sellerSku,
-  price,
-  quantity,
+  skus,
   weightGrams,
   warehouseId,
+  sizeAttributeName,
 }: {
   shopId: string;
   title: string;
   description: string;
   categoryId: string;
   imageUri: string;
-  sellerSku: string;
-  price: number;
-  quantity: number;
+  skus: CreateProductSkuInput[];
   weightGrams: number;
   warehouseId: string;
+  sizeAttributeName?: string;
 }): Promise<{ productId: string }> {
   const ctx = await requireShop(shopId);
+  const body = buildCreateProductPayload({
+    title,
+    description,
+    categoryId,
+    imageUri,
+    weightGrams,
+    warehouseId,
+    skus,
+    sizeAttributeName,
+  });
+
   const result = await callTikTokApi<{
     data?: { product_id?: string };
     product_id?: string;
@@ -191,23 +206,7 @@ export async function createProduct({
     query: { shop_cipher: ctx.shopCipher },
     method: "POST",
     path: "/product/202309/products",
-    body: {
-      title,
-      description,
-      category_id: categoryId,
-      // ร้านที่ขายหลายภูมิภาคต้องใช้หมวดเวอร์ชัน 2 (TikTok ปฏิเสธ v1 ด้วย error ชัดเจน)
-      category_version: "v2",
-      main_images: [{ uri: imageUri }],
-      package_weight: { value: String(weightGrams), unit: "GRAM" },
-      skus: [
-        {
-          seller_sku: sellerSku,
-          // ตามสคีมาของ TikTok: price = { amount, currency } (amount คือราคาขายจริงก่อนลด)
-          price: { amount: price.toFixed(2), currency: "THB" },
-          inventory: [{ warehouse_id: warehouseId, quantity }],
-        },
-      ],
-    },
+    body,
   });
 
   const failure = result.errors?.[0];
@@ -216,4 +215,126 @@ export async function createProduct({
   const productId = result.data?.product_id ?? result.product_id ?? null;
   if (!productId) throw new Error("TikTok ไม่คืนรหัสสินค้า");
   return { productId };
+}
+
+/** รหัสย่อยของสินค้าที่เพิ่งสร้าง — ใช้ต่อทั้งการตั้งยอดกลางและการผูกประกาศ */
+export type CreatedProductSku = {
+  skuId: string;
+  sellerSku: string | null;
+  /** ชื่อไซส์/ตัวเลือกจาก sales_attributes — ค่าว่าง = สินค้านี้ไม่มีตัวเลือก */
+  variantName: string;
+  quantity: number;
+};
+
+/**
+ * อ่านสินค้าที่เพิ่งสร้างกลับมาแล้วบันทึกลง platform_stock ของร้านนี้
+ *
+ * POST /product/202309/products ไม่คืน sku_id ของแต่ละรหัสย่อย จึงต้องอ่านกลับด้วย GET /products/{id}
+ * เขียนเฉพาะสินค้าตัวนี้ (ไม่ใช่การซิงก์ทั้งร้าน) เพื่อให้หน้าสต็อกกลางเห็นสินค้าใหม่ได้ทันที
+ * คืนรายการรหัสย่อยพร้อม sku_id ให้ผู้เรียกผูกเข้าสต็อกกลางต่อ
+ */
+export async function registerCreatedProductToStock({
+  shopId,
+  productId,
+  title,
+}: {
+  shopId: string;
+  productId: string;
+  title: string;
+}): Promise<{ skus: CreatedProductSku[]; imageUrl: string | null }> {
+  const ctx = await requireShop(shopId);
+
+  type Detail = {
+    status?: string;
+    main_images?: Array<{ thumb_urls?: string[]; uri?: string }>;
+    skus?: Array<{
+      id?: string;
+      seller_sku?: string;
+      sales_attributes?: Array<{ name?: string; value_name?: string }>;
+      inventory?: Array<{ warehouse_id?: string; quantity?: number }>;
+      price?: {
+        tax_exclusive?: { currency?: string; sale_price?: string };
+        sale_price?: string;
+        currency?: string;
+      };
+    }>;
+  };
+
+  const detail = await callTikTokApi<Detail>({
+    config: ctx.appConfig,
+    accessToken: ctx.accessToken,
+    query: { shop_cipher: ctx.shopCipher },
+    method: "GET",
+    path: `/product/202309/products/${encodeURIComponent(productId)}`,
+  });
+
+  const imageUrl = detail.main_images?.[0]?.thumb_urls?.[0] ?? detail.main_images?.[0]?.uri ?? null;
+  const rows = (detail.skus ?? []).flatMap((sku) => {
+    if (!sku.id) return [];
+    const warehouses = (sku.inventory ?? []).map((item) => ({
+      warehouseId: String(item.warehouse_id ?? ""),
+      quantity: Number(item.quantity ?? 0),
+    }));
+    return [
+      {
+        skuId: String(sku.id),
+        sellerSku: sku.seller_sku ?? null,
+        variantName: variantNameFromSalesAttributes(sku.sales_attributes),
+        quantity: warehouses.reduce((sum, item) => sum + item.quantity, 0),
+        price: sku.price?.tax_exclusive?.sale_price ?? sku.price?.sale_price ?? null,
+        currency: sku.price?.tax_exclusive?.currency ?? sku.price?.currency ?? "THB",
+        warehouses,
+      },
+    ];
+  });
+  if (rows.length === 0) throw new Error("อ่านสินค้าที่สร้างใหม่กลับมาไม่เจอรหัสย่อย");
+
+  const status = detail.status ?? null;
+  await query(
+    `INSERT INTO platform_stock (platform, shop_id, sku_id, product_id, seller_sku, product_name, image_url, quantity, warehouses, product_status, price, currency, variant_name, updated_at)
+     SELECT $1, $2, item.sku_id, $3, item.seller_sku, $4, $5, item.quantity, item.warehouses::jsonb, item.status, item.price::numeric, item.currency, item.variant_name, now()
+       FROM unnest($6::text[], $7::text[], $8::int[], $9::text[], $10::text[], $11::text[], $12::text[], $13::text[])
+            AS item(sku_id, seller_sku, quantity, warehouses, status, price, currency, variant_name)
+     ON CONFLICT (shop_id, sku_id) DO UPDATE
+       SET platform = EXCLUDED.platform,
+           product_id = EXCLUDED.product_id,
+           seller_sku = EXCLUDED.seller_sku,
+           -- ชื่อ/รูปที่ฝ่ายขายแก้ไว้ต้องไม่ถูกเขียนทับ (กติกาเดียวกับ syncStock)
+           product_name = CASE WHEN platform_stock.name_locked_until > now()
+                               THEN platform_stock.product_name ELSE EXCLUDED.product_name END,
+           image_url = CASE WHEN platform_stock.image_locked_until > now()
+                            THEN platform_stock.image_url ELSE COALESCE(EXCLUDED.image_url, platform_stock.image_url) END,
+           quantity = EXCLUDED.quantity,
+           warehouses = EXCLUDED.warehouses,
+           product_status = COALESCE(EXCLUDED.product_status, platform_stock.product_status),
+           price = COALESCE(EXCLUDED.price, platform_stock.price),
+           currency = COALESCE(EXCLUDED.currency, platform_stock.currency),
+           variant_name = EXCLUDED.variant_name,
+           updated_at = now()`,
+    [
+      TIKTOK_PLATFORM,
+      shopId,
+      productId,
+      title,
+      imageUrl,
+      rows.map((row) => row.skuId),
+      rows.map((row) => row.sellerSku),
+      rows.map((row) => row.quantity),
+      rows.map((row) => JSON.stringify(row.warehouses)),
+      rows.map(() => status),
+      rows.map((row) => row.price),
+      rows.map((row) => row.currency),
+      rows.map((row) => row.variantName),
+    ],
+  );
+
+  return {
+    skus: rows.map((row) => ({
+      skuId: row.skuId,
+      sellerSku: row.sellerSku,
+      variantName: row.variantName,
+      quantity: row.quantity,
+    })),
+    imageUrl,
+  };
 }
