@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { InvoiceCustomer, InvoiceItem, InvoiceModel } from "@/lib/invoice";
 import {
   bahtText,
@@ -12,6 +13,12 @@ import { formatSellerDisplayName } from "@/lib/seller";
 function formatReceiptTHB(value: number): string {
   return formatTHB(value);
 }
+
+/**
+ * ใบกำกับอย่างย่อบนฟอร์ม 4.5×5.5 นิ้ว พิมพ์ได้ 10 รายการต่อแผ่น — รายการที่ 11 ขึ้นไป
+ * ขึ้นแผ่นใหม่พร้อมหัวเรื่องต่อหน้า (เกินกว่านี้แถวจะล้นออกนอกกระดาษ)
+ */
+const ABBREV_ITEMS_PER_SHEET = 10;
 
 export interface AbbreviatedSummaryBreakdown {
   itemsNetTotal: number;
@@ -799,53 +806,72 @@ export function InvoiceDocument({
                     const unitNetAmount =
                       item.qty > 1 ? round2(lineNetAmount / item.qty) : null;
                     return (
-                      <tr key={`${item.sku}-${index}`}>
-                        <td className={`${cellPadClass} leading-tight text-[#0f172a]`}>
-                          {item.isCompensation ? (
-                            <div className="space-y-0.5">
-                              <div className="font-bold text-[#0f172a]">
-                                {item.compensationType || item.name}
-                              </div>
-                              {item.referenceOrderId ? (
-                                <div className="text-[8.5px] font-medium text-[#334155]">
-                                  คำสั่งซื้อ{" "}
-                                  <span className="mono font-semibold text-[#0f172a]">
-                                    #{item.referenceOrderId}
-                                  </span>
+                      <Fragment key={`${item.sku}-${index}`}>
+                        {index > 0 && index % ABBREV_ITEMS_PER_SHEET === 0 ? (
+                          <tr className="invoice-continuation">
+                            <td
+                              colSpan={3}
+                              className={`${cellPadClass} text-[8.5px] font-bold text-[#0f172a]`}
+                            >
+                              ต่อหน้า {Math.floor(index / ABBREV_ITEMS_PER_SHEET) + 1} · ใบกำกับฯ{" "}
+                              {invoice.invoiceNo ?? "-"} · ออเดอร์{" "}
+                              <span className="mono">{invoice.orderId}</span> · รายการที่{" "}
+                              {index + 1}–
+                              {Math.min(
+                                index + ABBREV_ITEMS_PER_SHEET,
+                                invoice.items.length,
+                              )}
+                            </td>
+                          </tr>
+                        ) : null}
+                        <tr>
+                          <td className={`${cellPadClass} leading-tight text-[#0f172a]`}>
+                            {item.isCompensation ? (
+                              <div className="space-y-0.5">
+                                <div className="font-bold text-[#0f172a]">
+                                  {item.compensationType || item.name}
                                 </div>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <>
-                              <span className="font-semibold text-[#0f172a]">
-                                {item.name || `รหัสสินค้า ${item.sku}`}
-                              </span>
-                              {unitNetAmount !== null ? (
-                                <span className="font-normal text-[#475569]">
-                                  {" "}
-                                  (ตัวละ {formatReceiptTHB(unitNetAmount)})
+                                {item.referenceOrderId ? (
+                                  <div className="text-[8.5px] font-medium text-[#334155]">
+                                    คำสั่งซื้อ{" "}
+                                    <span className="mono font-semibold text-[#0f172a]">
+                                      #{item.referenceOrderId}
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <>
+                                <span className="font-semibold text-[#0f172a]">
+                                  {item.name || `รหัสสินค้า ${item.sku}`}
                                 </span>
-                              ) : null}
-                              {!item.name && isNumericPlatformSku && invoice.createdDate ? (
-                                <span className="ml-1 text-[8px] text-[#64748b]">
-                                  (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ {formatDate(invoice.createdDate)})
-                                </span>
-                              ) : null}
-                              {showSkuAbbrev && item.sku ? (
-                                <span className="mono ml-1 text-[8px] text-[#64748b]">
-                                  [{item.sku}]
-                                </span>
-                              ) : null}
-                            </>
-                          )}
-                        </td>
-                        <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
-                          {item.qty}
-                        </td>
-                        <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
-                          {formatReceiptTHB(lineNetAmount)}
-                        </td>
-                      </tr>
+                                {unitNetAmount !== null ? (
+                                  <span className="font-normal text-[#475569]">
+                                    {" "}
+                                    (ตัวละ {formatReceiptTHB(unitNetAmount)})
+                                  </span>
+                                ) : null}
+                                {!item.name && isNumericPlatformSku && invoice.createdDate ? (
+                                  <span className="ml-1 text-[8px] text-[#64748b]">
+                                    (รอชื่อสินค้าจากไฟล์ สินค้าในออเดอร์ shipnity วันสั่งซื้อ {formatDate(invoice.createdDate)})
+                                  </span>
+                                ) : null}
+                                {showSkuAbbrev && item.sku ? (
+                                  <span className="mono ml-1 text-[8px] text-[#64748b]">
+                                    [{item.sku}]
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
+                          </td>
+                          <td className={`${cellPadClass} text-right font-bold tabular-nums text-[#0f172a]`}>
+                            {item.qty}
+                          </td>
+                          <td className={`${cellPadClass} text-right font-bold tabular-nums whitespace-nowrap text-[#0f172a]`}>
+                            {formatReceiptTHB(lineNetAmount)}
+                          </td>
+                        </tr>
+                      </Fragment>
                     );
                   })
                 )}

@@ -3186,6 +3186,13 @@ table.data {
     display: none !important;
   }
 
+  /* ใบที่สินค้าเกิน 10 รายการ: แถว "ต่อหน้า" ที่แทรกในตารางบังคับขึ้นแผ่นใหม่
+     (Chrome รองรับ break-before บน tr — ทดสอบพิมพ์ 25 แถวได้ 3 หน้าตามกำหนด) */
+  tr.invoice-continuation {
+    page-break-before: always;
+    break-before: page;
+  }
+
   .invoice-stack .invoice {
     page-break-after: always;
     break-after: page;
