@@ -1,64 +1,31 @@
 import { recordAuditLog, requireApiAuth } from "@/lib/auth";
-import { runTikTokSync, SyncUnavailableError, type SyncWindow } from "@/lib/platform/run-sync";
+import { runTikTokSync, SyncUnavailableError } from "@/lib/platform/run-sync";
+import { parseSyncWindow } from "@/lib/platform/sync-window";
 import { tikTokNowSeconds } from "@/lib/platform/tiktok";
 import { getClientIp } from "@/lib/session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DEFAULT_LOOKBACK_HOURS = 36;
-const MAX_LOOKBACK_HOURS = 36;
-// กันการยิงช่วงกว้างในคำขอเดียว จนค้างหรือโดนจำกัดอัตรา
-const MAX_BACKFILL_DAYS = 31;
-
-function parseDay(value: string | null): number | null {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const ms = Date.parse(`${value}T00:00:00Z`);
-  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
-}
-
-function clampHours(raw: string | null): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) return DEFAULT_LOOKBACK_HOURS;
-  return Math.min(MAX_LOOKBACK_HOURS, Math.max(1, Math.floor(value)));
-}
-
 /**
  * ดึงข้อมูลจาก TikTok
  * - ปุ่มบนแดชบอร์ด: ไม่ส่งพารามิเตอร์ → ดึงย้อน 36 ชม. แล้วตอบกลับทันที
  * - งานตั้งเวลา: เรียกฟังก์ชันเดียวกันจาก scheduler.ts (ไม่ผ่าน HTTP)
- * - backfill: ?from=YYYY-MM-DD&to=YYYY-MM-DD&wait=1 (ช่วงไม่เกิน 31 วันต่อครั้ง)
+ * - backfill: ?from=YYYY-MM-DD&to=YYYY-MM-DD&mode=create|update&wait=1 (ช่วงไม่เกิน 31 วันต่อครั้ง)
  */
 export async function POST(request: Request) {
   const auth = requireApiAuth(request);
   if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);
-  const now = tikTokNowSeconds();
-  const fromDay = parseDay(url.searchParams.get("from"));
-  const toDay = parseDay(url.searchParams.get("to"));
-
-  let window: SyncWindow;
-  if (fromDay !== null) {
-    if (toDay !== null && toDay <= fromDay) {
-      return Response.json(
-        { error: "ช่วงวันที่ไม่ถูกต้อง (ถึง ต้องอยู่หลัง จาก)", requestId: auth.requestId },
-        { status: 400, headers: { "x-request-id": auth.requestId } },
-      );
-    }
-    if ((toDay ?? now) - fromDay > MAX_BACKFILL_DAYS * 86400) {
-      return Response.json(
-        { error: `ดึงย้อนได้ครั้งละไม่เกิน ${MAX_BACKFILL_DAYS} วัน`, requestId: auth.requestId },
-        { status: 400, headers: { "x-request-id": auth.requestId } },
-      );
-    }
-    window = { from: fromDay, to: toDay ?? now, kind: "backfill", mode: "create" };
-  } else {
-    const hours = clampHours(url.searchParams.get("hours"));
-    window = { from: now - hours * 3600, to: now, kind: "sync-now", mode: "update" };
+  const parsed = parseSyncWindow(url.searchParams, tikTokNowSeconds());
+  if (!parsed.ok) {
+    return Response.json(
+      { error: parsed.error, requestId: auth.requestId },
+      { status: 400, headers: { "x-request-id": auth.requestId } },
+    );
   }
-
-  const wait = url.searchParams.get("wait") === "1";
+  const { window, wait } = parsed;
 
   if (wait) {
     try {
