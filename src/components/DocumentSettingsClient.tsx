@@ -809,7 +809,7 @@ export function DocumentSettingsClient({
                   [
                     {
                       id: "a6",
-                      label: "เครื่องปริ้นเล็ก 100×150 มม.",
+                      label: "เครื่องปริ้นเล็ก 4.5×5.5 นิ้ว",
                     },
                     { id: "a4-4up", label: "A4 แบ่ง 4 ใบ (1/4 A4)" },
                     { id: "80mm", label: "สลิปความร้อน 80 มม." },
@@ -1075,7 +1075,7 @@ export function DocumentSettingsClient({
                     <div className="grid w-full grid-cols-2 gap-1.5 sm:inline-flex sm:w-auto sm:flex-wrap sm:items-center">
                       {(
                         [
-                          { id: "a6", label: "100×150 มม." },
+                          { id: "a6", label: "4.5×5.5 นิ้ว" },
                           { id: "a4-4up", label: "A4 แบ่ง 4 ใบ" },
                           { id: "80mm", label: "สลิป 80 มม." },
                           { id: "a4", label: "A4 เต็มแผ่น" },

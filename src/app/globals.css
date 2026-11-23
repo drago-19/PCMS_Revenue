@@ -3138,23 +3138,25 @@ table.data {
     zoom: 1 !important;
   }
 
+  /* กระดาษ 114.3×139.7 มม. หักขอบซ้าย/ขวา 10 มม. เหลือ 94.3 มม. — เท่ากับความกว้าง
+     ตั้งต้นของใบบนจอ (356px) ใบจึงพิมพ์แบบ 1:1 โดยไม่ต้องซูมหรือบีบ */
   .invoice.invoice-paper-a6 {
     display: flex !important;
     flex-direction: column !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
 
+  /* ซูม 1.07–1.24 เคยขยายใบเป็น 101–117 มม. ล้นความกว้าง 94 มม. — พิมพ์ที่ขนาดจริงแทน */
   .invoice.invoice-paper-a6[data-print-density="spacious"] {
-    zoom: 1.24 !important;
     min-height: 110mm !important;
   }
 
   .invoice.invoice-paper-a6[data-print-density="medium"] {
-    zoom: 1.15 !important;
     min-height: 118mm !important;
   }
 
   .invoice.invoice-paper-a6[data-print-density="compact"] {
-    zoom: 1.07 !important;
     min-height: 126mm !important;
   }
 

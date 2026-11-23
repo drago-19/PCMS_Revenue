@@ -504,9 +504,11 @@ export function BillPreviewModal({
     onOpenChange(false);
   }
 
+  // กระดาษฟอร์มต่อเนื่อง 4.5×5.5 นิ้ว (114.3×139.7 มม.) — ขอบซ้าย/ขวาเว้น 10 มม. เลี่ยงรอยเจาะฟันปลา
+  // A6 (105×148) ยาวเกินแผ่น 8 มม. ท้ายใบจึงหลุดออกนอกกระดาษ
   const dialogPrintCss =
     effectiveTab === "invoice" && paperSize === "a6"
-      ? "@page { size: A6 portrait; margin: 3.5mm; }"
+      ? "@page { size: 114.3mm 139.7mm; margin: 4mm 10mm; }"
       : effectiveTab === "invoice" && paperSize === "80mm"
         ? "@page { size: 80mm auto; margin: 2.5mm; }"
         : "@page { size: A4 portrait; margin: 8mm; }";
@@ -681,7 +683,7 @@ export function BillPreviewModal({
                       {[
                         {
                           key: "a6" as InvoicePaperSize,
-                          label: "100×150 มม.",
+                          label: "4.5×5.5 นิ้ว",
                         },
                         {
                           key: "80mm" as InvoicePaperSize,

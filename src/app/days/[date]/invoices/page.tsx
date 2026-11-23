@@ -212,9 +212,11 @@ export default async function BulkInvoicesPage({
       : `/days/${targetDate}/invoices`;
   }
 
+  // กระดาษฟอร์มต่อเนื่อง 4.5×5.5 นิ้ว (114.3×139.7 มม.) — ขอบซ้าย/ขวาเว้น 10 มม. เลี่ยงรอยเจาะฟันปลา
+  // A6 (105×148) ยาวเกินแผ่น 8 มม. ท้ายใบจึงหลุดออกนอกกระดาษ
   const pagePrintCss =
     paper === "a6"
-      ? "@page { size: A6 portrait; margin: 3.5mm; }"
+      ? "@page { size: 114.3mm 139.7mm; margin: 4mm 10mm; }"
       : paper === "80mm"
         ? "@page { size: 80mm auto; margin: 2.5mm; }"
         : paper === "a4-4up"
@@ -421,7 +423,7 @@ export default async function BulkInvoicesPage({
                   className={`${SEGMENT_GROUP} grid grid-cols-2 sm:inline-flex`}
                 >
                   {[
-                    { key: "a6" as InvoicePaperSize, label: "100×150 มม." },
+                    { key: "a6" as InvoicePaperSize, label: "4.5×5.5 นิ้ว" },
                     { key: "a4-4up" as InvoicePaperSize, label: "A4 แบ่ง 4 ใบ" },
                     { key: "80mm" as InvoicePaperSize, label: "สลิป 80 มม." },
                     { key: "a4" as InvoicePaperSize, label: "A4 เต็มแผ่น" },
