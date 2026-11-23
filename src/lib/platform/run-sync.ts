@@ -1,10 +1,10 @@
 import {
-  getPlatformAccountRow,
   getPlatformConfig,
   getShopCompany,
   listPlatformAccounts,
   TIKTOK_PLATFORM,
 } from "./store";
+import { getFreshTikTokAccount } from "./token-freshness";
 import { query, runWithCompany } from "@/lib/db";
 import {
   countStoredReturns,
@@ -84,9 +84,9 @@ async function buildContexts(onlyShopId?: string): Promise<{
   const failures: ShopFailure[] = [];
   for (const account of accounts) {
     // อ่าน token ไม่ได้ (เช่น คีย์ถอดรหัสเปลี่ยน) ต้องขึ้นเป็น "ร้านนี้ล้ม" ไม่ใช่ข้ามเงียบ ๆ
-    let row: Awaited<ReturnType<typeof getPlatformAccountRow>> = null;
+    let row: Awaited<ReturnType<typeof getFreshTikTokAccount>> = null;
     try {
-      row = await getPlatformAccountRow(TIKTOK_PLATFORM, account.accountKey);
+      row = await getFreshTikTokAccount(account.accountKey);
     } catch (error) {
       failures.push({
         accountKey: account.accountKey,

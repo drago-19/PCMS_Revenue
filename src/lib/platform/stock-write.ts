@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { callTikTokApi } from "./tiktok";
-import { getPlatformAccountRow, getPlatformConfig, TIKTOK_PLATFORM } from "./store";
+import { getPlatformConfig, TIKTOK_PLATFORM } from "./store";
+import { getFreshTikTokAccount } from "./token-freshness";
 import { isSandboxShopName } from "./platforms";
 
 export type StockWriteCode = "not_allowed" | "not_found" | "conflict" | "rejected" | "api";
@@ -136,7 +137,7 @@ async function adjustStockInner(input: {
     );
   }
 
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!account?.accessToken || !account.shopCipher) {
     throw new StockWriteError("not_allowed", "ไม่พบ token ของร้าน");
   }
@@ -348,7 +349,7 @@ export async function setProductVisibility(input: {
     );
   }
 
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   const accessToken = account?.accessToken ?? "";
   const shopCipher = account?.shopCipher ?? "";
   if (!accessToken || !shopCipher) {

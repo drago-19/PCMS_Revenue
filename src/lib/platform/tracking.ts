@@ -3,7 +3,8 @@
 // - ใช้ของเดิมได้ไม่เกิน 10 นาที แล้วค่อยดึงใหม่ (คุมจำนวนคำขอตามกฎของ TikTok)
 
 import { query } from "@/lib/db";
-import { getPlatformAccountRow, getPlatformConfig, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getPlatformConfig } from "@/lib/platform/store";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 import { callTikTokApi } from "@/lib/platform/tiktok";
 
 export type OrderTrackingEvent = {
@@ -68,7 +69,7 @@ export async function loadOrderTracking(
   if (isFresh) return toEvents(cached);
 
   const config = await getPlatformConfig();
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!config.tiktok || !account?.accessToken || !account.shopCipher) return toEvents(cached);
 
   try {

@@ -2,7 +2,7 @@ import { recordAuditLog, requireApiAuth } from "@/lib/auth";
 import { isSandboxShopName } from "@/lib/platform/platforms";
 import { updateProductTitle } from "@/lib/platform/product-write";
 import { liveWriteAllowed } from "@/lib/platform/stock-write";
-import { getPlatformAccountRow, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 import { getClientIp } from "@/lib/session-token";
 
 export const runtime = "nodejs";
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "ข้อมูลไม่ครบ (ชื่อสินค้าอย่างน้อย 3 ตัวอักษร)", requestId: auth.requestId }, { status: 400 });
   }
 
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!account) {
     return Response.json({ error: "ไม่พบร้านนี้ในระบบ", requestId: auth.requestId }, { status: 404 });
   }

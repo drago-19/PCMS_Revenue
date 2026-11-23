@@ -383,6 +383,21 @@ interface RawTokenData {
   seller_base_region?: string;
 }
 
+/**
+ * แปลง `*_expire_in` ของ TikTok เป็นเวลาหมดอายุ
+ *
+ * TikTok ส่งมาเป็นเวลา Unix สัมบูรณ์ (วินาที) ไม่ใช่ระยะเวลา: ค่าที่ได้จริง
+ * 1795248763 = 2026-11-21T08:12:43Z ซึ่งตรงกับนาทีที่ token หมดอายุและซิงก์ล้มทั้งระบบ
+ * โค้ดรุ่นก่อนเอาไปบวกกับเวลาปัจจุบัน ทำให้ DB เก็บว่าหมดอายุปี 2083 จึงไม่มีใครต่ออายุเลย
+ * ค่าที่เล็กกว่า 1e9 (ก่อนปี 2001) ยังถือเป็นระยะเวลาวินาทีตามรูปแบบเดิม
+ */
+export function parseTokenExpiry(value: number | undefined, nowMs: number): Date {
+  const raw = Number(value ?? 0);
+  if (!Number.isFinite(raw) || raw <= 0) return new Date(nowMs);
+  if (raw >= 1_000_000_000) return new Date(raw * 1000);
+  return new Date(nowMs + raw * 1000);
+}
+
 function toTokenResult(data: RawTokenData): TikTokTokenResult {
   const now = Date.now();
   if (!data.access_token || !data.refresh_token) {
@@ -390,9 +405,9 @@ function toTokenResult(data: RawTokenData): TikTokTokenResult {
   }
   return {
     accessToken: data.access_token,
-    accessTokenExpiresAt: new Date(now + (data.access_token_expire_in ?? 0) * 1000),
+    accessTokenExpiresAt: parseTokenExpiry(data.access_token_expire_in, now),
     refreshToken: data.refresh_token,
-    refreshTokenExpiresAt: new Date(now + (data.refresh_token_expire_in ?? 0) * 1000),
+    refreshTokenExpiresAt: parseTokenExpiry(data.refresh_token_expire_in, now),
     grantedScopes: Array.isArray(data.granted_scopes) ? data.granted_scopes : [],
     sellerName: data.seller_name ?? null,
     sellerBaseRegion: data.seller_base_region ?? null,

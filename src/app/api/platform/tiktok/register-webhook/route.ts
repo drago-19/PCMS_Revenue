@@ -2,12 +2,12 @@ import { requireAdmin, requireApiAuth } from "@/lib/auth";
 import { appUrl } from "@/lib/platform/base-url";
 import { registerWebhooks, type TikTokAppConfig } from "@/lib/platform/tiktok";
 import {
-  getPlatformAccountRow,
   getPlatformConfig,
   listPlatformAccounts,
   setWebhookRegisteredAt,
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   const results: Array<{ shop: string | null; ok: boolean; error?: string }> = [];
 
   for (const account of accounts) {
-    const row = await getPlatformAccountRow(TIKTOK_PLATFORM, account.accountKey);
+    const row = await getFreshTikTokAccount(account.accountKey);
     if (!row?.accessToken || !row.shopCipher) {
       results.push({ shop: account.shopName, ok: false, error: "ไม่มี token" });
       continue;

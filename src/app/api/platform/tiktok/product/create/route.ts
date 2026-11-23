@@ -3,7 +3,8 @@ import { query } from "@/lib/db";
 import { isSandboxShopName } from "@/lib/platform/platforms";
 import { assertCreateProductSkus, MAX_PRODUCT_SKUS, type CreateProductSkuInput } from "@/lib/platform/product-payload";
 import { createProduct, registerCreatedProductToStock } from "@/lib/platform/product-write";
-import { getPlatformAccountRow, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 import { applyCreatedProductToCentral } from "@/lib/stock/central";
 import { getClientIp } from "@/lib/session-token";
 
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "น้ำหนักต้องอยู่ระหว่าง 1–50,000 กรัม", requestId: auth.requestId }, { status: 400 });
   }
 
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!account) {
     return Response.json({ error: "ไม่พบร้านนี้ในระบบ", requestId: auth.requestId }, { status: 404 });
   }

@@ -10,11 +10,11 @@ import {
   type TikTokStatement,
 } from "@/lib/platform/tiktok";
 import {
-  getPlatformAccountRow,
   getPlatformConfig,
   listPlatformAccounts,
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 
 export interface DayPoint {
   date: string;
@@ -73,7 +73,7 @@ export async function getTikTokDashboard(rangeDays = 30): Promise<TikTokDashboar
   if (!target) return null;
 
   const config = await getPlatformConfig();
-  const row = await getPlatformAccountRow(TIKTOK_PLATFORM, target.accountKey);
+  const row = await getFreshTikTokAccount(target.accountKey);
   if (!config.tiktok || !row?.accessToken || !row.shopCipher) return null;
 
   // เก็บเป็นค่าคงที่ เพื่อให้ TypeScript รู้ว่าไม่เป็น null ภายใน closure

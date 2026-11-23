@@ -4,6 +4,7 @@ import { createHmac } from "node:crypto";
 import {
   buildAuthorizeUrl,
   listStatements,
+  parseTokenExpiry,
   redactSecret,
   resetTikTokClockOffset,
   signRequest,
@@ -361,4 +362,20 @@ test("callTikTokApi: เจอ Invalid timestamp แต่ไม่มี Date h
     if (previousInterval === undefined) delete process.env.TIKTOK_MIN_INTERVAL_MS;
     else process.env.TIKTOK_MIN_INTERVAL_MS = previousInterval;
   }
+});
+
+test("parseTokenExpiry: TikTok ส่งเวลา Unix สัมบูรณ์ (ค่าที่ได้จริง 1795248763 = 2026-11-21T08:12:43Z)", () => {
+  const now = Date.parse("2026-11-14T08:12:43Z");
+  assert.equal(parseTokenExpiry(1795248763, now).toISOString(), "2026-11-21T08:12:43.000Z");
+});
+
+test("parseTokenExpiry: ค่าเล็กเป็นการนับวินาทีจากตอนนี้ (รูปแบบเดิม)", () => {
+  const now = Date.parse("2026-11-14T08:12:43Z");
+  assert.equal(parseTokenExpiry(86400, now).toISOString(), "2026-11-15T08:12:43.000Z");
+});
+
+test("parseTokenExpiry: ค่าว่างหรือศูนย์ = หมดอายุทันทีที่ได้ token", () => {
+  const now = Date.parse("2026-11-14T08:12:43Z");
+  assert.equal(parseTokenExpiry(undefined, now).toISOString(), "2026-11-14T08:12:43.000Z");
+  assert.equal(parseTokenExpiry(0, now).toISOString(), "2026-11-14T08:12:43.000Z");
 });

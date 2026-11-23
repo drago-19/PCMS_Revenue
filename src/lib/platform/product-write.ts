@@ -5,7 +5,8 @@ import {
   type CreateProductSkuInput,
 } from "./product-payload";
 import { callTikTokApi, callTikTokMultipart } from "./tiktok";
-import { getPlatformAccountRow, getPlatformConfig, TIKTOK_PLATFORM } from "./store";
+import { getPlatformConfig, TIKTOK_PLATFORM } from "./store";
+import { getFreshTikTokAccount } from "./token-freshness";
 
 type ShopContext = {
   appConfig: NonNullable<Awaited<ReturnType<typeof getPlatformConfig>>["tiktok"]>;
@@ -16,7 +17,7 @@ type ShopContext = {
 async function requireShop(shopId: string): Promise<ShopContext> {
   const config = await getPlatformConfig();
   if (!config.tiktok) throw new Error("ยังไม่ได้ตั้งค่าแอป TikTok");
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!account?.accessToken || !account.shopCipher) throw new Error("ไม่พบ token ของร้าน");
   return { appConfig: config.tiktok, accessToken: account.accessToken, shopCipher: account.shopCipher };
 }

@@ -3,11 +3,11 @@ import {
   type TikTokAppConfig,
 } from "@/lib/platform/tiktok";
 import {
-  getPlatformAccountRow,
   getPlatformConfig,
   listPlatformAccounts,
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 import { syncOrders, syncReturns, syncStatements, type SyncContext } from "@/lib/platform/sync";
 import { reconcileCentralStock } from "@/lib/stock/central";
 import { pushPoolToListings } from "@/lib/stock/push";
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   }
 
-  const row = await getPlatformAccountRow(TIKTOK_PLATFORM, account.accountKey);
+  const row = await getFreshTikTokAccount(account.accountKey);
   if (!row?.accessToken || !row.shopCipher) {
     return Response.json({ ok: true });
   }

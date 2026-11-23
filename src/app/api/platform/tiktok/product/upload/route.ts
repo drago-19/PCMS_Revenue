@@ -1,7 +1,7 @@
 import { requireApiAuth } from "@/lib/auth";
 import { isSandboxShopName } from "@/lib/platform/platforms";
 import { uploadProductImage } from "@/lib/platform/product-write";
-import { getPlatformAccountRow, TIKTOK_PLATFORM } from "@/lib/platform/store";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "ไฟล์ใหญ่เกิน 8MB", requestId: auth.requestId }, { status: 413 });
   }
 
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!account) {
     return Response.json({ error: "ไม่พบร้านนี้ในระบบ", requestId: auth.requestId }, { status: 404 });
   }

@@ -8,13 +8,13 @@ import { query, runWithCompany } from "@/lib/db";
 import { UNSHIPPED } from "@/lib/platform/ops";
 import { variantNameFromSalesAttributes } from "@/lib/platform/stock-list";
 import {
-  getPlatformAccountRow,
   getPlatformConfig,
   getShopCompany,
   isShopHidden,
   TIKTOK_PLATFORM,
 } from "@/lib/platform/store";
 import { callTikTokApi } from "@/lib/platform/tiktok";
+import { getFreshTikTokAccount } from "@/lib/platform/token-freshness";
 
 type ApiSku = {
   id?: string;
@@ -91,7 +91,7 @@ export async function syncStock(shopId: string): Promise<{ skus: number; changed
 
 async function syncStockInner(shopId: string): Promise<{ skus: number; changed: number; error?: string }> {
   const config = await getPlatformConfig();
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!config.tiktok || !account?.accessToken || !account.shopCipher) {
     return { skus: 0, changed: 0, error: "ยังไม่มีสิทธิ์เชื่อมต่อร้านนี้" };
   }
@@ -890,7 +890,7 @@ export async function getSkuDetail(
   // ค่าสด (TikTok): เปิดดูสินค้าตัวไหน = ขอจาก TikTok 1 คำขอ แล้วเขียนลง DB ก่อนแสดง
   if (platform === TIKTOK_PLATFORM && row.product_id) {
     const config = await getPlatformConfig();
-    const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+    const account = await getFreshTikTokAccount(shopId);
     if (config.tiktok && account?.accessToken && account.shopCipher) {
       try {
         const detail = await callTikTokApi<{
@@ -1057,7 +1057,7 @@ export async function refreshStockForRecentOrders(shopId: string, withinMinutes 
   if (ids.length === 0) return 0;
 
   const config = await getPlatformConfig();
-  const account = await getPlatformAccountRow(TIKTOK_PLATFORM, shopId);
+  const account = await getFreshTikTokAccount(shopId);
   if (!config.tiktok || !account?.accessToken || !account.shopCipher) return 0;
 
   let updated = 0;
