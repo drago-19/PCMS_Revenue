@@ -26,6 +26,7 @@ import {
   type UnknownColumn,
 } from "./ingest/parse";
 import type { Reconciliation } from "./ingest/import-service";
+import type { ImportMonth } from "./import-month";
 
 export interface ImportSpreadsheetSheet {
   name: string;
@@ -1660,6 +1661,66 @@ export async function deleteAllImports(db?: Queryable): Promise<number> {
   };
   if (db) return runClear(db);
   return withTransaction((client) => runClear(client));
+}
+
+export type ImportFileForMonth = {
+  id: number;
+  filename: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  importedAt: string;
+  transactionCount: number;
+  orderCount: number;
+};
+
+/**
+ * ไฟล์นำเข้าที่มีข้อมูลของเดือนนั้น — ใช้ช่วงวันที่ในไฟล์ (period_start/period_end) ก่อน
+ * ไฟล์ที่ไม่มีช่วงวันที่ (เช่นไฟล์สินค้า) ตัดสินจากเดือนที่อัปโหลดแทน
+ * ไฟล์ที่คร่อมสองเดือนจะติดมาทั้งสองเดือน — ลบแล้วข้อมูลของอีกเดือนในไฟล์เดียวกันหายไปด้วย
+ */
+export async function listImportFilesForMonth(
+  month: ImportMonth,
+  db?: Queryable,
+): Promise<ImportFileForMonth[]> {
+  return query<ImportFileForMonth>(
+    `SELECT i.id,
+            i.filename,
+            i.period_start AS "periodStart",
+            i.period_end AS "periodEnd",
+            i.imported_at::text AS "importedAt",
+            i.transaction_count AS "transactionCount",
+            i.order_count AS "orderCount"
+       FROM imports i
+      WHERE (
+              COALESCE(i.period_start, i.period_end) IS NOT NULL
+              AND COALESCE(i.period_start, i.period_end) <= $2
+              AND COALESCE(i.period_end, i.period_start) >= $1
+            )
+         OR (
+              i.period_start IS NULL
+              AND i.period_end IS NULL
+              AND to_char(i.imported_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') = $3
+            )
+      ORDER BY COALESCE(i.period_start, i.imported_at::text), i.id`,
+    [month.start, month.end, month.key],
+    db,
+  );
+}
+
+/**
+ * ลบข้อมูลของทั้งเดือน = ลบไฟล์นำเข้าของเดือนนั้นทีละไฟล์ผ่าน deleteImport
+ * ซึ่งจัดการ daily_summaries, sku_summaries, สินค้าที่ไม่มีของเหลือ และ void เลขใบกำกับฯ ให้แล้ว
+ * ไม่ลบ invoice_registry: เลขที่ออกไปแล้วต้องอยู่ต่อ และนำเข้าใหม่จะได้เลขเดิมคืน
+ */
+export async function deleteImportsForMonth(
+  month: ImportMonth,
+): Promise<{ files: number; deleted: number[] }> {
+  const files = await listImportFilesForMonth(month);
+  const deleted: number[] = [];
+  for (const file of files) {
+    if (await deleteImport(file.id)) deleted.push(file.id);
+  }
+  return { files: files.length, deleted };
 }
 
 const globalForDailyBatchesCache = globalThis as unknown as {
