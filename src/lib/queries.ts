@@ -1765,17 +1765,25 @@ export async function renumberInvoiceMonth(
 
     // ล็อกแถวของเดือนนี้กันการนำเข้าแทรกกลางคัน + เก็บเลขเดิมไว้คู่กับเลขใหม่
     await query("SELECT 1 FROM invoice_registry WHERE yymm = $1 FOR UPDATE", [yymm], client);
+    // แยกเป็นคำสั่งละครั้ง: pg ไม่รับหลาย statement ในคำสั่งเดียวเมื่อมีพารามิเตอร์ ($1)
     await query(
-      `CREATE TEMP TABLE IF NOT EXISTS _renumber_before (order_id TEXT PRIMARY KEY, invoice_no TEXT) ON COMMIT DROP;
-       DELETE FROM _renumber_before;
-       INSERT INTO _renumber_before (order_id, invoice_no)
-       SELECT order_id, invoice_no FROM invoice_registry WHERE yymm = $1 AND seq IS NOT NULL;`,
+      "CREATE TEMP TABLE IF NOT EXISTS _renumber_before (order_id TEXT PRIMARY KEY, invoice_no TEXT) ON COMMIT DROP",
+      [],
+      client,
+    );
+    await query("DELETE FROM _renumber_before", [], client);
+    await query(
+      `INSERT INTO _renumber_before (order_id, invoice_no)
+       SELECT order_id, invoice_no FROM invoice_registry WHERE yymm = $1 AND seq IS NOT NULL`,
       [yymm],
       client,
     );
     await query(
+      // พักทั้งเลขและ seq เป็นค่าลบชั่วคราว: seq มี unique (yymm, channel, seq)
+      // ถ้าพักแค่ invoice_no เลขใหม่จะชนกับ seq เดิมของใบที่ void ยังถืออยู่ (264..)
       `UPDATE invoice_registry
-          SET invoice_no = 'TMP/' || order_id
+          SET seq = -seq - 1,
+              invoice_no = 'TMP/' || order_id
         WHERE yymm = $1 AND seq IS NOT NULL`,
       [yymm],
       client,
