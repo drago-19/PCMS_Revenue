@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DatePickerField } from "@/components/DatePickerField";
 import { ClearAllImportsButton } from "@/components/DeleteImportButton";
 import { DeleteMonthImportsButton } from "@/components/DeleteMonthImportsButton";
+import { RenumberInvoiceMonthButton } from "@/components/RenumberInvoiceMonthButton";
 import { ExcelFilePreviewDialog } from "@/components/ExcelPreviewDialog";
 import { ToggleImportCategoryButton } from "@/components/ToggleImportCategoryButton";
 import { EmptyState, PageHeader, StatCard, StatusBadge } from "@/components/PageHeader";
@@ -97,6 +98,7 @@ export default async function ImportHistoryPage({
         description="ตรวจสอบไฟล์ Excel / CSV ที่นำเข้าทั้งหมด ดูรายงานการจับคู่คอลัมน์ ผลตรวจยอดกับชีตสรุป หรือลบการนำเข้า"
         actions={
           <>
+            <RenumberInvoiceMonthButton />
             <DeleteMonthImportsButton totalFiles={result.total} />
             <ClearAllImportsButton totalFiles={result.total} />
             <Button asChild variant="default">

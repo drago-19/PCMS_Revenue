@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-20-v80";
+const SCHEMA_VERSION = "2026-11-25-v82";
 
 /**
  * เทียบเวอร์ชัน schema รูปแบบ 2026-11-18-v77 — คืน > 0 เมื่อ a ใหม่กว่า b
@@ -564,6 +564,10 @@ ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFA
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ;
 ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS void_reason TEXT;
+-- รอยการพิมพ์: เลขที่ขึ้นกระดาษไปแล้วเลื่อนไม่ได้ — ใช้ตัดสิทธิ์การจัดเรียงเลขใหม่รายเดือน
+ALTER TABLE invoice_registry ADD COLUMN IF NOT EXISTS printed_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS ix_invoice_registry_printed
+  ON invoice_registry (yymm, channel) WHERE printed_at IS NOT NULL;
 UPDATE invoice_registry
 SET yymm = SUBSTRING(invoice_no FROM 5 FOR 4),
     seq = SUBSTRING(invoice_no FROM 10)::bigint
@@ -583,6 +587,8 @@ CREATE TABLE IF NOT EXISTS invoice_registry_audit (
   import_id INTEGER,
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- เลขเดิมก่อนจัดเรียงใหม่ — ถ้ากดจัดเรียงผิดเดือน ต้องย้อนดูได้โดยไม่ต้องเปิด backup
+ALTER TABLE invoice_registry_audit ADD COLUMN IF NOT EXISTS previous_invoice_no TEXT;
 CREATE INDEX IF NOT EXISTS ix_invoice_registry_audit_order ON invoice_registry_audit (order_id);
 
 ALTER TABLE imports ADD COLUMN IF NOT EXISTS file_type TEXT NOT NULL DEFAULT 'settlement';

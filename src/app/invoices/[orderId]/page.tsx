@@ -297,7 +297,10 @@ export default async function InvoicePage({
                     </Button>
                   </div>
                 ) : null}
-                <PrintButton className="w-full sm:w-auto" />
+                <PrintButton
+                  className="w-full sm:w-auto"
+                  orderIds={[row.externalId]}
+                />
               </div>
             </div>
 

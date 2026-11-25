@@ -26,7 +26,7 @@ import {
   type UnknownColumn,
 } from "./ingest/parse";
 import type { Reconciliation } from "./ingest/import-service";
-import type { ImportMonth } from "./import-month";
+import { invoiceYymm, type ImportMonth } from "./import-month";
 
 export interface ImportSpreadsheetSheet {
   name: string;
@@ -1721,6 +1721,125 @@ export async function deleteImportsForMonth(
     if (await deleteImport(file.id)) deleted.push(file.id);
   }
   return { files: files.length, deleted };
+}
+
+/** บันทึกว่าเลขใบกำกับฯ ขึ้นกระดาษแล้ว — ตั้งครั้งแรกครั้งเดียว ไม่ทับเวลาที่มีอยู่ */
+export async function markInvoicesPrinted(orderIds: string[]): Promise<number> {
+  const rows = await query<{ order_id: string }>(
+    `UPDATE invoice_registry
+        SET printed_at = now()
+      WHERE order_id = ANY($1::text[])
+        AND printed_at IS NULL
+      RETURNING order_id`,
+    [orderIds],
+  );
+  return rows.length;
+}
+
+export type MonthRenumberResult =
+  | { ok: true; renumbered: number; voided: number }
+  | { ok: false; reason: "printed"; printedCount: number };
+
+/**
+ * จัดเรียงเลขใบกำกับฯ ของทั้งเดือนใหม่ตาม "เวลาที่ชำระคำสั่งซื้อ" (paid_date)
+ * ทำได้เฉพาะเดือนที่ยังไม่มีใบไหนถูกพิมพ์ — เลขที่ขึ้นกระดาษแล้วเลื่อนไม่ได้
+ *
+ * ใน transaction เดียว: พักเลขเดิมทุกใบเป็น 'TMP/<order_id>' ก่อน เพราะ invoice_no เป็น UNIQUE
+ * การสลับเลขกันตรง ๆ ระหว่างแถวจะชนกันกลางทาง · ใบที่ void อยู่แล้วได้เลขต่อท้าย ไม่ปนกับใบใช้งาน
+ */
+export async function renumberInvoiceMonth(
+  month: ImportMonth,
+): Promise<MonthRenumberResult> {
+  const yymm = invoiceYymm(month);
+  return withTransaction(async (client) => {
+    const printed = await queryOne<{ c: string | number }>(
+      `SELECT COUNT(*) AS c FROM invoice_registry
+        WHERE yymm = $1 AND printed_at IS NOT NULL`,
+      [yymm],
+      client,
+    );
+    const printedCount = Number(printed?.c ?? 0);
+    if (printedCount > 0) {
+      return { ok: false as const, reason: "printed" as const, printedCount };
+    }
+
+    // ล็อกแถวของเดือนนี้กันการนำเข้าแทรกกลางคัน + เก็บเลขเดิมไว้คู่กับเลขใหม่
+    await query("SELECT 1 FROM invoice_registry WHERE yymm = $1 FOR UPDATE", [yymm], client);
+    await query(
+      `CREATE TEMP TABLE IF NOT EXISTS _renumber_before (order_id TEXT PRIMARY KEY, invoice_no TEXT) ON COMMIT DROP;
+       DELETE FROM _renumber_before;
+       INSERT INTO _renumber_before (order_id, invoice_no)
+       SELECT order_id, invoice_no FROM invoice_registry WHERE yymm = $1 AND seq IS NOT NULL;`,
+      [yymm],
+      client,
+    );
+    await query(
+      `UPDATE invoice_registry
+          SET invoice_no = 'TMP/' || order_id
+        WHERE yymm = $1 AND seq IS NOT NULL`,
+      [yymm],
+      client,
+    );
+
+    const updated = await query<{ order_id: string; invoice_no: string }>(
+      `WITH ranked AS (
+         SELECT r.order_id,
+                COALESCE(NULLIF(r.channel, ''), 'TikTok') AS channel,
+                r.status,
+                COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) AS sort_date
+           FROM invoice_registry r
+           LEFT JOIN transactions t
+             ON t.external_id = r.order_id AND t.is_order = 1
+          WHERE r.yymm = $1 AND r.seq IS NOT NULL
+       ),
+       ordered AS (
+         SELECT order_id, channel,
+                ROW_NUMBER() OVER (
+                  PARTITION BY channel
+                  ORDER BY (status = 'void'), sort_date ASC NULLS LAST, order_id ASC
+                ) AS new_seq
+           FROM ranked
+       )
+       UPDATE invoice_registry r
+          SET seq = o.new_seq,
+              invoice_no = CASE
+                WHEN o.channel = 'TikTok'
+                  THEN 'SEQ/' || r.yymm || '/' || LPAD(o.new_seq::text, GREATEST(5, LENGTH(o.new_seq::text)), '0')
+                ELSE 'SEQ/' || UPPER(o.channel) || '/' || r.yymm || '/' || LPAD(o.new_seq::text, GREATEST(5, LENGTH(o.new_seq::text)), '0')
+              END
+         FROM ordered o
+        WHERE r.order_id = o.order_id
+       RETURNING r.order_id, r.invoice_no`,
+      [yymm],
+      client,
+    );
+
+    const voided = await queryOne<{ c: string | number }>(
+      `SELECT COUNT(*) AS c FROM invoice_registry
+        WHERE yymm = $1 AND seq IS NOT NULL AND status = 'void'`,
+      [yymm],
+      client,
+    );
+
+    if (updated.length > 0) {
+      await query(
+        `INSERT INTO invoice_registry_audit (order_id, invoice_no, previous_invoice_no, action, reason)
+         SELECT r.order_id, r.invoice_no, b.invoice_no, 'renumber',
+                'จัดเรียงเลขใหม่ทั้งเดือนตามเวลาที่ชำระคำสั่งซื้อ'
+           FROM invoice_registry r
+           JOIN _renumber_before b USING (order_id)
+          WHERE r.yymm = $1 AND r.seq IS NOT NULL`,
+        [yymm],
+        client,
+      );
+    }
+
+    return {
+      ok: true as const,
+      renumbered: updated.length,
+      voided: Number(voided?.c ?? 0),
+    };
+  });
 }
 
 const globalForDailyBatchesCache = globalThis as unknown as {

@@ -296,7 +296,10 @@ export default async function BulkInvoicesPage({
               </p>
             </div>
           </div>
-          <PrintButton className="w-full shrink-0 sm:w-auto" />
+          <PrintButton
+            className="w-full shrink-0 sm:w-auto"
+            orderIds={pagedOrders.map((order) => order.externalId)}
+          />
         </div>
 
         {/* ตัวกรองข้อมูล + ตั้งค่าการพิมพ์ (ป้ายกำกับคอลัมน์เดียวกัน จัดแนวตรงกัน) */}

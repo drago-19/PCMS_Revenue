@@ -29,6 +29,14 @@ export type ImportMonth = {
  * ที่เก็บเป็น TEXT แบบ ISO (2026-11-01) จึงเทียบด้วยสตริงได้ตรง ๆ ไม่ต้อง cast เป็น date
  * คืน null เมื่อรูปแบบไม่ถูก เพื่อให้ผู้เรียกตอบ 400 แทนการเดาเดือนให้ผู้ใช้ลบข้อมูลผิดเดือน
  */
+/**
+ * รหัสเดือนแบบที่ invoice_registry เก็บ (yymm = "2611") — ต่างจาก key ที่ผู้ใช้เลือก ("2026-11")
+ * ใช้แปลงก่อนเทียบกับคอลัมน์ yymm เสมอ ไม่ใช่เทียบกับ key ตรง ๆ
+ */
+export function invoiceYymm(month: ImportMonth): string {
+  return `${month.key.slice(2, 4)}${month.key.slice(5, 7)}`;
+}
+
 export function parseImportMonth(
   raw: string | null | undefined,
 ): ImportMonth | null {

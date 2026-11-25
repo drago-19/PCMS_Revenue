@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseImportMonth } from "../src/lib/import-month";
+import { invoiceYymm, parseImportMonth } from "../src/lib/import-month";
 
 test("parseImportMonth: เดือนปกติคืนช่วงวันที่ครบเดือนและชื่อเดือนไทย พ.ศ.", () => {
   assert.deepEqual(parseImportMonth("2026-11"), {
@@ -35,6 +35,15 @@ test("parseImportMonth: รูปแบบผิดหรือเดือน�
   ]) {
     assert.equal(parseImportMonth(raw), null, `ต้องไม่รับค่า ${String(raw)}`);
   }
+});
+
+test("invoiceYymm: แปลง 2026-11 เป็นรหัสที่ invoice_registry เก็บ (2611)", () => {
+  const month = parseImportMonth("2026-11");
+  assert.ok(month);
+  assert.equal(invoiceYymm(month), "2611");
+  const jan = parseImportMonth("2027-01");
+  assert.ok(jan);
+  assert.equal(invoiceYymm(jan), "2701");
 });
 
 test("parseImportMonth: ปีนอกช่วง 2000-2100 คืน null", () => {
