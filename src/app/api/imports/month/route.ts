@@ -47,16 +47,23 @@ export async function DELETE(request: Request) {
     );
   }
 
-  const month = parseImportMonth(new URL(request.url).searchParams.get("month"));
+  const url = new URL(request.url);
+  const month = parseImportMonth(url.searchParams.get("month"));
   if (!month) {
     return Response.json(
       { error: "ระบุเดือนที่จะลบเป็นรูปแบบ YYYY-MM", requestId: auth.requestId },
       { status: 400, headers: { "x-request-id": auth.requestId } },
     );
   }
+  // ลบทีละชุด — หน้าจอเรียกซ้ำ ๆ จน remaining = 0 (ลบ 90 ไฟล์ในคำขอเดียวยาวเกินจนถูกตัด)
+  // ทีละ 2 ไฟล์: ลบหนึ่งไฟล์ใช้ ~13 วินาที (ต้องคำนวณสรุปยอดใหม่) 5 ไฟล์จะแตะเพดานเวลาของ proxy
+  const rawLimit = Number(url.searchParams.get("limit") ?? "2");
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(20, Math.max(1, Math.trunc(rawLimit)))
+    : 2;
 
   const result = await runWithCompany(auth.session.companyId ?? "dragon19", () =>
-    deleteImportsForMonth(month),
+    deleteImportsForMonth(month, limit),
   );
   await recordAuditLog({
     actor: auth.session.sub,
@@ -76,6 +83,7 @@ export async function DELETE(request: Request) {
       month: month.key,
       files: result.files,
       deletedCount: result.deleted.length,
+      remaining: result.remaining,
       requestId: auth.requestId,
     },
     { headers: { "x-request-id": auth.requestId } },

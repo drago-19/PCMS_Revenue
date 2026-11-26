@@ -56,6 +56,7 @@ export function DeleteMonthImportsButton({
   const [files, setFiles] = useState<ImportFileRow[]>([]);
   const [confirmText, setConfirmText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [deletedSoFar, setDeletedSoFar] = useState(0);
   const router = useRouter();
 
   const loadPreview = useCallback(async (targetMonth: string) => {
@@ -86,34 +87,46 @@ export function DeleteMonthImportsButton({
   useEffect(() => {
     if (!open) return;
     setConfirmText("");
+    setDeletedSoFar(0);
     void loadPreview(month);
   }, [open, month, loadPreview]);
 
   async function handleDelete() {
     setBusy(true);
     setError(null);
+    setDeletedSoFar(0);
+    let deletedTotal = 0;
     try {
-      const response = await fetch(
-        `/api/imports/month?month=${encodeURIComponent(month)}`,
-        { method: "DELETE" },
-      );
-      const payload = (await response.json()) as {
-        error?: string;
-        deletedCount?: number;
-      };
-      if (!response.ok) {
-        const msg = payload.error ?? "ลบข้อมูลไม่สำเร็จ";
-        setError(msg);
-        toast.error(msg);
-        return;
+      // ลบทีละชุด: ไฟล์ของเดือนหนึ่งมีได้เป็นร้อย คำขอเดียวจะยาวเกินจนถูกตัดกลางทาง
+      for (;;) {
+        const response = await fetch(
+          `/api/imports/month?month=${encodeURIComponent(month)}&limit=2`,
+          { method: "DELETE" },
+        );
+        const payload = (await response.json()) as {
+          error?: string;
+          deletedCount?: number;
+          remaining?: number;
+        };
+        if (!response.ok) {
+          const msg = payload.error ?? "ลบข้อมูลไม่สำเร็จ";
+          setError(msg);
+          toast.error(msg);
+          return;
+        }
+        const deletedThisRound = payload.deletedCount ?? 0;
+        deletedTotal += deletedThisRound;
+        setDeletedSoFar(deletedTotal);
+        if ((payload.remaining ?? 0) <= 0 || deletedThisRound === 0) break;
       }
       setOpen(false);
-      toast.success(
-        `ลบข้อมูลเดือน ${label || month} แล้ว ${payload.deletedCount ?? 0} ไฟล์`,
-      );
+      toast.success(`ลบข้อมูลเดือน ${label || month} แล้ว ${deletedTotal} ไฟล์`);
       router.refresh();
     } catch {
-      const msg = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้";
+      const msg =
+        deletedTotal > 0
+          ? `ลบไปแล้ว ${deletedTotal} ไฟล์ แล้วการเชื่อมต่อขาด — เปิดหน้าต่างนี้แล้วกดซ้ำเพื่อลบส่วนที่เหลือได้`
+          : "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้";
       setError(msg);
       toast.error(msg);
     } finally {
@@ -195,6 +208,13 @@ export function DeleteMonthImportsButton({
               </>
             )}
           </div>
+
+          {busy && files.length > 0 ? (
+            <p className="rounded-lg border border-border bg-[#f8fafc] px-3 py-2 text-sm font-medium text-[#334155]">
+              กำลังลบ {deletedSoFar.toLocaleString("th-TH")} /{" "}
+              {files.length.toLocaleString("th-TH")} ไฟล์...
+            </p>
+          ) : null}
 
           <label className="flex flex-col gap-1 text-sm font-semibold text-[#334155]">
             พิมพ์ {month} เพื่อยืนยัน

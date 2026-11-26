@@ -1714,13 +1714,20 @@ export async function listImportFilesForMonth(
  */
 export async function deleteImportsForMonth(
   month: ImportMonth,
-): Promise<{ files: number; deleted: number[] }> {
+  limit = 2,
+): Promise<{ files: number; deleted: number[]; remaining: number }> {
   const files = await listImportFilesForMonth(month);
+  const batch = files.slice(0, Math.max(1, limit));
   const deleted: number[] = [];
-  for (const file of files) {
+  for (const file of batch) {
     if (await deleteImport(file.id)) deleted.push(file.id);
   }
-  return { files: files.length, deleted };
+  // ลบทีละชุด: 90 ไฟล์ในคำขอเดียวจะเกินเวลาจนคำขอถูกตัดกลางทาง (25 พ.ย. 2026)
+  return {
+    files: files.length,
+    deleted,
+    remaining: Math.max(0, files.length - deleted.length),
+  };
 }
 
 /** บันทึกว่าเลขใบกำกับฯ ขึ้นกระดาษแล้ว — ตั้งครั้งแรกครั้งเดียว ไม่ทับเวลาที่มีอยู่ */
