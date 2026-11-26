@@ -1708,26 +1708,189 @@ export async function listImportFilesForMonth(
 }
 
 /**
- * ลบข้อมูลของทั้งเดือน = ลบไฟล์นำเข้าของเดือนนั้นทีละไฟล์ผ่าน deleteImport
- * ซึ่งจัดการ daily_summaries, sku_summaries, สินค้าที่ไม่มีของเหลือ และ void เลขใบกำกับฯ ให้แล้ว
+ * ลบข้อมูลของทั้งเดือนใน transaction เดียว — แถวทั้งหมดลบด้วยคำสั่งชุดเดียว แล้วคำนวณ
+ * daily_summaries/sku_summaries ใหม่ครั้งเดียว (ลบทีละไฟล์ผ่าน deleteImport คือคำนวณสรุปซ้ำ
+ * 90 รอบ ใช้เวลา ~20 นาทีต่อเดือน)
  * ไม่ลบ invoice_registry: เลขที่ออกไปแล้วต้องอยู่ต่อ และนำเข้าใหม่จะได้เลขเดิมคืน
  */
 export async function deleteImportsForMonth(
   month: ImportMonth,
-  limit = 2,
 ): Promise<{ files: number; deleted: number[]; remaining: number }> {
   const files = await listImportFilesForMonth(month);
-  const batch = files.slice(0, Math.max(1, limit));
-  const deleted: number[] = [];
-  for (const file of batch) {
-    if (await deleteImport(file.id)) deleted.push(file.id);
+  if (files.length === 0) {
+    return { files: 0, deleted: [], remaining: 0 };
   }
-  // ลบทีละชุด: 90 ไฟล์ในคำขอเดียวจะเกินเวลาจนคำขอถูกตัดกลางทาง (25 พ.ย. 2026)
-  return {
-    files: files.length,
-    deleted,
-    remaining: Math.max(0, files.length - deleted.length),
-  };
+  const ids = files.map((file) => file.id);
+
+  await withTransaction(async (client) => {
+    // เก็บวันที่/SKU/ออเดอร์ที่กระทบไว้ก่อนลบ เพื่อคำนวณสรุปยอดใหม่ทีเดียว
+    const dates = await query<{ paid_date: string }>(
+      `SELECT DISTINCT paid_date FROM transactions
+        WHERE import_id = ANY($1::int[]) AND paid_date <> ''`,
+      [ids],
+      client,
+    );
+    const skus = await query<{ sku_code: string }>(
+      `SELECT DISTINCT sku_code FROM oms_order_items
+        WHERE import_id = ANY($1::int[]) AND sku_code <> ''`,
+      [ids],
+      client,
+    );
+    const orders = await query<{ external_id: string }>(
+      `SELECT DISTINCT external_id FROM transactions WHERE import_id = ANY($1::int[])`,
+      [ids],
+      client,
+    );
+    const affectedDates = dates.map((row) => row.paid_date);
+    const affectedSkus = skus.map((row) => row.sku_code);
+    const affectedOrderIds = orders.map((row) => row.external_id);
+
+    await query("DELETE FROM transactions WHERE import_id = ANY($1::int[])", [ids], client);
+    await query("DELETE FROM oms_order_items WHERE import_id = ANY($1::int[])", [ids], client);
+    await query("DELETE FROM oms_orders WHERE import_id = ANY($1::int[])", [ids], client);
+    // file_blob ของไฟล์ต้นฉบับหายไปพร้อมแถวนี้
+    await query("DELETE FROM imports WHERE id = ANY($1::int[])", [ids], client);
+
+    if (affectedDates.length > 0) {
+      await query(
+        "DELETE FROM daily_summaries WHERE paid_date = ANY($1::text[])",
+        [affectedDates],
+        client,
+      );
+      await query(
+        `INSERT INTO daily_summaries (
+           paid_date, transaction_count, order_count, order_payout, order_income,
+           order_fees, other_count, other_payout, total_payout, adjustment,
+           tiktok_count, shopee_count, facebook_count, lazada_count, line_count, other_channel_count, compensation_count,
+           linked_count, oms_only_count, unlinked_count, mismatch_count,
+           shipping_positive, shipping_negative, updated_at
+         )
+         SELECT
+           paid_date,
+           COUNT(*)::int,
+           SUM(CASE WHEN is_order = 1 THEN 1 ELSE 0 END)::int,
+           ROUND(SUM(CASE WHEN is_order = 1 THEN payout ELSE 0 END)::numeric, 2),
+           ROUND(SUM(CASE WHEN is_order = 1 THEN income ELSE 0 END)::numeric, 2),
+           ROUND(SUM(CASE WHEN is_order = 1 THEN fee_total ELSE 0 END)::numeric, 2),
+           SUM(CASE WHEN is_order = 0 THEN 1 ELSE 0 END)::int,
+           ROUND(SUM(CASE WHEN is_order = 0 THEN payout ELSE 0 END)::numeric, 2),
+           ROUND(SUM(payout)::numeric, 2),
+           ROUND(SUM(adjustment)::numeric, 2),
+           SUM(CASE WHEN is_order = 1 AND channel = 'TikTok' THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND channel = 'Shopee' THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND channel = 'Facebook' THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND channel = 'Lazada' THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND channel = 'LINE' THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND channel = 'Other' THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 0 AND transaction_type IN ('การชดเชยจากแพลตฟอร์ม', 'เงินชดเชยด้านโลจิสติกส์') AND payout > 0 THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND link_priority = 0 THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND link_priority = 1 THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND link_priority = 2 THEN 1 ELSE 0 END)::int,
+           SUM(CASE WHEN is_order = 1 AND (
+             ABS(COALESCE((checks_json->>'incomeDiff')::numeric, 0)) >= 0.01
+             OR ABS(COALESCE((checks_json->>'feeDiff')::numeric, 0)) >= 0.01
+             OR ABS(COALESCE((checks_json->>'payoutDiff')::numeric, 0)) >= 0.01
+           ) THEN 1 ELSE 0 END)::int,
+           ROUND(COALESCE(SUM(shipping_positive), 0)::numeric, 2),
+           ROUND(COALESCE(SUM(shipping_negative), 0)::numeric, 2),
+           now()
+         FROM transactions
+         WHERE paid_date = ANY($1::text[])
+           AND channel IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+         GROUP BY paid_date`,
+        [affectedDates],
+        client,
+      );
+    }
+
+    if (affectedSkus.length > 0) {
+      await query(
+        "DELETE FROM sku_summaries WHERE sku_code = ANY($1::text[])",
+        [affectedSkus],
+        client,
+      );
+      await query(
+        `WITH target_orders AS (
+           SELECT DISTINCT COALESCE(NULLIF(order_uid, ''), order_code) AS ord_key
+           FROM oms_order_items
+           WHERE sku_code = ANY($1::text[])
+         ),
+         order_lines AS (
+           SELECT
+             i.*,
+             COALESCE(NULLIF(i.order_uid, ''), i.order_code) AS ord_key,
+             SUM(i.unit_price * i.quantity) OVER (PARTITION BY COALESCE(NULLIF(i.order_uid, ''), i.order_code)) AS order_gross_sum,
+             COUNT(*) OVER (PARTITION BY COALESCE(NULLIF(i.order_uid, ''), i.order_code)) AS order_line_cnt
+           FROM oms_order_items i
+           JOIN target_orders to_ord ON COALESCE(NULLIF(i.order_uid, ''), i.order_code) = to_ord.ord_key
+           WHERE COALESCE(NULLIF(i.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
+         )
+         INSERT INTO sku_summaries (
+           sku_code, product_name, total_qty, order_count, gross_amount,
+           net_sales_amount, tiktok_qty, shopee_qty, facebook_qty, lazada_qty, line_qty, other_qty, updated_at
+         )
+         SELECT
+           i.sku_code,
+           MAX(i.product_name),
+           COALESCE(SUM(i.quantity), 0)::int,
+           COUNT(DISTINCT i.ord_key)::int,
+           ROUND(COALESCE(SUM(i.unit_price * i.quantity), 0)::numeric, 2),
+           ROUND(COALESCE(SUM(
+             CASE
+               WHEN i.order_gross_sum > 0 THEN i.order_sales_amount * (i.unit_price * i.quantity) / i.order_gross_sum
+               WHEN i.order_line_cnt > 0 THEN i.order_sales_amount / i.order_line_cnt
+               ELSE i.order_sales_amount
+             END
+           ), 0)::numeric, 2),
+           COALESCE(SUM(CASE WHEN COALESCE(NULLIF(i.channel, ''), 'TikTok') = 'TikTok' THEN i.quantity ELSE 0 END), 0)::int,
+           COALESCE(SUM(CASE WHEN i.channel = 'Shopee' THEN i.quantity ELSE 0 END), 0)::int,
+           COALESCE(SUM(CASE WHEN i.channel = 'Facebook' THEN i.quantity ELSE 0 END), 0)::int,
+           COALESCE(SUM(CASE WHEN i.channel = 'Lazada' THEN i.quantity ELSE 0 END), 0)::int,
+           COALESCE(SUM(CASE WHEN i.channel = 'LINE' THEN i.quantity ELSE 0 END), 0)::int,
+           COALESCE(SUM(CASE WHEN i.channel = 'Other' THEN i.quantity ELSE 0 END), 0)::int,
+           now()
+         FROM order_lines i
+         WHERE i.sku_code = ANY($1::text[])
+         GROUP BY i.sku_code`,
+        [affectedSkus],
+        client,
+      );
+    }
+
+    // สินค้าที่ไม่เหลือรายการในออเดอร์แล้ว (ไม่แตะสินค้าที่สร้างมือ)
+    await query(
+      `DELETE FROM products p
+        WHERE p.is_manual IS NOT TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM oms_order_items i WHERE i.sku_code = p.sku_code
+          )`,
+      [],
+      client,
+    );
+
+    // เลขที่ใบกำกับฯ ล็อกแล้ว: void ไม่ลบ เพื่อให้นำเข้าใหม่ได้เลขเดิมกลับมา
+    await query(
+      `WITH upd AS (
+         UPDATE invoice_registry r
+         SET status = 'void', voided_at = now(), void_reason = 'ลบไฟล์นำเข้า'
+         WHERE r.status = 'active'
+           AND NOT EXISTS (
+             SELECT 1 FROM transactions t
+             WHERE t.external_id = r.order_id
+               AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
+               AND (${INVOICE_ELIGIBLE_SQL})
+           )
+           AND ($1::text[] IS NULL OR r.order_id = ANY($1::text[]))
+         RETURNING r.order_id, r.invoice_no, r.void_reason
+       )
+       INSERT INTO invoice_registry_audit (order_id, invoice_no, action, reason, import_id)
+       SELECT order_id, invoice_no, 'void', void_reason, NULL FROM upd`,
+      [affectedOrderIds.length > 0 ? affectedOrderIds : null],
+      client,
+    );
+  });
+
+  return { files: files.length, deleted: ids, remaining: 0 };
 }
 
 /** บันทึกว่าเลขใบกำกับฯ ขึ้นกระดาษแล้ว — ตั้งครั้งแรกครั้งเดียว ไม่ทับเวลาที่มีอยู่ */

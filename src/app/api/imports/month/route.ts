@@ -56,14 +56,9 @@ export async function DELETE(request: Request) {
     );
   }
   // ลบทีละชุด — หน้าจอเรียกซ้ำ ๆ จน remaining = 0 (ลบ 90 ไฟล์ในคำขอเดียวยาวเกินจนถูกตัด)
-  // ทีละ 2 ไฟล์: ลบหนึ่งไฟล์ใช้ ~13 วินาที (ต้องคำนวณสรุปยอดใหม่) 5 ไฟล์จะแตะเพดานเวลาของ proxy
-  const rawLimit = Number(url.searchParams.get("limit") ?? "2");
-  const limit = Number.isFinite(rawLimit)
-    ? Math.min(20, Math.max(1, Math.trunc(rawLimit)))
-    : 2;
-
+  // ลบทั้งเดือนใน transaction เดียว — ไม่รับ limit แล้ว (เดิมลบทีละไฟล์จนเกินเวลา)
   const result = await runWithCompany(auth.session.companyId ?? "dragon19", () =>
-    deleteImportsForMonth(month, limit),
+    deleteImportsForMonth(month),
   );
   await recordAuditLog({
     actor: auth.session.sub,
