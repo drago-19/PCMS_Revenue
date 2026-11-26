@@ -3359,7 +3359,8 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
             product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
             normalized_json, created_at, channel,
             buyer_name, buyer_tax_id, buyer_address, oms_order_uid, order_code, shop_name
-          ) VALUES ${orderPlaceholders.join(", ")}`,
+          ) VALUES ${orderPlaceholders.join(", ")}
+          ON CONFLICT DO NOTHING`,
           orderParams,
           client,
         );

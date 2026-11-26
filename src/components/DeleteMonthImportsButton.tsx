@@ -103,15 +103,28 @@ export function DeleteMonthImportsButton({
           `/api/imports/month?month=${encodeURIComponent(month)}&limit=2`,
           { method: "DELETE" },
         );
-        const payload = (await response.json()) as {
+        // อ่านเป็นข้อความก่อน: ถ้าได้ HTML (redirect ไป /login หรือ error page) จะได้บอก status ได้
+        const raw = await response.text();
+        let payload: {
           error?: string;
           deletedCount?: number;
           remaining?: number;
-        };
-        if (!response.ok) {
-          const msg = payload.error ?? "ลบข้อมูลไม่สำเร็จ";
-          setError(msg);
-          toast.error(msg);
+        } | null = null;
+        try {
+          payload = JSON.parse(raw) as typeof payload;
+        } catch {
+          payload = null;
+        }
+        if (!response.ok || !payload) {
+          const detail = [
+            `HTTP ${response.status}`,
+            response.redirected ? "ถูกเปลี่ยนเส้นทาง" : null,
+            payload?.error ?? null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          setError(`ลบไม่สำเร็จ — ${detail}`);
+          toast.error(`ลบไม่สำเร็จ — ${detail}`);
           return;
         }
         const deletedThisRound = payload.deletedCount ?? 0;
