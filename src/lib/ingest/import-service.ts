@@ -1376,7 +1376,8 @@ export async function reconcileAndSyncThreeFiles(
         currency, income, fee_total, adjustment, payout, related_order_id,
         product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
         normalized_json, created_at, channel, order_code, oms_order_uid, shop_name
-      ) VALUES ${placeholders.join(", ")}`,
+      ) VALUES ${placeholders.join(", ")}
+      ON CONFLICT DO NOTHING`,
       params,
       client,
     );
@@ -2729,7 +2730,8 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
             currency, income, fee_total, adjustment, payout, related_order_id,
             product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
             normalized_json, created_at, channel, order_code, oms_order_uid, shop_name
-          ) VALUES ${placeholders.join(", ")}`,
+          ) VALUES ${placeholders.join(", ")}
+          ON CONFLICT DO NOTHING`,
           params,
           client,
         );
@@ -2957,7 +2959,8 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
             product_detail, weight_estimated, weight_charged, checks_json, warnings_json,
             normalized_json, created_at, channel, order_code, oms_order_uid, shop_name,
             buyer_name, buyer_tax_id, buyer_address
-          ) VALUES ${placeholders.join(", ")}`,
+          ) VALUES ${placeholders.join(", ")}
+          ON CONFLICT DO NOTHING`,
           params,
           client,
         );
