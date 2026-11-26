@@ -27,6 +27,12 @@ type ImportFileRow = {
   orderCount: number;
 };
 
+type DeleteResponse = {
+  error?: string;
+  deletedCount?: number;
+  remaining?: number;
+};
+
 type PreviewResponse = {
   month: string;
   label: string;
@@ -105,13 +111,9 @@ export function DeleteMonthImportsButton({
         );
         // อ่านเป็นข้อความก่อน: ถ้าได้ HTML (redirect ไป /login หรือ error page) จะได้บอก status ได้
         const raw = await response.text();
-        let payload: {
-          error?: string;
-          deletedCount?: number;
-          remaining?: number;
-        } | null = null;
+        let payload: DeleteResponse | null = null;
         try {
-          payload = JSON.parse(raw) as typeof payload;
+          payload = JSON.parse(raw) as DeleteResponse;
         } catch {
           payload = null;
         }
