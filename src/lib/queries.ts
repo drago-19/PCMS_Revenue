@@ -903,7 +903,10 @@ export async function listImportsPaged(
   pageSize: number;
   pageCount: number;
   totals: {
+    /** ผลรวม order_count ของไฟล์ — นับซ้ำได้ (ไฟล์สินค้ากับไฟล์ออเดอร์เป็นออเดอร์ชุดเดียวกัน) */
     orderCount: number;
+    /** จำนวนบิลจริง (ออเดอร์ไม่ซ้ำ) ของไฟล์ที่ตรงเงื่อนไข — ใช้แสดงบนหน้าประวัติ */
+    billCount: number;
     latestPaidDate: string | null;
   };
 }> {
@@ -913,11 +916,11 @@ export async function listImportsPaged(
 
   const clauses: string[] = [];
   const params: unknown[] = [];
+  const isMonthFilter = /^\d{4}-\d{2}$/.test(date);
+  const isYearFilter = /^\d{4}$/.test(date);
+  const isDayFilter = /^\d{4}-\d{2}-\d{2}$/.test(date);
 
   if (date) {
-    const isMonthFilter = /^\d{4}-\d{2}$/.test(date);
-    const isYearFilter = /^\d{4}$/.test(date);
-    const isDayFilter = /^\d{4}-\d{2}-\d{2}$/.test(date);
 
     if (isDayFilter) {
       clauses.push(
@@ -959,6 +962,28 @@ export async function listImportsPaged(
     db,
   );
   const total = Number(aggRow?.c ?? 0);
+  // จำนวนบิลจริงของช่วงที่กรอง: นับออเดอร์ไม่ซ้ำที่วันชำระตรงกับช่วงนั้น
+  // (เดิมบวก order_count ของทุกไฟล์ → ไฟล์ออเดอร์กับไฟล์สินค้าเป็นชุดเดียวกัน ทำให้นับซ้ำ)
+  const billParams: unknown[] = [...params];
+  let billDateClause = "";
+  if (date) {
+    if (isDayFilter) {
+      billDateClause = `AND t.paid_date = $${billParams.length + 1}`;
+      billParams.push(date);
+    } else if (isMonthFilter || isYearFilter) {
+      billDateClause = `AND t.paid_date LIKE $${billParams.length + 1}`;
+      billParams.push(`${date}-%`);
+    }
+  }
+  const billRow = await queryOne<Record<string, unknown>>(
+    `SELECT COUNT(DISTINCT t.external_id) AS c
+       FROM transactions t
+      WHERE t.is_order = 1
+        AND t.import_id IN (SELECT id FROM imports ${where})
+        ${billDateClause}`,
+    billParams,
+    db,
+  );
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(rawPage, pageCount);
   const rows = await query<Record<string, unknown>>(
@@ -974,6 +999,7 @@ export async function listImportsPaged(
     pageCount,
     totals: {
       orderCount: Number(aggRow?.order_count ?? 0),
+      billCount: Number(billRow?.c ?? 0),
       latestPaidDate: aggRow?.latest_paid_date
         ? String(aggRow.latest_paid_date)
         : null,

@@ -124,7 +124,8 @@ export default async function ImportHistoryPage({
         />
         <StatCard
           label={isFilteredByDate ? "บิลจากไฟล์ในช่วงที่เลือก" : "บิลคำสั่งซื้อสะสม"}
-          value={`${(isFilteredByDate ? result.totals.orderCount : stats.orderCount).toLocaleString("th-TH")} ใบ`}
+          // ใช้จำนวนบิลจริง (ออเดอร์ไม่ซ้ำ) — เดิมบวก order_count ของทุกไฟล์ทำให้นับซ้ำเมื่ออัปทั้งไฟล์ออเดอร์และไฟล์สินค้า
+          value={`${(isFilteredByDate ? result.totals.billCount : stats.orderCount).toLocaleString("th-TH")} ใบ`}
           hint={
             isFilteredByDate
               ? `เฉพาะไฟล์ของ${datePeriodLabel}`
