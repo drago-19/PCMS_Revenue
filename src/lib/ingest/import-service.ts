@@ -3181,11 +3181,18 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
           [orderExternalIds],
           client,
         );
-        const existingByExt = new Map(
-          existingOrderRows.map((r) => [String(r.external_id), r]),
-        );
+        // ออเดอร์เดียวมีได้หลายแถว (แบบ ก) — ใช้แถวล่าสุดเป็นที่มาของข้อมูลผู้ซื้อ/รหัสออเดอร์/ร้าน
+        const existingByExt = new Map<string, (typeof existingOrderRows)[number]>();
+        for (const r of existingOrderRows) {
+          const key = String(r.external_id);
+          const cur = existingByExt.get(key);
+          if (!cur || String(r.paid_date ?? "") >= String(cur.paid_date ?? "")) {
+            existingByExt.set(key, r);
+          }
+        }
 
-        const extIdsToDelete = new Set<string>();
+        // แบบ ก (ผู้ใช้เลือก 27 พ.ย. 2026): ยึดรายงานของแต่ละวัน
+        // ขายวันหนึ่งกับคืนเงินอีกวันหนึ่งเป็นคนละแถว — ไม่รวมยอดและไม่ย้ายวันเหมือน Guard 16a/16b เดิม
         const effectiveOrderChunk: Array<{
           tx: NormalizedTransaction;
           buyerName: string | null;
@@ -3195,106 +3202,35 @@ export async function importWorkbook(options: ImportFileOptions): Promise<Import
           orderCode: string | null;
           shopName: string | null;
         }> = [];
+        const deleteExtIds = new Set<string>();
+        const deletePaidDates = new Set<string>();
 
-        for (let i = 0; i < orderChunk.length; i++) {
-          let tx = orderChunk[i]!;
-          const prev = existingByExt.get(tx.externalId);
-          let buyerName: string | null = null;
-          let buyerTaxId: string | null = null;
-          let buyerAddress: string | null = null;
-          let omsOrderUid: string | null = null;
-          let orderCode: string | null = null;
-          let shopName: string | null = null;
-
-          if (prev) {
-            const prevYm = String(prev.paid_date ?? "").slice(0, 7);
-            const currYm = String(tx.paidAt ?? "").slice(0, 7);
-            const isPrevSettlement = prev.transaction_type !== "คำสั่งซื้อ (OMS)";
-
-            if (isPrevSettlement && prevYm && currYm && prevYm !== currYm) {
-              // Guard #16a: Cross-month settlement adjustment/refund for an order already settled in a different month.
-              // Keep the original month's locked sale/invoice untouched and record this month's row as an adjustment.
-              const origExtId = tx.externalId;
-              const dateSuffix = String(tx.paidAt || currYm).replace(/[^0-9A-Za-z]/g, "");
-              const adjExtId = `${origExtId}-ADJ-${dateSuffix}`;
-              extIdsToDelete.add(adjExtId);
-              tx = {
-                ...tx,
-                externalId: adjExtId,
-                fields: {
-                  ...tx.fields,
-                  orderId: adjExtId,
-                  relatedOrderId: origExtId,
-                },
-              };
-              orderCode = prev.order_code ?? origExtId;
-              shopName = prev.shop_name ?? null;
-            } else {
-              extIdsToDelete.add(tx.externalId);
-              buyerName = prev.buyer_name ?? null;
-              buyerTaxId = prev.buyer_tax_id ?? null;
-              buyerAddress = prev.buyer_address ?? null;
-              omsOrderUid = prev.oms_order_uid ?? null;
-              orderCode = prev.order_code ?? null;
-              shopName = prev.shop_name ?? null;
-
-              // Guard #16b: Same-month split settlement files (e.g. Week 1 positive sale + Week 2 partial refund/adjustment)
-              const prevIncome = Number(prev.income ?? 0);
-              const currIncome = Number(tx.fields.incomeTotal ?? 0);
-              if (
-                isPrevSettlement &&
-                Number(prev.import_id ?? 0) !== id &&
-                ((prevIncome > 0 && currIncome <= 0) || (prevIncome <= 0 && currIncome > 0))
-              ) {
-                const prevNorm =
-                  typeof prev.normalized_json === "string"
-                    ? (JSON.parse(prev.normalized_json) as NormalizedTransaction)
-                    : ((prev.normalized_json as NormalizedTransaction) ?? null);
-                if (prevNorm && prevNorm.fields) {
-                  const mergedFields: Record<string, string | number> = {
-                    ...prevNorm.fields,
-                  };
-                  for (const [k, v] of Object.entries(tx.fields)) {
-                    if (typeof v === "number") {
-                      const prevNum =
-                        typeof mergedFields[k] === "number" ? (mergedFields[k] as number) : 0;
-                      mergedFields[k] = round2(prevNum + v);
-                    } else if (typeof v === "string" && v !== "") {
-                      mergedFields[k] = v;
-                    }
-                  }
-                  tx = {
-                    ...tx,
-                    createdAt: prevNorm.createdAt || tx.createdAt,
-                    paidAt: tx.paidAt || prevNorm.paidAt,
-                    fields: mergedFields,
-                    unknownValues: [
-                      ...(prevNorm.unknownValues ?? []),
-                      ...(tx.unknownValues ?? []),
-                    ],
-                  };
-                }
-              }
-            }
-          } else {
-            extIdsToDelete.add(tx.externalId);
-          }
+        for (const tx of orderChunk) {
+          const prev = existingByExt.get(tx.externalId) ?? null;
+          deleteExtIds.add(tx.externalId);
+          const paidDate = String(tx.paidAt ?? "").slice(0, 10);
+          if (paidDate) deletePaidDates.add(paidDate);
 
           effectiveOrderChunk.push({
             tx,
-            buyerName,
-            buyerTaxId,
-            buyerAddress,
-            omsOrderUid,
-            orderCode,
-            shopName,
+            buyerName: prev?.buyer_name ?? null,
+            buyerTaxId: prev?.buyer_tax_id ?? null,
+            buyerAddress: prev?.buyer_address ?? null,
+            omsOrderUid: prev?.oms_order_uid ?? null,
+            orderCode: prev?.order_code ?? null,
+            shopName: prev?.shop_name ?? null,
           });
         }
 
-        if (extIdsToDelete.size > 0) {
+        if (deleteExtIds.size > 0) {
+          // ลบเฉพาะ (1) แถวชั่วคราว OMS ของออเดอร์นี้ (มีรายได้จริงแล้ว) และ (2) แถวของวันเดียวกันที่นำเข้าซ้ำ
+          // ห้ามลบแถวของวันอื่นของออเดอร์เดิม — นั่นคือยอดที่รายงานของวันนั้นบันทึกไว้
           await query(
-            "DELETE FROM transactions WHERE external_id = ANY($1::text[]) AND is_order = 1",
-            [[...extIdsToDelete]],
+            `DELETE FROM transactions
+              WHERE is_order = 1
+                AND external_id = ANY($1::text[])
+                AND (transaction_type = 'คำสั่งซื้อ (OMS)' OR paid_date = ANY($2::text[]))`,
+            [[...deleteExtIds], [...deletePaidDates]],
             client,
           );
         }

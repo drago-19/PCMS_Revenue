@@ -8,7 +8,7 @@ import {
 import { seedSessionCutoffs } from "./session-revocation";
 
 // เวอร์ชัน schema — ต้อง bump ทุกครั้งที่เพิ่ม/แก้ DDL ไม่งั้นระบบจะข้ามการสร้างตาราง
-const SCHEMA_VERSION = "2026-11-25-v82";
+const SCHEMA_VERSION = "2026-11-27-v83";
 
 /**
  * เทียบเวอร์ชัน schema รูปแบบ 2026-11-18-v77 — คืน > 0 เมื่อ a ใหม่กว่า b
@@ -544,8 +544,10 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_transactions_key
   ON transactions(external_id, transaction_type, paid_date);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_transactions_order
-  ON transactions(external_id) WHERE is_order = 1;
+-- แบบ ก (ผู้ใช้เลือก 27 พ.ย. 2026): ยึดรายงานของแต่ละวัน — ออเดอร์เดียวมีได้หลายแถวเมื่อ TikTok
+-- ออกเอกสารซ้ากันคนละวัน (เช่น ขาย 1 พ.ย. 94.11 แล้วคืนเงิน 3 พ.ย. −79.57) จึงเลิก unique
+-- ต่อ external_id; ตัวกันซ้ำคือ (external_id, transaction_type, paid_date) ด้านบนแทน
+DROP INDEX IF EXISTS ux_transactions_order;
 CREATE INDEX IF NOT EXISTS ix_transactions_paid_date ON transactions(paid_date);
 CREATE INDEX IF NOT EXISTS ix_transactions_import ON transactions(import_id);
 
