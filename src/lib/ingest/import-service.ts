@@ -1221,15 +1221,19 @@ export async function reconcileAndSyncThreeFiles(
 
       const productAfterDiscount = round2(Math.max(0, salesAmount - shippingCustomer));
       const productBeforeDiscount = round2(productAfterDiscount + discountTotal);
-      const incomeTotal = salesAmount;
-      const feeTotal = round2(-shippingSeller);
+      // TikTok ที่ยังไม่มีไฟล์ Settlement ของออเดอร์นี้ = เงินยังไม่เกิด: ห้ามตั้งยอดจากไฟล์ Shipnity
+      // (ผู้ใช้ยืนยัน 27 พ.ย. 2026 ว่า "ไม่มียอดเงินจนกว่าไฟล์จะมา") income/fee_total/payout และช่องเงิน
+      // ในใบจึงเป็น 0 จนกว่าไฟล์ Settlement จะมาแทนที่แถวนี้ (DELETE ที่ extIdsToDelete ตอนนำเข้า Settlement)
+      const isPendingTikTokSettlement = channel === "TikTok";
+      const incomeTotal = isPendingTikTokSettlement ? 0 : salesAmount;
+      const feeTotal = isPendingTikTokSettlement ? 0 : round2(-shippingSeller);
       // AGENTS.md Rule 3 & 4 (Strict Platform Financial Isolation):
-      // - TikTok OMS temp row: payout = salesAmount - shippingSeller, cogs = 0
+      // - TikTok OMS placeholder: ไม่มียอดเงิน (0) — ยอดทุกบาทมาจากไฟล์ Settlement เท่านั้น
       // - Shopee, Facebook, LINE, Other (Shipnity 2-file channels): payout = salesAmount - shippingSeller (net cash for tax), cogs = cogsAmount
       let payout = netOmsPayout;
       let cogs = 0;
       if (channel === "TikTok") {
-        payout = netOmsPayout;
+        payout = 0;
         cogs = 0;
       } else if (channel === "Shopee") {
         payout = netOmsPayout;
@@ -1262,11 +1266,12 @@ export async function reconcileAndSyncThreeFiles(
           paidAt: paidDate,
           currency: "THB",
           incomeTotal,
-          customerPayment: salesAmount,
-          productAfterDiscount,
-          productBeforeDiscount,
-          storeDiscount: discountTotal > 0 ? -discountTotal : 0,
-          shippingCustomerFee: shippingCustomer,
+          customerPayment: isPendingTikTokSettlement ? 0 : salesAmount,
+          productAfterDiscount: isPendingTikTokSettlement ? 0 : productAfterDiscount,
+          productBeforeDiscount: isPendingTikTokSettlement ? 0 : productBeforeDiscount,
+          storeDiscount:
+            isPendingTikTokSettlement || discountTotal <= 0 ? 0 : -discountTotal,
+          shippingCustomerFee: isPendingTikTokSettlement ? 0 : shippingCustomer,
           feeTotal,
           shippingTotal: feeTotal,
           shippingSellerTotal: feeTotal,
@@ -1275,7 +1280,7 @@ export async function reconcileAndSyncThreeFiles(
           adjustment: 0,
           payout,
           cogs,
-          shipnityProfit: profitAmount,
+          shipnityProfit: isPendingTikTokSettlement ? 0 : profitAmount,
         },
         mappedFields: [
           "orderId",
@@ -1296,7 +1301,7 @@ export async function reconcileAndSyncThreeFiles(
           "payout",
         ],
         feeGroups:
-          shippingSeller > 0 || shippingCustomer > 0
+          !isPendingTikTokSettlement && (shippingSeller > 0 || shippingCustomer > 0)
             ? {
                 shipping: {
                   total: feeTotal,

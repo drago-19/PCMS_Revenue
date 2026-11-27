@@ -30,6 +30,13 @@ export const BILLABLE_ORDER_OR_COMPENSATION_SQL = `(t.is_order = 1 OR ${BILLABLE
 export const EXCLUDE_PENDING_SHOPEE_BILL_SQL = `NOT (t.channel = 'Shopee' AND t.transaction_type = 'คำสั่งซื้อ (OMS)')`;
 
 /**
+ * TikTok ที่ยังไม่มีไฟล์รายได้ (แถว OMS placeholder) — ไม่มียอดเงิน (income/fee/payout = 0)
+ * แต่ยังต้องเป็น "บิล" ให้เห็นในรายการพร้อมป้าย "รอไฟล์รายได้"
+ * ต้อง alias ตาราง transactions ว่า `t`
+ */
+export const PENDING_TIKTOK_BILL_SQL = `(t.channel = 'TikTok' AND t.transaction_type = 'คำสั่งซื้อ (OMS)')`;
+
+/**
  * เงื่อนไขบิลที่ "ออกใบกำกับภาษีได้" (ใช้ร่วมกันทั้งการออกเลขที่และหน้าพิมพ์รวม)
  * — บิลขายปกติเท่านั้น: ไม่รวมคืนเงิน / ตีกลับ / ยกเลิก (income/payout ≤ 0)
  *   และบิลเปลี่ยนสินค้าไม่มีราคา (link_priority = 3)

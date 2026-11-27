@@ -279,6 +279,31 @@ test("ห้ามมีโค้ดลบ/เรียงเลขที่ใ�
   }
 });
 
+test("TikTok ที่ยังไม่มีไฟล์รายได้: บิลไม่มียอดเงิน และยังนับเป็นบิลในหมวดขายปกติ", async () => {
+  const fs = await import("node:fs");
+  const { PENDING_TIKTOK_BILL_SQL } = await import("../src/lib/invoice-eligibility");
+  // แถว OMS ของ TikTok คือแถวที่ยังไม่มีไฟล์ Settlement (พอมีไฟล์แล้วแถวนี้ถูกแทนที่ด้วยยอดจริง)
+  assert.match(PENDING_TIKTOK_BILL_SQL, /channel = 'TikTok'/);
+  assert.match(PENDING_TIKTOK_BILL_SQL, /transaction_type = 'คำสั่งซื้อ \(OMS\)'/);
+
+  // การนำเข้า: ต้องไม่ตั้งยอดให้แถวนี้ (เดิม payout = sales_amount - shipping_fee_seller ทำให้ยอดโอนรายวันเกินจริง)
+  const importService = fs.readFileSync("src/lib/ingest/import-service.ts", "utf8");
+  assert.match(importService, /const isPendingTikTokSettlement = channel === "TikTok";/);
+  assert.match(
+    importService,
+    /if \(channel === "TikTok"\) \{\s*payout = 0;/,
+    "แถว TikTok ที่ยังไม่มี Settlement ต้องไม่มียอดเงิน",
+  );
+
+  // ชั้นแสดงผล: ต้องไม่คำนวณยอดแทน (income + feeTotal) ให้แถวนี้
+  const queries = fs.readFileSync("src/lib/queries.ts", "utf8");
+  assert.match(queries, /const isPendingTikTokSettlement =/);
+  assert.match(queries, /resolvedChannel !== "Lazada" &&\s*!isPendingTikTokSettlement/);
+
+  // หมวดบิลขายปกติยังต้องนับบิลที่ไม่มีเงิน (ไม่งั้นชิป "รอไฟล์รายได้" กลายเป็น 0)
+  assert.match(queries, /normal: `\(\(t\.is_order = 1 AND t\.income > 0 AND t\.payout > 0\) OR \$\{BILLABLE_COMPENSATION_SQL\} OR \$\{PENDING_TIKTOK_BILL_SQL\}\)`/);
+});
+
 async function makeXlsxBuffer(rows: (string | number | null)[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Sheet1");

@@ -12,6 +12,7 @@ import {
   BILLABLE_ORDER_OR_COMPENSATION_SQL,
   EXCLUDE_PENDING_SHOPEE_BILL_SQL,
   INVOICE_ELIGIBLE_SQL,
+  PENDING_TIKTOK_BILL_SQL,
   isCompensationTransactionType,
 } from "./invoice-eligibility";
 import { getDocumentSettings } from "./settings";
@@ -709,20 +710,28 @@ async function enrichTransactionsWithOms(
       o?.shipping_fee_seller !== undefined
         ? Math.abs(Number(o.shipping_fee_seller))
         : Math.abs(Number(tx.feeTotal ?? 0));
+    // TikTok ที่ยังไม่มีไฟล์รายได้: เงินยังไม่เกิด — ห้ามคำนวณยอดให้เอง (ผู้ใช้ยืนยัน 27 พ.ย. 2026)
+    const isPendingTikTokSettlement =
+      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel === "TikTok";
     const effectiveFeeTotal =
-      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada"
+      tx.transactionType === "คำสั่งซื้อ (OMS)" &&
+      resolvedChannel !== "Lazada" &&
+      !isPendingTikTokSettlement
         ? shipSellerAbs > 0
           ? -shipSellerAbs
           : Number(tx.feeTotal ?? 0)
         : Number(tx.feeTotal ?? 0);
     // Platform Isolation & Exact Values Display (AGENTS.md Rule 3 & 4):
-    // - TikTok Settlement: uses tx.payout directly from TikTok Settlement (or income + feeTotal for OMS placeholder)
+    // - TikTok Settlement: uses tx.payout directly from TikTok Settlement
+    // - TikTok OMS placeholder (ยังไม่มี Settlement): 0 — ไม่คำนวณยอดแทนไฟล์
     // - Shopee & Facebook: uses cash received: sales_amount - shipping_fee_seller (income + effectiveFeeTotal).
     //   Shipnity stock profit and COGS are computed for internal reference.
     const isShipnityChannel =
       tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada" && resolvedChannel !== "TikTok" && resolvedChannel !== "Lazada";
     const effectivePayout =
-      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada"
+      tx.transactionType === "คำสั่งซื้อ (OMS)" &&
+      resolvedChannel !== "Lazada" &&
+      !isPendingTikTokSettlement
         ? resolvedChannel === "Lazada" ? Number(tx.payout ?? 0) : Math.round((Number(tx.income ?? 0) + effectiveFeeTotal) * 100) / 100
         : Number(tx.payout ?? 0);
     const shipnityStockProfit =
@@ -739,7 +748,9 @@ async function enrichTransactionsWithOms(
           )
         : 0;
     const enrichedNormalized =
-      tx.transactionType === "คำสั่งซื้อ (OMS)" && resolvedChannel !== "Lazada"
+      tx.transactionType === "คำสั่งซื้อ (OMS)" &&
+      resolvedChannel !== "Lazada" &&
+      !isPendingTikTokSettlement
         ? {
             ...tx.normalized,
             fields: {
@@ -3119,9 +3130,10 @@ const BILL_SORT_SQL: Record<BillSortKey, string> = {
 };
 
 const BILL_CATEGORY_SQL: Record<BillCategoryKey, string> = {
-  normal: `((t.is_order = 1 AND t.income > 0 AND t.payout > 0) OR ${BILLABLE_COMPENSATION_SQL})`,
+  // บิล TikTok ที่ยังรอไฟล์รายได้ไม่มียอดเงิน แต่ยังนับเป็นบิลขายปกติ (ขายแล้ว รอเงินโอน)
+  normal: `((t.is_order = 1 AND t.income > 0 AND t.payout > 0) OR ${BILLABLE_COMPENSATION_SQL} OR ${PENDING_TIKTOK_BILL_SQL})`,
   refund_fee: `t.is_order = 1 AND (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0)) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
-  zero: `t.is_order = 1 AND (NOT (t.income > 0 AND t.payout > 0) AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0))) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
+  zero: `t.is_order = 1 AND NOT ${PENDING_TIKTOK_BILL_SQL} AND (NOT (t.income > 0 AND t.payout > 0) AND NOT (t.income < 0 OR t.payout < 0 OR (t.income <= 0 AND t.fee_total < 0))) AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
 };
 
 export async function listBills(
@@ -3412,7 +3424,9 @@ export async function listBills(
        WHERE ${baseWhere}
          AND t.is_order = 1
          AND (t.income <= 0 OR t.payout <= 0)
-         AND ${ORDER_LINK_PRIORITY_SQL} <> 3`,
+         AND ${ORDER_LINK_PRIORITY_SQL} <> 3
+         -- บิล TikTok ที่ยังรอไฟล์รายได้ไม่มียอดเงิน แต่ยังเป็นบิล: ห้ามถูกนับเป็น "ยอดไม่เป็นบวก" แล้วถูกหักออกจากจำนวนบิล
+         AND NOT ${PENDING_TIKTOK_BILL_SQL}`,
       baseParams,
       db,
     ),
