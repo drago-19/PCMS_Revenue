@@ -42,12 +42,15 @@ export default async function InvoicePage({
   searchParams,
 }: {
   params: Promise<{ orderId: string }>;
-  searchParams: Promise<{ mode?: string; paper?: string }>;
+  searchParams: Promise<{ mode?: string; paper?: string; date?: string }>;
 }) {
   const { orderId } = await params;
   const resolvedSearchParams = await searchParams;
 
-  const row = await getBill(decodeURIComponent(orderId));
+  const paidDateParam = /^\d{4}-\d{2}-\d{2}$/.test(resolvedSearchParams.date ?? "")
+    ? (resolvedSearchParams.date as string)
+    : null;
+  const row = await getBill(decodeURIComponent(orderId), undefined, paidDateParam);
   if (!row) notFound();
 
   if (!isOrderEligibleForInvoice(row)) {
@@ -230,7 +233,11 @@ export default async function InvoicePage({
             <div className="flex flex-col gap-2.5 border-b border-border px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-5">
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <Button asChild variant="outline" size="sm" className="h-9 flex-1 sm:flex-initial">
-                  <Link href={`/bills/${row.externalId}`}>
+                  <Link
+                    href={`/bills/${row.externalId}${
+                      /^\d{4}-\d{2}-\d{2}$/.test(row.paidDate ?? "") ? `?date=${row.paidDate}` : ""
+                    }`}
+                  >
                     <IconArrowLeft size={16} /> กลับไปบิล
                   </Link>
                 </Button>

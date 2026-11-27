@@ -15,11 +15,16 @@ export const metadata = { title: "บิลคำสั่งซื้อ" };
 
 export default async function BillDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orderId: string }>;
+  // แบบ ก: ออเดอร์เดียวมีหลายวัน — ?date= ระบุว่าจะเปิดแถวของวันไหน
+  searchParams: Promise<{ date?: string }>;
 }) {
   const { orderId } = await params;
-  const row = await getBill(decodeURIComponent(orderId));
+  const { date } = await searchParams;
+  const paidDate = /^\d{4}-\d{2}-\d{2}$/.test(date ?? "") ? date : null;
+  const row = await getBill(decodeURIComponent(orderId), undefined, paidDate);
   if (!row) notFound();
 
   const importRow = await getImport(row.importId);
@@ -43,7 +48,11 @@ export default async function BillDetailPage({
           />
           {isOrderEligibleForInvoice(row) ? (
             <Button asChild variant="secondary" className="no-print">
-              <Link href={`/invoices/${encodeURIComponent(row.externalId)}`}>
+              <Link
+                href={`/invoices/${encodeURIComponent(row.externalId)}${
+                  /^\d{4}-\d{2}-\d{2}$/.test(row.paidDate ?? "") ? `?date=${row.paidDate}` : ""
+                }`}
+              >
                 <IconReceipt size={16} /> ใบกำกับภาษี
               </Link>
             </Button>

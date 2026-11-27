@@ -46,7 +46,8 @@ import { cn } from "@/lib/utils";
 type PreviewTab = "bill" | "invoice" | "invoice_full";
 
 interface BillPreviewContextType {
-  openPreview: (orderId: string, defaultTab?: PreviewTab) => void;
+  // แบบ ก: ออเดอร์เดียวมีได้หลายแถวคนละวัน — ส่ง paidDate มาด้วยเพื่อเปิดแถวที่กดจริง
+  openPreview: (orderId: string, defaultTab?: PreviewTab, paidDate?: string | null) => void;
 }
 
 const BillPreviewContext = createContext<BillPreviewContextType | null>(null);
@@ -61,7 +62,11 @@ type OrderRowState = "idle" | "loading" | "ready" | "error";
  * โหลดข้อมูลบิลเต็มก้อน “ตอนเปิดป๊อปอัป” แทนการฝังทั้งออบเจกต์ลงใน payload ของทุกแถว
  * ใช้ loader ตัวเดียวกับที่หน้า /bills ใช้ (`getBillForPreview`) ข้อมูลจึงเป็นชุดเดียวกัน
  */
-function useOrderRow(orderId: string | null, open: boolean) {
+function useOrderRow(
+  orderId: string | null,
+  open: boolean,
+  paidDate?: string | null,
+) {
   const [row, setRow] = useState<TransactionRow | null>(null);
   const [state, setState] = useState<OrderRowState>("idle");
   const [attempt, setAttempt] = useState(0);
@@ -76,7 +81,10 @@ function useOrderRow(orderId: string | null, open: boolean) {
     let cancelled = false;
     setState("loading");
     setRow(null);
-    fetch(`/api/bills/${encodeURIComponent(orderId)}/preview`, {
+    const dateQuery = /^\d{4}-\d{2}-\d{2}$/.test(paidDate ?? "")
+      ? `?date=${paidDate}`
+      : "";
+    fetch(`/api/bills/${encodeURIComponent(orderId)}/preview${dateQuery}`, {
       cache: "no-store",
     })
       .then(async (res) => {
@@ -98,23 +106,25 @@ function useOrderRow(orderId: string | null, open: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [orderId, open, attempt]);
+  }, [orderId, open, paidDate, attempt]);
 
   return { row, state, retry: () => setAttempt((n) => n + 1) };
 }
 
 function OrderPreviewDialog({
   orderId,
+  paidDate,
   open,
   onOpenChange,
   initialTab = "bill",
 }: {
   orderId: string;
+  paidDate?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialTab?: PreviewTab;
 }) {
-  const { row, state, retry } = useOrderRow(orderId, open);
+  const { row, state, retry } = useOrderRow(orderId, open, paidDate);
 
   if (row && state === "ready") {
     return (
@@ -168,12 +178,14 @@ export function BillPreviewProvider({
   children: React.ReactNode;
 }) {
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [activePaidDate, setActivePaidDate] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<PreviewTab>("bill");
 
   const openPreview = useCallback(
-    (orderId: string, defaultTab: PreviewTab = "bill") => {
+    (orderId: string, defaultTab: PreviewTab = "bill", paidDate?: string | null) => {
       setActiveOrderId(orderId);
+      setActivePaidDate(paidDate ?? null);
       setTab(defaultTab);
       setOpen(true);
     },
@@ -186,6 +198,7 @@ export function BillPreviewProvider({
       {activeOrderId ? (
         <OrderPreviewDialog
           orderId={activeOrderId}
+          paidDate={activePaidDate}
           open={open}
           onOpenChange={setOpen}
           initialTab={tab}
@@ -197,10 +210,12 @@ export function BillPreviewProvider({
 
 export function BillTableRow({
   orderId,
+  paidDate,
   className,
   children,
 }: {
   orderId: string;
+  paidDate?: string | null;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -218,7 +233,7 @@ export function BillTableRow({
       return;
     }
     if (previewCtx) {
-      previewCtx.openPreview(orderId, "bill");
+      previewCtx.openPreview(orderId, "bill", paidDate);
     }
   };
 
@@ -237,6 +252,7 @@ export function BillTableRow({
 
 export function BillPreviewTrigger({
   orderId,
+  paidDate,
   displayOrderId,
   defaultTab = "bill",
   triggerVariant = "button",
@@ -245,6 +261,7 @@ export function BillPreviewTrigger({
   children,
 }: {
   orderId: string;
+  paidDate?: string | null;
   displayOrderId?: string;
   defaultTab?: PreviewTab;
   triggerVariant?: "button" | "ghost" | "outline" | "link";
@@ -258,7 +275,7 @@ export function BillPreviewTrigger({
   function handleOpen(e?: React.MouseEvent) {
     e?.stopPropagation();
     if (previewCtx) {
-      previewCtx.openPreview(orderId, defaultTab);
+      previewCtx.openPreview(orderId, defaultTab, paidDate);
       return;
     }
     setLocalOpen(true);
@@ -477,7 +494,11 @@ export function BillPreviewModal({
       effectiveRow.externalId
     : effectiveRow.externalId;
 
-  const fullPageHref =
+  // แบบ ก: พา paidDate ไปด้วย เพื่อเปิดแถวของวันเดียวกับที่กดมา (ออเดอร์เดียวมีหลายวันได้)
+  const paidDateQuery = /^\d{4}-\d{2}-\d{2}$/.test(effectiveRow.paidDate ?? "")
+    ? `date=${effectiveRow.paidDate}`
+    : "";
+  const fullPageBase =
     isInvoiceEligible && effectiveTab === "invoice"
       ? paperSize === "a6"
         ? `/invoices/${encodedExtId}`
@@ -485,6 +506,9 @@ export function BillPreviewModal({
       : isInvoiceEligible && effectiveTab === "invoice_full"
         ? `/invoices/${encodedExtId}?mode=full`
         : `/bills/${encodedExtId}`;
+  const fullPageHref = paidDateQuery
+    ? `${fullPageBase}${fullPageBase.includes("?") ? "&" : "?"}${paidDateQuery}`
+    : fullPageBase;
 
   async function handleOpenFullPage(e: React.MouseEvent<HTMLAnchorElement>) {
     if (effectiveTab === "invoice_full") {

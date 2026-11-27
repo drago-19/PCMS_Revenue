@@ -24,8 +24,12 @@ export async function GET(
     );
   }
 
+  // แบบ ก: ออเดอร์เดียวมีได้หลายแถว (ขาย/คืนเงินคนละวัน) — หน้ารายการส่งวันที่มาด้วย
+  const paidDate = new URL(request.url).searchParams.get("date");
+  const normalizedPaidDate = /^\d{4}-\d{2}-\d{2}$/.test(paidDate ?? "") ? paidDate : null;
+
   try {
-    const row = await getBillForPreview(decodedOrderId);
+    const row = await getBillForPreview(decodedOrderId, undefined, normalizedPaidDate);
     if (!row) {
       return Response.json(
         { error: "ไม่พบบิลของคำสั่งซื้อนี้", requestId: auth.requestId },

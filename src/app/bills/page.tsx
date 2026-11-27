@@ -1531,7 +1531,12 @@ export default async function BillsPage({
                     Math.abs(row.checks.feeDiff) < 0.01 &&
                     Math.abs(row.checks.payoutDiff) < 0.01;
                   return (
-                    <BillTableRow key={row.id} orderId={row.externalId} className="min-[768px]:[&>td]:align-top">
+                    <BillTableRow
+                      key={row.id}
+                      orderId={row.externalId}
+                      paidDate={row.paidDate}
+                      className="min-[768px]:[&>td]:align-top"
+                    >
                       <TableCell
                         data-label="หมายเลขคำสั่งซื้อ / ช่องทาง"
                         className={colOrderClass}
@@ -1771,6 +1776,7 @@ export default async function BillsPage({
                             {row.omsItems.length > 2 ? (
                               <BillPreviewTrigger
                                 orderId={row.externalId}
+                                paidDate={row.paidDate}
                                 defaultTab="bill"
                                 triggerVariant="link"
                                 label={`+${row.omsItems.length - 2} รายการอื่นในบิลนี้`}

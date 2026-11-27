@@ -4136,6 +4136,8 @@ export async function listBills(
 export async function getBill(
   orderId: string,
   db?: Queryable,
+  // แบบ ก: ออเดอร์เดียวมีได้หลายแถวคนละวัน (ขาย/คืนเงิน) — ส่งวันที่มาด้วยเพื่อเปิดแถวที่กดจริง
+  paidDate?: string | null,
 ): Promise<TransactionRow | null> {
   const row = await queryOne<Record<string, unknown>>(
     `SELECT t.*, r.invoice_no, i.filename AS import_filename, i.imported_at AS import_imported_at
@@ -4143,10 +4145,11 @@ export async function getBill(
      LEFT JOIN invoice_registry r ON r.order_id = t.external_id AND r.status = 'active'
      LEFT JOIN imports i ON i.id = t.import_id
      WHERE (t.external_id = $1 OR t.order_code = $1)
+       AND ($2::text IS NULL OR t.paid_date = $2)
        AND ${BILLABLE_ORDER_OR_COMPENSATION_SQL}
        AND COALESCE(NULLIF(t.channel, ''), 'TikTok') IN ('TikTok', 'Shopee', 'Facebook', 'Lazada', 'LINE', 'Other')
      ORDER BY CASE WHEN t.external_id = $1 THEN 0 ELSE 1 END, t.paid_date DESC, t.id DESC LIMIT 1`,
-    [orderId],
+    [orderId, paidDate ?? null],
     db,
   );
   if (!row) return null;
@@ -4161,9 +4164,10 @@ export async function getBill(
 export async function getBillForPreview(
   orderId: string,
   db?: Queryable,
+  paidDate?: string | null,
 ): Promise<TransactionRow | null> {
   const [row, sellerSettings] = await Promise.all([
-    getBill(orderId, db),
+    getBill(orderId, db, paidDate),
     getDocumentSettings(db),
   ]);
   if (!row) return null;
