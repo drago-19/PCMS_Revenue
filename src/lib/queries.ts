@@ -1372,6 +1372,8 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
     );
 
     // อัปเดตยอดใน transactions ของออเดอร์ที่ถูกคืนค่าจากไฟล์บัญชีให้ตรงกับ sales_amount ของ Shipnity (#20: sync both columns and normalized_json)
+    // ห้ามแตะแถว TikTok: ยอดของ TikTok มาจากไฟล์ Settlement เท่านั้น (แถว OMS ที่ยังรอไฟล์ต้องเป็น 0)
+    // เดิม WHERE กว้างเกิน — ลบไฟล์ใดก็เขียนยอดกลับให้แถว OMS ทุกแถว รวมถึง TikTok
     await query(
       `UPDATE transactions t
        SET income = o.sales_amount,
@@ -1410,6 +1412,7 @@ export async function deleteImport(id: number, db?: Queryable): Promise<boolean>
        FROM oms_orders o
        WHERE t.oms_order_uid = o.order_uid
          AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+         AND COALESCE(NULLIF(t.channel, ''), 'TikTok') <> 'TikTok'
          AND o.accounting_import_id IS NULL
          AND o.import_id <> $1`,
       [id],

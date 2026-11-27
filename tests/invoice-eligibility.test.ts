@@ -302,6 +302,19 @@ test("TikTok ที่ยังไม่มีไฟล์รายได้: �
 
   // หมวดบิลขายปกติยังต้องนับบิลที่ไม่มีเงิน (ไม่งั้นชิป "รอไฟล์รายได้" กลายเป็น 0)
   assert.match(queries, /normal: `\(\(t\.is_order = 1 AND t\.income > 0 AND t\.payout > 0\) OR \$\{BILLABLE_COMPENSATION_SQL\} OR \$\{PENDING_TIKTOK_BILL_SQL\}\)`/);
+
+  // คำสั่ง "คืนยอดจากไฟล์บัญชี" (ตอนลบไฟล์) ต้องไม่เขียนยอดกลับให้แถว TikTok
+  // เดิม WHERE กว้างเกิน: ลบไฟล์ใดก็ตั้ง income/payout ให้แถว OMS ทุกแถว → ยอด 1 พ.ย. เด้งกลับมา 7,921
+  const restoreBlocks = queries.match(/COALESCE\(NULLIF\(t\.channel, ''\), 'TikTok'\) <> 'TikTok'/g) ?? [];
+  assert.ok(
+    restoreBlocks.length >= 1,
+    "ต้องมีเงื่อนไขกันไม่ให้เขียนยอดกลับให้แถว TikTok ตอนคืนยอดจากไฟล์บัญชี",
+  );
+  assert.match(
+    importService,
+    /COALESCE\(NULLIF\(t\.channel, ''\), 'TikTok'\) <> 'TikTok'\s+AND o\.order_uid = ANY/,
+    "คำสั่งคืนยอดใน import-service ต้องข้ามแถว TikTok",
+  );
 });
 
 async function makeXlsxBuffer(rows: (string | number | null)[][]): Promise<Buffer> {

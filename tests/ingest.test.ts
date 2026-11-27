@@ -3600,7 +3600,9 @@ test("listBills keeps channelCounts identical across all/TikTok/Shopee/Facebook 
   }
 });
 
-test("TikTok OMS placeholder uses netOmsPayout (salesAmount - shippingSeller) instead of Shipnity profit_amount", async () => {
+// ชื่อเดิมบอกว่า placeholder ใช้ netOmsPayout — ตั้งแต่ 27 พ.ย. 2026 แถว OMS ของ TikTok ไม่มียอดเงินเลย
+// (ยอดมาจากไฟล์ Settlement เท่านั้น) เทสต์นี้จึงเหลือหน้าที่คุมตัว parser: ห้ามเอากำไรในสต็อก Shipnity มาใช้
+test("Shipnity OMS parser ไม่เอากำไรในสต็อก (profit_amount) มาเป็นยอดขาย/ยอดโอนของ TikTok", async () => {
   const { detectAndParseOmsInput } = await import("../src/lib/ingest/oms-parse");
 
   // Simulate an order like YQ77 where flash sale price is 100/pc (total 1400) but Shipnity stock cost is 150/pc resulting in -700 profit

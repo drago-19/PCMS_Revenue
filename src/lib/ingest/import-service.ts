@@ -3805,6 +3805,8 @@ export async function toggleImportAccountingMode(
            FROM oms_orders o
            WHERE t.oms_order_uid = o.order_uid
              AND t.transaction_type = 'คำสั่งซื้อ (OMS)'
+             -- ห้ามเขียนยอดกลับให้แถว TikTok: ยอดของ TikTok มาจากไฟล์ Settlement เท่านั้น
+             AND COALESCE(NULLIF(t.channel, ''), 'TikTok') <> 'TikTok'
              AND o.order_uid = ANY($1::text[])`,
           [affectedUids],
           client,
