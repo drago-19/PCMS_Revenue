@@ -378,7 +378,12 @@ function mapImport(row: Record<string, unknown>): ImportRow {
     transactionCount: Number(row.transaction_count ?? 0),
     orderCount: Number(row.order_count ?? 0),
     warnings: parseJson<IngestWarning[]>(row.warnings_json, []),
-    mapping: parseJson<MappingEntry[]>(row.mapping_json, []),
+    // mapping_json ของไฟล์เก่าบางไฟล์มีค่า null ปนอยู่ (import 654 "facebook 1069.xlsx" มี 1 รายการ)
+    // ถ้าปล่อยไว้ หน้า /import/[id] จะ throw "Cannot read properties of null (reading 'fieldKey')"
+    // และกดลบไฟล์นั้นไม่สำเร็จ — กรองเฉพาะรายการที่มีจริงตั้งแต่ตอนอ่าน
+    mapping: parseJson<(MappingEntry | null)[]>(row.mapping_json, []).filter(
+      (entry): entry is MappingEntry => Boolean(entry),
+    ),
     unknownColumns: parseJson<UnknownColumn[]>(row.unknown_columns_json, []),
     report: parseJson<ReportSummary>(row.report_json, REPORT_FALLBACK),
     reconciliation: parseJson<Reconciliation>(row.reconciliation_json, {
