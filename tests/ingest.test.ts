@@ -4346,7 +4346,8 @@ test("reconcileCrossFileOrderUids merges an order initially imported without tra
       assert.equal(invReg.length, 1);
       assert.equal(invReg[0]!.channel, "LINE");
       assert.equal(invReg[0]!.status, "active");
-      assert.match(invReg[0]!.invoice_no, /^SEQ\/LINE\/2609\//);
+      // เลขยึด \"เดือนที่ออกเลข\" + รหัสช่องทาง (LN) — ไม่ผูกกับเดือนของวันชำระอีก
+      assert.match(invReg[0]!.invoice_no, /^LN\d{4}\/\d{5}$/);
 
       throw new Error("ROLLBACK_TEST_ONLY");
     });

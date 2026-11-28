@@ -1805,6 +1805,16 @@ export async function syncMonthlyInvoiceRegistry(
          UNION
          SELECT r.order_id FROM invoice_registry r WHERE $1::int IS NULL
        )`;
+  // ผู้ใช้เลือก 28 พ.ย. 2026: ชุดเลขยึด "เดือนที่ออกเลข" + รหัสช่องทาง (TT/SP/FB/LZ/LN/OT)
+  // ส่งเป็นค่าคงที่เข้าไปในคิวรี — ไม่เรียก getDocumentSettings ในนี้ เพราะจะไปทับ settings ในหน่วยความจำของเทสต์
+  const channelPrefixes: Record<string, string> = {
+    TikTok: "TT",
+    Shopee: "SP",
+    Facebook: "FB",
+    Lazada: "LZ",
+    LINE: "LN",
+    Other: "OT",
+  };
   const params = [scoped ? importId : null];
 
   // กันการนำเข้าพร้อมกันออกเลขชนกัน (ล็อกต่อ schema/บริษัท จนจบ transaction)
@@ -1867,8 +1877,8 @@ export async function syncMonthlyInvoiceRegistry(
               t.external_id,
               t.channel,
               COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) AS eff_date,
-              SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
-                || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2) AS yymm
+              -- ผู้ใช้เลือก 28 พ.ย. 2026: ชุดเลขยึด "เดือนที่ออกเลข" ไม่ใช่เดือนของวันที่ชำระ
+              to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYMM') AS yymm
        FROM cand c
        JOIN transactions t ON t.external_id = c.external_id AND ${INVOICE_ELIGIBLE_SQL}
        WHERE COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'
@@ -1895,10 +1905,10 @@ export async function syncMonthlyInvoiceRegistry(
      ins AS (
        INSERT INTO invoice_registry (order_id, invoice_no, yymm, seq, channel, status)
        SELECT external_id,
-              CASE
-                WHEN channel = 'TikTok' THEN 'SEQ/' || yymm || '/' || LPAD(seq::text, GREATEST(5, LENGTH(seq::text)), '0')
-                ELSE 'SEQ/' || UPPER(channel) || '/' || yymm || '/' || LPAD(seq::text, GREATEST(5, LENGTH(seq::text)), '0')
-              END,
+              COALESCE(
+                NULLIF($2::jsonb ->> channel, ''),
+                'TT'
+              ) || yymm || '/' || LPAD(seq::text, GREATEST(5, LENGTH(seq::text)), '0'),
               yymm, seq, channel, 'active'
        FROM numbered
        ON CONFLICT (order_id) DO UPDATE
@@ -1912,7 +1922,7 @@ export async function syncMonthlyInvoiceRegistry(
      )
      INSERT INTO invoice_registry_audit (order_id, invoice_no, action, import_id)
      SELECT order_id, invoice_no, 'assign', $1::int FROM ins`,
-    params,
+    [...params, JSON.stringify(channelPrefixes)],
     client,
   );
 }

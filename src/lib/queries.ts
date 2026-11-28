@@ -2004,6 +2004,16 @@ export async function renumberInvoiceMonth(
       client,
     );
 
+    // จัดเรียงเลขใหม่ต้องได้รูปแบบเดียวกับตอนออกเลข (รหัสช่องทาง TT/SP/FB/LZ/LN/OT + เดือนที่ออก)
+    const renumberPrefixes: Record<string, string> = {
+      TikTok: "TT",
+      Shopee: "SP",
+      Facebook: "FB",
+      Lazada: "LZ",
+      LINE: "LN",
+      Other: "OT",
+    };
+
     const updated = await query<{ order_id: string; invoice_no: string }>(
       `WITH ranked AS (
          SELECT r.order_id,
@@ -2025,15 +2035,14 @@ export async function renumberInvoiceMonth(
        )
        UPDATE invoice_registry r
           SET seq = o.new_seq,
-              invoice_no = CASE
-                WHEN o.channel = 'TikTok'
-                  THEN 'SEQ/' || r.yymm || '/' || LPAD(o.new_seq::text, GREATEST(5, LENGTH(o.new_seq::text)), '0')
-                ELSE 'SEQ/' || UPPER(o.channel) || '/' || r.yymm || '/' || LPAD(o.new_seq::text, GREATEST(5, LENGTH(o.new_seq::text)), '0')
-              END
+              invoice_no = COALESCE(
+                NULLIF($2::jsonb ->> o.channel, ''),
+                'TT'
+              ) || r.yymm || '/' || LPAD(o.new_seq::text, GREATEST(5, LENGTH(o.new_seq::text)), '0')
          FROM ordered o
         WHERE r.order_id = o.order_id
        RETURNING r.order_id, r.invoice_no`,
-      [yymm],
+      [yymm, JSON.stringify(renumberPrefixes)],
       client,
     );
 

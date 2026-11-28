@@ -143,12 +143,13 @@ test("ออกเลขครั้งแรก: เฉพาะบิลขา
       { id: "TT_SEP", channel: "TikTok", paid: "2026-09-30" },
     ]);
     await syncMonthlyInvoiceRegistry(c);
+    // แบบใหม่: ทุกเลขอยู่ในชุดของ "เดือนที่ออกเลข" เดียวกัน ลำดับต่อเนื่องแยกตามแพลตฟอร์ม
     assert.deepEqual(await registry(c), [
-      "TT_SEP=SEQ/2609/00001",
-      "TT1=SEQ/2610/00001",
-      "TT2=SEQ/2610/00002",
-      "SP1=SEQ/SHOPEE/2610/00001",
-      "FB1=SEQ/FACEBOOK/2610/00001",
+      `TT_SEP=TT${YM}/00001`,
+      `TT1=TT${YM}/00002`,
+      `TT2=TT${YM}/00003`,
+      `SP1=SP${YM}/00001`,
+      `FB1=FB${YM}/00001`,
     ]);
     const audit = await c.query(`SELECT COUNT(*)::int AS n FROM invoice_registry_audit WHERE action = 'assign'`);
     assert.equal(audit.rows[0].n, 5);
@@ -166,9 +167,9 @@ test("เลขล็อก: อัปเดตข้อมูลออเดอ
     await seed(c, [{ id: "C", channel: "TikTok", paid: "2026-10-01", importId: 2 }]);
     await syncMonthlyInvoiceRegistry(c, 2);
     assert.deepEqual(await registry(c), [
-      "A=SEQ/2610/00001",
-      "C=SEQ/2610/00002",
-      "B=SEQ/SHOPEE/2610/00001",
+      `A=TT${YM}/00001`,
+      `C=TT${YM}/00002`,
+      `B=SP${YM}/00001`,
     ]);
   }, t);
 });
@@ -184,16 +185,16 @@ test("คืนเงิน/ตีกลับภายหลัง → void เ
     await seed(c, [{ id: "N", channel: "Facebook", paid: "2026-10-03", importId: 2 }]);
     await syncMonthlyInvoiceRegistry(c, 2);
     assert.deepEqual(await registry(c), [
-      "A=SEQ/2610/00001(void)",
-      "B=SEQ/2610/00002",
-      "N=SEQ/FACEBOOK/2610/00001",
+      `A=TT${YM}/00001(void)`,
+      `B=TT${YM}/00002`,
+      `N=FB${YM}/00001`,
     ]);
     await c.query(`UPDATE transactions SET income = 100, payout = 90, import_id = 3 WHERE external_id = 'A'`);
     await syncMonthlyInvoiceRegistry(c, 3);
     assert.deepEqual(await registry(c), [
-      "A=SEQ/2610/00001",
-      "B=SEQ/2610/00002",
-      "N=SEQ/FACEBOOK/2610/00001",
+      `A=TT${YM}/00001`,
+      `B=TT${YM}/00002`,
+      `N=FB${YM}/00001`,
     ]);
     const actions = (await c.query(`SELECT action FROM invoice_registry_audit WHERE order_id = 'A' ORDER BY id`)).rows;
     assert.deepEqual(actions.map((r) => r.action), ["assign", "void", "unvoid"]);
@@ -209,7 +210,7 @@ test("TikTok ที่ไฟล์ครบทีหลัง (link 2 → 0) ไ
     await syncMonthlyInvoiceRegistry(c);
     await c.query(`UPDATE transactions SET order_code = 'OC-X', product_detail = 'SKU · item × 1', import_id = 2 WHERE external_id = 'X'`);
     await syncMonthlyInvoiceRegistry(c, 2);
-    assert.deepEqual(await registry(c), ["Y=SEQ/2610/00001", "X=SEQ/2610/00002"]);
+    assert.deepEqual(await registry(c), [`Y=TT${YM}/00001`, `X=TT${YM}/00002`]);
   }, t);
 });
 
@@ -220,7 +221,7 @@ test("H1: sync แบบระบุ importId แตะเฉพาะออเ�
       { id: "NEW", channel: "TikTok", paid: "2026-10-02", importId: 2 },
     ]);
     await syncMonthlyInvoiceRegistry(c, 2);
-    assert.deepEqual(await registry(c), ["NEW=SEQ/2610/00001"]);
+    assert.deepEqual(await registry(c), [`NEW=TT${YM}/00001`]);
   }, t);
 });
 
@@ -261,11 +262,11 @@ test("LINE OA, Other และ ชดเชยจากแพลตฟอร์�
     ]);
     await syncMonthlyInvoiceRegistry(c);
     assert.deepEqual(await registry(c), [
-      "TT_NORM=SEQ/2610/00001",
-      "COMP_1=SEQ/2610/00002",
-      "COMP_2=SEQ/2610/00003",
-      "LINE_1=SEQ/LINE/2610/00001",
-      "OTHER_1=SEQ/OTHER/2610/00001",
+      `TT_NORM=TT${YM}/00001`,
+      `COMP_1=TT${YM}/00002`,
+      `COMP_2=TT${YM}/00003`,
+      `LINE_1=LN${YM}/00001`,
+      `OTHER_1=OT${YM}/00001`,
     ]);
   }, t);
 });
@@ -316,6 +317,15 @@ test("TikTok ที่ยังไม่มีไฟล์รายได้: �
     "คำสั่งคืนยอดใน import-service ต้องข้ามแถว TikTok",
   );
 });
+
+// เลขใบกำกับยึด "เดือนที่ออกเลข" + รหัสช่องทาง TT/SP/FB/LZ/LN/OT (ผู้ใช้เลือก 28 พ.ย. 2026)
+const YM = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Bangkok",
+  year: "2-digit",
+  month: "2-digit",
+})
+  .format(new Date())
+  .replace("-", "");
 
 async function makeXlsxBuffer(rows: (string | number | null)[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -468,17 +478,17 @@ test("End-to-End importWorkbook: นำเข้าไฟล์ Excel จริ�
 
       await importWorkbook({ filename: "oms_orders_1.xlsx", buffer: omsOrders1 });
       await importWorkbook({ filename: "oms_items_1.xlsx", buffer: omsItems1 });
-      // ณ จุดนี้: SP_B (Shopee) มี 2 ไฟล์ครบแล้ว จึงได้เลข SEQ/SHOPEE/2610/00001 ทันที!
+      // ณ จุดนี้: SP_B (Shopee) มี 2 ไฟล์ครบแล้ว จึงได้เลข SP<เดือนที่ออกเลข>/00001 ทันที!
       // ส่วน TT_A (TikTok) ยังรอไฟล์ที่ 3 (Settlement) จึงยังไม่ได้เลข (null)
-      assert.equal(await getInvoiceNo("261006SP0001"), "SEQ/SHOPEE/2610/00001");
+      assert.equal(await getInvoiceNo("261006SP0001"), `SP${YM}/00001`);
       assert.equal(await getInvoiceNo("580000000000000001"), null);
 
       await importWorkbook({ filename: "settlement_1.xlsx", buffer: settlement1 });
 
       // พอไฟล์ที่ 3 (Settlement) ของ TikTok เข้ามา:
       // SP_B ยังล็อกเลขเดิม SEQ/SHOPEE/2610/00001 ห้ามขยับ! และ TT_A ได้เลข 00001 ของ TikTok แยกกัน (SEQ/2610/00001)
-      assert.equal(await getInvoiceNo("261006SP0001"), "SEQ/SHOPEE/2610/00001");
-      assert.equal(await getInvoiceNo("580000000000000001"), "SEQ/2610/00001");
+      assert.equal(await getInvoiceNo("261006SP0001"), `SP${YM}/00001`);
+      assert.equal(await getInvoiceNo("580000000000000001"), `TT${YM}/00001`);
 
       // รอบที่ 2: นำเข้าไฟล์ใหม่ที่:
       // 1) อัปเดตยอดเงินของออเดอร์เดิม TT_A (580000000000000001) จาก 270 -> 285
@@ -602,9 +612,9 @@ test("End-to-End importWorkbook: นำเข้าไฟล์ Excel จริ�
       // พิสูจน์:
       // 1) ใบเดิม SP_B ยังเป็น SEQ/SHOPEE/2610/00001 และ TT_A ยังเป็น SEQ/2610/00001 ห้ามเลื่อนเด็ดขาด!
       // 2) ใบใหม่ TT_NEW (แม้วันที่ 2026-10-01 และเป็น TikTok) ต้องได้เลขต่อท้ายของ TikTok คือ SEQ/2610/00002!
-      assert.equal(await getInvoiceNo("261006SP0001"), "SEQ/SHOPEE/2610/00001", "ใบกำกับเดิม SP_B ต้องไม่ถูกแทรกจนเลขเปลี่ยน");
-      assert.equal(await getInvoiceNo("580000000000000001"), "SEQ/2610/00001", "ใบกำกับเดิม TT_A ต้องใช้เลขเดิม");
-      assert.equal(await getInvoiceNo("580000000000000002"), "SEQ/2610/00002", "ใบกำกับใหม่ TT_NEW ต้องรันต่อท้าย MAX+1 ของ TikTok");
+      assert.equal(await getInvoiceNo("261006SP0001"), `SP${YM}/00001`, "ใบกำกับเดิม SP_B ต้องไม่ถูกแทรกจนเลขเปลี่ยน");
+      assert.equal(await getInvoiceNo("580000000000000001"), `TT${YM}/00001`, "ใบกำกับเดิม TT_A ต้องใช้เลขเดิม");
+      assert.equal(await getInvoiceNo("580000000000000002"), `TT${YM}/00002`, "ใบกำกับใหม่ TT_NEW ต้องรันต่อท้าย MAX+1 ของ TikTok");
 
       // ตรวจสอบ audit trail ของใบเดิม TT_A ว่าไม่มีการถูก void แล้ว unvoid ตอนอัปเดต Settlement ซ้ำ
       const clAudit = await pool.connect();
