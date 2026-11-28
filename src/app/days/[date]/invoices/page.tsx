@@ -13,6 +13,7 @@ import { IconAlert, IconArrowLeft } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PrintToolbarCollapse } from "@/components/PrintToolbarCollapse";
 import { formatDate, formatDateLong } from "@/lib/format";
 import { buildInvoice } from "@/lib/invoice";
 import {
@@ -302,6 +303,7 @@ export default async function BulkInvoicesPage({
           />
         </div>
 
+        <PrintToolbarCollapse>
         {/* ตัวกรองข้อมูล + ตั้งค่าการพิมพ์ (ป้ายกำกับคอลัมน์เดียวกัน จัดแนวตรงกัน) */}
         <div className="grid gap-3 px-3.5 py-3 sm:px-5 lg:grid-cols-[minmax(280px,1fr)_auto] lg:items-start lg:gap-x-6">
           <div className="flex min-w-0 flex-col gap-3">
@@ -624,6 +626,7 @@ export default async function BulkInvoicesPage({
             </div>
           </div>
         ) : null}
+        </PrintToolbarCollapse>
       </Card>
 
       {invoices.length === 0 ? (
