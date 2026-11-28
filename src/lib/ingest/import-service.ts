@@ -1877,8 +1877,10 @@ export async function syncMonthlyInvoiceRegistry(
               t.external_id,
               t.channel,
               COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) AS eff_date,
-              -- ผู้ใช้เลือก 28 พ.ย. 2026: ชุดเลขยึด "เดือนที่ออกเลข" ไม่ใช่เดือนของวันที่ชำระ
-              to_char(now() AT TIME ZONE 'Asia/Bangkok', 'YYMM') AS yymm
+              -- ชุดเลขยึด "เดือนของวันชำระ" (วันที่พิมพ์บนบิล) เพื่อให้ชุดของเดือนเริ่มจากบิลวันแรกของเดือนนั้น
+              -- บิลของเดือนก่อนที่อัพช้า จะไปอยู่ในชุดของเดือนก่อน ไม่ปนกับชุดเดือนปัจจุบัน
+              SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 3 FOR 2)
+                || SUBSTRING(COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) FROM 6 FOR 2) AS yymm
        FROM cand c
        JOIN transactions t ON t.external_id = c.external_id AND ${INVOICE_ELIGIBLE_SQL}
        WHERE COALESCE(NULLIF(t.paid_date, ''), NULLIF(t.created_date, '')) ~ '^[0-9]{4}-[0-9]{2}'

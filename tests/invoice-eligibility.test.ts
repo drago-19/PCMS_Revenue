@@ -145,9 +145,9 @@ test("ออกเลขครั้งแรก: เฉพาะบิลขา
     await syncMonthlyInvoiceRegistry(c);
     // แบบใหม่: ทุกเลขอยู่ในชุดของ "เดือนที่ออกเลข" เดียวกัน ลำดับต่อเนื่องแยกตามแพลตฟอร์ม
     assert.deepEqual(await registry(c), [
-      `TT_SEP=TT${YM}/00001`,
-      `TT1=TT${YM}/00002`,
-      `TT2=TT${YM}/00003`,
+      "TT_SEP=TT2609/00001",
+      `TT1=TT${YM}/00001`,
+      `TT2=TT${YM}/00002`,
       `SP1=SP${YM}/00001`,
       `FB1=FB${YM}/00001`,
     ]);
@@ -318,14 +318,9 @@ test("TikTok ที่ยังไม่มีไฟล์รายได้: �
   );
 });
 
-// เลขใบกำกับยึด "เดือนที่ออกเลข" + รหัสช่องทาง TT/SP/FB/LZ/LN/OT (ผู้ใช้เลือก 28 พ.ย. 2026)
-const YM = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Asia/Bangkok",
-  year: "2-digit",
-  month: "2-digit",
-})
-  .format(new Date())
-  .replace("-", "");
+// เลขใบกำกับใช้รหัสช่องทาง TT/SP/FB/LZ/LN/OT + เดือนของ "วันชำระ" ของบิล (2026-10 = 2610)
+// ระบบเดิมออกแบบให้ชุดเลขของเดือนเริ่มจากบิลวันแรกของเดือนนั้น
+const YM = "2610";
 
 async function makeXlsxBuffer(rows: (string | number | null)[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
