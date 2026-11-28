@@ -654,9 +654,10 @@ export default async function BulkInvoicesPage({
               key={`sheet-${sheetIdx}`}
               className="invoice-4up-sheet mx-auto print:max-w-none print:grid print:grid-cols-2 print:gap-2 print:break-after-page last:print:break-after-auto"
             >
-              {sheetInvoices.map((invoice) => (
+              {sheetInvoices.map((invoice, idx) => (
                 <InvoiceDocument
-                  key={invoice.orderId}
+                  // ออเดอร์เดียวมีได้หลายแถว (ขาย/คืนเงิน) — key ต้องรวมวันชำระและลำดับในลิสต์
+                  key={`${invoice.orderId}-${invoice.paidDate ?? ""}-${idx}`}
                   invoice={invoice}
                   mode={mode}
                   paperSize="a4-4up"
@@ -668,9 +669,10 @@ export default async function BulkInvoicesPage({
         </div>
       ) : (
         <div className="invoice-stack">
-          {invoices.map((invoice) => (
+          {invoices.map((invoice, idx) => (
             <InvoiceDocument
-              key={invoice.orderId}
+              // ออเดอร์เดียวมีได้หลายแถว (ขาย/คืนเงิน) — key ต้องรวมวันชำระและลำดับในลิสต์
+              key={`${invoice.orderId}-${invoice.paidDate ?? ""}-${idx}`}
               invoice={invoice}
               mode={mode}
               paperSize={paper}
